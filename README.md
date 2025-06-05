@@ -75,6 +75,26 @@ The solution provides multiple build configurations, each targeting a specific b
 2. In the **Solution Configurations** dropdown (top toolbar), select your configuration (e.g. `CUDA_Release`).
 3. Build the solution via **Build > Build Solution**.
 
+**Note:** Both CUDA and OpenCL backends depend on **ArrayFire**, which in turn requires its own set of runtime dependencies.  
+If ArrayFire is properly installed, its `lib` directory (containing all required DLLs) is typically added to the system `PATH`, and everything should work out of the box.
+However, since not all systems have ArrayFire installed, we include the necessary DLLs in the prebuilt binaries. These files are copied directly from `$(AF_PATH)/lib` for convenience.
+
+**CUDA Implementation additional files**:
+- FreeImage.dll
+- afcuda.dll
+
+**OpenCL Implementation additional files**:
+- FreeImage.dll
+- afopencl.dll
+- forge.dll
+- glfw3.dll
+- libiomp5md.dll
+- mkl_core.2.dll
+- mkl_def.2.dll
+- mkl_intel_thread.2.dll
+- mkl_rt.2.dll
+- mkl_tbb_thread.2.dll
+
 # Libraries Used
 
 - [Eigen](https://eigen.tuxfamily.org/index.php?title=Main_Page): A C++ template library for linear algebra.
