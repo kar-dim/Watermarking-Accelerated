@@ -1,0 +1,130 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <CudaCompile Include="kernels.cu">
+      <Filter>Source Files\cuda</Filter>
+    </CudaCompile>
+    <CudaCompile Include="WatermarkCuda.cu">
+      <Filter>Source Files\cuda</Filter>
+    </CudaCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{07235656-1379-4c4c-ae06-c286738600a3}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{c27495dd-ff38-4903-9be7-ebc55a5a3d0e}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{38385e73-1b9a-4f48-af0e-ed8e7f8b492b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\cuda">
+      <UniqueIdentifier>{a2ce4c1c-7f2d-488d-9f54-60a1a321e21d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\opencl">
+      <UniqueIdentifier>{76494fd5-9fd8-4f93-8510-c53c0626a194}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\eigen">
+      <UniqueIdentifier>{d64eff2e-ad33-4f8b-9a5b-b8190384383f}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\cuda">
+      <UniqueIdentifier>{fb84eeb0-a166-46ed-a954-228587487156}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\eigen">
+      <UniqueIdentifier>{a05ddcca-660f-4882-85e5-ae33cf98fbb8}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\opencl">
+      <UniqueIdentifier>{cb66c64e-6c78-42a9-91ce-d5cf0897fd87}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\util">
+      <UniqueIdentifier>{5544a483-9602-4126-b17f-6a22bb675318}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\util">
+      <UniqueIdentifier>{824aa85b-7456-4226-a324-3d366d21638b}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="resources.rc">
+      <Filter>Resource Files</Filter>
+    </ResourceCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="utils.cpp">
+      <Filter>Source Files\util</Filter>
+    </ClCompile>
+    <ClCompile Include="main.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="cuda_utils.cpp">
+      <Filter>Source Files\cuda</Filter>
+    </ClCompile>
+    <ClCompile Include="opencl_utils.cpp">
+      <Filter>Source Files\opencl</Filter>
+    </ClCompile>
+    <ClCompile Include="WatermarkOCL.cpp">
+      <Filter>Source Files\opencl</Filter>
+    </ClCompile>
+    <ClCompile Include="WatermarkEigen.cpp">
+      <Filter>Source Files\eigen</Filter>
+    </ClCompile>
+    <ClCompile Include="eigen_utils.cpp">
+      <Filter>Source Files\eigen</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="utils.hpp">
+      <Filter>Header Files\util</Filter>
+    </ClInclude>
+    <ClInclude Include="cuda_utils.hpp">
+      <Filter>Header Files\cuda</Filter>
+    </ClInclude>
+    <ClInclude Include="kernels.cuh">
+      <Filter>Header Files\cuda</Filter>
+    </ClInclude>
+    <ClInclude Include="WatermarkCuda.cuh">
+      <Filter>Header Files\cuda</Filter>
+    </ClInclude>
+    <ClInclude Include="videoprocessingcontext.hpp">
+      <Filter>Header Files\util</Filter>
+    </ClInclude>
+    <ClInclude Include="opencl_init.h">
+      <Filter>Header Files\opencl</Filter>
+    </ClInclude>
+    <ClInclude Include="opencl_utils.hpp">
+      <Filter>Header Files\opencl</Filter>
+    </ClInclude>
+    <ClInclude Include="WatermarkOCL.hpp">
+      <Filter>Header Files\opencl</Filter>
+    </ClInclude>
+    <ClInclude Include="kernels\me_p3.hpp">
+      <Filter>Header Files\opencl</Filter>
+    </ClInclude>
+    <ClInclude Include="kernels\nvf.hpp">
+      <Filter>Header Files\opencl</Filter>
+    </ClInclude>
+    <ClInclude Include="kernels\scaled_neighbors_p3.hpp">
+      <Filter>Header Files\opencl</Filter>
+    </ClInclude>
+    <ClInclude Include="WatermarkBase.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="eigen_rgb_array.hpp">
+      <Filter>Header Files\eigen</Filter>
+    </ClInclude>
+    <ClInclude Include="WatermarkEigen.hpp">
+      <Filter>Header Files\eigen</Filter>
+    </ClInclude>
+    <ClInclude Include="eigen_utils.hpp">
+      <Filter>Header Files\eigen</Filter>
+    </ClInclude>
+    <ClInclude Include="buffer.hpp">
+      <Filter>Header Files\util</Filter>
+    </ClInclude>
+    <ClInclude Include="EigenImage.hpp">
+      <Filter>Header Files\eigen</Filter>
+    </ClInclude>
+    <ClInclude Include="WatermarkGpu.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+</Project>
