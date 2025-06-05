@@ -32,6 +32,7 @@ void Utilities::saveImage(const string& imagePath, const string& suffix, const B
 
 // Returns the maximum image size supported by the device (cols, rows)
 
+#if defined(_USE_OPENCL_) || defined(_USE_CUDA_)
 std::pair<unsigned int, unsigned int> Utilities::getMaxImageSize()
 {
 #if defined(_USE_OPENCL_)
@@ -45,6 +46,7 @@ std::pair<unsigned int, unsigned int> Utilities::getMaxImageSize()
 	return std::pair<unsigned int, unsigned int>(properties.maxTexture2D[0], properties.maxTexture2D[1]);
 #endif
 }
+#endif
 
 
 namespace timer 
