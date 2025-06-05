@@ -1,5 +1,6 @@
 #pragma once
 #include "opencl_init.h"
+#include <vector>
 
 namespace cl_utils 
 {
@@ -25,4 +26,7 @@ namespace cl_utils
 
     //helper method to copy an OpenCL buffer into an OpenCL Image (fast copy that happens in the device)
     void copyBufferToImage(const cl::CommandQueue& queue, const cl::Image2D& image2d, const cl_mem* imageBuff, const long long rows, const  long long cols);
+
+    //helper method to build opencl kernels from source
+    bool buildKernels(std::vector<cl::Program>& programs, const int p);
 }

@@ -5,10 +5,8 @@
 #include <omp.h>
 
 #elif defined(_USE_OPENCL_)
-#include "kernels/me_p3.hpp"
-#include "kernels/nvf.hpp"
-#include "kernels/scaled_neighbors_p3.hpp"
 #include "opencl_init.h"
+#include "opencl_utils.hpp"
 #include "WatermarkOCL.hpp"
 #include <af/opencl.h>
 #include <vector>
@@ -83,15 +81,12 @@ using FILEPtr = std::unique_ptr<FILE, decltype(&_pclose)>;
  */
 void exitProgram(const int exitCode);
 std::string executionTime(const bool showFps, const double seconds);
-#if defined(_USE_CUDA_)
+#if defined(_USE_CUDA_) || defined(_USE_EIGEN_)
 int testForImage(const INIReader& inir, const int p, const float psnr);
-int testForVideo(const INIReader& inir, const std::string& videoFile, const int p, const float psnr);
+int testForVideo(const INIReader& inir, const string& videoFile, const int p, const float psnr);
 #elif defined(_USE_OPENCL_)
 int testForImage(const INIReader& inir, const std::vector<cl::Program>& programs, const int p, const float psnr);
 int testForVideo(const INIReader& inir, const std::vector<cl::Program>& programs, const std::string& videoFile, const int p, const float psnr);
-#elif defined(_USE_EIGEN_)
-int testForImage(const INIReader& inir, const int p, const float psnr);
-int testForVideo(const INIReader& inir, const string& videoFile, const int p, const float psnr);
 #endif
 int findVideoStreamIndex(const AVFormatContext* inputFormatCtx);
 AVCodecContext* openDecoderContext(const AVCodecParameters* params);
@@ -122,8 +117,7 @@ int main(void)
 		cout << "NOTE: Invalid OpenCL device specified, using default 0" << "\n";
 		af::setDevice(0);
 	}
-	cl::Context context(afcl::getContext(false));
-	cl::Device device(afcl::getDeviceId(), false);
+
 #elif defined(_USE_CUDA_)
 	omp_set_num_threads(omp_get_max_threads());
 #pragma omp parallel for
@@ -160,36 +154,14 @@ int main(void)
 #if defined(_USE_OPENCL_)
 	//compile opencl kernels
 	std::vector<cl::Program> programs(3);
-	try {
-		auto buildProgram = [&context, &device](auto& program, const string& kernelName, const string& buildOptions)
-		{
-			program = cl::Program(context, kernelName);
-			program.build(device, buildOptions.c_str());
-		};
-		buildProgram(programs[0], nvf, std::format("-cl-mad-enable -Dp={}", p));
-		buildProgram(programs[1], me_p3, "-cl-mad-enable");
-		buildProgram(programs[2], scaled_neighbors_p3, "-cl-mad-enable");
-	}
-	catch (const cl::Error& e) {
-		cout << "Could not build a kernel, Reason: " << e.what() << "\n\n";
-		for (const cl::Program& program : programs)
-		{
-			if (program.get() != NULL && program.getBuildInfo<CL_PROGRAM_BUILD_STATUS>(device) != CL_BUILD_SUCCESS)
-				cout << program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(device) << "\n";
-		}
+	if (cl_utils::buildKernels(programs, p) == false)
 		exitProgram(EXIT_FAILURE);
-	}
-	catch (const std::exception& ex) {
-		cout << ex.what() << "\n";
-		exitProgram(EXIT_FAILURE);
-	}
 #endif
 
 	//test algorithms
 	try {
 		const string videoFile = inir.Get("paths", "video", "");
 #if defined(_USE_OPENCL_)
-		
 		const int code = videoFile != "" ?
 			testForVideo(inir, programs, videoFile, p, psnr) :
 			testForImage(inir, programs, p, psnr);
@@ -208,12 +180,10 @@ int main(void)
 }
 
 //embed watermark for static images
-#if defined(_USE_CUDA_)
+#if defined(_USE_CUDA_) || defined(_USE_EIGEN_)
 int testForImage(const INIReader& inir, const int p, const float psnr)
 #elif defined(_USE_OPENCL_)
 int testForImage(const INIReader& inir, const std::vector<cl::Program>& programs, const int p, const float psnr)
-#elif defined(_USE_EIGEN_)
-int testForImage(const INIReader& inir, const int p, const float psnr)
 #endif
 {
 	double secs;
