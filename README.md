@@ -53,6 +53,27 @@ Needs to be parameterized from the corresponding ```settings.ini``` file. Here i
 | encode_options                    | These are ffmpeg options for encoding. Example: ```-c:v libx265 -preset fast -crf 23```  will pass these encoding options to ffmpeg.
 | watermark_detection               | \[true/false\]: Set to true to try to detect the watermark of the "video" parameter. The detection occurs after "watermark_interval" frames.|
 
+# How to Build
+
+This project is built using **Visual Studio** and consists of a **solution with two projects**.
+
+### Solution Configurations
+
+The solution provides multiple build configurations, each targeting a specific backend:
+
+| Configuration    | Backend     | Notes                                       |
+|------------------|-------------|---------------------------------------------|
+| `OpenCL_Release` | OpenCL      | Most recommended backend with very high performance. There is **no debug version** due to some known issues |
+| `CUDA_Release`   | CUDA        | Recommended for systems with NVIDIA GPUs. Slightly faster than OpenCL backend    |
+| `CUDA_Debug`     | CUDA        | Use for debugging CUDA-specific code        |
+| `EIGEN_Release`  | Eigen (CPU) | Optimized CPU-based implementation.         |
+| `EIGEN_Debug`    | Eigen (CPU) | Use for debugging CPU implementation        |
+
+### Build Instructions
+
+1. Open the `.sln` file in **Visual Studio 2022** (or a compatible version).
+2. In the **Solution Configurations** dropdown (top toolbar), select your configuration (e.g. `CUDA_Release`).
+3. Build the solution via **Build > Build Solution**.
 
 # Libraries Used
 
