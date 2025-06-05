@@ -1,5 +1,6 @@
 #pragma once
 
+#include "WatermarkBase.hpp"
 #include <arrayfire.h>
 #include <concepts>
 #include <utility>
@@ -26,6 +27,44 @@ protected:
 	virtual af::array computeScaledNeighbors(const af::array& coefficients) const = 0;
 	virtual af::array computePredictionErrorMask(const af::array& image, af::array& errorSequence, af::array& coefficients, const bool maskNeeded) const = 0;
 	virtual void copyDataToTexture(const af::array& image) const = 0;
+
+	//Main watermark embedding method for GPU-based implementations
+	af::array makeWatermarkGpu(const af::array& inputImage, const af::array& outputImage, const af::array& randomMatrix, const float strengthFactor, float& watermarkStrength, MASK_TYPE maskType)
+	{
+		af::array mask, errorSequence, coefficients;
+		copyDataToTexture(inputImage);
+		if (maskType == MASK_TYPE::ME)
+		{
+			mask = computePredictionErrorMask(inputImage, errorSequence, coefficients, ME_MASK_CALCULATION_REQUIRED_YES);
+			//if the system is not solvable, don't waste time embeding the watermark, return output image without modification
+			if (coefficients.elements() == 0)
+				return outputImage;
+		}
+		else
+			mask = computeCustomMask();
+		const af::array u = mask * randomMatrix;
+		watermarkStrength = strengthFactor / static_cast<float>(af::norm(u) / sqrt(inputImage.elements()));
+		return af::clamp(outputImage + (u * watermarkStrength), 0, 255);
+	}
+
+	//main detector method for GPU-based implementations
+	float detectWatermarkGpu(const af::array& watermarkedImage, const af::array& randomMatrix, MASK_TYPE maskType)
+	{
+		af::array mask, errorSequenceW, coefficients;
+		copyDataToTexture(watermarkedImage);
+		if (maskType == MASK_TYPE::NVF)
+		{
+			computePredictionErrorMask(watermarkedImage, errorSequenceW, coefficients, ME_MASK_CALCULATION_REQUIRED_NO);
+			mask = computeCustomMask();
+		}
+		else
+			mask = computePredictionErrorMask(watermarkedImage, errorSequenceW, coefficients, ME_MASK_CALCULATION_REQUIRED_YES);
+		//if the system is not solvable, don't waste time computing the correlation, there is no watermark
+		if (coefficients.elements() == 0)
+			return 0.0f;
+		const af::array u = mask * randomMatrix;
+		return computeCorrelation(computeErrorSequence(u, coefficients), errorSequenceW);
+	}
 
 	//helper method used in detectors
 	float computeCorrelation(const af::array& e_u, const af::array& e_z) const

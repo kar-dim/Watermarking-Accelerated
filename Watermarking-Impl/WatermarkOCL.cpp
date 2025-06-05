@@ -113,20 +113,7 @@ af::array WatermarkOCL::computeScaledNeighbors(const af::array& coefficients) co
 //into a new array based on "outputImage" (can be grayscale or RGB).
 BufferType WatermarkOCL::makeWatermark(const BufferType& inputImage, const BufferType& outputImage, float& watermarkStrength, MASK_TYPE maskType)
 {
-	af::array mask, errorSequence, coefficients;
-	copyDataToTexture(inputImage);
-	if (maskType == MASK_TYPE::ME)
-	{
-		mask = computePredictionErrorMask(inputImage, errorSequence, coefficients, ME_MASK_CALCULATION_REQUIRED_YES);
-		//if the system is not solvable, don't waste time embeding the watermark, return output image without modification
-		if (coefficients.elements() == 0)
-			return outputImage;
-	}
-	else
-		mask = computeCustomMask();
-	const af::array u = mask * randomMatrix;
-	watermarkStrength = strengthFactor / static_cast<float>(af::norm(u) / sqrt(inputImage.elements()));
-	return af::clamp(outputImage + (u * watermarkStrength), 0, 255);
+	return makeWatermarkGpu(inputImage, outputImage, randomMatrix, strengthFactor, watermarkStrength, maskType);
 }
 
 //Compute prediction error mask. Used in both creation and detection of the watermark.
@@ -177,18 +164,5 @@ af::array WatermarkOCL::computePredictionErrorMask(const af::array& image, af::a
 //the main mask detector function
 float WatermarkOCL::detectWatermark(const BufferType& watermarkedImage, MASK_TYPE maskType)
 {
-	af::array mask, errorSequenceW, coefficients;
-	copyDataToTexture(watermarkedImage);
-	if (maskType == MASK_TYPE::NVF)
-	{
-		computePredictionErrorMask(watermarkedImage, errorSequenceW, coefficients, ME_MASK_CALCULATION_REQUIRED_NO);
-		mask = computeCustomMask();
-	}
-	else
-		mask = computePredictionErrorMask(watermarkedImage, errorSequenceW, coefficients, ME_MASK_CALCULATION_REQUIRED_YES);
-	//if the system is not solvable, don't waste time computing the correlation, there is no watermark
-	if (coefficients.elements() == 0)
-		return 0.0f;
-	const af::array u = mask * randomMatrix;
-	return computeCorrelation(computeErrorSequence(u, coefficients), errorSequenceW);
+	return detectWatermarkGpu(watermarkedImage, randomMatrix, maskType);
 }
