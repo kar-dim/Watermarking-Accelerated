@@ -464,7 +464,7 @@ void detectFrameWatermark(const VideoProcessingContext& data, BufferType& inputF
 #if defined(_USE_GPU_)
 		inputFrame = GrayBuffer(data.width, data.height, rowPadding ? data.inputFramePtr : frame->data[0], afHost).T().as(f32);
 #elif defined(_USE_EIGEN_)
-		inputFrame.getGray() = Map<GrayBuffer>(rowPadding ? data.inputFramePtr : frame->data[0], data.width, data.height).transpose().cast<float>();
+		inputFrame = BufferType(Map<GrayBuffer>(rowPadding ? data.inputFramePtr : frame->data[0], data.width, data.height).transpose().cast<float>());
 #endif
 		float correlation = data.watermarkObj->detectWatermark(inputFrame, MASK_TYPE::ME);
 		cout << "Correlation for frame: " << framesCount << ": " << correlation << "\n";
