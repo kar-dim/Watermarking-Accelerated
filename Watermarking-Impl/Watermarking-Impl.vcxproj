@@ -298,6 +298,7 @@ xcopy "$(ProjectDir)libs\ffmpeg\bin\ffmpeg.exe" "$(OutDir)" /y /D</Command>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="buffer.hpp" />
+    <ClInclude Include="cimg_init.h" />
     <ClInclude Include="cuda_utils.hpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='OPENCL_Release|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='EIGEN_Release|x64'">true</ExcludedFromBuild>

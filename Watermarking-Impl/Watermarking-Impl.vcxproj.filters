@@ -126,5 +126,8 @@
     <ClInclude Include="WatermarkGpu.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="cimg_init.h">
+      <Filter>Header Files\eigen</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

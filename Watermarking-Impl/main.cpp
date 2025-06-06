@@ -10,8 +10,7 @@
 #include <af/opencl.h>
 
 #elif defined(_USE_EIGEN_)
-#define cimg_use_png
-#define cimg_use_jpeg
+#include "cimg_init.h"
 #include "eigen_utils.hpp"
 #include "WatermarkEigen.hpp"
 #include <CImg.h>
@@ -279,6 +278,10 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 	if (inir.GetBoolean("options", "save_watermarked_files_to_disk", false)) 
 	{
 		cout << "\nSaving watermarked files to disk...\n";
+#if defined(_USE_OPENCL_)
+		Utilities::saveImage(imageFile, "W_NVF", watermarkNVF);
+		Utilities::saveImage(imageFile, "W_ME", watermarkME);
+#elif defined(_USE_CUDA_) || defined(_USE_EIGEN_)
 #pragma omp parallel sections
 		{
 #pragma omp section
@@ -286,6 +289,7 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 #pragma omp section
 			Utilities::saveImage(imageFile, "W_ME", watermarkME);
 		}
+#endif
 		cout << "Successully saved to disk\n";
 	}
 	return EXIT_SUCCESS;

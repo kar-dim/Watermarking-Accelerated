@@ -1,6 +1,6 @@
 #pragma once
+#include "cimg_init.h"
 #include "eigen_rgb_array.hpp"
-#include <CImg.h>
 #include <string>
 
 enum IMAGE_TYPE

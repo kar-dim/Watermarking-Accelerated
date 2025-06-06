@@ -13,11 +13,10 @@
 #include "WatermarkCuda.cuh"
 #include <utility>
 #elif defined(_USE_EIGEN_)
+#include "cimg_init.h"
 #include "eigen_utils.hpp"
 #include "WatermarkEigen.hpp"
 #endif
-
-
 
 using std::string;
 
