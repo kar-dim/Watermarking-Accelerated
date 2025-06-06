@@ -11,9 +11,6 @@
 #include <utility>
 #include <vector>
 
-#define ALIGN_UP_16(x) (x + 15) & ~15
-#define ALIGN_UP_64(x) (x + 63) & ~63
-
 using std::string;
 
 //initialize data and memory
