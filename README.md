@@ -20,7 +20,7 @@ The aim of this project is to compare the performance (primarily execution speed
 
 # Run the pre-built binaries
 
-- Get the latest binaries [here](https://github.com/kar-dim/Watermarking-Accelerated/releases) for Eigen, OpenCL or CUDA platform. The binary contains the sample application and the embedded CUDA/OpenCL kernels. Before we can emded the watermark, we have to create it first.
+- Get the latest binaries [here](https://github.com/kar-dim/Watermarking-Accelerated/releases) for Eigen, OpenCL or CUDA platform. The binary contains the sample application and the embedded CUDA/OpenCL kernels. Before we can emded the watermark, we have to create it first (the prebuilt binaries already include generated watermarks for each sample image and video size).
 - The watermark generation is based on Normal-distributed random values with zero mean and standard deviation of one. The ```Watermarking-Generate``` project produces pseudo-random values. A bat file is included to generate the watermarks, with sizes exactly the same as the provided sample images. Of course, one can generate a random watermark for any desired image size like this:  
 ```Watermarking-Generate.exe [rows] [cols] [seed] [fileName]```  then pass the provided watermark file path in the sample project configuration.
 
