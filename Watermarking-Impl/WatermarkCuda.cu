@@ -17,7 +17,7 @@ cudaStream_t WatermarkCuda::afStream = afcu::getStream(afcu::getNativeId(af::get
 
 //initialize data and memory
 WatermarkCuda::WatermarkCuda(const unsigned int rows, const unsigned int cols, const string& randomMatrixPath, const int p, const float psnr)
-	: WatermarkBase(rows, cols, randomMatrixPath, p, (255.0f / sqrt(pow(10.0f, psnr / 10.0f)))), meKernelDims(ALIGN_UP_64(cols), rows)
+	: WatermarkBase(rows, cols, randomMatrixPath, p, (255.0f / sqrt(pow(10.0f, psnr / 10.0f)))), meKernelDims(ALIGN(cols, 64), rows)
 {
 	if (p != 3 && p != 5 && p != 7 && p != 9)
 		throw std::runtime_error(string("Wrong p parameter: ") + std::to_string(p) + "!\n");

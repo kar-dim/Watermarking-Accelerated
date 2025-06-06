@@ -15,7 +15,7 @@ using std::string;
 
 //initialize data and memory
 WatermarkOCL::WatermarkOCL(const unsigned int rows, const unsigned int cols, const string& randomMatrixPath, const int p, const float psnr)
-	: WatermarkBase(rows, cols, randomMatrixPath, p, (255.0f / sqrt(pow(10.0f, psnr / 10.0f)))), texKernelDims({ ALIGN_UP_16(rows), ALIGN_UP_16(cols) }), meKernelDims({ rows, ALIGN_UP_64(cols) })
+	: WatermarkBase(rows, cols, randomMatrixPath, p, (255.0f / sqrt(pow(10.0f, psnr / 10.0f)))), texKernelDims({ ALIGN(rows, 16), ALIGN(cols, 16) }), meKernelDims({ rows, ALIGN(cols, 64) })
 {
 	if (p != 3 && p != 5 && p != 7 && p != 9)
 		throw std::runtime_error(string("Wrong p parameter: ") + std::to_string(p) + "!\n");

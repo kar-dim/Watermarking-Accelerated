@@ -12,8 +12,7 @@ enum MASK_TYPE
 	NVF
 };
 
-#define ALIGN_UP_16(x) (x + 15) & ~15
-#define ALIGN_UP_64(x) (x + 63) & ~63
+#define ALIGN(x, ALIGN) (((x) + ((ALIGN) - 1)) & ~((ALIGN) - 1))
 #define ME_MASK_CALCULATION_REQUIRED_NO false
 #define ME_MASK_CALCULATION_REQUIRED_YES true
 
