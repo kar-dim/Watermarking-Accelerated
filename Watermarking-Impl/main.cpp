@@ -562,7 +562,7 @@ void writeConditionallyWatermarkeFrameToPipe(const bool embedWatermark, const Vi
 #elif defined(_USE_EIGEN_)
 		inputFrame = BufferType(Map<GrayBuffer>(frame->data[0], data.width, data.height).transpose().cast<float>().eval());
 		watermarkedFrame = data.watermarkObj->makeWatermark(inputFrame, inputFrame, watermarkStrength, MASK_TYPE::ME).getGray().transpose().cast<uint8_t>();
-}
+	}
 	fwrite(embedWatermark ? watermarkedFrame.data() : frame->data[0], 1, data.width* frame->height, ffmpegPipe);
 #endif
 }
