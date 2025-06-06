@@ -162,7 +162,6 @@ int main(void)
 //embed watermark for static images
 int testForImage(const INIReader& inir, const int p, const float psnr)
 {
-	double secs;
 	constexpr float rPercent = 0.299f;
 	constexpr float gPercent = 0.587f;
 	constexpr float bPercent = 0.114f;
@@ -183,27 +182,23 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 	const auto rows = static_cast<unsigned int>(image.dims(0));
 	const auto cols = static_cast<unsigned int>(image.dims(1));
 	cout << "Time to load and transfer RGB image from disk to VRAM: " << timer::elapsedSeconds() << "\n\n";
-	checkError(cols < 64 || rows < 64, "Image dimensions too low");
-	checkError(cols > maxImageDims.first || rows > maxImageDims.second, "Image dimensions too high for this GPU");
 #elif defined(_USE_EIGEN_)
+	constexpr auto maxImageDims = std::pair<unsigned int, unsigned int>(65536, 65536);
 	//load image from disk into CImg
 	timer::start();
-	const CImg<float> rgbImageCimg(imageFile.c_str());
-	timer::end();
-	const int rows = rgbImageCimg.height();
-	const int cols = rgbImageCimg.width();
 	//copy from cimg to Eigen
-	secs = timer::elapsedSeconds();
-	timer::start();
-	const BufferType rgbImage(cimgToEigen3dArray(rgbImageCimg));
+	const BufferType rgbImage(cimgToEigen3dArray(CImg<float>(imageFile.c_str())));
 	const BufferType image(eigen3dArrayToGrayscaleArray(rgbImage.getRGB(), rPercent, gPercent, bPercent));
 	timer::end();
-	cout << "Time to load image from disk and initialize CImg and Eigen memory objects: " << secs + timer::elapsedSeconds() << " seconds\n\n";
-	checkError(cols <= 16 || rows <= 16 || rows >= 16384 || cols >= 16384, "Image dimensions too low or too high");
+	const auto rows = image.getGray().rows();
+	const auto cols = image.getGray().cols();
+	cout << "Time to load image from disk and initialize CImg and Eigen memory objects: " << timer::elapsedSeconds() << " seconds\n\n";
 #endif
-	
+	checkError(cols < 64 || rows < 64, "Image dimensions too low");
+	checkError(cols > maxImageDims.first || rows > maxImageDims.second, "Image dimensions too high");
+
 	float watermarkStrength;
-	secs = 0;
+	double secs = 0;
 	//initialize watermark functions class, including parameters, ME and custom (NVF in this example) kernels
 	std::unique_ptr<WatermarkBase> watermarkObj = Utilities::createWatermarkObject(rows, cols, inir.Get("paths", "watermark", ""), p, psnr);
 
