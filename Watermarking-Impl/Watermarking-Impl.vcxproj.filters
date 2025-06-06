@@ -70,6 +70,9 @@
     <ClCompile Include="eigen_utils.cpp">
       <Filter>Source Files\eigen</Filter>
     </ClCompile>
+    <ClCompile Include="WatermarkGpu.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="utils.hpp">
