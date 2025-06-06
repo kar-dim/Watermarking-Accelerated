@@ -36,7 +36,7 @@ Needs to be parameterized from the corresponding ```settings.ini``` file. Here i
 | watermark                         | Path to the Random Matrix (watermark). This is produced by the CommonRandomMatrix project. Watermark and Image sizes should match exactly. |
 | save_watermarked_files_to_disk    | \[true/false\]: Set to true to save the watermarked NVF and Prediction-Error files to disk.                                                |
 | execution_time_in_fps             | \[true/false\]: Set to true to display execution times in FPS. Else, it will display execution time in seconds.                            |
-| p                                 | Window size for masking algorithms. Currently only ```p=3``` is allowed.                                                                   |
+| p                                 | Window size for masking algorithms. Currently only ```p=3``` is allowed for ```OpenCL``` and ```CUDA``` implementations. ```Eigen``` implementation supports values of 3,5,7 and 9.                                                                   |
 | psnr                              | PSNR (Peak Signal-to-Noise Ratio). Higher values correspond to less watermark in the image, reducing noise, but making detection harder.   |
 | loops_for_test                    | Loops the algorithms many times, simulating more work. A value of 1000 produces almost identical execution times.                          |
 | opencl_device                     | [OpenCL only / Number]: Works only for OpenCL binary. If multiple OpenCL devices are found, then set this to the desired device. Set it to 0 if one device is found. |
