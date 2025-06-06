@@ -1,6 +1,6 @@
 #include "cuda_utils.hpp"
-#include <cuda_runtime.h>
 #include <cstring>
+#include <cuda_runtime.h>
 #include <utility>
 
 namespace cuda_utils 

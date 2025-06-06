@@ -6,22 +6,19 @@
 
 #elif defined(_USE_OPENCL_)
 #include "opencl_init.h"
-#include "opencl_utils.hpp"
 #include "WatermarkOCL.hpp"
 #include <af/opencl.h>
-#include <vector>
 
 #elif defined(_USE_EIGEN_)
 #define cimg_use_png
 #define cimg_use_jpeg
-#include "eigen_rgb_array.hpp"
 #include "eigen_utils.hpp"
+#include "WatermarkEigen.hpp"
 #include <CImg.h>
 #include <cstdlib>
 #include <Eigen/Dense>
-#include "WatermarkEigen.hpp"
-#include <thread>
 #include <omp.h>
+#include <thread>
 #endif
 
 #include "buffer.hpp"
@@ -36,7 +33,6 @@
 #include <iostream>
 #include <memory>
 #include <sstream>
-#include <stdio.h>
 #include <string>
 #include "WatermarkBase.hpp"
 #include <utility>

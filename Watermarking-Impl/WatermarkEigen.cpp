@@ -5,10 +5,7 @@
 #include "WatermarkEigen.hpp"
 #include <cmath>
 #include <Eigen/Dense>
-#include <fstream>
-#include <memory>
 #include <omp.h>
-#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>

@@ -1,14 +1,10 @@
 #pragma once
 #if defined(_USE_OPENCL_) || defined(_USE_CUDA_)
 #include <arrayfire.h>
+#include <utility>
 #endif
 #include <chrono>
 #include <string>
-#include <utility>
-#if defined(_USE_OPENCL_)
-#include "opencl_init.h"
-#include <vector>
-#endif
 #include "buffer.hpp"
 #include "WatermarkBase.hpp"
 #include <memory>

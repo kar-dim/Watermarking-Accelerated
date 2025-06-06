@@ -3,7 +3,6 @@
 #include "kernels/scaled_neighbors_p3.hpp"
 #include "opencl_utils.hpp"
 #include <af/opencl.h>
-#include <format>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -42,7 +41,7 @@ namespace cl_utils
 					program = cl::Program(context, kernelName);
 					program.build(device, buildOptions.c_str());
 				};
-			buildProgram(programs[0], nvf, std::format("-cl-mad-enable -Dp={}", p));
+			buildProgram(programs[0], nvf, "-cl-mad-enable -Dp=" + std::to_string(p));
 			buildProgram(programs[1], me_p3, "-cl-mad-enable");
 			buildProgram(programs[2], scaled_neighbors_p3, "-cl-mad-enable");
 		}

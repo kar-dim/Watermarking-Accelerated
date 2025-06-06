@@ -5,11 +5,9 @@
 #include <memory>
 #include <string>
 #if defined(_USE_OPENCL_)
-#include "opencl_utils.hpp"
 #include "WatermarkOCL.hpp"
 #include <af/opencl.h>
 #include <utility>
-#include <vector>
 #elif defined(_USE_CUDA_)
 #include "cuda_utils.hpp"
 #include "WatermarkCuda.cuh"

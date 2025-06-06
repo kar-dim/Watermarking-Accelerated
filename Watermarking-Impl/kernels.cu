@@ -1,7 +1,7 @@
 #include "kernels.cuh"
+#include <cuda_fp16.h>
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
-#include <cuda_fp16.h>
 
 #define HALF(x) __float2half(x)
 #define FLOAT(x) __half2float(x)

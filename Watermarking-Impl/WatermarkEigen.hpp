@@ -1,7 +1,6 @@
 #pragma once
 
 #include "buffer.hpp"
-#include "eigen_rgb_array.hpp"
 #include "WatermarkBase.hpp"
 #include <Eigen/Dense>
 #include <string>

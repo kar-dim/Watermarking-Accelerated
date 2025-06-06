@@ -1,5 +1,5 @@
 #pragma once
-#include <Eigen/Dense>
 #include <array>
+#include <Eigen/Dense>
 
 typedef std::array<Eigen::ArrayXXf, 3> EigenArrayRGB;
