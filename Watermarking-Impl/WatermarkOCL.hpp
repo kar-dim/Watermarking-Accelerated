@@ -36,7 +36,7 @@ private:
 	const cl::CommandQueue queue{ afcl::getQueue(false) };
 	const cl::Buffer RxMappingsBuff{ context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(int) * 64, (void*)RxMappings, NULL };
 	dim2 texKernelDims, meKernelDims;
-	std::vector<cl::Program> programs;
+	std::vector<cl::Program> programs { 3 };
 	cl::Image2D image2d;
 
 	void initializeMemory() override;
@@ -46,7 +46,7 @@ private:
 	void copyDataToTexture(const af::array& image) const override;
 
 public:
-	WatermarkOCL(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const int p, const float psnr, const std::vector<cl::Program>& programs);
+	WatermarkOCL(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const int p, const float psnr);
 	WatermarkOCL(const WatermarkOCL& other);
 	WatermarkOCL(WatermarkOCL&& other) noexcept = delete;
 	WatermarkOCL& operator=(WatermarkOCL&& other) noexcept = delete;

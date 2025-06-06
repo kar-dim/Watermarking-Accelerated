@@ -7,8 +7,11 @@
 #include <utility>
 #if defined(_USE_OPENCL_)
 #include "opencl_init.h"
+#include <vector>
 #endif
 #include "buffer.hpp"
+#include "WatermarkBase.hpp"
+#include <memory>
 /*!
  *  \brief  Helper utility methods for testing the watermark algorithms
  *  \author Dimitris Karatzas
@@ -18,6 +21,7 @@ class Utilities
 public:
 	static std::string addSuffixBeforeExtension(const std::string& file, const std::string& suffix);
 	static void saveImage(const std::string& imagePath, const std::string& suffix, const BufferType& watermark);
+	static std::unique_ptr<WatermarkBase> createWatermarkObject(const unsigned int height, const unsigned int width, const std::string& randomMatrixPath, const int p, const float psnr);
 #if defined(_USE_OPENCL_) || defined(_USE_CUDA_)
 	static std::pair<unsigned int, unsigned int> getMaxImageSize();
 #endif

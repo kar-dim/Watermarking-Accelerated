@@ -1,17 +1,26 @@
+#include "buffer.hpp"
 #include "utils.hpp"
+#include "WatermarkBase.hpp"
 #include <chrono>
+#include <memory>
 #include <string>
 #if defined(_USE_OPENCL_)
 #include "opencl_utils.hpp"
+#include "WatermarkOCL.hpp"
 #include <af/opencl.h>
 #include <utility>
+#include <vector>
 #elif defined(_USE_CUDA_)
 #include "cuda_utils.hpp"
+#include "WatermarkCuda.cuh"
 #include <utility>
 #elif defined(_USE_EIGEN_)
 #include "eigen_utils.hpp"
+#include "WatermarkEigen.hpp"
 #endif
-#include "buffer.hpp"
+
+
+
 using std::string;
 
 string Utilities::addSuffixBeforeExtension(const string& file, const string& suffix)
@@ -28,6 +37,19 @@ void Utilities::saveImage(const string& imagePath, const string& suffix, const B
 #elif defined(_USE_OPENCL_) || defined(_USE_CUDA_)
 	af::saveImageNative(addSuffixBeforeExtension(imagePath, suffix).c_str(), watermark.as(u8));
 #endif
+}
+
+std::unique_ptr<WatermarkBase> Utilities::createWatermarkObject(const unsigned int height, const unsigned int width, const string& randomMatrixPath, const int p, const float psnr)
+{
+	std::unique_ptr<WatermarkBase> watermarkObj;
+#if defined(_USE_OPENCL_)
+	watermarkObj = std::make_unique<WatermarkOCL>(height, width, randomMatrixPath, p, psnr);
+#elif defined(_USE_CUDA_)
+	watermarkObj = std::make_unique<WatermarkCuda>(height, width, randomMatrixPath, p, psnr);
+#elif defined(_USE_EIGEN_)
+	watermarkObj = std::make_unique<WatermarkEigen>(height, width, randomMatrixPath, p, psnr);
+#endif
+	return watermarkObj;
 }
 
 // Returns the maximum image size supported by the device (cols, rows)

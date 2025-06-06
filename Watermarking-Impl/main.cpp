@@ -24,6 +24,7 @@
 #include <omp.h>
 #endif
 
+#include "buffer.hpp"
 #include "utils.hpp"
 #include "videoprocessingcontext.hpp"
 #include <cstdint>
@@ -51,7 +52,6 @@ extern "C" {
 #include <libavutil/pixfmt.h>
 #include "libavcodec/codec_par.h"
 #include "libavutil/rational.h"
-#include "buffer.hpp"
 }
 
 #if defined(_USE_OPENCL_) || defined(_USE_CUDA_)
@@ -81,13 +81,8 @@ using FILEPtr = std::unique_ptr<FILE, decltype(&_pclose)>;
  */
 void exitProgram(const int exitCode);
 std::string executionTime(const bool showFps, const double seconds);
-#if defined(_USE_CUDA_) || defined(_USE_EIGEN_)
 int testForImage(const INIReader& inir, const int p, const float psnr);
 int testForVideo(const INIReader& inir, const string& videoFile, const int p, const float psnr);
-#elif defined(_USE_OPENCL_)
-int testForImage(const INIReader& inir, const std::vector<cl::Program>& programs, const int p, const float psnr);
-int testForVideo(const INIReader& inir, const std::vector<cl::Program>& programs, const std::string& videoFile, const int p, const float psnr);
-#endif
 int findVideoStreamIndex(const AVFormatContext* inputFormatCtx);
 AVCodecContext* openDecoderContext(const AVCodecParameters* params);
 bool receivedValidVideoFrame(AVCodecContext* inputDecoderCtx, AVPacket* packet, AVFrame* frame, const int videoStreamIndex);
@@ -95,6 +90,8 @@ std::string getVideoFrameRate(const AVFormatContext* inputFormatCtx, const int v
 void embedWatermarkFrame(const VideoProcessingContext& data, BufferType& inputFrame, GrayBuffer& watermarkedFrame, int& framesCount, AVFrame* frame, FILE* ffmpegPipe);
 void detectFrameWatermark(const VideoProcessingContext& data, BufferType& inputFrame, int& framesCount, AVFrame* frame);
 int processFrames(const VideoProcessingContext& data, std::function<void(AVFrame*, int&)> processFrame);
+void writeWatermarkeFrameToPipe(const VideoProcessingContext& data, BufferType& inputFrame, GrayBuffer& watermarkedFrame, AVFrame* frame, FILE* ffmpegPipe);
+void writeConditionallyWatermarkeFrameToPipe(const bool embedWatermark, const VideoProcessingContext& data, BufferType& inputFrame, GrayBuffer& watermarkedFrame, AVFrame* frame, FILE* ffmpegPipe);
 void checkError(const bool criticalErrorCondition, const string& errorMessage);
 
 /*!
@@ -151,25 +148,12 @@ int main(void)
 #endif
 	checkError(psnr <= 0, "PSNR must be a positive number");
 
-#if defined(_USE_OPENCL_)
-	//compile opencl kernels
-	std::vector<cl::Program> programs(3);
-	if (cl_utils::buildKernels(programs, p) == false)
-		exitProgram(EXIT_FAILURE);
-#endif
-
 	//test algorithms
 	try {
 		const string videoFile = inir.Get("paths", "video", "");
-#if defined(_USE_OPENCL_)
-		const int code = videoFile != "" ?
-			testForVideo(inir, programs, videoFile, p, psnr) :
-			testForImage(inir, programs, p, psnr);
-#elif defined(_USE_CUDA_) || defined(_USE_EIGEN_)
 		const int code = videoFile != "" ?
 			testForVideo(inir, videoFile, p, psnr) :
 			testForImage(inir, p, psnr);
-#endif
 		exitProgram(code);
 	}
 	catch (const std::exception& ex) {
@@ -180,11 +164,7 @@ int main(void)
 }
 
 //embed watermark for static images
-#if defined(_USE_CUDA_) || defined(_USE_EIGEN_)
 int testForImage(const INIReader& inir, const int p, const float psnr)
-#elif defined(_USE_OPENCL_)
-int testForImage(const INIReader& inir, const std::vector<cl::Program>& programs, const int p, const float psnr)
-#endif
 {
 	double secs;
 	constexpr float rPercent = 0.299f;
@@ -229,14 +209,7 @@ int testForImage(const INIReader& inir, const std::vector<cl::Program>& programs
 	float watermarkStrength;
 	secs = 0;
 	//initialize watermark functions class, including parameters, ME and custom (NVF in this example) kernels
-	std::unique_ptr<WatermarkBase> watermarkObj;
-#if defined(_USE_OPENCL_)
-	watermarkObj = std::make_unique<WatermarkOCL>(rows, cols, inir.Get("paths", "watermark", ""), p, psnr, programs);
-#elif defined(_USE_CUDA_)
-	watermarkObj = std::make_unique<WatermarkCuda>(rows, cols, inir.Get("paths", "watermark", ""), p, psnr);
-#elif defined(_USE_EIGEN_)
-	watermarkObj = std::make_unique<WatermarkEigen>(rows, cols, inir.Get("paths", "watermark", ""), p, psnr);
-#endif
+	std::unique_ptr<WatermarkBase> watermarkObj = Utilities::createWatermarkObject(rows, cols, inir.Get("paths", "watermark", ""), p, psnr);
 
 #if defined(_USE_GPU_)
 	//warmup for arrayfire
@@ -252,7 +225,6 @@ int testForImage(const INIReader& inir, const std::vector<cl::Program>& programs
 #if defined(_USE_GPU_)
 		watermarkNVF = watermarkObj->makeWatermark(image, rgbImage, watermarkStrength, MASK_TYPE::NVF);
 #elif defined(_USE_EIGEN_)
-		//makeWatermark dhmioyrgei temporary, kai vgainei out of scope, watermarkNVF einai DANGLING.... fix this
 		watermarkNVF = std::move(watermarkObj->makeWatermark(image, rgbImage, watermarkStrength, MASK_TYPE::NVF).getRGB());
 #endif
 		timer::end();
@@ -329,11 +301,7 @@ int testForImage(const INIReader& inir, const std::vector<cl::Program>& programs
 }
 
 //embed watermark for a video or try to detect watermark in a video
-#if defined(_USE_CUDA_) || defined(_USE_EIGEN_)
 int testForVideo(const INIReader& inir, const string& videoFile, const int p, const float psnr)
-#elif defined(_USE_OPENCL_)
-int testForVideo(const INIReader& inir, const std::vector<cl::Program>& programs, const string& videoFile, const int p, const float psnr)
-#endif
 {
 	const bool showFps = inir.GetBoolean("options", "execution_time_in_fps", false);
 	const int watermarkInterval = inir.GetInteger("parameters_video", "watermark_interval", 30);
@@ -357,14 +325,7 @@ int testForVideo(const INIReader& inir, const std::vector<cl::Program>& programs
 	const int height = inputFormatCtx->streams[videoStreamIndex]->codecpar->height;
 	const int width = inputFormatCtx->streams[videoStreamIndex]->codecpar->width;
 	//initialize watermark functions class, including parameters, ME and custom (NVF in this example) kernels
-	std::unique_ptr<WatermarkBase> watermarkObj;
-#if defined(_USE_OPENCL_)
-	watermarkObj = std::make_unique<WatermarkOCL>(height, width, inir.Get("paths", "watermark", ""), p, psnr, programs);
-#elif defined(_USE_CUDA_)
-	watermarkObj = std::make_unique<WatermarkCuda>(height, width, inir.Get("paths", "watermark", ""), p, psnr);
-#elif defined(_USE_EIGEN_)
-	watermarkObj = std::make_unique<WatermarkEigen>(height, width, inir.Get("paths", "watermark", ""), p, psnr);
-#endif
+	std::unique_ptr<WatermarkBase> watermarkObj = Utilities::createWatermarkObject(height, width, inir.Get("paths", "watermark", ""), p, psnr);
 
 	//initialize host pinned memory for fast GPU<->CPU transfers, and Eigen memory for CPU implementation
 #if defined(_USE_CUDA_)
@@ -452,7 +413,6 @@ int processFrames(const VideoProcessingContext& data, std::function<void(AVFrame
 // Embed watermark in a video frame
 void embedWatermarkFrame(const VideoProcessingContext& data, BufferType& inputFrame, GrayBuffer& watermarkedFrame, int& framesCount, AVFrame* frame, FILE* ffmpegPipe)
 {
-	float watermarkStrength;
 	const bool embedWatermark = framesCount % data.watermarkInterval == 0;
 	//if there is row padding (for alignment), we must copy the data to a contiguous block!
 	if (frame->linesize[0] != data.width)
@@ -462,16 +422,7 @@ void embedWatermarkFrame(const VideoProcessingContext& data, BufferType& inputFr
 			for (int y = 0; y < data.height; y++)
 				memcpy(data.inputFramePtr + y * data.width, frame->data[0] + y * frame->linesize[0], data.width);
 			//embed the watermark, receive the watermarked data back to host and write the watermarked image data to ffmpeg pipe
-#if defined(_USE_GPU_)
-			inputFrame = BufferType(data.width, data.height, data.inputFramePtr, afHost).T().as(f32);
-			watermarkedFrame = data.watermarkObj->makeWatermark(inputFrame, inputFrame, watermarkStrength, MASK_TYPE::ME).as(u8).T();
-			watermarkedFrame.host(data.inputFramePtr);
-			fwrite(data.inputFramePtr, 1, data.width * frame->height, ffmpegPipe);
-#elif defined(_USE_EIGEN_)
-			inputFrame = BufferType(Map<GrayBuffer>(data.inputFramePtr, data.width, data.height).transpose().cast<float>().eval());
-			watermarkedFrame = data.watermarkObj->makeWatermark(inputFrame, inputFrame, watermarkStrength, MASK_TYPE::ME).getGray().transpose().cast<uint8_t>();
-			fwrite(watermarkedFrame.data(), 1, data.width * frame->height, ffmpegPipe);
-#endif
+			writeWatermarkeFrameToPipe(data, inputFrame, watermarkedFrame, frame, ffmpegPipe);
 		}
 		else
 		{
@@ -489,23 +440,7 @@ void embedWatermarkFrame(const VideoProcessingContext& data, BufferType& inputFr
 	//no row padding, read and write data directly
 	else
 	{
-		if (embedWatermark)
-		{
-#if defined(_USE_GPU_)
-			inputFrame = BufferType(data.width, data.height, frame->data[0], afHost).T().as(f32);
-			watermarkedFrame = data.watermarkObj->makeWatermark(inputFrame, inputFrame, watermarkStrength, MASK_TYPE::ME).as(u8).T();
-			watermarkedFrame.host(data.inputFramePtr);
-#elif defined(_USE_EIGEN_)
-			inputFrame = BufferType(Map<GrayBuffer>(frame->data[0], data.width, data.height).transpose().cast<float>().eval());
-			watermarkedFrame = data.watermarkObj->makeWatermark(inputFrame, inputFrame, watermarkStrength, MASK_TYPE::ME).getGray().transpose().cast<uint8_t>();
-#endif
-		}
-		// Write original or modified frame to ffmpeg (pipe)
-#if defined(_USE_GPU_)
-		fwrite(embedWatermark ? data.inputFramePtr : frame->data[0], 1, data.width * frame->height, ffmpegPipe);
-#elif defined(_USE_EIGEN_)
-		fwrite(embedWatermark ? watermarkedFrame.data() : frame->data[0], 1, data.width * frame->height, ffmpegPipe);
-#endif
+		writeConditionallyWatermarkeFrameToPipe(embedWatermark, data, inputFrame, watermarkedFrame, frame, ffmpegPipe);
 		fwrite(frame->data[1], 1, data.width * frame->height / 4, ffmpegPipe);
 		fwrite(frame->data[2], 1, data.width * frame->height / 4, ffmpegPipe);
 	}
@@ -527,7 +462,7 @@ void detectFrameWatermark(const VideoProcessingContext& data, BufferType& inputF
 		}
 		//supply the input frame to the GPU and run the detection of the watermark
 #if defined(_USE_GPU_)
-		inputFrame = BufferType(data.width, data.height, rowPadding ? data.inputFramePtr : frame->data[0], afHost).T().as(f32);
+		inputFrame = GrayBuffer(data.width, data.height, rowPadding ? data.inputFramePtr : frame->data[0], afHost).T().as(f32);
 #elif defined(_USE_EIGEN_)
 		inputFrame.getGray() = Map<GrayBuffer>(rowPadding ? data.inputFramePtr : frame->data[0], data.width, data.height).transpose().cast<float>();
 #endif
@@ -599,6 +534,42 @@ void exitProgram(const int exitCode)
 {
 	std::system("pause");
 	std::exit(exitCode);
+}
+
+// runs the watermark creation for a video frame and writes the watermarked frame to the ffmpeg pipe
+void writeWatermarkeFrameToPipe(const VideoProcessingContext& data, BufferType& inputFrame, GrayBuffer& watermarkedFrame, AVFrame* frame, FILE* ffmpegPipe)
+{
+	float watermarkStrength;
+#if defined(_USE_GPU_)
+	inputFrame = BufferType(data.width, data.height, data.inputFramePtr, afHost).T().as(f32);
+	watermarkedFrame = data.watermarkObj->makeWatermark(inputFrame, inputFrame, watermarkStrength, MASK_TYPE::ME).as(u8).T();
+	watermarkedFrame.host(data.inputFramePtr);
+	fwrite(data.inputFramePtr, 1, data.width * frame->height, ffmpegPipe);
+#elif defined(_USE_EIGEN_)
+	inputFrame = BufferType(Map<GrayBuffer>(data.inputFramePtr, data.width, data.height).transpose().cast<float>().eval());
+	watermarkedFrame = data.watermarkObj->makeWatermark(inputFrame, inputFrame, watermarkStrength, MASK_TYPE::ME).getGray().transpose().cast<uint8_t>();
+	fwrite(watermarkedFrame.data(), 1, data.width * frame->height, ffmpegPipe);
+#endif
+}
+
+// runs the watermark creation for a video frame and writes the watermarked frame to the ffmpeg pipe, if the watermark is embedded, or writes the original frame data otherwise
+void writeConditionallyWatermarkeFrameToPipe(const bool embedWatermark, const VideoProcessingContext& data, BufferType& inputFrame, GrayBuffer& watermarkedFrame, AVFrame* frame, FILE* ffmpegPipe)
+{
+	if (embedWatermark)
+	{
+		float watermarkStrength;
+#if defined(_USE_GPU_)
+		inputFrame = BufferType(data.width, data.height, frame->data[0], afHost).T().as(f32);
+		watermarkedFrame = data.watermarkObj->makeWatermark(inputFrame, inputFrame, watermarkStrength, MASK_TYPE::ME).as(u8).T();
+		watermarkedFrame.host(data.inputFramePtr);
+	}
+	fwrite(embedWatermark ? data.inputFramePtr : frame->data[0], 1, data.width * frame->height, ffmpegPipe);
+#elif defined(_USE_EIGEN_)
+		inputFrame = BufferType(Map<GrayBuffer>(frame->data[0], data.width, data.height).transpose().cast<float>().eval());
+		watermarkedFrame = data.watermarkObj->makeWatermark(inputFrame, inputFrame, watermarkStrength, MASK_TYPE::ME).getGray().transpose().cast<uint8_t>();
+}
+	fwrite(embedWatermark ? watermarkedFrame.data() : frame->data[0], 1, data.width* frame->height, ffmpegPipe);
+#endif
 }
 
 //prints an error message and terminates the program if an error condition is true
