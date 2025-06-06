@@ -132,5 +132,8 @@
     <ClInclude Include="cimg_init.h">
       <Filter>Header Files\eigen</Filter>
     </ClInclude>
+    <ClInclude Include="host_memory.h">
+      <Filter>Header Files\util</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

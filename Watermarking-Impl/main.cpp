@@ -27,6 +27,7 @@
 #include <cstring>
 #include <exception>
 #include <format>
+#include "host_memory.h"
 #include <functional>
 #include <INIReader.h>
 #include <iostream>
@@ -58,7 +59,6 @@ using namespace cimg_library;
 using namespace Eigen;
 using GrayBuffer = Array<uint8_t, Dynamic, Dynamic>;
 #elif defined(_USE_GPU_) 
-using PinnedPtr = std::unique_ptr<uint8_t, std::function<void(uint8_t*)>>;
 using GrayBuffer = af::array;
 #endif
 
@@ -322,20 +322,8 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 	//initialize watermark functions class, including parameters, ME and custom (NVF in this example) kernels
 	std::unique_ptr<WatermarkBase> watermarkObj = Utilities::createWatermarkObject(height, width, inir.Get("paths", "watermark", ""), p, psnr);
 
-	//initialize host pinned memory for fast GPU<->CPU transfers, and Eigen memory for CPU implementation
-#if defined(_USE_CUDA_)
-	uint8_t* frameFlatPinned = nullptr;
-	cudaHostAlloc((void**)&frameFlatPinned, width * height * sizeof(uint8_t), cudaHostAllocDefault);
-	PinnedPtr framePinned(frameFlatPinned, [](uint8_t* ptr) { if (ptr) cudaFreeHost(ptr); });
-#elif defined(_USE_OPENCL_)
-	const cl::Context context(afcl::getContext(false));
-	const cl::CommandQueue queue(afcl::getQueue(false));
-	cl::Buffer pinnedBuff(context, CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR, width * height * sizeof(cl_uchar), nullptr, nullptr);
-	cl_uchar* frameFlatPinned = static_cast<cl_uchar*>(queue.enqueueMapBuffer(pinnedBuff, CL_TRUE, CL_MAP_WRITE, 0, width * height * sizeof(cl_uchar), nullptr, nullptr, nullptr));
-	PinnedPtr framePinned(frameFlatPinned, [&](cl_uchar* ptr) { queue.enqueueUnmapMemObject(pinnedBuff, ptr); });
-#elif defined(_USE_EIGEN_)
-	std::unique_ptr<uint8_t> framePinned(new uint8_t[width * height]);
-#endif
+	//initialize host pinned memory for fast GPU<->CPU transfers, or simple Eigen memory for CPU implementation
+	HostMemory<uint8_t> framePinned(width * height);
 
 	//group common video data for both embedding and detection
 	const VideoProcessingContext videoData(inputFormatCtx.get(), inputDecoderCtx.get(), videoStreamIndex, watermarkObj.get(), height, width, watermarkInterval, framePinned.get());
