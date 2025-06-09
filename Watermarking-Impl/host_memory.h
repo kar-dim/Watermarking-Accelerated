@@ -3,6 +3,8 @@
 #include <cuda_runtime.h>
 #elif defined(_USE_OPENCL_)
 #include "opencl_init.h"
+#elif defined(_USE_EIGEN_)
+#include <memory>
 #endif
 
 template <typename T>
@@ -16,7 +18,8 @@ public:
         pinnedBuffer = cl::Buffer(cl::Context(afcl::getContext(false)), CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR, size * sizeof(T));
         ptr = static_cast<T*>(queue.enqueueMapBuffer(pinnedBuffer, CL_TRUE, CL_MAP_WRITE, 0, size * sizeof(T)));
 #elif defined(_USE_EIGEN_)
-        ptr = new T[size];
+        pinnedBuffer = std::make_unique<T[]>(size);
+        ptr = pinnedBuffer.get();
 #endif
     }
     ~HostMemory()
@@ -25,8 +28,6 @@ public:
         if (ptr) cudaFreeHost(ptr);
 #elif defined(_USE_OPENCL_)
         if (ptr) queue.enqueueUnmapMemObject(pinnedBuffer, ptr);
-#elif defined(_USE_EIGEN_)
-        delete[] ptr;
 #endif
     }
 
@@ -38,6 +39,8 @@ private:
 #if defined(_USE_OPENCL_)
     cl::Buffer pinnedBuffer;
     cl::CommandQueue queue{ afcl::getQueue(false) };
+#elif defined(_USE_EIGEN_)
+    std::unique_ptr<T[]> pinnedBuffer;
 #endif
 
 };
