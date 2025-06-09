@@ -66,8 +66,8 @@ The solution provides multiple build configurations, each targeting a specific b
 | `OpenCL_Release` | OpenCL      | Most recommended backend with very high performance. There is **no debug version** due to some known issues |
 | `CUDA_Release`   | CUDA        | Recommended for systems with NVIDIA GPUs. Slightly faster than OpenCL backend    |
 | `CUDA_Debug`     | CUDA        | Use for debugging CUDA-specific code        |
-| `EIGEN_Release`  | Eigen (CPU) | Optimized CPU-based implementation.         |
-| `EIGEN_Debug`    | Eigen (CPU) | Use for debugging CPU implementation        |
+| `EIGEN_Release`  | Eigen (CPU) | Optimized CPU-based implementation (clang-cl toolset is used for maximum performance).         |
+| `EIGEN_Debug`    | Eigen (CPU) | Use for debugging CPU implementation (clang-cl)      |
 
 ### Build Instructions
 
@@ -75,15 +75,18 @@ The solution provides multiple build configurations, each targeting a specific b
 2. In the **Solution Configurations** dropdown (top toolbar), select your configuration (e.g. `CUDA_Release`).
 3. Build the solution via **Build > Build Solution**.
 
-**Note:** Both CUDA and OpenCL backends depend on **ArrayFire**, which in turn requires its own set of runtime dependencies.  
+**Note:** Both CUDA and OpenCL backends depend on **ArrayFire**, which in turn requires its own set of runtime dependencies.
 If ArrayFire is properly installed, its `lib` directory (containing all required DLLs) is typically added to the system `PATH`, and everything should work out of the box.
-However, since not all systems have ArrayFire installed, we include the necessary DLLs in the prebuilt binaries. These files are copied directly from `$(AF_PATH)/lib` for convenience.
+However, since not all systems have ArrayFire installed, we include the necessary DLLs in the prebuilt binaries. These files are copied directly from `$(AF_PATH)/lib` for convenience (Post-Build event).
+The same applies for CPU backend, where we copy the relevant libraries required by CImg (LibJPEG, LibPNG, zlib) and clang's OpenMP.
+All backends require ffmpeg which is also copied (most libav* DLLs).
 
-**CUDA Implementation additional files**:
+
+**CUDA dependencies**:
 - FreeImage.dll
 - afcuda.dll
 
-**OpenCL Implementation additional files**:
+**OpenCL dependencies**:
 - FreeImage.dll
 - afopencl.dll
 - forge.dll
@@ -94,6 +97,13 @@ However, since not all systems have ArrayFire installed, we include the necessar
 - mkl_intel_thread.2.dll
 - mkl_rt.2.dll
 - mkl_tbb_thread.2.dll
+
+**Eigen dependencies**:
+- zlib1.dll
+- libpng16.dll
+- jpeg62.dll
+- libomp.dll
+
 
 # Libraries Used
 
