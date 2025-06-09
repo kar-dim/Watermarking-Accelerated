@@ -96,7 +96,10 @@
       <AdditionalOptions>-diag-suppress 1388 --std c++20 %(AdditionalOptions)</AdditionalOptions>
     </CudaCompile>
     <PostBuildEvent>
-      <Command>xcopy "$(ProjectDir)libs\ffmpeg\bin\*.dll" "$(OutDir)" /y /D</Command>
+      <Command>xcopy "$(ProjectDir)libs\ffmpeg\bin\*.dll" "$(OutDir)" /y /D
+xcopy "$(ProjectDir)libs\ffmpeg\bin\ffmpeg.exe" "$(OutDir)" /y /D
+xcopy "$(AF_PATH)\lib\FreeImage.dll" "$(OutDir)" /y /D
+xcopy "$(AF_PATH)\lib\afcuda.dll" "$(OutDir)" /y /D</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='CUDA_Release|x64'">
@@ -129,7 +132,9 @@
     </CudaCompile>
     <PostBuildEvent>
       <Command>xcopy "$(ProjectDir)libs\ffmpeg\bin\*.dll" "$(OutDir)" /y /D
-xcopy "$(ProjectDir)libs\ffmpeg\bin\ffmpeg.exe" "$(OutDir)" /y /D</Command>
+xcopy "$(ProjectDir)libs\ffmpeg\bin\ffmpeg.exe" "$(OutDir)" /y /D
+xcopy "$(AF_PATH)\lib\FreeImage.dll" "$(OutDir)" /y /D
+xcopy "$(AF_PATH)\lib\afcuda.dll" "$(OutDir)" /y /D</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='OPENCL_Release|x64'">
@@ -173,7 +178,17 @@ xcopy "$(ProjectDir)libs\ffmpeg\bin\ffmpeg.exe" "$(OutDir)" /y /D</Command>
       <SubSystem>Console</SubSystem>
     </Link>
     <PostBuildEvent>
-      <Command>xcopy "$(ProjectDir)libs\ffmpeg\bin\*.dll" "$(OutDir)" /y /D</Command>
+      <Command>xcopy "$(ProjectDir)libs\ffmpeg\bin\*.dll" "$(OutDir)" /y /D
+xcopy "$(AF_PATH)\lib\afopencl.dll" "$(OutDir)" /y /D
+xcopy "$(AF_PATH)\lib\FreeImage.dll" "$(OutDir)" /y /D
+xcopy "$(AF_PATH)\lib\forge.dll" "$(OutDir)" /y /D
+xcopy "$(AF_PATH)\lib\glfw3.dll" "$(OutDir)" /y /D
+xcopy "$(AF_PATH)\lib\libiomp5md.dll" "$(OutDir)" /y /D
+xcopy "$(AF_PATH)\lib\mkl_core.2.dll" "$(OutDir)" /y /D
+xcopy "$(AF_PATH)\lib\mkl_def.2.dll" "$(OutDir)" /y /D
+xcopy "$(AF_PATH)\lib\mkl_intel_thread.2.dll" "$(OutDir)" /y /D
+xcopy "$(AF_PATH)\lib\mkl_rt.2.dll" "$(OutDir)" /y /D
+xcopy "$(AF_PATH)\lib\mkl_tbb_thread.2.dll" "$(OutDir)" /y /D</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='EIGEN_Release|x64'">
