@@ -27,31 +27,32 @@ The aim of this project is to compare the performance (primarily execution speed
 The sample application:
    - Embeds the watermark using the NVF and the proposed Prediction-Error mask for a video or image.
    - Detects the watermark using the proposed Prediction-Error based detector for a video or image.
-   - Prints FPS/execution time for both operations, and both masks (image mode only, for video ME masking is used, which is more optimal).
+   - Prints FPS/execution time for both operations, and both masks.
+**NOTE**: For video operations, only the proposed mask is used, which is more optimal.
 Needs to be parameterized from the corresponding ```settings.ini``` file. Here is a detailed explanation for each parameter:
 
 | Parameter                         | Description                                                                                                                 |
 |-----------------------------------|-----------------------------------------------------------------------------------------------------------------------------               |
-| image                             | Path to the input image.                                                                                                                   |
-| watermark                         | Path to the Random Matrix (watermark). This is produced by the CommonRandomMatrix project. Watermark and Image sizes should match exactly. |
-| save_watermarked_files_to_disk    | \[true/false\]: Set to true to save the watermarked NVF and Prediction-Error files to disk.                                                |
-| execution_time_in_fps             | \[true/false\]: Set to true to display execution times in FPS. Else, it will display execution time in seconds.                            |
-| p                                 | Window size for masking algorithms. Currently only ```p=3``` is allowed for ```OpenCL``` and ```CUDA``` implementations. ```Eigen``` implementation supports values of 3,5,7 and 9.                                                                   |
+| image                             | Path to the input image to embed and detect watermark. This will set the sample application to ```image mode```. |
+| watermark                         | Path to the Random Matrix (watermark). This is produced by the ```Watermarking-Generate``` project. Watermark and Image sizes should match exactly. |
+| save_watermarked_files_to_disk    | ```[true/false]```: Set to true to save the watermarked NVF and Prediction-Error files to disk.                                                |
+| execution_time_in_fps             | ```[true/false]```: Set to true to display execution times in FPS. Else, it will display execution time in seconds.                            |
+| p                                 | Window size for masking algorithms. Currently only ```p=3``` is allowed for ```OpenCL``` and ```CUDA``` implementations. ```Eigen``` implementation supports values of ```p=3,5,7``` and ```9```. |
 | psnr                              | PSNR (Peak Signal-to-Noise Ratio). Higher values correspond to less watermark in the image, reducing noise, but making detection harder.   |
-| loops_for_test                    | Loops the algorithms many times, simulating more work. A value of 1000 produces almost identical execution times.                          |
-| opencl_device                     | [OpenCL only / Number]: Works only for OpenCL binary. If multiple OpenCL devices are found, then set this to the desired device. Set it to 0 if one device is found. |
-| threads                           | [CPU only / Number]: Maximum number of threads. Set to 0 to automatically find the maximum concurrent threads supported, or set them manually here.    |
+| loops_for_test                    | Loops the algorithms many times, simulating more work. A value of ```100~1000``` produces consistent execution times.                          |
+| opencl_device                     | ```[OpenCL only / Number]```: Works only for OpenCL binary. If multiple OpenCL devices are found, then set this to the desired device. Set it to 0 if one device is found. |
+| threads                           | ```[CPU only / Number]```: Maximum number of threads. Set to 0 to automatically find the maximum concurrent threads supported, or set them manually here.    |
 
 **Video-only settings:**
 
 
 | Parameter                         | Description                                                                                                                 |
 |-----------------------------------|-----------------------------------------------------------------------------------------------------------------------------                |
-| video                             | Path to the video file, if we want to embed the watermark for a video, or try to detect its watermark.                                      |
-| watermark_interval                | [Number]: Embed/Try to detect the watermark every X frames. If set to 1 then the watermark will be embedded for each frame, which degrades video quality.|
+| video                             | Path to the video file, if we want to embed or detect the watermark for a video. This will set the sample application to ```video mode``` and will read the video-only settings that are described in this section. |
+| watermark_interval                | ```[Number]```: Embed or try to detect the watermark every X frames. If set to 1 when embedding, the watermark will be embedded for all frames, which degrades video quality.|
 | encode_watermark_file_path        | Set this value to a file path, in order to embed watermark and save the watermarked file to disk.                                           |
 | encode_options                    | These are ffmpeg options for encoding. Example: ```-c:v libx265 -preset fast -crf 23```  will pass these encoding options to ffmpeg.
-| watermark_detection               | \[true/false\]: Set to true to try to detect the watermark of the "video" parameter. The detection occurs after "watermark_interval" frames.|
+| watermark_detection               | ```[true/false]```: Set to true to try to detect the watermark of the "video" parameter. The detection occurs after ```watermark_interval``` frames. It is ignored when ```encode_watermark_file_path``` is set. |
 
 # How to Build
 
