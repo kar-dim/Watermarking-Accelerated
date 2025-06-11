@@ -21,14 +21,14 @@ WatermarkOCL::WatermarkOCL(const unsigned int rows, const unsigned int cols, con
 		throw std::runtime_error(string("Wrong p parameter: ") + std::to_string(p) + "!\n");
 	//compile opencl kernels and initialize memory
 	cl_utils::buildKernels(programs, p);
-	initializeMemory();
+	initializeGpuMemory();
 }
 
 //copy constructor
 WatermarkOCL::WatermarkOCL(const WatermarkOCL& other) : WatermarkBase(other.baseRows, other.baseCols, other.randomMatrix, other.p, other.strengthFactor),
 	texKernelDims(other.texKernelDims), meKernelDims(other.meKernelDims), programs(other.programs)
 {
-	initializeMemory();
+	initializeGpuMemory();
 }
 
 //copy assignment operator
@@ -44,13 +44,13 @@ WatermarkOCL& WatermarkOCL::operator=(const WatermarkOCL& other)
 		programs = other.programs;
 		p = other.p;
 		strengthFactor = other.strengthFactor;
-		initializeMemory();
+		initializeGpuMemory();
 	}
 	return *this;
 }
 
 //supply the input image size, and pre-allocate buffers and arrays
-void WatermarkOCL::initializeMemory() 
+void WatermarkOCL::initializeGpuMemory()
 {
 	//initialize texture (transposed dimensions, arrayfire is column wise, we skip an extra transpose)
 	image2d = cl::Image2D(context, CL_MEM_READ_ONLY, cl::ImageFormat(CL_LUMINANCE, CL_FLOAT), baseRows, baseCols, 0, NULL);
@@ -62,6 +62,13 @@ void WatermarkOCL::copyDataToTexture(const af::array& image) const
 	const std::unique_ptr<cl_mem> imageMem(image.device<cl_mem>());
 	cl_utils::copyBufferToImage(queue, image2d, imageMem.get(), baseCols, baseRows);
 	unlockArrays(image);
+}
+
+void WatermarkOCL::onReinitialize()
+{
+	texKernelDims = { ALIGN(baseRows, 16), ALIGN(baseCols, 16) };
+	meKernelDims = { baseRows, ALIGN(baseCols, 64) };
+	initializeGpuMemory();
 }
 
 //computes the custom mask (NVF).

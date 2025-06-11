@@ -28,6 +28,16 @@ void WatermarkEigen::createNeighbors(const ArrayXXf& array, VectorXf& x_, const 
 	x_.tail(pSquared - halfNeighborsSize - 1) = x_temp.tail(halfNeighborsSize);
 }
 
+void WatermarkEigen::onReinitialize()
+{
+	pad = p / 2;
+	paddedRows = (baseRows + 2 * pad);
+	paddedCols = (baseCols + 2 * pad);
+	pSquared = p * p;
+	halfNeighborsSize = (pSquared - 1) / 2;
+	padded = ArrayXXf::Zero(paddedRows, paddedCols);
+}
+
 //computes the custom mask, in this case "NVF" mask
 ArrayXXf WatermarkEigen::computeCustomMask(const ArrayXXf& image, const ArrayXXf& padded) const
 {

@@ -5,7 +5,6 @@
 #include <arrayfire.h>
 #include <cuda_runtime.h>
 #include <string>
-#include <utility>
 
 /*!
  *  \brief  Functions for watermark computation and detection
@@ -20,7 +19,8 @@ private:
 	cudaArray* texArray;
 	static cudaStream_t afStream;
 
-	void initializeMemory() override;
+	void initializeGpuMemory() override;
+	void onReinitialize() override;
 	af::array computeCustomMask() const override;
 	af::array computeScaledNeighbors(const af::array& coefficients) const override;
 	af::array computePredictionErrorMask(const af::array& image, af::array& errorSequence, af::array& coefficients, const bool maskNeeded) const override;

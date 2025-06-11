@@ -21,7 +21,7 @@ WatermarkCuda::WatermarkCuda(const unsigned int rows, const unsigned int cols, c
 {
 	if (p != 3 && p != 5 && p != 7 && p != 9)
 		throw std::runtime_error(string("Wrong p parameter: ") + std::to_string(p) + "!\n");
-	initializeMemory();
+	initializeGpuMemory();
 }
 
 //copy constructor
@@ -29,7 +29,7 @@ WatermarkCuda::WatermarkCuda(const WatermarkCuda& other) : WatermarkBase(other.b
 	meKernelDims(other.meKernelDims)
 {
 	//we don't need to copy the internal buffers data, only to allocate the correct size based on other
-	initializeMemory();
+	initializeGpuMemory();
 }
 
 //move constructor
@@ -83,7 +83,7 @@ WatermarkCuda& WatermarkCuda::operator=(const WatermarkCuda& other)
 		copyParams(other);
 		cudaDestroyTextureObject(texObj);
 		cudaFreeArray(texArray);
-		initializeMemory();
+		initializeGpuMemory();
 		randomMatrix = other.randomMatrix;
 	}
 	return *this;
@@ -97,13 +97,20 @@ WatermarkCuda::~WatermarkCuda()
 	destroy(texArray, cudaFreeArray);
 }
 
-//supply the input image to apply watermarking and detection
-void WatermarkCuda::initializeMemory()
+void WatermarkCuda::initializeGpuMemory()
 {
 	//initialize texture (transposed dimensions, arrayfire is column wise, we skip an extra transpose)
 	auto textureData = cuda_utils::createTextureData(baseCols, baseRows);
 	texObj = textureData.first;
 	texArray = textureData.second;
+}
+
+void WatermarkCuda::onReinitialize()
+{
+	meKernelDims = { ALIGN(baseCols, 64), UINT(baseRows) };
+	cudaDestroyTextureObject(texObj);
+	cudaFreeArray(texArray);
+	initializeGpuMemory();
 }
 
 //computes custom Mask (NVF)
