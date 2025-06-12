@@ -4,31 +4,72 @@
 #include <utility>
 #include <variant>
 
-class EigenImage {
-public:
+class EigenImage 
+{
+private:
     std::variant<std::monostate, Eigen::ArrayXXf, EigenArrayRGB> data;
 
+public:
     EigenImage() = default;
-    EigenImage(const Eigen::ArrayXXf& gray) = delete;
-    EigenImage(Eigen::ArrayXXf&& gray)
-        : data(std::move(gray)) 
+
+	//move constructors
+    EigenImage(EigenImage&&) noexcept = default;
+    EigenImage(Eigen::ArrayXXf&& gray) noexcept
+        : data(std::move(gray))
     { }
 
-    EigenImage(const EigenArrayRGB& rgb) = delete;
-    EigenImage(EigenArrayRGB&& rgb)
-        : data(std::move(rgb)) 
+    EigenImage(EigenArrayRGB&& rgb) noexcept
+        : data(std::move(rgb))
     { }
 
-    EigenImage& operator=(Eigen::ArrayXXf&& gray) noexcept {
-        data = std::move(gray);
-		return *this;
+	//move assignment operators
+    EigenImage& operator=(EigenImage&& other) noexcept 
+    {
+        data = std::move(other.data);
+        return *this;
     };
 
-    EigenImage& operator=(EigenArrayRGB&& rgb) noexcept {
+    EigenImage& operator=(Eigen::ArrayXXf&& gray) noexcept 
+    {
+        data = std::move(gray);
+        return *this;
+    };
+
+    EigenImage& operator=(EigenArrayRGB&& rgb) noexcept 
+    {
         data = std::move(rgb);
         return *this;
     };
 
+    //copy constructors
+    EigenImage(const EigenImage& other) : data(other.data)
+    { };
+
+    EigenImage(const Eigen::ArrayXXf& gray) : data(gray)
+    { };
+
+    EigenImage(const EigenArrayRGB& rgb) : data(rgb)
+    { };
+
+	//copy assignment operators
+    EigenImage& operator=(const EigenImage& other) 
+    {
+        data = other.data;
+        return *this;
+    }
+    EigenImage& operator=(const Eigen::ArrayXXf& gray) 
+    {
+        data = gray;
+        return *this;
+    };
+
+    EigenImage& operator=(const EigenArrayRGB& rgb) 
+    {
+        data = rgb;
+        return *this;
+    };
+
+    //helper methods to retrieve the actual data type
     bool isRGB() const 
     {
         return std::holds_alternative<EigenArrayRGB>(data);

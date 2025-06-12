@@ -5,7 +5,8 @@
 #include <Eigen/Dense>
 #include <string>
 
-class WatermarkEigen : public WatermarkBase {
+class WatermarkEigen : public WatermarkBase 
+{
 private:
 	int pad;
 	unsigned int paddedRows, paddedCols;
@@ -21,6 +22,10 @@ private:
 
 public:
 	WatermarkEigen(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const int p, const float psnr);
+	WatermarkEigen(const WatermarkEigen& other) = default;
+	WatermarkEigen(WatermarkEigen&& other) noexcept = default;
+	WatermarkEigen& operator=(WatermarkEigen&& other) noexcept = default;
+	WatermarkEigen& operator=(const WatermarkEigen& other) = default;
 	BufferType makeWatermark(const BufferType& inputImage, const BufferType& outputImage, float& watermarkStrength, MASK_TYPE maskType) override;
 	float detectWatermark(const BufferType& watermarkedImage, MASK_TYPE type) override;
 };

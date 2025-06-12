@@ -18,8 +18,8 @@ struct dim2
  *  \brief  Functions for watermark computation and detection
  *  \author Dimitris Karatzas
  */
-class WatermarkOCL : public WatermarkBase, public WatermarkGPU {
-
+class WatermarkOCL : public WatermarkBase, public WatermarkGPU 
+{
 private:
 	static constexpr int RxMappings[64]
 	{

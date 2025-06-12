@@ -5,7 +5,8 @@
 #include <concepts>
 #include <utility>
 
-class WatermarkGPU {
+class WatermarkGPU 
+{
 public:
 	virtual ~WatermarkGPU() = default;
 

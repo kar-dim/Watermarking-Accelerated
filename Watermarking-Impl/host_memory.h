@@ -8,7 +8,8 @@
 #endif
 
 template <typename T>
-class HostMemory {
+class HostMemory 
+{
 public:
     HostMemory(const size_t size) 
     {

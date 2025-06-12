@@ -17,7 +17,8 @@ enum MASK_TYPE
 #define ME_MASK_CALCULATION_REQUIRED_NO false
 #define ME_MASK_CALCULATION_REQUIRED_YES true
 
-class WatermarkBase {
+class WatermarkBase 
+{
 public:
 	WatermarkBase(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const int p, const float strengthFactor)
 		: baseRows(rows), baseCols(cols), p(p), randomMatrix(loadRandomMatrix(randomMatrixPath)), strengthFactor(strengthFactor)
