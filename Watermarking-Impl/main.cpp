@@ -85,6 +85,7 @@ std::string getVideoFrameRate(const AVFormatContext* inputFormatCtx, const int v
 void embedWatermarkFrame(const VideoProcessingContext& data, BufferType& inputFrame, GrayBuffer& watermarkedFrame, int& framesCount, AVFrame* frame, FILE* ffmpegPipe);
 void detectFrameWatermark(const VideoProcessingContext& data, BufferType& inputFrame, int& framesCount, AVFrame* frame);
 int processFrames(const VideoProcessingContext& data, std::function<void(AVFrame*, int&)> processFrame);
+void makeRgbWatermarkBuffer(const std::unique_ptr<WatermarkBase>& watermarkObj, const BufferType& image, const BufferType& rgbImage, BufferType& output, float& watermarkStrength, MASK_TYPE maskType);
 void writeWatermarkeFrameToPipe(const VideoProcessingContext& data, BufferType& inputFrame, GrayBuffer& watermarkedFrame, AVFrame* frame, FILE* ffmpegPipe);
 void writeConditionallyWatermarkeFrameToPipe(const bool embedWatermark, const VideoProcessingContext& data, BufferType& inputFrame, GrayBuffer& watermarkedFrame, AVFrame* frame, FILE* ffmpegPipe);
 void checkError(const bool criticalErrorCondition, const string& errorMessage);
@@ -173,31 +174,31 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 #if defined(_USE_GPU_)
 	const auto maxImageDims = Utilities::getMaxImageSize();
 	//load image from disk into an arrayfire array
-	timer::start();
-	const BufferType rgbImage = af::loadImage(imageFile.c_str(), true);
-	const BufferType image = af::rgb2gray(rgbImage, rPercent, gPercent, bPercent);
-	af::sync();
-	timer::end();
+	BufferType rgbImage, image;
+	double secs = Utilities::executionTime([&] {
+		rgbImage = af::loadImage(imageFile.c_str(), true);
+		image = af::rgb2gray(rgbImage, rPercent, gPercent, bPercent);
+		af::sync();
+	});
 	const auto rows = static_cast<unsigned int>(image.dims(0));
 	const auto cols = static_cast<unsigned int>(image.dims(1));
-	cout << "Time to load and transfer RGB image from disk to VRAM: " << timer::elapsedSeconds() << "\n\n";
+	cout << "Time to load and transfer RGB image from disk to VRAM: " << secs << "\n\n";
 #elif defined(_USE_EIGEN_)
 	constexpr auto maxImageDims = std::pair<unsigned int, unsigned int>(65536, 65536);
-	//load image from disk into CImg
-	timer::start();
-	//copy from cimg to Eigen
-	const BufferType rgbImage(cimgToEigen3dArray(CImg<float>(imageFile.c_str())));
-	const BufferType image(eigen3dArrayToGrayscaleArray(rgbImage.getRGB(), rPercent, gPercent, bPercent));
-	timer::end();
+	BufferType rgbImage, image;
+	//load image from disk into CImg and copy from CImg object to Eigen arrays
+	double secs = Utilities::executionTime([&] {
+		rgbImage = BufferType(cimgToEigen3dArray(CImg<float>(imageFile.c_str())));
+		image = BufferType(eigen3dArrayToGrayscaleArray(rgbImage.getRGB(), rPercent, gPercent, bPercent));
+	});
 	const auto rows = image.getGray().rows();
 	const auto cols = image.getGray().cols();
-	cout << "Time to load image from disk and initialize CImg and Eigen memory objects: " << timer::elapsedSeconds() << " seconds\n\n";
+	cout << "Time to load image from disk and initialize CImg and Eigen memory objects: " << secs << " seconds\n\n";
 #endif
 	checkError(cols < 64 || rows < 64, "Image dimensions too low");
 	checkError(cols > maxImageDims.first || rows > maxImageDims.second, "Image dimensions too high");
 
 	float watermarkStrength;
-	double secs = 0;
 	//initialize watermark functions class, including parameters, ME and custom (NVF in this example) kernels
 	std::unique_ptr<WatermarkBase> watermarkObj = Utilities::createWatermarkObject(rows, cols, inir.Get("paths", "watermark", ""), p, psnr);
 
@@ -207,34 +208,12 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 	watermarkObj->makeWatermark(image, rgbImage, watermarkStrength, MASK_TYPE::ME);
 #endif
 
-	//make NVF watermark
 	BufferType watermarkNVF, watermarkME;
-	for (int i = 0; i < loops; i++)
-	{
-		timer::start();
-#if defined(_USE_GPU_)
-		watermarkNVF = watermarkObj->makeWatermark(image, rgbImage, watermarkStrength, MASK_TYPE::NVF);
-#elif defined(_USE_EIGEN_)
-		watermarkNVF = std::move(watermarkObj->makeWatermark(image, rgbImage, watermarkStrength, MASK_TYPE::NVF).getRGB());
-#endif
-		timer::end();
-		secs += timer::elapsedSeconds();
-	}
+	//make NVF watermark
+	secs = Utilities::executionTime([&]() { makeRgbWatermarkBuffer(watermarkObj, image, rgbImage, watermarkNVF, watermarkStrength, MASK_TYPE::NVF); }, loops);
 	cout << std::format("Watermark strength (parameter a): {}\nCalculation of NVF mask with {} rows and {} columns and parameters:\np = {}  PSNR(dB) = {}\n{}\n\n", watermarkStrength, rows, cols, p, psnr, executionTime(showFps, secs / loops));
-
-	secs = 0;
-	//Prediction error mask calculation
-	for (int i = 0; i < loops; i++)
-	{
-		timer::start();
-#if defined(_USE_GPU_)
-		watermarkME = watermarkObj->makeWatermark(image, rgbImage, watermarkStrength, MASK_TYPE::ME);
-#elif defined(_USE_EIGEN_)
-		watermarkME = std::move(watermarkObj->makeWatermark(image, rgbImage, watermarkStrength, MASK_TYPE::ME).getRGB());
-#endif
-		timer::end();
-		secs += timer::elapsedSeconds();
-	}
+	//make ME watermark
+	secs = Utilities::executionTime([&]() { makeRgbWatermarkBuffer(watermarkObj, image, rgbImage, watermarkME, watermarkStrength, MASK_TYPE::ME); }, loops);
 	cout << std::format("Watermark strength (parameter a): {}\nCalculation of ME mask with {} rows and {} columns and parameters:\np = {}  PSNR(dB) = {}\n{}\n\n", watermarkStrength, rows, cols, p, psnr, executionTime(showFps, secs / loops));
 
 #if defined(_USE_GPU_)
@@ -249,30 +228,13 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 #endif
 
 	float correlationNvf, correlationMe;
-	secs = 0;
-	//NVF mask detection
-	for (int i = 0; i < loops; i++)
-	{
-		timer::start();
-		correlationNvf = watermarkObj->detectWatermark(watermarkedNVFgray, MASK_TYPE::NVF);
-		timer::end();
-		secs += timer::elapsedSeconds();
-	}
+	//NVF and ME mask detection
+	secs = Utilities::executionTime([&]() { correlationNvf = watermarkObj->detectWatermark(watermarkedNVFgray, MASK_TYPE::NVF); }, loops);
 	cout << std::format("Calculation of the watermark correlation (NVF) of an image with {} rows and {} columns and parameters:\np = {}  PSNR(dB) = {}\n{}\n\n", rows, cols, p, psnr, executionTime(showFps, secs / loops));
-
-	secs = 0;
-	//Prediction error mask detection
-	for (int i = 0; i < loops; i++)
-	{
-		timer::start();
-		correlationMe = watermarkObj->detectWatermark(watermarkedMEgray, MASK_TYPE::ME);
-		timer::end();
-		secs += timer::elapsedSeconds();
-	}
+	secs = Utilities::executionTime([&]() { correlationMe = watermarkObj->detectWatermark(watermarkedMEgray, MASK_TYPE::ME); }, loops);
 	cout << std::format("Calculation of the watermark correlation (ME) of an image with {} rows and {} columns and parameters:\np = {}  PSNR(dB) = {}\n{}\n\n", rows, cols, p, psnr, executionTime(showFps, secs / loops));
-	
-	cout << std::format("Correlation [NVF]: {:.16f}\n", correlationNvf);
-	cout << std::format("Correlation [ME]: {:.16f}\n", correlationMe);
+	//print the correlation values
+	cout << std::format("Correlation [NVF]: {:.16f}\nCorrelation [ME]: {:.16f}\n", correlationNvf, correlationMe);
 
 	//save watermarked images to disk
 	if (inir.GetBoolean("options", "save_watermarked_files_to_disk", false)) 
@@ -344,27 +306,23 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 		FILEPtr ffmpegPipe(_popen(ffmpegCmd.str().c_str(), "wb"), _pclose);
 		checkError(!ffmpegPipe.get(), "Error: Could not open FFmpeg pipe");
 
-		timer::start();
 		BufferType inputFrame;
 		GrayBuffer watermarkedFrame;
 		//embed watermark on the video frames
+		double secs = Utilities::executionTime([&] { processFrames(videoData, [&](AVFrame* frame, int& framesCount) { embedWatermarkFrame(videoData, inputFrame, watermarkedFrame, framesCount, frame, ffmpegPipe.get()); }); });
 		processFrames(videoData, [&](AVFrame* frame, int& framesCount) { embedWatermarkFrame(videoData, inputFrame, watermarkedFrame, framesCount, frame, ffmpegPipe.get()); });
-		timer::end();
-
-		cout << "\nWatermark embedding total execution time: " << executionTime(false, timer::elapsedSeconds()) << "\n";
+		cout << "\nWatermark embedding total execution time: " << executionTime(false, secs) << "\n";
 	}
 
 	//realtime watermarked video detection
 	else if (inir.GetBoolean("parameters_video", "watermark_detection", false))
 	{
-		timer::start();
 		BufferType inputFrame;
 		//detect watermark on the video frames
-		const int framesCount = processFrames(videoData, [&](AVFrame* frame, int& framesCount) { detectFrameWatermark(videoData, inputFrame, framesCount, frame); });
-		timer::end();
-
-		cout << "\nWatermark detection total execution time: " << executionTime(false, timer::elapsedSeconds()) << "\n";
-		cout << "\nWatermark detection average execution time per frame: " << executionTime(showFps, timer::elapsedSeconds() / framesCount) << "\n";
+		int framesCount = 1;
+		double secs = Utilities::executionTime([&] { processFrames(videoData, [&](AVFrame* frame, int& framesCount) { detectFrameWatermark(videoData, inputFrame, framesCount, frame); }); });
+		cout << "\nWatermark detection total execution time: " << executionTime(false, secs) << "\n";
+		cout << "\nWatermark detection average execution time per frame: " << executionTime(showFps, secs / framesCount) << "\n";
 	}
 	return EXIT_SUCCESS;
 }
@@ -519,6 +477,15 @@ void exitProgram(const int exitCode)
 	std::exit(exitCode);
 }
 
+//creates a watermarked RGB BufferType
+void makeRgbWatermarkBuffer(const std::unique_ptr<WatermarkBase>& watermarkObj, const BufferType& image, const BufferType& rgbImage, BufferType& output, float& watermarkStrength, MASK_TYPE maskType)
+{
+#if defined(_USE_GPU_)
+	output = watermarkObj->makeWatermark(image, rgbImage, watermarkStrength, maskType);
+#elif defined(_USE_EIGEN_)
+	output = std::move(watermarkObj->makeWatermark(image, rgbImage, watermarkStrength, maskType).getRGB());
+#endif
+}
 // runs the watermark creation for a video frame and writes the watermarked frame to the ffmpeg pipe
 void writeWatermarkeFrameToPipe(const VideoProcessingContext& data, BufferType& inputFrame, GrayBuffer& watermarkedFrame, AVFrame* frame, FILE* ffmpegPipe)
 {

@@ -19,6 +19,16 @@ public:
         : data(std::move(rgb)) 
     { }
 
+    EigenImage& operator=(Eigen::ArrayXXf&& gray) noexcept {
+        data = std::move(gray);
+		return *this;
+    };
+
+    EigenImage& operator=(EigenArrayRGB&& rgb) noexcept {
+        data = std::move(rgb);
+        return *this;
+    };
+
     bool isRGB() const 
     {
         return std::holds_alternative<EigenArrayRGB>(data);

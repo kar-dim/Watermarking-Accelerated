@@ -66,20 +66,3 @@ std::pair<unsigned int, unsigned int> Utilities::getMaxImageSize()
 #endif
 }
 #endif
-
-
-namespace timer 
-{
-	void start() 
-	{
-		startTime = std::chrono::high_resolution_clock::now();
-	}
-	void end() 
-	{
-		currentTime = std::chrono::high_resolution_clock::now();
-	}
-	float elapsedSeconds() 
-	{
-		return static_cast<float>(std::chrono::duration_cast<std::chrono::microseconds>(currentTime - startTime).count() / 1000000.0f);
-	}
-}
