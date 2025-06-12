@@ -263,28 +263,25 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 	const bool showFps = inir.GetBoolean("options", "execution_time_in_fps", false);
 	const int watermarkInterval = inir.GetInteger("parameters_video", "watermark_interval", 30);
 
-	//Set ffmpeg log level
+	//set ffmpeg log level
 	av_log_set_level(AV_LOG_INFO);
 
-	//Load input video
+	//load input video
 	AVFormatContext* rawInputCtx = nullptr;
 	checkError(avformat_open_input(&rawInputCtx, videoFile.c_str(), nullptr, nullptr) < 0, "ERROR: Failed to open input video file");
 	AVFormatContextPtr inputFormatCtx(rawInputCtx, [](AVFormatContext* ctx) { if (ctx) { avformat_close_input(&ctx); } });
 	avformat_find_stream_info(inputFormatCtx.get(), nullptr);
 	av_dump_format(inputFormatCtx.get(), 0, videoFile.c_str(), 0);
 
-	//Find video stream and open video decoder
+	//find video stream and open video decoder
 	const int videoStreamIndex = findVideoStreamIndex(inputFormatCtx.get());
 	checkError(videoStreamIndex == -1, "ERROR: No video stream found");
 	const AVCodecContextPtr inputDecoderCtx(openDecoderContext(inputFormatCtx->streams[videoStreamIndex]->codecpar), [](AVCodecContext* ctx) { avcodec_free_context(&ctx); });
 
-	//initialize watermark functions class
+	//initialize watermark functions class and host pinned memory for fast GPU<->CPU transfers, or simple Eigen memory for CPU implementation
 	const int height = inputFormatCtx->streams[videoStreamIndex]->codecpar->height;
 	const int width = inputFormatCtx->streams[videoStreamIndex]->codecpar->width;
-	//initialize watermark functions class, including parameters, ME and custom (NVF in this example) kernels
 	std::unique_ptr<WatermarkBase> watermarkObj = Utilities::createWatermarkObject(height, width, inir.Get("paths", "watermark", ""), p, psnr);
-
-	//initialize host pinned memory for fast GPU<->CPU transfers, or simple Eigen memory for CPU implementation
 	HostMemory<uint8_t> framePinned(width * height);
 
 	//group common video data for both embedding and detection
@@ -295,14 +292,14 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 	if (makeWatermarkVideoPath != "")
 	{
 		const string ffmpegOptions = inir.Get("parameters_video", "encode_options", "-c:v libx265 -preset fast -crf 23");
-		// Build the FFmpeg command
+		//build the FFmpeg command
 		std::ostringstream ffmpegCmd;
 		ffmpegCmd << "ffmpeg -y -f rawvideo -pix_fmt yuv420p " << "-s " << width << "x" << height
 			<< " -r " << getVideoFrameRate(inputFormatCtx.get(), videoStreamIndex) << " -i - -i " << videoFile << " " << ffmpegOptions
 			<< " -c:s copy -c:a copy -map 1:s? -map 0:v -map 1:a? -max_interleave_delta 0 " << makeWatermarkVideoPath;
 		cout << "\nFFmpeg encode command: " << ffmpegCmd.str() << "\n\n";
 
-		// Open FFmpeg process (with pipe) for writing
+		//open FFmpeg process (with pipe) for writing
 		FILEPtr ffmpegPipe(_popen(ffmpegCmd.str().c_str(), "wb"), _pclose);
 		checkError(!ffmpegPipe.get(), "Error: Could not open FFmpeg pipe");
 
@@ -327,21 +324,21 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 	return EXIT_SUCCESS;
 }
 
-//Main frames loop logic for video watermark embedding and detection
+//main frames loop logic for video watermark embedding and detection
 int processFrames(const VideoProcessingContext& data, std::function<void(AVFrame*, int&)> processFrame)
 {
 	const AVPacketPtr packet(av_packet_alloc(), [](AVPacket* pkt) { av_packet_free(&pkt); });
 	const AVFramePtr frame(av_frame_alloc(), [](AVFrame* frame) { av_frame_free(&frame); });
 	int framesCount = 0;
 
-	// Read video frames loop
+	//read video frames loop
 	while (av_read_frame(data.inputFormatCtx, packet.get()) >= 0)
 	{
 		if (!receivedValidVideoFrame(data.inputDecoderCtx, packet.get(), frame.get(), data.videoStreamIndex))
 			continue;
 		processFrame(frame.get(), framesCount);
 	}
-	// Ensure all remaining frames are flushed
+	//ensure all remaining frames are flushed
 	avcodec_send_packet(data.inputDecoderCtx, nullptr);
 	while (avcodec_receive_frame(data.inputDecoderCtx, frame.get()) == 0)
 	{
@@ -351,7 +348,7 @@ int processFrames(const VideoProcessingContext& data, std::function<void(AVFrame
 	return framesCount;
 }
 
-// Embed watermark in a video frame
+//embed watermark in a video frame
 void embedWatermarkFrame(const VideoProcessingContext& data, BufferType& inputFrame, GrayBuffer& watermarkedFrame, int& framesCount, AVFrame* frame, FILE* ffmpegPipe)
 {
 	const bool embedWatermark = framesCount % data.watermarkInterval == 0;
@@ -388,7 +385,7 @@ void embedWatermarkFrame(const VideoProcessingContext& data, BufferType& inputFr
 	framesCount++;
 }
 
-// Detect the watermark for a video frame
+//detect the watermark for a video frame
 void detectFrameWatermark(const VideoProcessingContext& data, BufferType& inputFrame, int& framesCount, AVFrame* frame)
 {
 	//detect watermark after X frames
@@ -413,7 +410,7 @@ void detectFrameWatermark(const VideoProcessingContext& data, BufferType& inputF
 	framesCount++;
 }
 
-// find the first video stream index
+//find the first video stream index
 int findVideoStreamIndex(const AVFormatContext* inputFormatCtx)
 {
 	for (unsigned int i = 0; i < inputFormatCtx->nb_streams; i++)
@@ -440,7 +437,7 @@ AVCodecContext* openDecoderContext(const AVCodecParameters* inputCodecParams)
 	return inputDecoderCtx;
 }
 
-// Get the input video FPS (average)
+//get the input video FPS (average)
 string getVideoFrameRate(const AVFormatContext* inputFormatCtx, const int videoStreamIndex)
 {
 	const AVRational frameRate = inputFormatCtx->streams[videoStreamIndex]->avg_frame_rate;
@@ -486,7 +483,7 @@ void makeRgbWatermarkBuffer(const std::unique_ptr<WatermarkBase>& watermarkObj, 
 	output = std::move(watermarkObj->makeWatermark(image, rgbImage, watermarkStrength, maskType).getRGB());
 #endif
 }
-// runs the watermark creation for a video frame and writes the watermarked frame to the ffmpeg pipe
+//runs the watermark creation for a video frame and writes the watermarked frame to the ffmpeg pipe
 void writeWatermarkeFrameToPipe(const VideoProcessingContext& data, BufferType& inputFrame, GrayBuffer& watermarkedFrame, AVFrame* frame, FILE* ffmpegPipe)
 {
 	float watermarkStrength;
@@ -502,7 +499,7 @@ void writeWatermarkeFrameToPipe(const VideoProcessingContext& data, BufferType& 
 #endif
 }
 
-// runs the watermark creation for a video frame and writes the watermarked frame to the ffmpeg pipe, if the watermark is embedded, or writes the original frame data otherwise
+//runs the watermark creation for a video frame and writes the watermarked frame to the ffmpeg pipe, if the watermark is embedded, or writes the original frame data otherwise
 void writeConditionallyWatermarkeFrameToPipe(const bool embedWatermark, const VideoProcessingContext& data, BufferType& inputFrame, GrayBuffer& watermarkedFrame, AVFrame* frame, FILE* ffmpegPipe)
 {
 	if (embedWatermark)

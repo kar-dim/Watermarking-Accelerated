@@ -49,14 +49,12 @@ WatermarkOCL& WatermarkOCL::operator=(const WatermarkOCL& other)
 	return *this;
 }
 
-//supply the input image size, and pre-allocate buffers and arrays
 void WatermarkOCL::initializeGpuMemory()
 {
 	//initialize texture (transposed dimensions, arrayfire is column wise, we skip an extra transpose)
 	image2d = cl::Image2D(context, CL_MEM_READ_ONLY, cl::ImageFormat(CL_LUMINANCE, CL_FLOAT), baseRows, baseCols, 0, NULL);
 }
 
-//copy data to texture and transfer ownership back to arrayfire
 void WatermarkOCL::copyDataToTexture(const af::array& image) const
 {
 	const std::unique_ptr<cl_mem> imageMem(image.device<cl_mem>());
@@ -71,7 +69,6 @@ void WatermarkOCL::onReinitialize()
 	initializeGpuMemory();
 }
 
-//computes the custom mask (NVF).
 af::array WatermarkOCL::computeCustomMask() const
 {
 	const af::array customMask(baseRows, baseCols);
@@ -92,7 +89,6 @@ af::array WatermarkOCL::computeCustomMask() const
 	}
 }
 
-//Computes scaled neighbors array, which calculates the dot product of the coefficients with the neighbors of each pixel
 af::array WatermarkOCL::computeScaledNeighbors(const af::array& coefficients) const
 {
 	const af::array neighbors(baseRows, baseCols);
@@ -114,16 +110,11 @@ af::array WatermarkOCL::computeScaledNeighbors(const af::array& coefficients) co
 	}
 }
 
-//Main watermark embedding method
-//it embeds the watermark computed fom "inputImage" (always grayscale)
-//into a new array based on "outputImage" (can be grayscale or RGB).
 BufferType WatermarkOCL::makeWatermark(const BufferType& inputImage, const BufferType& outputImage, float& watermarkStrength, MASK_TYPE maskType)
 {
 	return makeWatermarkGpu(inputImage, outputImage, randomMatrix, strengthFactor, watermarkStrength, maskType);
 }
 
-//Compute prediction error mask. Used in both creation and detection of the watermark.
-//can also calculate error sequence and prediction error filter
 af::array WatermarkOCL::computePredictionErrorMask(const af::array& image, af::array& errorSequence, af::array& coefficients, const bool maskNeeded) const
 {
 	const af::array RxPartial(baseRows, meKernelDims.cols);
@@ -167,7 +158,6 @@ af::array WatermarkOCL::computePredictionErrorMask(const af::array& image, af::a
 	return af::array();
 }
 
-//the main mask detector function
 float WatermarkOCL::detectWatermark(const BufferType& watermarkedImage, MASK_TYPE maskType)
 {
 	return detectWatermarkGpu(watermarkedImage, randomMatrix, maskType);

@@ -17,6 +17,10 @@ enum MASK_TYPE
 #define ME_MASK_CALCULATION_REQUIRED_NO false
 #define ME_MASK_CALCULATION_REQUIRED_YES true
 
+/*!
+ *  \brief  Functions for watermark computation and detection
+ *  \author Dimitris Karatzas
+ */
 class WatermarkBase 
 {
 public:
@@ -36,8 +40,12 @@ public:
 		initialize(rows, cols, randomMatrixPath, p, psnr);
 		onReinitialize();
 	}
-
+	//main watermark embedding method
+	//it embeds the watermark computed fom "inputImage" (always grayscale)
+	//into a new array based on "outputImage" (RGB or grayscale)
 	virtual BufferType makeWatermark(const BufferType& inputImage, const BufferType& outputImage, float& watermarkStrength, const MASK_TYPE maskType) = 0;
+	
+	//the main mask detector function
 	virtual float detectWatermark(const BufferType& watermarkedImage, const MASK_TYPE maskType) = 0;
 
 protected:
@@ -58,7 +66,6 @@ protected:
 	virtual void onReinitialize() = 0;
 
 	//helper method to load the random noise matrix W from the file specified.
-	//This is the random generated watermark generated from a Normal distribution generator with mean 0 and standard deviation 1
 	BufferType loadRandomMatrix(const std::string& randomMatrixPath) const
 	{
 		std::ifstream randomMatrixStream(randomMatrixPath.c_str(), std::ios::binary);

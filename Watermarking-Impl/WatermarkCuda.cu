@@ -52,7 +52,6 @@ void WatermarkCuda::copyParams(const WatermarkCuda& other) noexcept
 	strengthFactor = other.strengthFactor;
 }
 
-//copy data to texture and transfer ownership back to arrayfire
 void WatermarkCuda::copyDataToTexture(const af::array& image) const
 {
 	cuda_utils::copyDataToCudaArray(image.device<float>(), baseCols, baseRows, texArray);
@@ -113,7 +112,6 @@ void WatermarkCuda::onReinitialize()
 	initializeGpuMemory();
 }
 
-//computes custom Mask (NVF)
 af::array WatermarkCuda::computeCustomMask() const
 {
 	const dim3 gridSize = cuda_utils::gridSizeCalculate(texKernelBlockSize, baseRows, baseCols, true);
@@ -125,7 +123,6 @@ af::array WatermarkCuda::computeCustomMask() const
 	return customMask;
 }
 
-//computes scaled neighbors array used in prediction error mask
 af::array WatermarkCuda::computeScaledNeighbors(const af::array& coefficients) const
 {
 	const dim3 gridSize = cuda_utils::gridSizeCalculate(texKernelBlockSize, baseRows, baseCols, true);
@@ -137,16 +134,11 @@ af::array WatermarkCuda::computeScaledNeighbors(const af::array& coefficients) c
 	return neighbors;
 }
 
-//Main watermark embedding method
-//it embeds the watermark computed from "inputImage" (always grayscale)
-//into a new array based on "outputImage" (can be grayscale or RGB).
 BufferType WatermarkCuda::makeWatermark(const BufferType& inputImage, const BufferType& outputImage, float& watermarkStrength, MASK_TYPE maskType)
 {
 	return makeWatermarkGpu(inputImage, outputImage, randomMatrix, strengthFactor, watermarkStrength, maskType);
 }
 
-//Compute prediction error mask. Used in both creation and detection of the watermark.
-//Can also calculate error sequence and prediction error filter
 af::array WatermarkCuda::computePredictionErrorMask(const af::array& image, af::array& errorSequence, af::array& coefficients, const bool maskNeeded) const
 {
 	const dim3 gridSize = cuda_utils::gridSizeCalculate(meKernelBlockSize, meKernelDims.y, meKernelDims.x);
@@ -174,7 +166,6 @@ af::array WatermarkCuda::computePredictionErrorMask(const af::array& image, af::
 	return af::array();
 }
 
-//the main mask detector function
 float WatermarkCuda::detectWatermark(const BufferType& watermarkedImage, MASK_TYPE maskType)
 {
 	return detectWatermarkGpu(watermarkedImage, randomMatrix, maskType);

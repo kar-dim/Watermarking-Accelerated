@@ -49,8 +49,7 @@ std::unique_ptr<WatermarkBase> Utilities::createWatermarkObject(const unsigned i
 	return watermarkObj;
 }
 
-// Returns the maximum image size supported by the device (cols, rows)
-
+//returns the maximum image size supported by the device (cols, rows)
 #if defined(_USE_OPENCL_) || defined(_USE_CUDA_)
 std::pair<unsigned int, unsigned int> Utilities::getMaxImageSize()
 {

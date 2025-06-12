@@ -38,7 +38,6 @@ void WatermarkEigen::onReinitialize()
 	padded = ArrayXXf::Zero(paddedRows, paddedCols);
 }
 
-//computes the custom mask, in this case "NVF" mask
 ArrayXXf WatermarkEigen::computeCustomMask(const ArrayXXf& image, const ArrayXXf& padded) const
 {
 	ArrayXXf nvf(baseRows, baseCols);
@@ -57,9 +56,6 @@ ArrayXXf WatermarkEigen::computeCustomMask(const ArrayXXf& image, const ArrayXXf
 	return nvf;
 }
 
-//Main watermark embedding method
-//it embeds the watermark computed fom "inputImage" (always grayscale)
-//into a new array based on "outputImage" (RGB or grayscale)
 BufferType WatermarkEigen::makeWatermark(const BufferType& inputImage, const BufferType& outputImage, float& watermarkStrength, MASK_TYPE type)
 {
 	const ArrayXXf uStrength = computeStrengthenedWatermark(inputImage.getGray(), watermarkStrength, type);
@@ -75,6 +71,7 @@ BufferType WatermarkEigen::makeWatermark(const BufferType& inputImage, const Buf
 	return BufferType(std::move(watermarkedImage));
 }
 
+//compute the strengthened watermark, calcaulated by multiplying the mask with the strengthened watermark (random matrix)
 ArrayXXf WatermarkEigen::computeStrengthenedWatermark(const ArrayXXf& inputImage, float& watermarkStrength, MASK_TYPE maskType)
 {
 	padded.block(pad, pad, inputImage.rows(), inputImage.cols()) = inputImage;
@@ -156,7 +153,6 @@ ArrayXXf WatermarkEigen::computeErrorSequence(const ArrayXXf& padded, const Vect
 	return errorSequence;
 }
 
-//main mask detector for Me and NVF masks
 float WatermarkEigen::detectWatermark(const BufferType& watermarkedImage, MASK_TYPE maskType)
 {
 	VectorXf a_z;

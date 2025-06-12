@@ -18,13 +18,23 @@ public:
 	static void displayArray(const af::array& array, const int width = 1600, const int height = 900);
 
 protected:
+	//initialize internal GPU buffers
 	virtual void initializeGpuMemory() = 0;
+
+	//computes custom Mask
 	virtual af::array computeCustomMask() const = 0;
+	
+	//computes scaled neighbors array used in prediction error mask
 	virtual af::array computeScaledNeighbors(const af::array& coefficients) const = 0;
+	
+	//Compute prediction error mask. Used in both creation and detection of the watermark.
+	//can also calculate error sequence and prediction error filter
 	virtual af::array computePredictionErrorMask(const af::array& image, af::array& errorSequence, af::array& coefficients, const bool maskNeeded) const = 0;
+	
+	//copy data to texture and transfer ownership back to arrayfire
 	virtual void copyDataToTexture(const af::array& image) const = 0;
 
-	//Main watermark embedding method for GPU-based implementations
+	//main watermark embedding method for GPU-based implementations
 	af::array makeWatermarkGpu(const af::array& inputImage, const af::array& outputImage, const af::array& randomMatrix, const float strengthFactor, float& watermarkStrength, MASK_TYPE maskType);
 
 	//main detector method for GPU-based implementations
