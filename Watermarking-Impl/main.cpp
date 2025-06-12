@@ -200,7 +200,7 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 
 	float watermarkStrength;
 	//initialize watermark functions class, including parameters, ME and custom (NVF in this example) kernels
-	std::unique_ptr<WatermarkBase> watermarkObj = Utilities::createWatermarkObject(rows, cols, inir.Get("paths", "watermark", ""), p, psnr);
+	const auto watermarkObj = Utilities::createWatermarkObject(rows, cols, inir.Get("paths", "watermark", ""), p, psnr);
 
 #if defined(_USE_GPU_)
 	//warmup for arrayfire
@@ -281,7 +281,7 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 	//initialize watermark functions class and host pinned memory for fast GPU<->CPU transfers, or simple Eigen memory for CPU implementation
 	const int height = inputFormatCtx->streams[videoStreamIndex]->codecpar->height;
 	const int width = inputFormatCtx->streams[videoStreamIndex]->codecpar->width;
-	std::unique_ptr<WatermarkBase> watermarkObj = Utilities::createWatermarkObject(height, width, inir.Get("paths", "watermark", ""), p, psnr);
+	const auto watermarkObj = Utilities::createWatermarkObject(height, width, inir.Get("paths", "watermark", ""), p, psnr);
 	HostMemory<uint8_t> framePinned(width * height);
 
 	//group common video data for both embedding and detection
