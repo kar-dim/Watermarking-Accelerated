@@ -319,8 +319,8 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 	{
 		BufferType inputFrame;
 		//detect watermark on the video frames
-		int framesCount = 1;
-		double secs = Utilities::executionTime([&] { processFrames(videoData, [&](AVFrame* frame, int& framesCount) { detectFrameWatermark(videoData, inputFrame, framesCount, frame); }); });
+		int framesCount;
+		double secs = Utilities::executionTime([&] { framesCount = processFrames(videoData, [&](AVFrame* frame, int& framesCount) { detectFrameWatermark(videoData, inputFrame, framesCount, frame); }); });
 		cout << "\nWatermark detection total execution time: " << executionTime(false, secs) << "\n";
 		cout << "\nWatermark detection average execution time per frame: " << executionTime(showFps, secs / framesCount) << "\n";
 	}
