@@ -1,7 +1,6 @@
 #include "buffer.hpp"
 #include "utils.hpp"
 #include "WatermarkBase.hpp"
-#include <chrono>
 #include <memory>
 #include <string>
 #if defined(_USE_OPENCL_)

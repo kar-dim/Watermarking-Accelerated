@@ -1,10 +1,10 @@
 #pragma once
+#include "WatermarkBase.hpp"
 #include <cstdint>
 
 extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
-#include "WatermarkBase.hpp"
 }
 
 // Struct to hold common data for video watermarking and detection

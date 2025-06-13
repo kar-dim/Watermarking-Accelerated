@@ -13,7 +13,7 @@
 #include "cimg_init.h"
 #include "eigen_utils.hpp"
 #include "WatermarkEigen.hpp"
-#include <CImg.h>
+#include <algorithm>
 #include <cstdlib>
 #include <Eigen/Dense>
 #include <omp.h>
@@ -121,10 +121,7 @@ int main(void)
 #if defined(_USE_EIGEN_)
 	int numThreads = inir.GetInteger("parameters", "threads", 0);
 	if (numThreads <= 0)
-	{
-		auto threadsSupported = std::thread::hardware_concurrency();
-		numThreads = threadsSupported == 0 ? 2 : threadsSupported;
-	}
+		numThreads = std::max(omp_get_max_threads(), static_cast<int>(std::thread::hardware_concurrency()));
 	omp_set_num_threads(numThreads);
 	//check valid parameter values
 	checkError(p <= 1 || p % 2 != 1 || p > 9, "p parameter must be a positive odd number greater than or equal to 3 and less than or equal to 9");
