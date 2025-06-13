@@ -14,8 +14,8 @@ enum MASK_TYPE
 };
 
 #define ALIGN(x, ALIGN) (((x) + ((ALIGN) - 1)) & ~((ALIGN) - 1))
-#define ME_MASK_CALCULATION_REQUIRED_NO false
-#define ME_MASK_CALCULATION_REQUIRED_YES true
+#define MASK_CALC_NOT_REQUIRED false
+#define MASK_CALC_REQUIRED true
 
 /*!
  *  \brief  Functions for watermark computation and detection
@@ -46,7 +46,7 @@ public:
 	virtual BufferType makeWatermark(const BufferType& inputImage, const BufferType& outputImage, float& watermarkStrength, const MASK_TYPE maskType) = 0;
 	
 	//the main mask detector function
-	virtual float detectWatermark(const BufferType& watermarkedImage, const MASK_TYPE maskType) = 0;
+	virtual float detectWatermark(const BufferType& inputImage, const MASK_TYPE maskType) = 0;
 
 protected:
 	unsigned int baseRows, baseCols;
@@ -79,7 +79,7 @@ protected:
 		std::unique_ptr<float> wPtr(new float[baseRows * baseCols]);
 		randomMatrixStream.read(reinterpret_cast<char*>(wPtr.get()), totalBytes);
 #if defined(_USE_EIGEN_)
-		return BufferType(std::move(Eigen::Map<Eigen::ArrayXXf>(wPtr.get(), baseCols, baseRows).transpose().eval()));
+		return BufferType(Eigen::Map<Eigen::ArrayXXf>(wPtr.get(), baseCols, baseRows).transpose().eval());
 #elif defined(_USE_CUDA_) || defined(_USE_OPENCL_)
 		return af::transpose(af::array(baseCols, baseRows, wPtr.get()));
 #endif

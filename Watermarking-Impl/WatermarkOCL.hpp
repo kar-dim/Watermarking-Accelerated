@@ -53,5 +53,5 @@ public:
 	WatermarkOCL& operator=(WatermarkOCL&& other) noexcept = delete;
 	WatermarkOCL& operator=(const WatermarkOCL& other);
 	BufferType makeWatermark(const BufferType& inputImage, const BufferType& outputImage, float& watermarkStrength, MASK_TYPE maskType) override;
-	float detectWatermark(const BufferType& watermarkedImage, MASK_TYPE maskType) override;
+	float detectWatermark(const BufferType& inputImage, MASK_TYPE maskType) override;
 };

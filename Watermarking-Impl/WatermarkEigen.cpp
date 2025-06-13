@@ -3,11 +3,13 @@
 #include "EigenImage.hpp"
 #include "WatermarkBase.hpp"
 #include "WatermarkEigen.hpp"
+#include <algorithm>
+#include <array>
 #include <cmath>
 #include <Eigen/Dense>
 #include <omp.h>
 #include <string>
-#include <utility>
+//#include <utility>
 #include <vector>
 
 using namespace Eigen;
@@ -16,7 +18,9 @@ using std::string;
 //constructor to initialize all the necessary data
 WatermarkEigen::WatermarkEigen(const unsigned int rows, const unsigned int cols, const string& randomMatrixPath, const int p, const float psnr) :
 	WatermarkBase(rows, cols, randomMatrixPath, p, (255.0f / sqrt(pow(10.0f, psnr / 10.0f)))), pad(p / 2), paddedRows(rows + 2 * pad), 
-	paddedCols(cols + 2 * pad), pSquared(p * p), halfNeighborsSize((pSquared - 1) / 2), padded(ArrayXXf::Zero(paddedRows, paddedCols))
+	paddedCols(cols + 2 * pad), pSquared(p * p), halfNeighborsSize((pSquared - 1) / 2), padded(ArrayXXf::Zero(paddedRows, paddedCols)), 
+	mask(rows, cols), errorSequence(rows, cols), filteredEstimation(rows, cols), u(rows,cols), uStrengthened(rows, cols), coefficients(pSquared - 1),
+	watermarkedImage{ [](int r, int c) { return std::array<ArrayXXf, 3>{ ArrayXXf(r, c), ArrayXXf(r, c), ArrayXXf(r, c) }; }(rows, cols) }
 { }
 
 //generate p x p neighbors
@@ -36,11 +40,17 @@ void WatermarkEigen::onReinitialize()
 	pSquared = p * p;
 	halfNeighborsSize = (pSquared - 1) / 2;
 	padded = ArrayXXf::Zero(paddedRows, paddedCols);
+	mask = ArrayXXf(baseRows, baseCols);
+	errorSequence = ArrayXXf(baseRows, baseCols);
+	filteredEstimation = ArrayXXf(baseRows, baseCols);
+	u = ArrayXXf(baseRows, baseCols);
+	uStrengthened = ArrayXXf(baseRows, baseCols);
+	coefficients = VectorXf(pSquared - 1);
+	std::generate(watermarkedImage.begin(), watermarkedImage.end(), [this] { return ArrayXXf(baseRows, baseCols); });
 }
 
-ArrayXXf WatermarkEigen::computeCustomMask(const ArrayXXf& image, const ArrayXXf& padded) const
+void WatermarkEigen::computeCustomMask(const ArrayXXf& image) 
 {
-	ArrayXXf nvf(baseRows, baseCols);
 	const int neighborsSize = (p - 1) / 2;
 #pragma omp parallel for
 	for (int j = pad; j < baseCols + pad; j++)
@@ -50,47 +60,39 @@ ArrayXXf WatermarkEigen::computeCustomMask(const ArrayXXf& image, const ArrayXXf
 			const auto neighb = padded.block(i - neighborsSize, j - neighborsSize, p, p);
 			const float mean = neighb.mean();
 			const float variance = (neighb - mean).square().sum() / pSquared;
-			nvf(i - pad, j - pad) = variance / (1.0f + variance);
+			mask(i - pad, j - pad) = variance / (1.0f + variance);
 		}
 	}
-	return nvf;
 }
 
 BufferType WatermarkEigen::makeWatermark(const BufferType& inputImage, const BufferType& outputImage, float& watermarkStrength, MASK_TYPE type)
 {
-	const ArrayXXf uStrength = computeStrengthenedWatermark(inputImage.getGray(), watermarkStrength, type);
+	computeStrengthenedWatermark(inputImage.getGray(), watermarkStrength, type);
 	if (outputImage.isRGB())
 	{
-		EigenArrayRGB watermarkedImage;
 #pragma omp parallel for
 		for (int channel = 0; channel < 3; channel++)
-			watermarkedImage[channel] = (outputImage.getRGB()[channel] + uStrength).cwiseMax(0).cwiseMin(255);
+			watermarkedImage[channel] = (outputImage.getRGB()[channel] + uStrengthened).cwiseMax(0).cwiseMin(255);
 		return watermarkedImage;
 	}
-	ArrayXXf watermarkedImage = (outputImage.getGray() + uStrength).cwiseMax(0).cwiseMin(255);
-	return BufferType(std::move(watermarkedImage));
+	return BufferType((outputImage.getGray() + uStrengthened).cwiseMax(0).cwiseMin(255));
 }
 
 //compute the strengthened watermark, calcaulated by multiplying the mask with the strengthened watermark (random matrix)
-ArrayXXf WatermarkEigen::computeStrengthenedWatermark(const ArrayXXf& inputImage, float& watermarkStrength, MASK_TYPE maskType)
+void WatermarkEigen::computeStrengthenedWatermark(const ArrayXXf& inputImage, float& watermarkStrength, MASK_TYPE maskType)
 {
 	padded.block(pad, pad, inputImage.rows(), inputImage.cols()) = inputImage;
-	ArrayXXf mask;
 	if (maskType == MASK_TYPE::NVF)
-		mask = computeCustomMask(inputImage, padded);
+		computeCustomMask(inputImage);
 	else
-	{
-		ArrayXXf errorSequence;
-		VectorXf coefficients;
-		mask = computePredictionErrorMask(padded, errorSequence, coefficients, ME_MASK_CALCULATION_REQUIRED_YES);
-	}
-	const ArrayXXf u = mask * randomMatrix.getGray();
+		computePredictionErrorMask(MASK_CALC_REQUIRED);
+	u = mask * randomMatrix.getGray();
 	watermarkStrength = strengthFactor / sqrt(u.square().sum() / (baseRows * baseCols));
-	return u * watermarkStrength;
+	uStrengthened = u * watermarkStrength;
 }
 
 //compute Prediction error mask
-ArrayXXf WatermarkEigen::computePredictionErrorMask(const ArrayXXf& paddedImage, ArrayXXf& errorSequence, VectorXf& coefficients, const bool maskNeeded) const
+void WatermarkEigen::computePredictionErrorMask(const bool maskNeeded)
 {
 	MatrixXf Rx = ArrayXXf::Zero(pSquared - 1, pSquared - 1);
 	VectorXf rx = VectorXf::Zero(pSquared - 1);
@@ -110,10 +112,10 @@ ArrayXXf WatermarkEigen::computePredictionErrorMask(const ArrayXXf& paddedImage,
 		for (int i = pad; i < baseRows + pad; i++)
 		{
 			//calculate p^2 - 1 neighbors
-			createNeighbors(paddedImage, x_, neighborsSize, i, j);
+			createNeighbors(padded, x_, neighborsSize, i, j);
 			//calculate Rx and rx
 			Rx_all[omp_get_thread_num()].noalias() += x_ * x_.transpose();
-			rx_all[omp_get_thread_num()].noalias() += x_ * paddedImage(i, j);
+			rx_all[omp_get_thread_num()].noalias() += x_ * padded(i, j);
 		}
 	}
 	//reduction sums of Rx,rx of each thread
@@ -124,19 +126,17 @@ ArrayXXf WatermarkEigen::computePredictionErrorMask(const ArrayXXf& paddedImage,
 	}
 	coefficients = Rx.fullPivLu().solve(rx);
 	//calculate ex(i,j)
-	errorSequence = computeErrorSequence(paddedImage, coefficients);
+	computeErrorSequence(errorSequence);
 	if (maskNeeded) 
 	{
 		auto errorSequenceAbs = errorSequence.abs();
-		return errorSequenceAbs / errorSequenceAbs.maxCoeff();
+		mask = errorSequenceAbs / errorSequenceAbs.maxCoeff();
 	}
-	return ArrayXXf();
 }
 
-//computes the prediction error sequence 
-ArrayXXf WatermarkEigen::computeErrorSequence(const ArrayXXf& padded, const VectorXf& coefficients) const
+//computes the prediction error sequence of the padded input image
+void WatermarkEigen::computeErrorSequence(ArrayXXf& outputErrorSequence)
 {
-	ArrayXXf errorSequence(baseRows, baseCols);
 	const int neighborsSize = (p - 1) / 2;
 #pragma omp parallel for
 	for (int j = 0; j < baseCols; j++)
@@ -147,39 +147,36 @@ ArrayXXf WatermarkEigen::computeErrorSequence(const ArrayXXf& padded, const Vect
 		{
 			const int iPad = i + pad;
 			createNeighbors(padded, x_, neighborsSize, iPad, jPad);
-			errorSequence(i, j) = padded(iPad, jPad) - x_.dot(coefficients);
+			outputErrorSequence(i, j) = padded(iPad, jPad) - x_.dot(coefficients);
 		}
 	}
-	return errorSequence;
 }
 
-float WatermarkEigen::detectWatermark(const BufferType& watermarkedImage, MASK_TYPE maskType)
+float WatermarkEigen::detectWatermark(const BufferType& inputImage, MASK_TYPE maskType)
 {
-	VectorXf a_z;
-	ArrayXXf mask, e_z;
-	const auto &watermarkedBuffer = watermarkedImage.getGray();
+	const auto &watermarkedBuffer = inputImage.getGray();
 	//pad by using the preallocated block
 	padded.block(pad, pad, watermarkedBuffer.rows(), watermarkedBuffer.cols()) = watermarkedBuffer;
 	if (maskType == MASK_TYPE::NVF) 
 	{
-		computePredictionErrorMask(padded, e_z, a_z, ME_MASK_CALCULATION_REQUIRED_NO);
-		mask = computeCustomMask(watermarkedBuffer, padded);
+		computePredictionErrorMask(MASK_CALC_NOT_REQUIRED);
+		computeCustomMask(watermarkedBuffer);
 	}
 	else
-		mask = computePredictionErrorMask(padded, e_z, a_z, ME_MASK_CALCULATION_REQUIRED_YES);
+		computePredictionErrorMask(MASK_CALC_REQUIRED);
 	
 	padded.block(pad, pad, watermarkedBuffer.rows(), watermarkedBuffer.cols()) = (mask * randomMatrix.getGray());
-	const ArrayXXf e_u = computeErrorSequence(padded, a_z);
+	computeErrorSequence(filteredEstimation);
 	float dot_ez_eu, d_ez, d_eu;
 	
 #pragma omp parallel sections
 	{
 #pragma omp section
-		dot_ez_eu = e_z.cwiseProduct(e_u).sum();
+		dot_ez_eu = errorSequence.cwiseProduct(filteredEstimation).sum();
 #pragma omp section
-		d_ez = std::sqrt(e_z.matrix().squaredNorm());
+		d_ez = std::sqrt(errorSequence.matrix().squaredNorm());
 #pragma omp section
-		d_eu = std::sqrt(e_u.matrix().squaredNorm());
+		d_eu = std::sqrt(filteredEstimation.matrix().squaredNorm());
 	}
 	return dot_ez_eu / (d_ez * d_eu);
 }

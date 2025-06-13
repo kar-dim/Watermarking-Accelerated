@@ -38,7 +38,7 @@ protected:
 	af::array makeWatermarkGpu(const af::array& inputImage, const af::array& outputImage, const af::array& randomMatrix, const float strengthFactor, float& watermarkStrength, MASK_TYPE maskType);
 
 	//main detector method for GPU-based implementations
-	float detectWatermarkGpu(const af::array& watermarkedImage, const af::array& randomMatrix, MASK_TYPE maskType);
+	float detectWatermarkGpu(const af::array& inputImage, const af::array& randomMatrix, MASK_TYPE maskType);
 
 	//helper method used in detectors
 	float computeCorrelation(const af::array& e_u, const af::array& e_z) const;

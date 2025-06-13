@@ -31,5 +31,5 @@ public:
 	WatermarkCuda& operator=(const WatermarkCuda& other);
 	~WatermarkCuda();
 	BufferType makeWatermark(const BufferType& inputImage, const BufferType& outputImage, float& watermarkStrength, MASK_TYPE type) override;
-	float detectWatermark(const BufferType& watermarkedImage, MASK_TYPE maskType) override;
+	float detectWatermark(const BufferType& inputImage, MASK_TYPE maskType) override;
 };

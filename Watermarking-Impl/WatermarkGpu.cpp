@@ -13,13 +13,13 @@ void WatermarkGPU::displayArray(const af::array& array, const int width, const i
 
 af::array WatermarkGPU::makeWatermarkGpu(const af::array& inputImage, const af::array& outputImage, const af::array& randomMatrix, const float strengthFactor, float& watermarkStrength, MASK_TYPE maskType)
 {
-	af::array mask, errorSequence, coefficients;
+	af::array mask, inputErrorSequence, inputCoefficients;
 	copyDataToTexture(inputImage);
 	if (maskType == MASK_TYPE::ME)
 	{
-		mask = computePredictionErrorMask(inputImage, errorSequence, coefficients, ME_MASK_CALCULATION_REQUIRED_YES);
+		mask = computePredictionErrorMask(inputImage, inputErrorSequence, inputCoefficients, MASK_CALC_REQUIRED);
 		//if the system is not solvable, don't waste time embeding the watermark, return output image without modification
-		if (coefficients.elements() == 0)
+		if (inputCoefficients.elements() == 0)
 			return outputImage;
 	}
 	else
@@ -29,17 +29,17 @@ af::array WatermarkGPU::makeWatermarkGpu(const af::array& inputImage, const af::
 	return af::clamp(outputImage + (u * watermarkStrength), 0, 255);
 }
 
-float WatermarkGPU::detectWatermarkGpu(const af::array& watermarkedImage, const af::array& randomMatrix, MASK_TYPE maskType)
+float WatermarkGPU::detectWatermarkGpu(const af::array& inputImage, const af::array& randomMatrix, MASK_TYPE maskType)
 {
 	af::array mask, errorSequenceW, coefficients;
-	copyDataToTexture(watermarkedImage);
+	copyDataToTexture(inputImage);
 	if (maskType == MASK_TYPE::NVF)
 	{
-		computePredictionErrorMask(watermarkedImage, errorSequenceW, coefficients, ME_MASK_CALCULATION_REQUIRED_NO);
+		computePredictionErrorMask(inputImage, errorSequenceW, coefficients, MASK_CALC_NOT_REQUIRED);
 		mask = computeCustomMask();
 	}
 	else
-		mask = computePredictionErrorMask(watermarkedImage, errorSequenceW, coefficients, ME_MASK_CALCULATION_REQUIRED_YES);
+		mask = computePredictionErrorMask(inputImage, errorSequenceW, coefficients, MASK_CALC_REQUIRED);
 	//if the system is not solvable, don't waste time computing the correlation, there is no watermark
 	if (coefficients.elements() == 0)
 		return 0.0f;

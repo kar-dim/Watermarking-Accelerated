@@ -158,7 +158,7 @@ af::array WatermarkOCL::computePredictionErrorMask(const af::array& image, af::a
 	return af::array();
 }
 
-float WatermarkOCL::detectWatermark(const BufferType& watermarkedImage, MASK_TYPE maskType)
+float WatermarkOCL::detectWatermark(const BufferType& inputImage, MASK_TYPE maskType)
 {
-	return detectWatermarkGpu(watermarkedImage, randomMatrix, maskType);
+	return detectWatermarkGpu(inputImage, randomMatrix, maskType);
 }

@@ -166,7 +166,7 @@ af::array WatermarkCuda::computePredictionErrorMask(const af::array& image, af::
 	return af::array();
 }
 
-float WatermarkCuda::detectWatermark(const BufferType& watermarkedImage, MASK_TYPE maskType)
+float WatermarkCuda::detectWatermark(const BufferType& inputImage, MASK_TYPE maskType)
 {
-	return detectWatermarkGpu(watermarkedImage, randomMatrix, maskType);
+	return detectWatermarkGpu(inputImage, randomMatrix, maskType);
 }
