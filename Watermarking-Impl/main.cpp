@@ -110,11 +110,6 @@ int main(void)
 		cout << "NOTE: Invalid OpenCL device specified, using default 0" << "\n";
 		af::setDevice(0);
 	}
-
-#elif defined(_USE_CUDA_)
-	omp_set_num_threads(omp_get_max_threads());
-#pragma omp parallel for
-	for (int i = 0; i < 24; i++) { }
 #endif
 #if defined(_USE_GPU_)
 	af::info();
@@ -130,17 +125,18 @@ int main(void)
 		auto threadsSupported = std::thread::hardware_concurrency();
 		numThreads = threadsSupported == 0 ? 2 : threadsSupported;
 	}
-
-	//openmp initialization
 	omp_set_num_threads(numThreads);
-#pragma omp parallel for
-	for (int i = 0; i < 24; i++) {}
 	//check valid parameter values
 	checkError(p <= 1 || p % 2 != 1 || p > 9, "p parameter must be a positive odd number greater than or equal to 3 and less than or equal to 9");
 	cout << "Using " << numThreads << " parallel threads.\n";
 #else
 	//TODO GPU: for p>3 we have problems with ME masking buffers
 	checkError(p != 3, "For now, only p=3 is allowed");
+#endif
+#if defined(_USE_EIGEN_) || defined(_USE_CUDA_)
+//initialize openmp
+#pragma omp parallel
+{ }
 #endif
 	checkError(psnr <= 0, "PSNR must be a positive number");
 
