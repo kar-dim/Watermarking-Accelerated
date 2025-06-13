@@ -93,7 +93,7 @@ void checkError(const bool criticalErrorCondition, const string& errorMessage);
 /*!
  *  \brief  This is a project implementation of my Thesis with title:
  *			EFFICIENT IMPLEMENTATION OF WATERMARKING ALGORITHMS AND
- *			WATERMARK DETECTION IN IMAGE AND VIDEO USING GPU, CUDA version
+ *			WATERMARK DETECTION IN IMAGE AND VIDEO USING GPU.
  *  \author Dimitris Karatzas
  */
 int main(void)

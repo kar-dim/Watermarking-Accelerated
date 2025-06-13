@@ -11,7 +11,6 @@
  *  \brief  This is a helper project for my Thesis with title:
  *			EFFICIENT IMPLEMENTATION OF WATERMARKING ALGORITHMS AND
  *			WATERMARK DETECTION IN IMAGE AND VIDEO USING GPU.
- *          It generates a random matrix of floats and writes it to a file.
  *  \author Dimitris Karatzas
  */
 int main(int argc, char* argv[])
