@@ -54,6 +54,36 @@ Needs to be parameterized from the corresponding ```settings.ini``` file. Here i
 | encode_options                    | These are ffmpeg options for encoding. Example: ```-c:v libx265 -preset fast -crf 23```  will pass these encoding options to ffmpeg.
 | watermark_detection               | ```[true/false]```: Set to true to try to detect the watermark of the "video" parameter. The detection occurs after ```watermark_interval``` frames. It is ignored when ```encode_watermark_file_path``` is set. |
 
+# FFmpeg Command Used for Video Encoding
+
+The following ffmpeg command is used to encode a new video while preserving the original input's metadata, subtitles, and audio tracks. It reads raw video frames from standard input (stdin) and copies audio/subtitles from the original input file as is. You can customize encoding settings (codec, CRF, etc) via the ```encode_options``` option as described above.
+```
+ffmpeg -y -f rawvideo -pix_fmt yuv420p -s <width>x<height>
+  -r <frame_rate>
+  -i -
+  -i <input_video_file>
+  <ffmpegOptions>
+  -c:s copy -c:a copy
+  -map 1:s? -map 0:v -map 1:a?
+  -max_interleave_delta 0
+  <output_file>
+```
+
+### Explanation:
+- `-f rawvideo -pix_fmt yuv420p`: Specifies raw pixel format for input.
+- `-s <width>x<height>`: Specifies frame size (extracted from the input).
+- `-r <frame_rate>`: Frame rate of the video (extracted from the input).
+- `-i -`: Accepts raw video from stdin.
+- `-i <input_video_file>`: **USER SUPPLIED**: Original input file.
+- `<ffmpegOptions>`: **USER SUPPLIED**: Encoding options (e.g., ```-c:v libx265 -preset fast -crf 23```).
+- `-c:s copy -c:a copy`: Copies subtitle and audio streams without re-encoding.
+- `-map 1:s? -map 0:v -map 1:a?`: Maps subtitles/audio from the original input, and video from stdin.
+- `-max_interleave_delta 0`: Reduces potential interleaving delay issues.
+- `<output_file>`: **USER SUPPLIED**: Output file path for the final video.
+
+**NOTE:** Only Constant Frame Rate (CFR) works as expected for an input video. If the input video is Variable Frame Rate (VFR) there may be issues with audio/subtitles sync on the output file.
+
+
 # How to Build
 
 This project is built using **Visual Studio** and consists of a **solution with two projects**.
