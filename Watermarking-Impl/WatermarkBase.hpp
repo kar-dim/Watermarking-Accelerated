@@ -85,7 +85,7 @@ protected:
 #elif defined(_USE_EIGEN_)
 		Eigen::ArrayXXf watermark(baseCols, baseRows);
 		randomMatrixStream.read(reinterpret_cast<char*>(watermark.data()), totalBytes);
-		return BufferType(watermark.transpose().eval());
+		return BufferType(watermark.transpose());
 #endif
 	}
 };

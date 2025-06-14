@@ -486,7 +486,7 @@ void writeWatermarkeFrameToPipe(const VideoProcessingContext& data, BufferType& 
 	watermarkedFrame.host(data.inputFramePtr);
 	fwrite(data.inputFramePtr, 1, data.width * frame->height, ffmpegPipe);
 #elif defined(_USE_EIGEN_)
-	inputFrame = BufferType(Map<GrayBuffer>(data.inputFramePtr, data.width, data.height).transpose().cast<float>().eval());
+	inputFrame = BufferType(Map<GrayBuffer>(data.inputFramePtr, data.width, data.height).transpose().cast<float>());
 	watermarkedFrame = data.watermarkObj->makeWatermark(inputFrame, inputFrame, watermarkStrength, MASK_TYPE::ME).getGray().transpose().cast<uint8_t>();
 	fwrite(watermarkedFrame.data(), 1, data.width * frame->height, ffmpegPipe);
 #endif
@@ -505,7 +505,7 @@ void writeConditionallyWatermarkeFrameToPipe(const bool embedWatermark, const Vi
 	}
 	fwrite(embedWatermark ? data.inputFramePtr : frame->data[0], 1, data.width * frame->height, ffmpegPipe);
 #elif defined(_USE_EIGEN_)
-		inputFrame = BufferType(Map<GrayBuffer>(frame->data[0], data.width, data.height).transpose().cast<float>().eval());
+		inputFrame = BufferType(Map<GrayBuffer>(frame->data[0], data.width, data.height).transpose().cast<float>());
 		watermarkedFrame = data.watermarkObj->makeWatermark(inputFrame, inputFrame, watermarkStrength, MASK_TYPE::ME).getGray().transpose().cast<uint8_t>();
 	}
 	fwrite(embedWatermark ? watermarkedFrame.data() : frame->data[0], 1, data.width* frame->height, ffmpegPipe);
