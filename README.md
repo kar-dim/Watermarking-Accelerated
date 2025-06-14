@@ -51,12 +51,12 @@ Needs to be parameterized from the corresponding ```settings.ini``` file. Here i
 | video                             | Path to the video file, if we want to embed or detect the watermark for a video. This will set the sample application to ```video mode``` and will read the video-only settings that are described in this section. |
 | watermark_interval                | ```[Number]```: Embed or try to detect the watermark every X frames. If set to 1 when embedding, the watermark will be embedded for all frames, which degrades video quality.|
 | encode_watermark_file_path        | Set this value to a file path, in order to embed watermark and save the watermarked file to disk.                                           |
-| encode_options                    | These are ffmpeg options for encoding. Example: ```-c:v libx265 -preset fast -crf 23```  will pass these encoding options to ffmpeg.
+| encode_options                    | These are FFmpeg options for encoding. Example: ```-c:v libx265 -preset fast -crf 23```  will pass these encoding options to FFmpeg.|
 | watermark_detection               | ```[true/false]```: Set to true to try to detect the watermark of the "video" parameter. The detection occurs after ```watermark_interval``` frames. It is ignored when ```encode_watermark_file_path``` is set. |
 
 # FFmpeg Command Used for Video Encoding
 
-The following ffmpeg command is used to encode a new video while preserving the original input's metadata, subtitles, and audio tracks. It reads raw video frames from standard input (stdin) and copies audio/subtitles from the original input file as is. You can customize encoding settings (codec, CRF, etc) via the ```encode_options``` option as described above.
+The following FFmpeg command is used to encode a new video while preserving the original input's metadata, subtitles, and audio tracks. It reads raw video frames from standard input (stdin) and copies audio/subtitles from the original input file as is. You can customize encoding settings (codec, CRF, etc) via the ```encode_options``` option as described above.
 ```
 ffmpeg -y -f rawvideo -pix_fmt yuv420p -s <width>x<height>
   -r <frame_rate>
@@ -110,7 +110,7 @@ The solution provides multiple build configurations, each targeting a specific b
 If ArrayFire is properly installed, its `lib` directory (containing all required DLLs) is typically added to the system `PATH`, and everything should work out of the box.
 However, since not all systems have ArrayFire installed, we include the necessary DLLs in the prebuilt binaries. These files are copied directly from `$(AF_PATH)/lib` for convenience (Post-Build event).
 The same applies for CPU backend, where we copy the relevant libraries required by CImg (LibJPEG, LibPNG, zlib) and clang's OpenMP.
-All backends require ffmpeg which is also copied (most libav* DLLs).
+All backends require FFmpeg which is also copied (most libav* DLLs).
 
 
 **CUDA dependencies**:
@@ -140,7 +140,7 @@ All backends require ffmpeg which is also copied (most libav* DLLs).
 
 - [Eigen](https://eigen.tuxfamily.org/index.php?title=Main_Page): A C++ template library for linear algebra.
 - [ArrayFire](https://arrayfire.org): A C++ library for fast GPU computing.
-- [FFMpeg](https://www.ffmpeg.org/): A complete, cross-platform solution to record, convert and stream audio and video.
+- [FFmpeg](https://www.ffmpeg.org/): A complete, cross-platform solution to record, convert and stream audio and video.
 - [CImg](https://cimg.eu/): A C++ library for image processing.
 - [inih](https://github.com/jtilly/inih): A lightweight C++ library for parsing .ini configuration files.
 
@@ -150,4 +150,4 @@ All backends require ffmpeg which is also copied (most libav* DLLs).
 - CUDA implementation: NVIDIA CUDA Toolkit is required for building.
 - CPU Implementation: LibPNG and LibJPEG and zlib are also included, and are used internally by CImg for loading and saving of images.
 - ArrayFire should be installed globally, with default installation options. Environment Variable "AF_PATH" will be defined automatically.
-- FFMpeg must exist on system PATH (Pre-build binaries already include FFMpeg binaries and DLLs).
+- FFmpeg must exist on system PATH (Pre-build binaries already include FFmpeg binaries and DLLs).
