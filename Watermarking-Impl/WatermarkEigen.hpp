@@ -20,7 +20,6 @@ private:
 	Eigen::MatrixXf Rx;
 	std::vector<Eigen::VectorXf> RxVec_all, rx_all;
 	void createNeighbors(const Eigen::ArrayXXf& array, Eigen::VectorXf& x_, const int neighborSize, const int i, const int j) const;
-	constexpr inline int lowerTriangularIndex(const int i, const int j) { return (i * (i + 1)) / 2 + j; }
 	void resetRxVectors();
 	void onReinitialize() override;
 	void computeCustomMask(const Eigen::ArrayXXf& image);

@@ -149,9 +149,9 @@ void WatermarkEigen::computePredictionErrorMask(const bool maskNeeded)
 		rx.noalias() += rx_all[i];
 	}
 	//Reconstruct full Rx matrix from the vector
-	for (int i = 0; i < Rx.rows(); i++) {
-		for (int j = 0; j <= i; j++) {
-			float val = RxVec(lowerTriangularIndex(i, j));
+	for (int i = 0, k = 0; i < size; i++) {
+		for (int j = 0; j <= i; j++, k++) {
+			float val = RxVec(k);
 			Rx(i, j) = val;
 			Rx(j, i) = val;
 		}
