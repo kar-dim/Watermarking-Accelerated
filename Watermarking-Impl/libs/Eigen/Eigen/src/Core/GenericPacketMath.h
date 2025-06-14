@@ -72,6 +72,7 @@ struct default_packet_traits {
     HasReciprocal = 0,
     HasSqrt = 0,
     HasRsqrt = 0,
+    HasCbrt = 0,
     HasExp = 0,
     HasExpm1 = 0,
     HasLog = 0,
@@ -454,48 +455,42 @@ EIGEN_DEVICE_FUNC inline Packet pcmp_lt_or_nan(const Packet& a, const Packet& b)
 
 template <typename T>
 struct bit_and {
-  EIGEN_DEVICE_FUNC EIGEN_CONSTEXPR EIGEN_ALWAYS_INLINE T operator()(const T& a, const T& b) const { return a & b; }
+  EIGEN_DEVICE_FUNC constexpr EIGEN_ALWAYS_INLINE T operator()(const T& a, const T& b) const { return a & b; }
 };
 
 template <typename T>
 struct bit_or {
-  EIGEN_DEVICE_FUNC EIGEN_CONSTEXPR EIGEN_ALWAYS_INLINE T operator()(const T& a, const T& b) const { return a | b; }
+  EIGEN_DEVICE_FUNC constexpr EIGEN_ALWAYS_INLINE T operator()(const T& a, const T& b) const { return a | b; }
 };
 
 template <typename T>
 struct bit_xor {
-  EIGEN_DEVICE_FUNC EIGEN_CONSTEXPR EIGEN_ALWAYS_INLINE T operator()(const T& a, const T& b) const { return a ^ b; }
+  EIGEN_DEVICE_FUNC constexpr EIGEN_ALWAYS_INLINE T operator()(const T& a, const T& b) const { return a ^ b; }
 };
 
 template <typename T>
 struct bit_not {
-  EIGEN_DEVICE_FUNC EIGEN_CONSTEXPR EIGEN_ALWAYS_INLINE T operator()(const T& a) const { return ~a; }
+  EIGEN_DEVICE_FUNC constexpr EIGEN_ALWAYS_INLINE T operator()(const T& a) const { return ~a; }
 };
 
 template <>
 struct bit_and<bool> {
-  EIGEN_DEVICE_FUNC EIGEN_CONSTEXPR EIGEN_ALWAYS_INLINE bool operator()(const bool& a, const bool& b) const {
-    return a && b;
-  }
+  EIGEN_DEVICE_FUNC constexpr EIGEN_ALWAYS_INLINE bool operator()(const bool& a, const bool& b) const { return a && b; }
 };
 
 template <>
 struct bit_or<bool> {
-  EIGEN_DEVICE_FUNC EIGEN_CONSTEXPR EIGEN_ALWAYS_INLINE bool operator()(const bool& a, const bool& b) const {
-    return a || b;
-  }
+  EIGEN_DEVICE_FUNC constexpr EIGEN_ALWAYS_INLINE bool operator()(const bool& a, const bool& b) const { return a || b; }
 };
 
 template <>
 struct bit_xor<bool> {
-  EIGEN_DEVICE_FUNC EIGEN_CONSTEXPR EIGEN_ALWAYS_INLINE bool operator()(const bool& a, const bool& b) const {
-    return a != b;
-  }
+  EIGEN_DEVICE_FUNC constexpr EIGEN_ALWAYS_INLINE bool operator()(const bool& a, const bool& b) const { return a != b; }
 };
 
 template <>
 struct bit_not<bool> {
-  EIGEN_DEVICE_FUNC EIGEN_CONSTEXPR EIGEN_ALWAYS_INLINE bool operator()(const bool& a) const { return !a; }
+  EIGEN_DEVICE_FUNC constexpr EIGEN_ALWAYS_INLINE bool operator()(const bool& a) const { return !a; }
 };
 
 // Use operators &, |, ^, ~.
@@ -613,7 +608,7 @@ EIGEN_DEVICE_FUNC inline bool pselect<bool>(const bool& cond, const bool& a, con
 
 /** \internal \returns the min or of \a a and \a b (coeff-wise)
     If either \a a or \a b are NaN, the result is implementation defined. */
-template <int NaNPropagation>
+template <int NaNPropagation, bool IsInteger>
 struct pminmax_impl {
   template <typename Packet, typename Op>
   static EIGEN_DEVICE_FUNC inline Packet run(const Packet& a, const Packet& b, Op op) {
@@ -624,7 +619,7 @@ struct pminmax_impl {
 /** \internal \returns the min or max of \a a and \a b (coeff-wise)
     If either \a a or \a b are NaN, NaN is returned. */
 template <>
-struct pminmax_impl<PropagateNaN> {
+struct pminmax_impl<PropagateNaN, false> {
   template <typename Packet, typename Op>
   static EIGEN_DEVICE_FUNC inline Packet run(const Packet& a, const Packet& b, Op op) {
     Packet not_nan_mask_a = pcmp_eq(a, a);
@@ -637,7 +632,7 @@ struct pminmax_impl<PropagateNaN> {
     If both \a a and \a b are NaN, NaN is returned.
     Equivalent to std::fmin(a, b).  */
 template <>
-struct pminmax_impl<PropagateNumbers> {
+struct pminmax_impl<PropagateNumbers, false> {
   template <typename Packet, typename Op>
   static EIGEN_DEVICE_FUNC inline Packet run(const Packet& a, const Packet& b, Op op) {
     Packet not_nan_mask_a = pcmp_eq(a, a);
@@ -659,7 +654,8 @@ EIGEN_DEVICE_FUNC inline Packet pmin(const Packet& a, const Packet& b) {
     NaNPropagation determines the NaN propagation semantics. */
 template <int NaNPropagation, typename Packet>
 EIGEN_DEVICE_FUNC inline Packet pmin(const Packet& a, const Packet& b) {
-  return pminmax_impl<NaNPropagation>::run(a, b, EIGEN_BINARY_OP_NAN_PROPAGATION(Packet, (pmin<Packet>)));
+  constexpr bool IsInteger = NumTraits<typename unpacket_traits<Packet>::type>::IsInteger;
+  return pminmax_impl<NaNPropagation, IsInteger>::run(a, b, EIGEN_BINARY_OP_NAN_PROPAGATION(Packet, (pmin<Packet>)));
 }
 
 /** \internal \returns the max of \a a and \a b  (coeff-wise)
@@ -673,7 +669,8 @@ EIGEN_DEVICE_FUNC inline Packet pmax(const Packet& a, const Packet& b) {
     NaNPropagation determines the NaN propagation semantics. */
 template <int NaNPropagation, typename Packet>
 EIGEN_DEVICE_FUNC inline Packet pmax(const Packet& a, const Packet& b) {
-  return pminmax_impl<NaNPropagation>::run(a, b, EIGEN_BINARY_OP_NAN_PROPAGATION(Packet, (pmax<Packet>)));
+  constexpr bool IsInteger = NumTraits<typename unpacket_traits<Packet>::type>::IsInteger;
+  return pminmax_impl<NaNPropagation, IsInteger>::run(a, b, EIGEN_BINARY_OP_NAN_PROPAGATION(Packet, (pmax<Packet>)));
 }
 
 /** \internal \returns the absolute value of \a a */
@@ -1249,26 +1246,46 @@ EIGEN_DEVICE_FUNC inline typename unpacket_traits<Packet>::type predux_mul(const
 template <typename Packet>
 EIGEN_DEVICE_FUNC inline typename unpacket_traits<Packet>::type predux_min(const Packet& a) {
   typedef typename unpacket_traits<Packet>::type Scalar;
-  return predux_helper(a, EIGEN_BINARY_OP_NAN_PROPAGATION(Scalar, (pmin<PropagateFast, Scalar>)));
+  return predux_helper(a, EIGEN_BINARY_OP_NAN_PROPAGATION(Scalar, (pmin<Scalar>)));
 }
 
-template <int NaNPropagation, typename Packet>
-EIGEN_DEVICE_FUNC inline typename unpacket_traits<Packet>::type predux_min(const Packet& a) {
-  typedef typename unpacket_traits<Packet>::type Scalar;
-  return predux_helper(a, EIGEN_BINARY_OP_NAN_PROPAGATION(Scalar, (pmin<NaNPropagation, Scalar>)));
-}
-
-/** \internal \returns the min of the elements of \a a */
+/** \internal \returns the max of the elements of \a a */
 template <typename Packet>
 EIGEN_DEVICE_FUNC inline typename unpacket_traits<Packet>::type predux_max(const Packet& a) {
   typedef typename unpacket_traits<Packet>::type Scalar;
-  return predux_helper(a, EIGEN_BINARY_OP_NAN_PROPAGATION(Scalar, (pmax<PropagateFast, Scalar>)));
+  return predux_helper(a, EIGEN_BINARY_OP_NAN_PROPAGATION(Scalar, (pmax<Scalar>)));
+}
+
+template <int NaNPropagation, typename Packet>
+struct predux_min_max_helper_impl {
+  using Scalar = typename unpacket_traits<Packet>::type;
+  static constexpr bool UsePredux_ = NaNPropagation == PropagateFast || NumTraits<Scalar>::IsInteger;
+  template <bool UsePredux = UsePredux_, std::enable_if_t<!UsePredux, bool> = true>
+  static EIGEN_DEVICE_FUNC inline Scalar run_min(const Packet& a) {
+    return predux_helper(a, EIGEN_BINARY_OP_NAN_PROPAGATION(Scalar, (pmin<NaNPropagation, Scalar>)));
+  }
+  template <bool UsePredux = UsePredux_, std::enable_if_t<!UsePredux, bool> = true>
+  static EIGEN_DEVICE_FUNC inline Scalar run_max(const Packet& a) {
+    return predux_helper(a, EIGEN_BINARY_OP_NAN_PROPAGATION(Scalar, (pmax<NaNPropagation, Scalar>)));
+  }
+  template <bool UsePredux = UsePredux_, std::enable_if_t<UsePredux, bool> = true>
+  static EIGEN_DEVICE_FUNC inline Scalar run_min(const Packet& a) {
+    return predux_min(a);
+  }
+  template <bool UsePredux = UsePredux_, std::enable_if_t<UsePredux, bool> = true>
+  static EIGEN_DEVICE_FUNC inline Scalar run_max(const Packet& a) {
+    return predux_max(a);
+  }
+};
+
+template <int NaNPropagation, typename Packet>
+EIGEN_DEVICE_FUNC inline typename unpacket_traits<Packet>::type predux_min(const Packet& a) {
+  return predux_min_max_helper_impl<NaNPropagation, Packet>::run_min(a);
 }
 
 template <int NaNPropagation, typename Packet>
 EIGEN_DEVICE_FUNC inline typename unpacket_traits<Packet>::type predux_max(const Packet& a) {
-  typedef typename unpacket_traits<Packet>::type Scalar;
-  return predux_helper(a, EIGEN_BINARY_OP_NAN_PROPAGATION(Scalar, (pmax<NaNPropagation, Scalar>)));
+  return predux_min_max_helper_impl<NaNPropagation, Packet>::run_max(a);
 }
 
 #undef EIGEN_BINARY_OP_NAN_PROPAGATION
@@ -1560,6 +1577,73 @@ EIGEN_DEVICE_FUNC EIGEN_ALWAYS_INLINE Packet pcarg(const Packet& a) {
   RealPacket aflip = pcplxflip(a).v;                // i     r    i     r    ...
   RealPacket result = patan2(aflip, a.v);           // atan2 crap atan2 crap ...
   return (Packet)pand(result, peven_mask(result));  // atan2 0    atan2 0    ...
+}
+
+/** \internal \returns a packet populated with values in the range [begin, begin + count). Elements
+ * outside this range are not defined. \a *from does not need to be aligned, and can be null if \a count is zero.*/
+template <typename Packet>
+EIGEN_DEVICE_FUNC inline Packet ploaduSegment(const typename unpacket_traits<Packet>::type* from, Index begin,
+                                              Index count) {
+  using Scalar = typename unpacket_traits<Packet>::type;
+  constexpr Index PacketSize = unpacket_traits<Packet>::size;
+  eigen_assert((begin >= 0 && count >= 0 && begin + count <= PacketSize) && "invalid range");
+  Scalar aux[PacketSize];
+  memset(static_cast<void*>(aux), 0x00, sizeof(Scalar) * PacketSize);
+  smart_copy(from + begin, from + begin + count, aux + begin);
+  return ploadu<Packet>(aux);
+}
+
+/** \internal \returns a packet populated with values in the range [begin, begin + count). Elements
+ * outside this range are not defined. \a *from must be aligned, and cannot be null.*/
+template <typename Packet>
+EIGEN_DEVICE_FUNC inline Packet ploadSegment(const typename unpacket_traits<Packet>::type* from, Index begin,
+                                             Index count) {
+  return ploaduSegment<Packet>(from, begin, count);
+}
+
+/** \internal copy the packet \a from in the range [begin, begin + count) to \a *to.
+Elements outside of the range [begin, begin + count) are not defined. \a *to does not need to be aligned, and can be
+null if \a count is zero.*/
+template <typename Scalar, typename Packet>
+EIGEN_DEVICE_FUNC inline void pstoreuSegment(Scalar* to, const Packet& from, Index begin, Index count) {
+  constexpr Index PacketSize = unpacket_traits<Packet>::size;
+  eigen_assert((begin >= 0 && count >= 0 && begin + count <= PacketSize) && "invalid range");
+  Scalar aux[PacketSize];
+  pstoreu<Scalar, Packet>(aux, from);
+  smart_copy(aux + begin, aux + begin + count, to + begin);
+}
+
+/** \internal copy the packet \a from in the range [begin, begin + count) to \a *to.
+Elements outside of the range [begin, begin + count) are not defined. \a *to must be aligned, and cannot be
+null.*/
+template <typename Scalar, typename Packet>
+EIGEN_DEVICE_FUNC inline void pstoreSegment(Scalar* to, const Packet& from, Index begin, Index count) {
+  return pstoreuSegment(to, from, begin, count);
+}
+
+/** \internal \returns a packet populated with values in the range [begin, begin + count). Elements
+ * outside this range are not defined.*/
+template <typename Packet, int Alignment>
+EIGEN_DEVICE_FUNC inline Packet ploadtSegment(const typename unpacket_traits<Packet>::type* from, Index begin,
+                                              Index count) {
+  constexpr int RequiredAlignment = unpacket_traits<Packet>::alignment;
+  if (Alignment >= RequiredAlignment) {
+    return ploadSegment<Packet>(from, begin, count);
+  } else {
+    return ploaduSegment<Packet>(from, begin, count);
+  }
+}
+
+/** \internal copy the packet \a from in the range [begin, begin + count) to \a *to.
+Elements outside of the range [begin, begin + count) are not defined.*/
+template <typename Scalar, typename Packet, int Alignment>
+EIGEN_DEVICE_FUNC inline void pstoretSegment(Scalar* to, const Packet& from, Index begin, Index count) {
+  constexpr int RequiredAlignment = unpacket_traits<Packet>::alignment;
+  if (Alignment >= RequiredAlignment) {
+    pstoreSegment<Scalar, Packet>(to, from, begin, count);
+  } else {
+    pstoreuSegment<Scalar, Packet>(to, from, begin, count);
+  }
 }
 
 #ifndef EIGEN_NO_IO

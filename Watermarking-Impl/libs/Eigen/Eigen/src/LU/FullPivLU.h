@@ -78,6 +78,17 @@ class FullPivLU : public SolverBase<FullPivLU<MatrixType_, PermutationIndex_> > 
   typedef PermutationMatrix<RowsAtCompileTime, MaxRowsAtCompileTime, PermutationIndex> PermutationPType;
   typedef typename MatrixType::PlainObject PlainObject;
 
+  /** \brief Reports whether the LU factorization was successful.
+   *
+   * \note This function always returns \c Success. It is provided for compatibility
+   * with other factorization routines.
+   * \returns \c Success
+   */
+  ComputationInfo info() const {
+    eigen_assert(m_isInitialized && "FullPivLU is not initialized.");
+    return Success;
+  }
+
   /**
    * \brief Default Constructor.
    *
@@ -391,8 +402,8 @@ class FullPivLU : public SolverBase<FullPivLU<MatrixType_, PermutationIndex_> > 
 
   MatrixType reconstructedMatrix() const;
 
-  EIGEN_DEVICE_FUNC EIGEN_CONSTEXPR inline Index rows() const EIGEN_NOEXCEPT { return m_lu.rows(); }
-  EIGEN_DEVICE_FUNC EIGEN_CONSTEXPR inline Index cols() const EIGEN_NOEXCEPT { return m_lu.cols(); }
+  EIGEN_DEVICE_FUNC constexpr Index rows() const noexcept { return m_lu.rows(); }
+  EIGEN_DEVICE_FUNC constexpr Index cols() const noexcept { return m_lu.cols(); }
 
 #ifndef EIGEN_PARSED_BY_DOXYGEN
   template <typename RhsType, typename DstType>

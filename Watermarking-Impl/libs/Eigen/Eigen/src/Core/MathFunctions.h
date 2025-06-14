@@ -170,8 +170,8 @@ struct imag_ref_default_impl {
 
 template <typename Scalar>
 struct imag_ref_default_impl<Scalar, false> {
-  EIGEN_DEVICE_FUNC EIGEN_CONSTEXPR static inline Scalar run(Scalar&) { return Scalar(0); }
-  EIGEN_DEVICE_FUNC EIGEN_CONSTEXPR static inline const Scalar run(const Scalar&) { return Scalar(0); }
+  EIGEN_DEVICE_FUNC constexpr static Scalar run(Scalar&) { return Scalar(0); }
+  EIGEN_DEVICE_FUNC constexpr static const Scalar run(const Scalar&) { return Scalar(0); }
 };
 
 template <typename Scalar>
@@ -836,8 +836,8 @@ EIGEN_DEVICE_FUNC std::enable_if_t<(std::numeric_limits<T>::has_infinity && !Num
 
 template <typename T>
 EIGEN_DEVICE_FUNC
-    std::enable_if_t<!(std::numeric_limits<T>::has_quiet_NaN || std::numeric_limits<T>::has_signaling_NaN), bool>
-    isnan_impl(const T&) {
+std::enable_if_t<!(std::numeric_limits<T>::has_quiet_NaN || std::numeric_limits<T>::has_signaling_NaN), bool>
+isnan_impl(const T&) {
   return false;
 }
 
@@ -1297,7 +1297,7 @@ EIGEN_DEVICE_FUNC EIGEN_ALWAYS_INLINE double trunc(const double& x) {
 // Integer division with rounding up.
 // T is assumed to be an integer type with a>=0, and b>0
 template <typename T>
-EIGEN_DEVICE_FUNC EIGEN_ALWAYS_INLINE EIGEN_CONSTEXPR T div_ceil(T a, T b) {
+EIGEN_DEVICE_FUNC EIGEN_ALWAYS_INLINE constexpr T div_ceil(T a, T b) {
   using UnsignedT = typename internal::make_unsigned<T>::type;
   EIGEN_STATIC_ASSERT((NumTraits<T>::IsInteger), THIS FUNCTION IS FOR INTEGER TYPES)
   // Note: explicitly declaring a and b as non-negative values allows the compiler to use better optimizations
@@ -1310,7 +1310,7 @@ EIGEN_DEVICE_FUNC EIGEN_ALWAYS_INLINE EIGEN_CONSTEXPR T div_ceil(T a, T b) {
 // Integer round down to nearest power of b
 // T is assumed to be an integer type with a>=0, and b>0
 template <typename T, typename U>
-EIGEN_DEVICE_FUNC EIGEN_ALWAYS_INLINE EIGEN_CONSTEXPR T round_down(T a, U b) {
+EIGEN_DEVICE_FUNC EIGEN_ALWAYS_INLINE constexpr T round_down(T a, U b) {
   using UnsignedT = typename internal::make_unsigned<T>::type;
   using UnsignedU = typename internal::make_unsigned<U>::type;
   EIGEN_STATIC_ASSERT((NumTraits<T>::IsInteger), THIS FUNCTION IS FOR INTEGER TYPES)
@@ -1323,7 +1323,7 @@ EIGEN_DEVICE_FUNC EIGEN_ALWAYS_INLINE EIGEN_CONSTEXPR T round_down(T a, U b) {
 
 /** Log base 2 for 32 bits positive integers.
  * Conveniently returns 0 for x==0. */
-EIGEN_CONSTEXPR inline int log2(int x) {
+constexpr int log2(int x) {
   unsigned int v(x);
   constexpr int table[32] = {0, 9,  1,  10, 13, 21, 2,  29, 11, 14, 16, 18, 22, 25, 3, 30,
                              8, 12, 20, 28, 15, 17, 24, 7,  19, 27, 23, 6,  26, 5,  4, 31};
@@ -1361,9 +1361,15 @@ SYCL_SPECIALIZE_FLOATING_TYPES_UNARY(sqrt, sqrt)
 
 /** \returns the cube root of \a x. **/
 template <typename T>
-EIGEN_DEVICE_FUNC EIGEN_ALWAYS_INLINE T cbrt(const T& x) {
+EIGEN_DEVICE_FUNC EIGEN_ALWAYS_INLINE std::enable_if_t<!NumTraits<T>::IsComplex, T> cbrt(const T& x) {
   EIGEN_USING_STD(cbrt);
   return static_cast<T>(cbrt(x));
+}
+
+template <typename T>
+EIGEN_DEVICE_FUNC EIGEN_ALWAYS_INLINE std::enable_if_t<NumTraits<T>::IsComplex, T> cbrt(const T& x) {
+  EIGEN_USING_STD(pow);
+  return pow(x, typename NumTraits<T>::Real(1.0 / 3.0));
 }
 
 /** \returns the reciprocal square root of \a x. **/
@@ -1394,17 +1400,17 @@ EIGEN_DEVICE_FUNC EIGEN_ALWAYS_INLINE double log(const double& x) {
 #endif
 
 template <typename T>
-EIGEN_DEVICE_FUNC EIGEN_ALWAYS_INLINE
-    std::enable_if_t<NumTraits<T>::IsSigned || NumTraits<T>::IsComplex, typename NumTraits<T>::Real>
-    abs(const T& x) {
+EIGEN_DEVICE_FUNC
+EIGEN_ALWAYS_INLINE std::enable_if_t<NumTraits<T>::IsSigned || NumTraits<T>::IsComplex, typename NumTraits<T>::Real>
+abs(const T& x) {
   EIGEN_USING_STD(abs);
   return abs(x);
 }
 
 template <typename T>
-EIGEN_DEVICE_FUNC EIGEN_ALWAYS_INLINE
-    std::enable_if_t<!(NumTraits<T>::IsSigned || NumTraits<T>::IsComplex), typename NumTraits<T>::Real>
-    abs(const T& x) {
+EIGEN_DEVICE_FUNC
+EIGEN_ALWAYS_INLINE std::enable_if_t<!(NumTraits<T>::IsSigned || NumTraits<T>::IsComplex), typename NumTraits<T>::Real>
+abs(const T& x) {
   return x;
 }
 
