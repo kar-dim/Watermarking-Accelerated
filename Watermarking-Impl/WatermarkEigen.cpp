@@ -17,10 +17,12 @@ using std::string;
 //constructor to initialize all the necessary data
 WatermarkEigen::WatermarkEigen(const unsigned int rows, const unsigned int cols, const string& randomMatrixPath, const int p, const float psnr) :
 	WatermarkBase(rows, cols, randomMatrixPath, p, (255.0f / sqrt(pow(10.0f, psnr / 10.0f)))), pad(p / 2), paddedRows(rows + 2 * pad), 
-	paddedCols(cols + 2 * pad), pSquared(p * p), halfNeighborsSize((pSquared - 1) / 2), padded(ArrayXXf::Zero(paddedRows, paddedCols)), 
+	paddedCols(cols + 2 * pad), pSquared(p * p), localSize(pSquared - 1), halfNeighborsSize((pSquared - 1) / 2), padded(ArrayXXf::Zero(paddedRows, paddedCols)), 
 	mask(rows, cols), errorSequence(rows, cols), filteredEstimation(rows, cols), u(rows,cols), uStrengthened(rows, cols), coefficients(pSquared - 1),
 	watermarkedImage{ [](int r, int c) { return std::array<ArrayXXf, 3>{ ArrayXXf(r, c), ArrayXXf(r, c), ArrayXXf(r, c) }; }(rows, cols) }
-{ }
+{ 
+	resetRxVectors();
+}
 
 //generate p x p neighbors
 void WatermarkEigen::createNeighbors(const ArrayXXf& array, VectorXf& x_, const int neighborSize, const int i, const int j) const
@@ -31,12 +33,29 @@ void WatermarkEigen::createNeighbors(const ArrayXXf& array, VectorXf& x_, const 
 	x_.tail(pSquared - halfNeighborsSize - 1) = x_temp.tail(halfNeighborsSize);
 }
 
+//resets the Rx and rx vectors to the correct size
+void WatermarkEigen::resetRxVectors()
+{
+	const int numThreads = omp_get_max_threads();
+	RxVec = VectorXf(localSize * (localSize + 1) / 2);
+	Rx = MatrixXf(localSize, localSize);
+	rx = VectorXf(localSize);
+	RxVec_all.resize(numThreads);
+	rx_all.resize(numThreads);
+	for (int i = 0; i < numThreads; i++)
+	{
+		RxVec_all[i] = VectorXf(RxVec.size());
+		rx_all[i] = VectorXf(localSize);
+	}
+}
+
 void WatermarkEigen::onReinitialize()
 {
 	pad = p / 2;
 	paddedRows = (baseRows + 2 * pad);
 	paddedCols = (baseCols + 2 * pad);
 	pSquared = p * p;
+	localSize = pSquared - 1;
 	halfNeighborsSize = (pSquared - 1) / 2;
 	padded = ArrayXXf::Zero(paddedRows, paddedCols);
 	mask = ArrayXXf(baseRows, baseCols);
@@ -46,6 +65,7 @@ void WatermarkEigen::onReinitialize()
 	uStrengthened = ArrayXXf(baseRows, baseCols);
 	coefficients = VectorXf(pSquared - 1);
 	std::generate(watermarkedImage.begin(), watermarkedImage.end(), [this] { return ArrayXXf(baseRows, baseCols); });
+	resetRxVectors();
 }
 
 void WatermarkEigen::computeCustomMask(const ArrayXXf& image) 
@@ -90,40 +110,53 @@ void WatermarkEigen::computeStrengthenedWatermark(const ArrayXXf& inputImage, fl
 	uStrengthened = u * watermarkStrength;
 }
 
+
 //compute Prediction error mask
 void WatermarkEigen::computePredictionErrorMask(const bool maskNeeded)
 {
-	MatrixXf Rx = ArrayXXf::Zero(pSquared - 1, pSquared - 1);
-	VectorXf rx = VectorXf::Zero(pSquared - 1);
 	const int numThreads = omp_get_max_threads();
-	std::vector<MatrixXf> Rx_all(numThreads);
-	std::vector<VectorXf> rx_all(numThreads);
-	for (int i = 0; i < numThreads; i++) 
+	const int size = pSquared - 1;
+	RxVec.setZero();
+	Rx.setZero();
+	rx.setZero();
+	for (int i = 0; i < numThreads; i++)
 	{
-		Rx_all[i] = Rx;
-		rx_all[i] = rx;
+		RxVec_all[i].setZero();
+		rx_all[i].setZero();
 	}
 	const int neighborsSize = (p - 1) / 2;
 #pragma omp parallel for
 	for (int j = pad; j < baseCols + pad; j++)
 	{
-		VectorXf x_(pSquared - 1);
+		VectorXf x_(size);
 		for (int i = pad; i < baseRows + pad; i++)
 		{
 			//calculate p^2 - 1 neighbors
 			createNeighbors(padded, x_, neighborsSize, i, j);
-			//calculate Rx and rx
-			Rx_all[omp_get_thread_num()].noalias() += x_ * x_.transpose();
+			//calculate Rx optimized by using a vector representing the lower-triangular only instead of a matrix
+			auto& v = RxVec_all[omp_get_thread_num()];
+			int k = 0;
+			for (int i = 0; i < size; i++)
+				for (int j = 0; j <= i; j++)
+					v[k++] += x_(i) * x_(j);
 			rx_all[omp_get_thread_num()].noalias() += x_ * padded(i, j);
 		}
 	}
 	//reduction sums of Rx,rx of each thread
-	for (int i = 0; i < numThreads; i++) 
+	for (int i = 0; i < numThreads; i++)
 	{
-		Rx.noalias() += Rx_all[i];
+		RxVec.noalias() += RxVec_all[i];
 		rx.noalias() += rx_all[i];
 	}
-	coefficients = Rx.fullPivLu().solve(rx);
+	//Reconstruct full Rx matrix from the vector
+	for (int i = 0; i < Rx.rows(); i++) {
+		for (int j = 0; j <= i; j++) {
+			float val = RxVec(lowerTriangularIndex(i, j));
+			Rx(i, j) = val;
+			Rx(j, i) = val;
+		}
+	}
+	coefficients = Rx.colPivHouseholderQr().solve(rx);
 	//calculate ex(i,j)
 	computeErrorSequence(errorSequence);
 	if (maskNeeded) 
