@@ -3,7 +3,9 @@
 #include "buffer.hpp"
 #include <cmath>
 #include <fstream>
+#if defined(_USE_CUDA_) || defined(_USE_OPENCL_)
 #include <memory>
+#endif
 #include <stdexcept>
 #include <string>
 
@@ -76,12 +78,14 @@ protected:
 		randomMatrixStream.seekg(0, std::ios::beg);
 		if (baseRows * baseCols * sizeof(float) != totalBytes)
 			throw std::runtime_error(std::string("Error: W file total elements != image dimensions! W file total elements: " + std::to_string(totalBytes / (sizeof(float))) + ", Image width: " + std::to_string(baseCols) + ", Image height: " + std::to_string(baseRows) + "\n"));
+#if defined(_USE_CUDA_) || defined(_USE_OPENCL_)
 		std::unique_ptr<float> wPtr(new float[baseRows * baseCols]);
 		randomMatrixStream.read(reinterpret_cast<char*>(wPtr.get()), totalBytes);
-#if defined(_USE_EIGEN_)
-		return BufferType(Eigen::Map<Eigen::ArrayXXf>(wPtr.get(), baseCols, baseRows).transpose().eval());
-#elif defined(_USE_CUDA_) || defined(_USE_OPENCL_)
 		return af::transpose(af::array(baseCols, baseRows, wPtr.get()));
+#elif defined(_USE_EIGEN_)
+		Eigen::ArrayXXf watermark(baseCols, baseRows);
+		randomMatrixStream.read(reinterpret_cast<char*>(watermark.data()), totalBytes);
+		return BufferType(watermark.transpose().eval());
 #endif
 	}
 };
