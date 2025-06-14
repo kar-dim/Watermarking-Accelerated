@@ -20,7 +20,7 @@ private:
 	Eigen::MatrixXf Rx;
 	std::vector<Eigen::VectorXf> RxVec_all, rx_all;
 	void createNeighbors(const Eigen::ArrayXXf& array, Eigen::VectorXf& x_, const int neighborSize, const int i, const int j) const;
-	void resetRxVectors();
+	void resetPredictionErrorVectors();
 	void onReinitialize() override;
 	void computeCustomMask(const Eigen::ArrayXXf& image);
 	void computePredictionErrorMask(const bool maskNeeded);
