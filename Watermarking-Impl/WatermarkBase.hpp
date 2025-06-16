@@ -26,7 +26,7 @@ enum MASK_TYPE
 class WatermarkBase 
 {
 private:
-	static inline float computeStrengthFactor(const float psnr) { return 255.0f / sqrt(pow(10.0f, psnr / 10.0f)); }
+	static inline float computeStrengthFactor(const float psnr) { return 255.0f / std::sqrt(std::pow(10.0f, psnr / 10.0f)); }
 
 public:
 	WatermarkBase(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr)

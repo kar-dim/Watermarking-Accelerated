@@ -25,7 +25,7 @@ af::array WatermarkGPU::makeWatermarkGpu(const af::array& inputImage, const af::
 	else
 		mask = computeCustomMask();
 	const af::array u = mask * randomMatrix;
-	watermarkStrength = strengthFactor / static_cast<float>(af::norm(u) / sqrt(inputImage.elements()));
+	watermarkStrength = strengthFactor / static_cast<float>(af::norm(u) / std::sqrt(inputImage.elements()));
 	return af::clamp(outputImage + (u * watermarkStrength), 0, 255);
 }
 
