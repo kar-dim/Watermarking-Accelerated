@@ -16,6 +16,7 @@
 #include "eigen_utils.hpp"
 #include "WatermarkEigen.hpp"
 #endif
+#include <stdexcept>
 
 using std::string;
 
@@ -43,7 +44,19 @@ std::unique_ptr<WatermarkBase> Utilities::createWatermarkObject(const unsigned i
 #elif defined(_USE_CUDA_)
 	watermarkObj = std::make_unique<WatermarkCuda>(height, width, randomMatrixPath, p, psnr);
 #elif defined(_USE_EIGEN_)
-	watermarkObj = std::make_unique<WatermarkEigen>(height, width, randomMatrixPath, p, psnr);
+	switch (p)
+	{
+	case 3:
+		watermarkObj = std::make_unique<WatermarkEigen<3>>(height, width, randomMatrixPath, psnr); break;
+	case 5:
+		watermarkObj = std::make_unique<WatermarkEigen<5>>(height, width, randomMatrixPath, psnr); break;
+	case 7:
+		watermarkObj = std::make_unique<WatermarkEigen<7>>(height, width, randomMatrixPath, psnr); break;
+	case 9:
+		watermarkObj = std::make_unique<WatermarkEigen<9>>(height, width, randomMatrixPath, psnr); break;
+	default:
+		throw std::invalid_argument("Unsupported value for p. Allowed values: 3, 5, 7, 9.");
+	}
 #endif
 	return watermarkObj;
 }

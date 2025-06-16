@@ -64,9 +64,6 @@
     <ClCompile Include="WatermarkOCL.cpp">
       <Filter>Source Files\opencl</Filter>
     </ClCompile>
-    <ClCompile Include="WatermarkEigen.cpp">
-      <Filter>Source Files\eigen</Filter>
-    </ClCompile>
     <ClCompile Include="eigen_utils.cpp">
       <Filter>Source Files\eigen</Filter>
     </ClCompile>
@@ -134,6 +131,9 @@
     </ClInclude>
     <ClInclude Include="host_memory.h">
       <Filter>Header Files\util</Filter>
+    </ClInclude>
+    <ClInclude Include="PredictionErrorMatrixData.hpp">
+      <Filter>Header Files\eigen</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

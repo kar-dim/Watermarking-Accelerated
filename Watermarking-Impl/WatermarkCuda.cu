@@ -3,6 +3,7 @@
 #include "kernels.cuh"
 #include "WatermarkBase.hpp"
 #include "WatermarkCuda.cuh"
+#include "WatermarkGpu.hpp"
 #include <af/cuda.h>
 #include <arrayfire.h>
 #include <cmath>
@@ -17,15 +18,13 @@ cudaStream_t WatermarkCuda::afStream = afcu::getStream(afcu::getNativeId(af::get
 
 //initialize data and memory
 WatermarkCuda::WatermarkCuda(const unsigned int rows, const unsigned int cols, const string& randomMatrixPath, const int p, const float psnr)
-	: WatermarkBase(rows, cols, randomMatrixPath, p, (255.0f / sqrt(pow(10.0f, psnr / 10.0f)))), meKernelDims(ALIGN(cols, 64), rows)
+	: WatermarkBase(rows, cols, randomMatrixPath, (255.0f / sqrt(pow(10.0f, psnr / 10.0f)))), WatermarkGPU(p), meKernelDims(ALIGN(cols, 64), rows)
 {
-	if (p != 3 && p != 5 && p != 7 && p != 9)
-		throw std::runtime_error(string("Wrong p parameter: ") + std::to_string(p) + "!\n");
 	initializeGpuMemory();
 }
 
 //copy constructor
-WatermarkCuda::WatermarkCuda(const WatermarkCuda& other) : WatermarkBase(other.baseRows, other.baseCols, other.randomMatrix, other.p, other.strengthFactor),
+WatermarkCuda::WatermarkCuda(const WatermarkCuda& other) : WatermarkBase(other.baseRows, other.baseCols, other.randomMatrix, other.strengthFactor), WatermarkGPU(other.p),
 	meKernelDims(other.meKernelDims)
 {
 	//we don't need to copy the internal buffers data, only to allocate the correct size based on other
@@ -33,7 +32,7 @@ WatermarkCuda::WatermarkCuda(const WatermarkCuda& other) : WatermarkBase(other.b
 }
 
 //move constructor
-WatermarkCuda::WatermarkCuda(WatermarkCuda&& other) noexcept : WatermarkBase(other.baseRows, other.baseCols, std::move(other.randomMatrix), other.p, other.strengthFactor),
+WatermarkCuda::WatermarkCuda(WatermarkCuda&& other) noexcept : WatermarkBase(other.baseRows, other.baseCols, std::move(other.randomMatrix), other.strengthFactor), WatermarkGPU(other.p),
 	meKernelDims(other.meKernelDims)
 {
 	static constexpr auto moveMember = [](auto& thisData, auto& otherData, auto value) { thisData = otherData; otherData = value; };
@@ -102,14 +101,6 @@ void WatermarkCuda::initializeGpuMemory()
 	auto textureData = cuda_utils::createTextureData(baseCols, baseRows);
 	texObj = textureData.first;
 	texArray = textureData.second;
-}
-
-void WatermarkCuda::onReinitialize()
-{
-	meKernelDims = { ALIGN(baseCols, 64), UINT(baseRows) };
-	cudaDestroyTextureObject(texObj);
-	cudaFreeArray(texArray);
-	initializeGpuMemory();
 }
 
 af::array WatermarkCuda::computeCustomMask() const

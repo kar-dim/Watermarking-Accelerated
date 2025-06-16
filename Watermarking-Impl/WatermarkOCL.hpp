@@ -40,7 +40,6 @@ private:
 	cl::Image2D image2d;
 
 	void initializeGpuMemory() override;
-	void onReinitialize() override;
 	af::array computeCustomMask() const override;
 	af::array computeScaledNeighbors(const af::array& coefficients) const override;
 	af::array computePredictionErrorMask(const af::array& image, af::array& errorSequence, af::array& coefficients, const bool maskNeeded) const override;

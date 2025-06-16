@@ -3,11 +3,18 @@
 #include "WatermarkBase.hpp"
 #include <arrayfire.h>
 #include <concepts>
+#include <stdexcept>
 #include <utility>
 
-class WatermarkGPU 
+class WatermarkGPU
 {
 public:
+	WatermarkGPU(int p) : p(p) 
+	{ 
+		if (p != 3 && p != 5 && p != 7 && p != 9)
+			throw std::invalid_argument("Unsupported value for p. Allowed values: 3, 5, 7, 9.");
+	}
+
 	virtual ~WatermarkGPU() = default;
 
 	//helper method to unlock multiple af::arrays (return memory to ArrayFire)
@@ -18,6 +25,8 @@ public:
 	static void displayArray(const af::array& array, const int width = 1600, const int height = 900);
 
 protected:
+	int p;
+
 	//initialize internal GPU buffers
 	virtual void initializeGpuMemory() = 0;
 

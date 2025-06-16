@@ -2,6 +2,7 @@
 #include "opencl_init.h"
 #include "opencl_utils.hpp"
 #include "WatermarkBase.hpp"
+#include "WatermarkGpu.hpp"
 #include "WatermarkOCL.hpp"
 #include <arrayfire.h>
 #include <cmath>
@@ -15,17 +16,16 @@ using std::string;
 
 //initialize data and memory
 WatermarkOCL::WatermarkOCL(const unsigned int rows, const unsigned int cols, const string& randomMatrixPath, const int p, const float psnr)
-	: WatermarkBase(rows, cols, randomMatrixPath, p, (255.0f / sqrt(pow(10.0f, psnr / 10.0f)))), texKernelDims({ ALIGN(rows, 16), ALIGN(cols, 16) }), meKernelDims({ rows, ALIGN(cols, 64) })
+	: WatermarkBase(rows, cols, randomMatrixPath, (255.0f / sqrt(pow(10.0f, psnr / 10.0f)))), WatermarkGPU(p), 
+	texKernelDims({ ALIGN(rows, 16), ALIGN(cols, 16) }), meKernelDims({ rows, ALIGN(cols, 64) })
 {
-	if (p != 3 && p != 5 && p != 7 && p != 9)
-		throw std::runtime_error(string("Wrong p parameter: ") + std::to_string(p) + "!\n");
 	//compile opencl kernels and initialize memory
 	cl_utils::buildKernels(programs, p);
 	initializeGpuMemory();
 }
 
 //copy constructor
-WatermarkOCL::WatermarkOCL(const WatermarkOCL& other) : WatermarkBase(other.baseRows, other.baseCols, other.randomMatrix, other.p, other.strengthFactor),
+WatermarkOCL::WatermarkOCL(const WatermarkOCL& other) : WatermarkBase(other.baseRows, other.baseCols, other.randomMatrix, other.strengthFactor), WatermarkGPU(other.p),
 	texKernelDims(other.texKernelDims), meKernelDims(other.meKernelDims), programs(other.programs)
 {
 	initializeGpuMemory();
@@ -60,13 +60,6 @@ void WatermarkOCL::copyDataToTexture(const af::array& image) const
 	const std::unique_ptr<cl_mem> imageMem(image.device<cl_mem>());
 	cl_utils::copyBufferToImage(queue, image2d, imageMem.get(), baseCols, baseRows);
 	unlockArrays(image);
-}
-
-void WatermarkOCL::onReinitialize()
-{
-	texKernelDims = { ALIGN(baseRows, 16), ALIGN(baseCols, 16) };
-	meKernelDims = { baseRows, ALIGN(baseCols, 64) };
-	initializeGpuMemory();
 }
 
 af::array WatermarkOCL::computeCustomMask() const

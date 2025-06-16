@@ -26,22 +26,16 @@ enum MASK_TYPE
 class WatermarkBase 
 {
 public:
-	WatermarkBase(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const int p, const float strengthFactor)
-		: baseRows(rows), baseCols(cols), p(p), randomMatrix(loadRandomMatrix(randomMatrixPath)), strengthFactor(strengthFactor)
+	WatermarkBase(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float strengthFactor)
+		: baseRows(rows), baseCols(cols), randomMatrix(loadRandomMatrix(randomMatrixPath)), strengthFactor(strengthFactor)
 	{ }
 
-	WatermarkBase(const unsigned int rows, const unsigned int cols, const BufferType& randomMatrix, const int p, const float strengthFactor)
-		: baseRows(rows), baseCols(cols), p(p), randomMatrix(randomMatrix), strengthFactor(strengthFactor) 
+	WatermarkBase(const unsigned int rows, const unsigned int cols, const BufferType& randomMatrix, const float strengthFactor)
+		: baseRows(rows), baseCols(cols), randomMatrix(randomMatrix), strengthFactor(strengthFactor) 
 	{ }
 
     virtual ~WatermarkBase() = default;
 
-	//reinitialize the watermarking algorithm with new parameters
-    void reinitialize(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const int p, const float psnr)
-	{
-		initialize(rows, cols, randomMatrixPath, p, psnr);
-		onReinitialize();
-	}
 	//main watermark embedding method
 	//it embeds the watermark computed fom "inputImage" (always grayscale)
 	//into a new array based on "outputImage" (RGB or grayscale)
@@ -52,20 +46,16 @@ public:
 
 protected:
 	unsigned int baseRows, baseCols;
-	int p;
 	BufferType randomMatrix;
 	float strengthFactor;
 
-	void initialize(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const int pParam, const float psnr)
+	void initialize(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr)
 	{
 		baseRows = rows;
 		baseCols = cols;
-		p = pParam;
 		strengthFactor = (255.0f / sqrt(pow(10.0f, psnr / 10.0f)));
 		randomMatrix = loadRandomMatrix(randomMatrixPath);
 	}
-
-	virtual void onReinitialize() = 0;
 
 	//helper method to load the random noise matrix W from the file specified.
 	BufferType loadRandomMatrix(const std::string& randomMatrixPath) const
