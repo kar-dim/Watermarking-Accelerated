@@ -181,8 +181,8 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 	BufferType rgbImage, image;
 	//load image from disk into CImg and copy from CImg object to Eigen arrays
 	double secs = Utilities::executionTime([&] {
-		rgbImage = BufferType(cimgToEigen3dArray(CImg<float>(imageFile.c_str())));
-		image = BufferType(eigen3dArrayToGrayscaleArray(rgbImage.getRGB(), rPercent, gPercent, bPercent));
+		rgbImage = cimgToEigen3dArray(CImg<float>(imageFile.c_str()));
+		image = eigen3dArrayToGrayscaleArray(rgbImage.getRGB(), rPercent, gPercent, bPercent);
 	});
 	const auto rows = image.getGray().rows();
 	const auto cols = image.getGray().cols();
@@ -395,7 +395,7 @@ void detectFrameWatermark(const VideoProcessingContext& data, BufferType& inputF
 #if defined(_USE_GPU_)
 		inputFrame = GrayBuffer(data.width, data.height, rowPadding ? data.inputFramePtr : frame->data[0], afHost).T().as(f32);
 #elif defined(_USE_EIGEN_)
-		inputFrame = BufferType(Map<GrayBuffer>(rowPadding ? data.inputFramePtr : frame->data[0], data.width, data.height).transpose().cast<float>());
+		inputFrame = Map<GrayBuffer>(rowPadding ? data.inputFramePtr : frame->data[0], data.width, data.height).transpose().cast<float>();
 #endif
 		float correlation = data.watermarkObj->detectWatermark(inputFrame, MASK_TYPE::ME);
 		cout << "Correlation for frame: " << framesCount << ": " << correlation << "\n";
@@ -486,7 +486,7 @@ void writeWatermarkeFrameToPipe(const VideoProcessingContext& data, BufferType& 
 	watermarkedFrame.host(data.inputFramePtr);
 	fwrite(data.inputFramePtr, 1, data.width * frame->height, ffmpegPipe);
 #elif defined(_USE_EIGEN_)
-	inputFrame = BufferType(Map<GrayBuffer>(data.inputFramePtr, data.width, data.height).transpose().cast<float>());
+	inputFrame = Map<GrayBuffer>(data.inputFramePtr, data.width, data.height).transpose().cast<float>();
 	watermarkedFrame = data.watermarkObj->makeWatermark(inputFrame, inputFrame, watermarkStrength, MASK_TYPE::ME).getGray().transpose().cast<uint8_t>();
 	fwrite(watermarkedFrame.data(), 1, data.width * frame->height, ffmpegPipe);
 #endif
