@@ -7,16 +7,22 @@ class PredictionErrorMatrixData
 {
 public:
 	static constexpr int localSize = (p * p) - 1;
+
+private:
 	using LocalVector = Eigen::Matrix<float, localSize, 1>;
 	using LocalVectorDiag = Eigen::Matrix<float, localSize * (localSize + 1) / 2, 1>;
 	using LocalMatrix = Eigen::Matrix<float, localSize, localSize>;
+	const int numThreads;
+	LocalVectorDiag RxVec;
+	LocalVector coefficients, rx;
+	LocalMatrix Rx;
+	std::vector<LocalVectorDiag> RxVec_all;
+	std::vector<LocalVector> rx_all;
 
+public:
 	//initialize prediction error matrix data (allocate memory) for a given number of threads
-	PredictionErrorMatrixData(const int numThreads) : numThreads(numThreads)
-	{
-		RxVec_all.resize(numThreads);
-		rx_all.resize(numThreads);
-	}
+	PredictionErrorMatrixData(const int numThreads) : numThreads(numThreads), RxVec_all(numThreads), rx_all(numThreads)
+	{ }
 
 	//sets all Rx,rx matrices and vectors to zero
 	void setZero()
@@ -67,12 +73,4 @@ public:
 	}
 
 	LocalVector getCoefficients() const { return coefficients; }
-
-private:
-	const int numThreads;
-	LocalVectorDiag RxVec;
-	LocalVector coefficients, rx;
-	LocalMatrix Rx;
-	std::vector<LocalVectorDiag> RxVec_all;
-	std::vector<LocalVector> rx_all;
 };
