@@ -24,7 +24,7 @@ private:
 
 public:
 	WatermarkEigen<p>(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr) :
-		WatermarkBase(rows, cols, randomMatrixPath, (255.0f / sqrt(pow(10.0f, psnr / 10.0f)))), paddedRows(rows + 2 * pad),
+		WatermarkBase(rows, cols, randomMatrixPath, psnr), paddedRows(rows + 2 * pad),
 		paddedCols(cols + 2 * pad), padded(ArrayXXf::Zero(paddedRows, paddedCols)),
 		mask(rows, cols), errorSequence(rows, cols), filteredEstimation(rows, cols), u(rows, cols), uStrengthened(rows, cols),
 		watermarkedImage{ [](int r, int c) { return std::array<ArrayXXf, 3>{ ArrayXXf(r, c), ArrayXXf(r, c), ArrayXXf(r, c) }; }(rows, cols) },

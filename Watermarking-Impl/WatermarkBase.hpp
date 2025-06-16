@@ -25,13 +25,16 @@ enum MASK_TYPE
  */
 class WatermarkBase 
 {
+private:
+	static inline float computeStrengthFactor(const float psnr) { return 255.0f / sqrt(pow(10.0f, psnr / 10.0f)); }
+
 public:
-	WatermarkBase(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float strengthFactor)
-		: baseRows(rows), baseCols(cols), randomMatrix(loadRandomMatrix(randomMatrixPath)), strengthFactor(strengthFactor)
+	WatermarkBase(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr)
+		: baseRows(rows), baseCols(cols), randomMatrix(loadRandomMatrix(randomMatrixPath)), strengthFactor(computeStrengthFactor(psnr))
 	{ }
 
 	WatermarkBase(const unsigned int rows, const unsigned int cols, const BufferType& randomMatrix, const float strengthFactor)
-		: baseRows(rows), baseCols(cols), randomMatrix(randomMatrix), strengthFactor(strengthFactor) 
+		: baseRows(rows), baseCols(cols), randomMatrix(randomMatrix), strengthFactor(strengthFactor)
 	{ }
 
     virtual ~WatermarkBase() = default;
@@ -48,14 +51,6 @@ protected:
 	unsigned int baseRows, baseCols;
 	BufferType randomMatrix;
 	float strengthFactor;
-
-	void initialize(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr)
-	{
-		baseRows = rows;
-		baseCols = cols;
-		strengthFactor = (255.0f / sqrt(pow(10.0f, psnr / 10.0f)));
-		randomMatrix = loadRandomMatrix(randomMatrixPath);
-	}
 
 	//helper method to load the random noise matrix W from the file specified.
 	BufferType loadRandomMatrix(const std::string& randomMatrixPath) const

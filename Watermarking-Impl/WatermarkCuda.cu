@@ -6,9 +6,7 @@
 #include "WatermarkGpu.hpp"
 #include <af/cuda.h>
 #include <arrayfire.h>
-#include <cmath>
 #include <cuda_runtime.h>
-#include <stdexcept>
 #include <string>
 #include <utility>
 
@@ -18,7 +16,7 @@ cudaStream_t WatermarkCuda::afStream = afcu::getStream(afcu::getNativeId(af::get
 
 //initialize data and memory
 WatermarkCuda::WatermarkCuda(const unsigned int rows, const unsigned int cols, const string& randomMatrixPath, const int p, const float psnr)
-	: WatermarkBase(rows, cols, randomMatrixPath, (255.0f / sqrt(pow(10.0f, psnr / 10.0f)))), WatermarkGPU(p), meKernelDims(ALIGN(cols, 64), rows)
+	: WatermarkBase(rows, cols, randomMatrixPath, psnr), WatermarkGPU(p), meKernelDims(ALIGN(cols, 64), rows)
 {
 	initializeGpuMemory();
 }

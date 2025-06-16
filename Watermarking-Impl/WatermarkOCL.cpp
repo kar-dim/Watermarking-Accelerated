@@ -5,7 +5,6 @@
 #include "WatermarkGpu.hpp"
 #include "WatermarkOCL.hpp"
 #include <arrayfire.h>
-#include <cmath>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -16,7 +15,7 @@ using std::string;
 
 //initialize data and memory
 WatermarkOCL::WatermarkOCL(const unsigned int rows, const unsigned int cols, const string& randomMatrixPath, const int p, const float psnr)
-	: WatermarkBase(rows, cols, randomMatrixPath, (255.0f / sqrt(pow(10.0f, psnr / 10.0f)))), WatermarkGPU(p), 
+	: WatermarkBase(rows, cols, randomMatrixPath, psnr), WatermarkGPU(p), 
 	texKernelDims({ ALIGN(rows, 16), ALIGN(cols, 16) }), meKernelDims({ rows, ALIGN(cols, 64) })
 {
 	//compile opencl kernels and initialize memory
