@@ -18,10 +18,7 @@ namespace cl_utils
         argsCounter = 0;
     }
 
-    cl::Kernel KernelBuilder::build() const 
-    {
-        return kernel;
-    }
+    cl::Kernel KernelBuilder::build() const { return kernel; }
 
     void copyBufferToImage(const cl::CommandQueue& queue, const cl::Image2D& image2d, const cl_mem* imageBuff, const long long rows, const long long cols)
     {

@@ -310,7 +310,11 @@ xcopy "$(ProjectDir)libs\ffmpeg\bin\ffmpeg.exe" "$(OutDir)" /y /D</Command>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="buffer.hpp" />
-    <ClInclude Include="cimg_init.h" />
+    <ClInclude Include="cimg_init.h">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='OPENCL_Release|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='CUDA_Debug|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='CUDA_Release|x64'">true</ExcludedFromBuild>
+    </ClInclude>
     <ClInclude Include="cuda_utils.hpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='OPENCL_Release|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='EIGEN_Release|x64'">true</ExcludedFromBuild>
@@ -367,7 +371,11 @@ xcopy "$(ProjectDir)libs\ffmpeg\bin\ffmpeg.exe" "$(OutDir)" /y /D</Command>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='EIGEN_Debug|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='EIGEN_Release|x64'">true</ExcludedFromBuild>
     </ClInclude>
-    <ClInclude Include="PredictionErrorMatrixData.hpp" />
+    <ClInclude Include="PredictionErrorMatrixData.hpp">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='CUDA_Debug|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='CUDA_Release|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='OPENCL_Release|x64'">true</ExcludedFromBuild>
+    </ClInclude>
     <ClInclude Include="utils.hpp" />
     <ClInclude Include="videoprocessingcontext.hpp" />
     <ClInclude Include="WatermarkCuda.cuh">

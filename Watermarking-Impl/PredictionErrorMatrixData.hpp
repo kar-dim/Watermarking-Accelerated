@@ -18,7 +18,7 @@ public:
 		rx_all.resize(numThreads);
 	}
 
-	//sets all matrices and vectors to zero
+	//sets all Rx,rx matrices and vectors to zero
 	void setZero()
 	{
 		RxVec.setZero();
@@ -43,7 +43,7 @@ public:
 		rx_all[index].noalias() += x_ * pixelValue;
 	}
 
-	//calculates the coefficients by reducing (sum) the the Rx/rx matrices calculated by each thread, and reconstructing the full Rx matrix
+	//calculates the coefficients by reducing (sum) the Rx/rx matrices calculated by each thread, and reconstructing the full Rx matrix
 	void computeCoefficients()
 	{
 		//reduction sums of Rx,rx of each thread
@@ -66,10 +66,7 @@ public:
 		coefficients = Rx.colPivHouseholderQr().solve(rx);
 	}
 
-	LocalVector getCoefficients() const
-	{
-		return coefficients;
-	}
+	LocalVector getCoefficients() const { return coefficients; }
 
 private:
 	const int numThreads;

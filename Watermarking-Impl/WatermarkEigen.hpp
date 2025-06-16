@@ -10,23 +10,24 @@
 #include <omp.h>
 #include <string>
 
-template<int P>
+template<int p>
 class WatermarkEigen : public WatermarkBase 
 {
 private:
-	static constexpr int pSquared = P * P;
-	static constexpr int pad = P / 2;
+	static constexpr int pSquared = p * p;
+	static constexpr int pad = p / 2;
 	static constexpr int localSize = pSquared - 1;
-	static constexpr int neighborsSize = (P - 1) / 2;
+	static constexpr int neighborsSize = (p - 1) / 2;
 	static constexpr int halfNeighborsSize = localSize / 2;
 	using LocalVector = Eigen::Matrix<float, localSize, 1>;
+	using ArrayXXf = Eigen::ArrayXXf;
 
 public:
-	WatermarkEigen<P>(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr) :
+	WatermarkEigen<p>(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr) :
 		WatermarkBase(rows, cols, randomMatrixPath, (255.0f / sqrt(pow(10.0f, psnr / 10.0f)))), paddedRows(rows + 2 * pad),
-		paddedCols(cols + 2 * pad), padded(Eigen::ArrayXXf::Zero(paddedRows, paddedCols)),
+		paddedCols(cols + 2 * pad), padded(ArrayXXf::Zero(paddedRows, paddedCols)),
 		mask(rows, cols), errorSequence(rows, cols), filteredEstimation(rows, cols), u(rows, cols), uStrengthened(rows, cols),
-		watermarkedImage{ [](int r, int c) { return std::array<Eigen::ArrayXXf, 3>{ Eigen::ArrayXXf(r, c), Eigen::ArrayXXf(r, c), Eigen::ArrayXXf(r, c) }; }(rows, cols) },
+		watermarkedImage{ [](int r, int c) { return std::array<ArrayXXf, 3>{ ArrayXXf(r, c), ArrayXXf(r, c), ArrayXXf(r, c) }; }(rows, cols) },
 		meMatrixData(omp_get_max_threads())
 	{ }
 
@@ -73,27 +74,27 @@ public:
 	}
 private:
 	unsigned int paddedRows, paddedCols;
-	Eigen::ArrayXXf padded, mask, errorSequence, filteredEstimation, u, uStrengthened;
+	ArrayXXf padded, mask, errorSequence, filteredEstimation, u, uStrengthened;
 	EigenArrayRGB watermarkedImage;
-	PredictionErrorMatrixData<P> meMatrixData;
+	PredictionErrorMatrixData<p> meMatrixData;
 
 	//generate p x p neighbors
-	void createNeighbors(const Eigen::ArrayXXf& array, Eigen::Matrix<float, localSize, 1>& x_, const int i, const int j) const
+	void createNeighbors(const ArrayXXf& array, LocalVector& x_, const int i, const int j) const
 	{
-		const auto x_temp = array.block(i - neighborsSize, j - neighborsSize, P, P).reshaped();
+		const auto x_temp = array.block(i - neighborsSize, j - neighborsSize, p, p).reshaped();
 		//ignore the central pixel value
 		x_.head(halfNeighborsSize) = x_temp.head(halfNeighborsSize);
 		x_.tail(pSquared - halfNeighborsSize - 1) = x_temp.tail(halfNeighborsSize);
 	}
 
-	void computeCustomMask(const Eigen::ArrayXXf& image)
+	void computeCustomMask(const ArrayXXf& image)
 	{
 #pragma omp parallel for
 		for (int j = pad; j < baseCols + pad; j++)
 		{
 			for (int i = pad; i < baseRows + pad; i++)
 			{
-				const auto neighb = padded.block(i - neighborsSize, j - neighborsSize, P, P);
+				const auto neighb = padded.block(i - neighborsSize, j - neighborsSize, p, p);
 				const float mean = neighb.mean();
 				const float variance = (neighb - mean).square().sum() / pSquared;
 				mask(i - pad, j - pad) = variance / (1.0f + variance);
@@ -101,7 +102,7 @@ private:
 		}
 	}
 	//compute the strengthened watermark, calcaulated by multiplying the mask with the strengthened watermark (random matrix)
-	void computeStrengthenedWatermark(const Eigen::ArrayXXf& inputImage, float& watermarkStrength, MASK_TYPE maskType)
+	void computeStrengthenedWatermark(const ArrayXXf& inputImage, float& watermarkStrength, MASK_TYPE maskType)
 	{
 		padded.block(pad, pad, inputImage.rows(), inputImage.cols()) = inputImage;
 		if (maskType == MASK_TYPE::NVF)
@@ -141,7 +142,7 @@ private:
 	}
 
 	//computes the prediction error sequence of the padded input image
-	void computeErrorSequence(Eigen::ArrayXXf& outputErrorSequence)
+	void computeErrorSequence(ArrayXXf& outputErrorSequence)
 	{
 		const auto& coefficients = meMatrixData.getCoefficients();
 #pragma omp parallel for

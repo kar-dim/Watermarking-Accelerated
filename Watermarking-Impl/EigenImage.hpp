@@ -70,28 +70,13 @@ public:
     };
 
     //helper methods to retrieve the actual data type
-    bool isRGB() const 
-    {
-        return std::holds_alternative<EigenArrayRGB>(data);
-    }
+    bool isRGB() const { return std::holds_alternative<EigenArrayRGB>(data); }
 
-    Eigen::ArrayXXf& getGray() 
-    {
-        return std::get<Eigen::ArrayXXf>(data);
-    }
+    Eigen::ArrayXXf& getGray() { return std::get<Eigen::ArrayXXf>(data); }
 
-    const Eigen::ArrayXXf& getGray() const 
-    {
-        return std::get<Eigen::ArrayXXf>(data);
-    }
+    const Eigen::ArrayXXf& getGray() const { return std::get<Eigen::ArrayXXf>(data); }
 
-    EigenArrayRGB& getRGB() 
-    {
-        return std::get<EigenArrayRGB>(data);
-    }
+    EigenArrayRGB& getRGB() { return std::get<EigenArrayRGB>(data); }
 
-    const EigenArrayRGB& getRGB() const 
-    {
-        return std::get<EigenArrayRGB>(data);
-    }
+    const EigenArrayRGB& getRGB() const { return std::get<EigenArrayRGB>(data); }
 };
