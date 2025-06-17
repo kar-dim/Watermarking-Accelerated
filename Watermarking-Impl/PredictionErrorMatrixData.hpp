@@ -5,10 +5,8 @@
 template <int p>
 class PredictionErrorMatrixData
 {
-public:
-	static constexpr int localSize = (p * p) - 1;
-
 private:
+	static constexpr int localSize = (p * p) - 1;
 	using LocalVector = Eigen::Matrix<float, localSize, 1>;
 	using LocalVectorDiag = Eigen::Matrix<float, localSize * (localSize + 1) / 2, 1>;
 	using LocalMatrix = Eigen::Matrix<float, localSize, localSize>;
