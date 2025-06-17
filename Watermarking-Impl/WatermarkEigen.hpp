@@ -81,7 +81,7 @@ private:
 	//generate p x p neighbors
 	void createNeighbors(const ArrayXXf& array, LocalVector& x_, const int i, const int j) const
 	{
-		const auto x_temp = array.block(i - neighborsSize, j - neighborsSize, p, p).reshaped();
+		const auto& x_temp = array.block<p, p>(i - neighborsSize, j - neighborsSize).reshaped();
 		//ignore the central pixel value
 		x_.head(halfNeighborsSize) = x_temp.head(halfNeighborsSize);
 		x_.tail(pSquared - halfNeighborsSize - 1) = x_temp.tail(halfNeighborsSize);
@@ -94,7 +94,7 @@ private:
 		{
 			for (int i = pad; i < baseRows + pad; i++)
 			{
-				const auto neighb = padded.block(i - neighborsSize, j - neighborsSize, p, p);
+				const auto& neighb = padded.block<p, p>(i - neighborsSize, j - neighborsSize);
 				const float mean = neighb.mean();
 				const float variance = (neighb - mean).square().sum() / pSquared;
 				mask(i - pad, j - pad) = variance / (1.0f + variance);
