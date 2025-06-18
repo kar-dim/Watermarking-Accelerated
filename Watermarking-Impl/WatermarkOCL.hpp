@@ -18,7 +18,7 @@ struct dim2
  *  \brief  Functions for watermark computation and detection
  *  \author Dimitris Karatzas
  */
-class WatermarkOCL : public WatermarkBase, public WatermarkGPU 
+class WatermarkOCL : public WatermarkGPU 
 {
 private:
 	static constexpr int RxMappings[64]
@@ -51,6 +51,4 @@ public:
 	WatermarkOCL(WatermarkOCL&& other) noexcept = delete;
 	WatermarkOCL& operator=(WatermarkOCL&& other) noexcept = delete;
 	WatermarkOCL& operator=(const WatermarkOCL& other);
-	BufferType makeWatermark(const BufferType& inputImage, const BufferType& outputImage, float& watermarkStrength, MASK_TYPE maskType) override;
-	float detectWatermark(const BufferType& inputImage, MASK_TYPE maskType) override;
 };

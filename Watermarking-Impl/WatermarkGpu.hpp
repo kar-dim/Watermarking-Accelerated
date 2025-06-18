@@ -1,19 +1,30 @@
 #pragma once
 
+#include "buffer.hpp"
 #include "WatermarkBase.hpp"
 #include <arrayfire.h>
 #include <concepts>
 #include <stdexcept>
+#include <string>
 #include <utility>
 
-class WatermarkGPU
+class WatermarkGPU : public WatermarkBase
 {
 public:
-	WatermarkGPU(int p) : p(p) 
-	{ 
+	WatermarkGPU(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr, const int p) 
+		: WatermarkBase(rows, cols, randomMatrixPath, psnr), p(p)
+	{ }
+
+	WatermarkGPU(const unsigned int rows, const unsigned int cols, const BufferType& randomMatrix, const float strengthFactor, const int p)
+		: WatermarkBase(rows, cols, randomMatrix, strengthFactor), p(p)
+	{
 		if (p != 3 && p != 5 && p != 7 && p != 9)
 			throw std::invalid_argument("Unsupported value for p. Allowed values: 3, 5, 7, 9.");
 	}
+
+	BufferType makeWatermark(const BufferType& inputImage, const BufferType& outputImage, float& watermarkStrength, const MASK_TYPE maskType) override;
+
+	float detectWatermark(const BufferType& inputImage, const MASK_TYPE maskType) override;
 
 	virtual ~WatermarkGPU() = default;
 
@@ -42,12 +53,6 @@ protected:
 	
 	//copy data to texture and transfer ownership back to arrayfire
 	virtual void copyDataToTexture(const af::array& image) const = 0;
-
-	//main watermark embedding method for GPU-based implementations
-	af::array makeWatermarkGpu(const af::array& inputImage, const af::array& outputImage, const af::array& randomMatrix, const float strengthFactor, float& watermarkStrength, MASK_TYPE maskType);
-
-	//main detector method for GPU-based implementations
-	float detectWatermarkGpu(const af::array& inputImage, const af::array& randomMatrix, MASK_TYPE maskType);
 
 	//helper method used in detectors
 	float computeCorrelation(const af::array& e_u, const af::array& e_z) const;

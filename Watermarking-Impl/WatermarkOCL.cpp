@@ -15,8 +15,7 @@ using std::string;
 
 //initialize data and memory
 WatermarkOCL::WatermarkOCL(const unsigned int rows, const unsigned int cols, const string& randomMatrixPath, const int p, const float psnr)
-	: WatermarkBase(rows, cols, randomMatrixPath, psnr), WatermarkGPU(p), 
-	texKernelDims({ ALIGN(rows, 16), ALIGN(cols, 16) }), meKernelDims({ rows, ALIGN(cols, 64) })
+	: WatermarkGPU(rows, cols, randomMatrixPath, psnr, p), texKernelDims({ align<16>(rows), align<16>(cols) }), meKernelDims({ rows, align<64>(cols) })
 {
 	//compile opencl kernels and initialize memory
 	cl_utils::buildKernels(programs, p);
@@ -24,7 +23,7 @@ WatermarkOCL::WatermarkOCL(const unsigned int rows, const unsigned int cols, con
 }
 
 //copy constructor
-WatermarkOCL::WatermarkOCL(const WatermarkOCL& other) : WatermarkBase(other.baseRows, other.baseCols, other.randomMatrix, other.strengthFactor), WatermarkGPU(other.p),
+WatermarkOCL::WatermarkOCL(const WatermarkOCL& other) : WatermarkGPU(other.baseRows, other.baseCols, other.randomMatrix, other.strengthFactor, other.p),
 	texKernelDims(other.texKernelDims), meKernelDims(other.meKernelDims), programs(other.programs)
 {
 	initializeGpuMemory();
@@ -102,11 +101,6 @@ af::array WatermarkOCL::computeScaledNeighbors(const af::array& coefficients) co
 	}
 }
 
-BufferType WatermarkOCL::makeWatermark(const BufferType& inputImage, const BufferType& outputImage, float& watermarkStrength, MASK_TYPE maskType)
-{
-	return makeWatermarkGpu(inputImage, outputImage, randomMatrix, strengthFactor, watermarkStrength, maskType);
-}
-
 af::array WatermarkOCL::computePredictionErrorMask(const af::array& image, af::array& errorSequence, af::array& coefficients, const bool maskNeeded) const
 {
 	const af::array RxPartial(baseRows, meKernelDims.cols);
@@ -148,9 +142,4 @@ af::array WatermarkOCL::computePredictionErrorMask(const af::array& image, af::a
 		return errorSequenceAbs / af::max<float>(errorSequenceAbs);
 	}
 	return af::array();
-}
-
-float WatermarkOCL::detectWatermark(const BufferType& inputImage, MASK_TYPE maskType)
-{
-	return detectWatermarkGpu(inputImage, randomMatrix, maskType);
 }

@@ -1,7 +1,6 @@
 #include "buffer.hpp"
 #include "cuda_utils.hpp"
 #include "kernels.cuh"
-#include "WatermarkBase.hpp"
 #include "WatermarkCuda.cuh"
 #include "WatermarkGpu.hpp"
 #include <af/cuda.h>
@@ -16,13 +15,13 @@ cudaStream_t WatermarkCuda::afStream = afcu::getStream(afcu::getNativeId(af::get
 
 //initialize data and memory
 WatermarkCuda::WatermarkCuda(const unsigned int rows, const unsigned int cols, const string& randomMatrixPath, const int p, const float psnr)
-	: WatermarkBase(rows, cols, randomMatrixPath, psnr), WatermarkGPU(p), meKernelDims(ALIGN(cols, 64), rows)
+	: WatermarkGPU(rows, cols, randomMatrixPath, psnr, p), meKernelDims(align<64>(cols), rows)
 {
 	initializeGpuMemory();
 }
 
 //copy constructor
-WatermarkCuda::WatermarkCuda(const WatermarkCuda& other) : WatermarkBase(other.baseRows, other.baseCols, other.randomMatrix, other.strengthFactor), WatermarkGPU(other.p),
+WatermarkCuda::WatermarkCuda(const WatermarkCuda& other) : WatermarkGPU(other.baseRows, other.baseCols, other.randomMatrix, other.strengthFactor, other.p),
 	meKernelDims(other.meKernelDims)
 {
 	//we don't need to copy the internal buffers data, only to allocate the correct size based on other
@@ -30,7 +29,7 @@ WatermarkCuda::WatermarkCuda(const WatermarkCuda& other) : WatermarkBase(other.b
 }
 
 //move constructor
-WatermarkCuda::WatermarkCuda(WatermarkCuda&& other) noexcept : WatermarkBase(other.baseRows, other.baseCols, std::move(other.randomMatrix), other.strengthFactor), WatermarkGPU(other.p),
+WatermarkCuda::WatermarkCuda(WatermarkCuda&& other) noexcept : WatermarkGPU(other.baseRows, other.baseCols, std::move(other.randomMatrix), other.strengthFactor, other.p),
 	meKernelDims(other.meKernelDims)
 {
 	static constexpr auto moveMember = [](auto& thisData, auto& otherData, auto value) { thisData = otherData; otherData = value; };
@@ -123,11 +122,6 @@ af::array WatermarkCuda::computeScaledNeighbors(const af::array& coefficients) c
 	return neighbors;
 }
 
-BufferType WatermarkCuda::makeWatermark(const BufferType& inputImage, const BufferType& outputImage, float& watermarkStrength, MASK_TYPE maskType)
-{
-	return makeWatermarkGpu(inputImage, outputImage, randomMatrix, strengthFactor, watermarkStrength, maskType);
-}
-
 af::array WatermarkCuda::computePredictionErrorMask(const af::array& image, af::array& errorSequence, af::array& coefficients, const bool maskNeeded) const
 {
 	const dim3 gridSize = cuda_utils::gridSizeCalculate(meKernelBlockSize, meKernelDims.y, meKernelDims.x);
@@ -153,9 +147,4 @@ af::array WatermarkCuda::computePredictionErrorMask(const af::array& image, af::
 		return errorSequenceAbs / af::max<float>(errorSequenceAbs);
 	}
 	return af::array();
-}
-
-float WatermarkCuda::detectWatermark(const BufferType& inputImage, MASK_TYPE maskType)
-{
-	return detectWatermarkGpu(inputImage, randomMatrix, maskType);
 }

@@ -6,7 +6,7 @@
 #include <cuda_runtime.h>
 #include <string>
 
-class WatermarkCuda : public WatermarkBase, public WatermarkGPU
+class WatermarkCuda : public WatermarkGPU
 {
 private:
 	static constexpr dim3 texKernelBlockSize{ 16, 16 }, meKernelBlockSize{ 64, 1 };
@@ -29,6 +29,4 @@ public:
 	WatermarkCuda& operator=(WatermarkCuda&& other) noexcept;
 	WatermarkCuda& operator=(const WatermarkCuda& other);
 	~WatermarkCuda();
-	BufferType makeWatermark(const BufferType& inputImage, const BufferType& outputImage, float& watermarkStrength, MASK_TYPE type) override;
-	float detectWatermark(const BufferType& inputImage, MASK_TYPE maskType) override;
 };

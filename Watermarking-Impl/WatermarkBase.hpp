@@ -15,10 +15,6 @@ enum MASK_TYPE
 	NVF
 };
 
-#define ALIGN(x, ALIGN) (((x) + ((ALIGN) - 1)) & ~((ALIGN) - 1))
-#define MASK_CALC_NOT_REQUIRED false
-#define MASK_CALC_REQUIRED true
-
 /*!
  *  \brief  Functions for watermark computation and detection
  *  \author Dimitris Karatzas
@@ -48,6 +44,10 @@ public:
 	virtual float detectWatermark(const BufferType& inputImage, const MASK_TYPE maskType) = 0;
 
 protected:
+	template<unsigned int ALIGN>
+	static constexpr unsigned int align(const unsigned int x) { return (x + (ALIGN - 1)) & ~(ALIGN - 1); }
+	static constexpr bool maskCalcRequired = true;
+	static constexpr bool maskCalcNotRequired = false;
 	unsigned int baseRows, baseCols;
 	BufferType randomMatrix;
 	float strengthFactor;

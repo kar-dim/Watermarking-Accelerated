@@ -1,3 +1,4 @@
+#include "buffer.hpp"
 #include "WatermarkBase.hpp"
 #include "WatermarkGpu.hpp"
 #include <arrayfire.h>
@@ -11,13 +12,13 @@ void WatermarkGPU::displayArray(const af::array& array, const int width, const i
 		window.image(array);
 }
 
-af::array WatermarkGPU::makeWatermarkGpu(const af::array& inputImage, const af::array& outputImage, const af::array& randomMatrix, const float strengthFactor, float& watermarkStrength, MASK_TYPE maskType)
+BufferType WatermarkGPU::makeWatermark(const BufferType& inputImage, const BufferType& outputImage, float& watermarkStrength, const MASK_TYPE maskType)
 {
 	af::array mask, inputErrorSequence, inputCoefficients;
 	copyDataToTexture(inputImage);
 	if (maskType == MASK_TYPE::ME)
 	{
-		mask = computePredictionErrorMask(inputImage, inputErrorSequence, inputCoefficients, MASK_CALC_REQUIRED);
+		mask = computePredictionErrorMask(inputImage, inputErrorSequence, inputCoefficients, maskCalcRequired);
 		//if the system is not solvable, don't waste time embeding the watermark, return output image without modification
 		if (inputCoefficients.elements() == 0)
 			return outputImage;
@@ -29,17 +30,17 @@ af::array WatermarkGPU::makeWatermarkGpu(const af::array& inputImage, const af::
 	return af::clamp(outputImage + (u * watermarkStrength), 0, 255);
 }
 
-float WatermarkGPU::detectWatermarkGpu(const af::array& inputImage, const af::array& randomMatrix, MASK_TYPE maskType)
+float WatermarkGPU::detectWatermark(const BufferType& inputImage, const MASK_TYPE maskType)
 {
 	af::array mask, errorSequenceW, coefficients;
 	copyDataToTexture(inputImage);
 	if (maskType == MASK_TYPE::NVF)
 	{
-		computePredictionErrorMask(inputImage, errorSequenceW, coefficients, MASK_CALC_NOT_REQUIRED);
+		computePredictionErrorMask(inputImage, errorSequenceW, coefficients, maskCalcNotRequired);
 		mask = computeCustomMask();
 	}
 	else
-		mask = computePredictionErrorMask(inputImage, errorSequenceW, coefficients, MASK_CALC_REQUIRED);
+		mask = computePredictionErrorMask(inputImage, errorSequenceW, coefficients, maskCalcRequired);
 	//if the system is not solvable, don't waste time computing the correlation, there is no watermark
 	if (coefficients.elements() == 0)
 		return 0.0f;
