@@ -137,7 +137,7 @@ af::array WatermarkCuda::computePredictionErrorMask(const af::array& image, af::
 	me_p3 <<<gridSize, meKernelBlockSize, 0, afStream >>> (texObj, RxPartial.device<float>(), rxPartial.device<float>(), baseCols, meKernelDims.x, baseRows);
 	unlockArrays(RxPartial, rxPartial);
 	//calculation of coefficients, error sequence and mask
-	const auto correlationArrays = transformCorrelationArrays(RxPartial, rxPartial, p);
+	const auto correlationArrays = transformCorrelationArrays(RxPartial, rxPartial);
 	coefficients = af::solve(correlationArrays.first, correlationArrays.second);
 	//if system is not solvable, don't waste computing the error sequence, there is no watermark to embed
 	if (af::anyTrue<bool>(af::isNaN(coefficients))) 

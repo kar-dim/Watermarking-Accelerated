@@ -57,5 +57,5 @@ protected:
 
 	//helper method to sum the incomplete Rx_partial and rxPartial arrays which were produced from the custom kernel
 	//and to transform them to the correct size, so that they can be used by the system solver
-	std::pair<af::array, af::array> transformCorrelationArrays(const af::array& RxPartial, const af::array& rxPartial, const int p) const;
+	std::pair<af::array, af::array> transformCorrelationArrays(const af::array& RxPartial, const af::array& rxPartial) const;
 };

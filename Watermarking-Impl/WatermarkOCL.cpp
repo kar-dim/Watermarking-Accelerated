@@ -131,7 +131,7 @@ af::array WatermarkOCL::computePredictionErrorMask(const af::array& image, af::a
 
 	unlockArrays(RxPartial, rxPartial);
 	//calculation of coefficients, error sequence and mask
-	const auto correlationArrays = transformCorrelationArrays(RxPartial, rxPartial, p);
+	const auto correlationArrays = transformCorrelationArrays(RxPartial, rxPartial);
 	//solve() may crash in OpenCL ArrayFire implementation if the system is not solvable.
 	try {
 		coefficients = af::solve(correlationArrays.first, correlationArrays.second);

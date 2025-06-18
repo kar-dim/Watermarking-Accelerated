@@ -58,7 +58,7 @@ af::array WatermarkGPU::computeErrorSequence(const af::array& u, const af::array
 	return u - computeScaledNeighbors(coefficients);
 }
 
-std::pair<af::array, af::array> WatermarkGPU::transformCorrelationArrays(const af::array& RxPartial, const af::array& rxPartial, const int p) const
+std::pair<af::array, af::array> WatermarkGPU::transformCorrelationArrays(const af::array& RxPartial, const af::array& rxPartial) const
 {
 	const int neighborsSize = (p * p) - 1;
 	const int neighborsSizeSq = neighborsSize * neighborsSize;
