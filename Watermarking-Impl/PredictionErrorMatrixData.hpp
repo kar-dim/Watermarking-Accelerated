@@ -10,7 +10,6 @@ private:
 	using LocalVector = Eigen::Matrix<float, localSize, 1>;
 	using LocalVectorDiag = Eigen::Matrix<float, localSize * (localSize + 1) / 2, 1>;
 	using LocalMatrix = Eigen::Matrix<float, localSize, localSize>;
-	const int numThreads;
 	LocalVectorDiag RxVec;
 	LocalVector coefficients, rx;
 	LocalMatrix Rx;
@@ -19,7 +18,7 @@ private:
 
 public:
 	//initialize prediction error matrix data (allocate memory) for a given number of threads
-	PredictionErrorMatrixData(const int numThreads) : numThreads(numThreads), RxVec_all(numThreads), rx_all(numThreads)
+	PredictionErrorMatrixData(const int numThreads) : RxVec_all(numThreads), rx_all(numThreads)
 	{ }
 
 	//sets all Rx,rx matrices and vectors to zero
@@ -28,11 +27,8 @@ public:
 		RxVec.setZero();
 		Rx.setZero();
 		rx.setZero();
-		for (int i = 0; i < numThreads; i++)
-		{
-			RxVec_all[i].setZero();
-			rx_all[i].setZero();
-		}
+		for (auto& rxVec : RxVec_all) rxVec.setZero();
+		for (auto& rx : rx_all) rx.setZero();
 	}
 
 	//computes the prediction error matrices for each thread
@@ -51,11 +47,10 @@ public:
 	void computeCoefficients()
 	{
 		//reduction sums of Rx,rx of each thread
-		for (int i = 0; i < numThreads; i++)
-		{
-			RxVec.noalias() += RxVec_all[i];
-			rx.noalias() += rx_all[i];
-		}
+		for (const auto& RxVal : RxVec_all)
+			RxVec.noalias() += RxVal;
+		for (const auto& rxVal : rx_all)
+			rx.noalias() += rxVal;
 		//Reconstruct full Rx matrix from the vector
 		for (int i = 0, k = 0; i < localSize; i++) 
 		{
