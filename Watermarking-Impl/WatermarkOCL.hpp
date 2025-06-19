@@ -1,10 +1,8 @@
 ﻿#pragma once
-#include "arrayfire.h"
-#include "buffer.hpp"
 #include "opencl_init.h"
-#include "WatermarkBase.hpp"
 #include "WatermarkGpu.hpp"
 #include <af/opencl.h>
+#include <arrayfire.h>
 #include <string>
 #include <vector>
 
@@ -42,7 +40,7 @@ private:
 	void initializeGpuMemory() override;
 	af::array computeCustomMask() const override;
 	af::array computeScaledNeighbors(const af::array& coefficients) const override;
-	af::array computePredictionErrorMask(const af::array& image, af::array& errorSequence, af::array& coefficients, const bool maskNeeded) const override;
+	void computePredictionErrorData(const af::array& image, af::array& errorSequence, af::array& coefficients) const override;
 	void copyDataToTexture(const af::array& image) const override;
 
 public:

@@ -1,4 +1,3 @@
-#include "buffer.hpp"
 #include "cuda_utils.hpp"
 #include "kernels.cuh"
 #include "WatermarkCuda.cuh"
@@ -122,7 +121,7 @@ af::array WatermarkCuda::computeScaledNeighbors(const af::array& coefficients) c
 	return neighbors;
 }
 
-af::array WatermarkCuda::computePredictionErrorMask(const af::array& image, af::array& errorSequence, af::array& coefficients, const bool maskNeeded) const
+void WatermarkCuda::computePredictionErrorData(const af::array& image, af::array& errorSequence, af::array& coefficients) const
 {
 	const dim3 gridSize = cuda_utils::gridSizeCalculate(meKernelBlockSize, meKernelDims.y, meKernelDims.x);
 	//call prediction error mask kernel
@@ -137,14 +136,8 @@ af::array WatermarkCuda::computePredictionErrorMask(const af::array& image, af::
 	if (af::anyTrue<bool>(af::isNaN(coefficients))) 
 	{
 		coefficients = af::array(0, f32);
-		return af::array();
+		return;
 	}
 	//call scaled neighbors kernel and compute error sequence
 	errorSequence = image - computeScaledNeighbors(coefficients);
-	if (maskNeeded)
-	{
-		const af::array errorSequenceAbs = af::abs(errorSequence);
-		return errorSequenceAbs / af::max<float>(errorSequenceAbs);
-	}
-	return af::array();
 }

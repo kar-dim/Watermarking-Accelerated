@@ -1,5 +1,4 @@
 #pragma once
-
 #include "buffer.hpp"
 #include "WatermarkBase.hpp"
 #include <arrayfire.h>
@@ -47,10 +46,13 @@ protected:
 	//computes scaled neighbors array used in prediction error mask
 	virtual af::array computeScaledNeighbors(const af::array& coefficients) const = 0;
 	
-	//Compute prediction error mask. Used in both creation and detection of the watermark.
-	//can also calculate error sequence and prediction error filter
-	virtual af::array computePredictionErrorMask(const af::array& image, af::array& errorSequence, af::array& coefficients, const bool maskNeeded) const = 0;
+	//Used in both creation and detection of the watermark.
+	//Calculates error sequence and prediction error filter (coefficients)
+	virtual void computePredictionErrorData(const af::array& image, af::array& errorSequence, af::array& coefficients) const = 0;
 	
+	//compute prediction error mask
+	af::array computePredictionErrorMask(const af::array& errorSequence) const;
+
 	//copy data to texture and transfer ownership back to arrayfire
 	virtual void copyDataToTexture(const af::array& image) const = 0;
 

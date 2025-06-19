@@ -1,5 +1,4 @@
-﻿#include "buffer.hpp"
-#include "opencl_init.h"
+﻿#include "opencl_init.h"
 #include "opencl_utils.hpp"
 #include "WatermarkBase.hpp"
 #include "WatermarkGpu.hpp"
@@ -101,7 +100,7 @@ af::array WatermarkOCL::computeScaledNeighbors(const af::array& coefficients) co
 	}
 }
 
-af::array WatermarkOCL::computePredictionErrorMask(const af::array& image, af::array& errorSequence, af::array& coefficients, const bool maskNeeded) const
+void WatermarkOCL::computePredictionErrorData(const af::array& image, af::array& errorSequence, af::array& coefficients) const
 {
 	const af::array RxPartial(baseRows, meKernelDims.cols);
 	const af::array rxPartial(baseRows, meKernelDims.cols / 8);
@@ -132,14 +131,8 @@ af::array WatermarkOCL::computePredictionErrorMask(const af::array& image, af::a
 	}
 	catch (const af::exception&) {
 		coefficients = af::array(0, f32);
-		return af::array();
+		return;
 	}
 	//call scaled neighbors kernel and compute error sequence
 	errorSequence = image - computeScaledNeighbors(coefficients);
-	if (maskNeeded) 
-	{
-		const af::array errorSequenceAbs = af::abs(errorSequence);
-		return errorSequenceAbs / af::max<float>(errorSequenceAbs);
-	}
-	return af::array();
 }

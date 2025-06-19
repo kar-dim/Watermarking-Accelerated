@@ -1,6 +1,4 @@
 #pragma once
-#include "buffer.hpp"
-#include "WatermarkBase.hpp"
 #include "WatermarkGpu.hpp"
 #include <arrayfire.h>
 #include <cuda_runtime.h>
@@ -18,7 +16,7 @@ private:
 	void initializeGpuMemory() override;
 	af::array computeCustomMask() const override;
 	af::array computeScaledNeighbors(const af::array& coefficients) const override;
-	af::array computePredictionErrorMask(const af::array& image, af::array& errorSequence, af::array& coefficients, const bool maskNeeded) const override;
+	void computePredictionErrorData(const af::array& image, af::array& errorSequence, af::array& coefficients) const override;
 	void copyDataToTexture(const af::array& image) const override;
 	void copyParams(const WatermarkCuda& other) noexcept;
 

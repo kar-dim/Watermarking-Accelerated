@@ -18,10 +18,11 @@ BufferType WatermarkGPU::makeWatermark(const BufferType& inputImage, const Buffe
 	copyDataToTexture(inputImage);
 	if (maskType == MASK_TYPE::ME)
 	{
-		mask = computePredictionErrorMask(inputImage, inputErrorSequence, inputCoefficients, maskCalcRequired);
+		computePredictionErrorData(inputImage, inputErrorSequence, inputCoefficients);
 		//if the system is not solvable, don't waste time embeding the watermark, return output image without modification
 		if (inputCoefficients.elements() == 0)
 			return outputImage;
+		mask = computePredictionErrorMask(inputErrorSequence);
 	}
 	else
 		mask = computeCustomMask();
@@ -34,18 +35,19 @@ float WatermarkGPU::detectWatermark(const BufferType& inputImage, const MASK_TYP
 {
 	af::array mask, errorSequenceW, coefficients;
 	copyDataToTexture(inputImage);
-	if (maskType == MASK_TYPE::NVF)
-	{
-		computePredictionErrorMask(inputImage, errorSequenceW, coefficients, maskCalcNotRequired);
-		mask = computeCustomMask();
-	}
-	else
-		mask = computePredictionErrorMask(inputImage, errorSequenceW, coefficients, maskCalcRequired);
+	computePredictionErrorData(inputImage, errorSequenceW, coefficients);
+	mask = maskType == MASK_TYPE::NVF ? computeCustomMask() : computePredictionErrorMask(errorSequenceW);
 	//if the system is not solvable, don't waste time computing the correlation, there is no watermark
 	if (coefficients.elements() == 0)
 		return 0.0f;
 	const af::array u = mask * randomMatrix;
 	return computeCorrelation(computeErrorSequence(u, coefficients), errorSequenceW);
+}
+
+af::array WatermarkGPU::computePredictionErrorMask(const af::array& errorSequence) const
+{
+	const af::array errorSequenceAbs = af::abs(errorSequence);
+	return errorSequenceAbs / af::max<float>(errorSequenceAbs);
 }
 
 float WatermarkGPU::computeCorrelation(const af::array& e_u, const af::array& e_z) const

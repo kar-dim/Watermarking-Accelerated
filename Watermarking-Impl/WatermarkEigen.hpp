@@ -51,11 +51,11 @@ public:
 		padded.block(pad, pad, watermarkedBuffer.rows(), watermarkedBuffer.cols()) = watermarkedBuffer;
 		if (maskType == MASK_TYPE::NVF)
 		{
-			computePredictionErrorMask<maskCalcNotRequired>();
+			computePredictionErrorData<maskCalcNotRequired>();
 			computeCustomMask(watermarkedBuffer);
 		}
 		else
-			computePredictionErrorMask<maskCalcRequired>();
+			computePredictionErrorData<maskCalcRequired>();
 
 		padded.block(pad, pad, watermarkedBuffer.rows(), watermarkedBuffer.cols()) = (mask * randomMatrix.getGray());
 		computeErrorSequence(filteredEstimation);
@@ -108,15 +108,15 @@ private:
 		if (maskType == MASK_TYPE::NVF)
 			computeCustomMask(inputImage);
 		else
-			computePredictionErrorMask<maskCalcRequired>();
+			computePredictionErrorData<maskCalcRequired>();
 		u = mask * randomMatrix.getGray();
 		watermarkStrength = strengthFactor / sqrt(u.square().sum() / (baseRows * baseCols));
 		uStrengthened = u * watermarkStrength;
 	}
 
-	//compute Prediction error mask
+	//compute Prediction error data (coefficients, error sequence), and if needed, prediction error mask
 	template<bool maskNeeded>
-	void computePredictionErrorMask()
+	void computePredictionErrorData()
 	{
 		meMatrixData.setZero();
 
