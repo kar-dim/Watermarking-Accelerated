@@ -63,13 +63,13 @@ af::array WatermarkGPU::computeErrorSequence(const af::array& u, const af::array
 
 std::pair<af::array, af::array> WatermarkGPU::transformCorrelationArrays(const af::array& RxPartial, const af::array& rxPartial) const
 {
-	const int neighborsSize = (p * p) - 1;
-	const int neighborsSizeSq = neighborsSize * neighborsSize;
+	const int localSize = (p * p) - 1;
+	const int localSizeSq = localSize * localSize;
 	const auto paddedElems = RxPartial.dims(0) * RxPartial.dims(1);
 	//reduction sum of blocks
 	//all [p^2-1,1] blocks will be summed in rx
 	//all [p^2-1, p^2-1] blocks will be summed in Rx
-	const af::array Rx = af::moddims(af::sum(af::moddims(RxPartial, neighborsSizeSq, paddedElems / neighborsSizeSq), 1), neighborsSize, neighborsSize);
-	const af::array rx = af::sum(af::moddims(rxPartial, neighborsSize, paddedElems / (8 * neighborsSize)), 1);
+	const af::array Rx = af::moddims(af::sum(af::moddims(RxPartial, localSizeSq, paddedElems / localSizeSq), 1), localSize, localSize);
+	const af::array rx = af::sum(af::moddims(rxPartial, localSize, paddedElems / localSizeSq), 1);
 	return std::make_pair(Rx, rx);
 }

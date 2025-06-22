@@ -17,7 +17,7 @@ private:
 	static constexpr int pSquared = p * p;
 	static constexpr int pad = p / 2;
 	static constexpr int localSize = pSquared - 1;
-	static constexpr int neighborsSize = (p - 1) / 2;
+	static constexpr int blockRadius = p / 2;
 	static constexpr int halfNeighborsSize = localSize / 2;
 	using LocalVector = Eigen::Matrix<float, localSize, 1>;
 	using ArrayXXf = Eigen::ArrayXXf;
@@ -81,7 +81,7 @@ private:
 	//generate (p x p) - 1 neighbors
 	void createNeighbors(const ArrayXXf& array, LocalVector& x_, const int i, const int j) const
 	{
-		const auto& block = array.block<p, p>(i - neighborsSize, j - neighborsSize).reshaped();
+		const auto& block = array.block<p, p>(i - blockRadius, j - blockRadius).reshaped();
 		//ignore the central pixel value
 		x_.head(halfNeighborsSize) = block.head(halfNeighborsSize);
 		x_.tail(pSquared - halfNeighborsSize - 1) = block.tail(halfNeighborsSize);
@@ -94,7 +94,7 @@ private:
 		{
 			for (int i = pad; i < baseRows + pad; i++)
 			{
-				const auto& neighb = padded.block<p, p>(i - neighborsSize, j - neighborsSize);
+				const auto& neighb = padded.block<p, p>(i - blockRadius, j - blockRadius);
 				const float mean = neighb.mean();
 				const float variance = (neighb - mean).square().sum() / pSquared;
 				mask(i - pad, j - pad) = variance / (1.0f + variance);
