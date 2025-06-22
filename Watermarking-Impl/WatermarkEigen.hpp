@@ -78,13 +78,13 @@ private:
 	EigenArrayRGB watermarkedImage;
 	PredictionErrorMatrixData<p> meMatrixData;
 
-	//generate p x p neighbors
+	//generate (p x p) - 1 neighbors
 	void createNeighbors(const ArrayXXf& array, LocalVector& x_, const int i, const int j) const
 	{
-		const auto& x_temp = array.block<p, p>(i - neighborsSize, j - neighborsSize).reshaped();
+		const auto& block = array.block<p, p>(i - neighborsSize, j - neighborsSize).reshaped();
 		//ignore the central pixel value
-		x_.head(halfNeighborsSize) = x_temp.head(halfNeighborsSize);
-		x_.tail(pSquared - halfNeighborsSize - 1) = x_temp.tail(halfNeighborsSize);
+		x_.head(halfNeighborsSize) = block.head(halfNeighborsSize);
+		x_.tail(pSquared - halfNeighborsSize - 1) = block.tail(halfNeighborsSize);
 	}
 
 	void computeCustomMask(const ArrayXXf& image)
