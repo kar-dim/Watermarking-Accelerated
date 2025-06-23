@@ -36,10 +36,10 @@ float WatermarkGPU::detectWatermark(const BufferType& inputImage, const MASK_TYP
 	af::array mask, errorSequenceW, coefficients;
 	copyDataToTexture(inputImage);
 	computePredictionErrorData(inputImage, errorSequenceW, coefficients);
-	mask = maskType == MASK_TYPE::NVF ? computeCustomMask() : computePredictionErrorMask(errorSequenceW);
 	//if the system is not solvable, don't waste time computing the correlation, there is no watermark
 	if (coefficients.elements() == 0)
 		return 0.0f;
+	mask = maskType == MASK_TYPE::NVF ? computeCustomMask() : computePredictionErrorMask(errorSequenceW);
 	const af::array u = mask * randomMatrix;
 	return computeCorrelation(computeErrorSequence(u, coefficients), errorSequenceW);
 }
