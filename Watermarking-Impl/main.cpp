@@ -23,6 +23,7 @@
 #include "buffer.hpp"
 #include "utils.hpp"
 #include "videoprocessingcontext.hpp"
+#include <cerrno>
 #include <cstdint>
 #include <cstring>
 #include <exception>
@@ -48,6 +49,7 @@ extern "C" {
 #include <libavutil/pixfmt.h>
 #include "libavcodec/codec_par.h"
 #include "libavutil/rational.h"
+#include "libavutil/error.h"
 }
 
 #if defined(_USE_OPENCL_) || defined(_USE_CUDA_)
@@ -398,7 +400,7 @@ void detectFrameWatermark(const VideoProcessingContext& data, BufferType& inputF
 		inputFrame = Map<GrayBuffer>(rowPadding ? data.inputFramePtr : frame->data[0], data.width, data.height).transpose().cast<float>();
 #endif
 		float correlation = data.watermarkObj->detectWatermark(inputFrame, MASK_TYPE::ME);
-		cout << "Correlation for frame: " << framesCount << ": " << correlation << "\n";
+		cout << "Correlation for frame: " << (framesCount + 1) << ": " << correlation << "\n";
 	}
 	framesCount++;
 }
@@ -445,13 +447,23 @@ bool receivedValidVideoFrame(AVCodecContext* inputDecoderCtx, AVPacket* packet, 
 		av_packet_unref(packet);
 		return false;
 	}
-	int sendPacketResult = avcodec_send_packet(inputDecoderCtx, packet);
+	int ret = avcodec_send_packet(inputDecoderCtx, packet);
 	av_packet_unref(packet);
-	if (sendPacketResult != 0 || avcodec_receive_frame(inputDecoderCtx, frame) != 0)
+	if (ret != 0)
 		return false;
-	const bool validFormat = frame->format == AV_PIX_FMT_YUV420P || frame->format == AV_PIX_FMT_YUVJ420P;
-	checkError(!validFormat, "Error: Video frame format not supported, aborting");
-	return validFormat;
+
+	while (true) 
+	{
+		ret = avcodec_receive_frame(inputDecoderCtx, frame);
+		if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
+			break;
+		if (ret < 0)
+			return false;
+		const bool validFormat = frame->format == AV_PIX_FMT_YUV420P || frame->format == AV_PIX_FMT_YUVJ420P;
+		checkError(!validFormat, "Error: Video frame format not supported, aborting");
+		return validFormat;
+	}
+	return false;
 }
 
 //helper method to calculate execution time in FPS or in seconds
