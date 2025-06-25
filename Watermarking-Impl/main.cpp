@@ -34,6 +34,7 @@
 #include <iostream>
 #include <memory>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include "WatermarkBase.hpp"
 #include <utility>
@@ -77,13 +78,12 @@ using FILEPtr = std::unique_ptr<FILE, decltype(&_pclose)>;
  *  \author Dimitris Karatzas
  */
 void exitProgram(const int exitCode);
-std::string executionTime(const bool showFps, const double seconds);
+string executionTime(const bool showFps, const double seconds);
 int testForImage(const INIReader& inir, const int p, const float psnr);
 int testForVideo(const INIReader& inir, const string& videoFile, const int p, const float psnr);
 int findVideoStreamIndex(const AVFormatContext* inputFormatCtx);
 AVCodecContext* openDecoderContext(const AVCodecParameters* params);
-bool receivedValidVideoFrame(AVCodecContext* inputDecoderCtx, AVPacket* packet, AVFrame* frame, const int videoStreamIndex);
-std::string getVideoFrameRate(const AVFormatContext* inputFormatCtx, const int videoStreamIndex);
+string getVideoFrameRate(const AVFormatContext* inputFormatCtx, const int videoStreamIndex);
 void embedWatermarkFrame(const VideoProcessingContext& data, BufferType& inputFrame, GrayBuffer& watermarkedFrame, int& framesCount, AVFrame* frame, FILE* ffmpegPipe);
 void detectFrameWatermark(const VideoProcessingContext& data, BufferType& inputFrame, int& framesCount, AVFrame* frame);
 int processFrames(const VideoProcessingContext& data, std::function<void(AVFrame*, int&)> processFrame);
@@ -329,16 +329,34 @@ int processFrames(const VideoProcessingContext& data, std::function<void(AVFrame
 	//read video frames loop
 	while (av_read_frame(data.inputFormatCtx, packet.get()) >= 0)
 	{
-		if (!receivedValidVideoFrame(data.inputDecoderCtx, packet.get(), frame.get(), data.videoStreamIndex))
+		if (packet->stream_index != data.videoStreamIndex || avcodec_send_packet(data.inputDecoderCtx, packet.get()) < 0) 
+		{
+			av_packet_unref(packet.get());
 			continue;
-		processFrame(frame.get(), framesCount);
+		}
+		while (true)
+		{
+			int ret = avcodec_receive_frame(data.inputDecoderCtx, frame.get());
+			if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
+				break;
+			if (ret < 0)
+			{
+				char errbuf[256];
+				av_strerror(ret, errbuf, sizeof(errbuf));
+				av_packet_unref(packet.get());
+				throw std::runtime_error(std::string("FFmpeg decoding error: ") + errbuf);
+			}
+			checkError(frame->format != AV_PIX_FMT_YUV420P && frame->format != AV_PIX_FMT_YUVJ420P, "Error: Video frame format not supported, aborting");
+			processFrame(frame.get(), framesCount);
+		}
+		av_packet_unref(packet.get());
 	}
 	//ensure all remaining frames are flushed
 	avcodec_send_packet(data.inputDecoderCtx, nullptr);
 	while (avcodec_receive_frame(data.inputDecoderCtx, frame.get()) == 0)
 	{
-		if (frame->format == data.inputDecoderCtx->pix_fmt)
-			processFrame(frame.get(), framesCount);
+		checkError(frame->format != AV_PIX_FMT_YUV420P && frame->format != AV_PIX_FMT_YUVJ420P, "Error: Video frame format not supported, aborting");
+		processFrame(frame.get(), framesCount);
 	}
 	return framesCount;
 }
@@ -368,7 +386,6 @@ void embedWatermarkFrame(const VideoProcessingContext& data, BufferType& inputFr
 			fwrite(frame->data[1] + y * frame->linesize[1], 1, data.width / 2, ffmpegPipe);
 		for (int y = 0; y < data.height / 2; y++)
 			fwrite(frame->data[2] + y * frame->linesize[2], 1, data.width / 2, ffmpegPipe);
-
 	}
 	//no row padding, read and write data directly
 	else
@@ -437,33 +454,6 @@ string getVideoFrameRate(const AVFormatContext* inputFormatCtx, const int videoS
 {
 	const AVRational frameRate = inputFormatCtx->streams[videoStreamIndex]->avg_frame_rate;
 	return std::format("{:.3f}", static_cast<float>(frameRate.num) / frameRate.den);
-}
-
-//supply a packet to the decoder and check if the received frame is valid by checking its format
-bool receivedValidVideoFrame(AVCodecContext* inputDecoderCtx, AVPacket* packet, AVFrame* frame, const int videoStreamIndex)
-{
-	if (packet->stream_index != videoStreamIndex)
-	{
-		av_packet_unref(packet);
-		return false;
-	}
-	int ret = avcodec_send_packet(inputDecoderCtx, packet);
-	av_packet_unref(packet);
-	if (ret != 0)
-		return false;
-
-	while (true) 
-	{
-		ret = avcodec_receive_frame(inputDecoderCtx, frame);
-		if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
-			break;
-		if (ret < 0)
-			return false;
-		const bool validFormat = frame->format == AV_PIX_FMT_YUV420P || frame->format == AV_PIX_FMT_YUVJ420P;
-		checkError(!validFormat, "Error: Video frame format not supported, aborting");
-		return validFormat;
-	}
-	return false;
 }
 
 //helper method to calculate execution time in FPS or in seconds
