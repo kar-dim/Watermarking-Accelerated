@@ -1,13 +1,15 @@
 #pragma once
-#if defined(_USE_OPENCL_) || defined(_USE_CUDA_)
+#include "buffer.hpp"
+
+#if defined(_USE_GPU_)
 #include <arrayfire.h>
 #include <utility>
 #endif
+
 #include <chrono>
-#include <string>
-#include "buffer.hpp"
-#include "WatermarkBase.hpp"
 #include <memory>
+#include <string>
+#include "WatermarkBase.hpp"
 
 /*!
  *  \brief  Helper utility methods for testing the watermark algorithms
@@ -41,7 +43,7 @@ public:
 		return totalSecs;
 	}
 	//returns the maximum image size supported by the GPU device (cols, rows)
-#if defined(_USE_OPENCL_) || defined(_USE_CUDA_)
+#if defined(_USE_GPU_)
 	static std::pair<unsigned int, unsigned int> getMaxImageSize();
 #endif
 };

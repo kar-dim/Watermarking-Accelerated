@@ -20,13 +20,6 @@ extern "C" {
 #include "libavcodec/packet.h"
 }
 
-#if defined(_USE_EIGEN_)
-using GrayBuffer = Eigen::Array<uint8_t, Eigen::Dynamic, Eigen::Dynamic>;
-#elif defined(_USE_OPENCL_) || defined(_USE_CUDA_)
-#define _USE_GPU_
-using GrayBuffer = af::array;
-#endif
-
 using AVPacketPtr = std::unique_ptr<AVPacket, std::function<void(AVPacket*)>>;
 using AVFramePtr = std::unique_ptr<AVFrame, std::function<void(AVFrame*)>>;
 using AVFormatContextPtr = std::unique_ptr<AVFormatContext, std::function<void(AVFormatContext*)>>;

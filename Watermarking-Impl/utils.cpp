@@ -74,7 +74,7 @@ string Utils::formatExecutionTime(const bool showFps, const double seconds)
 	return showFps ? std::format("FPS: {:.2f} FPS", 1.0 / seconds) : std::format("{:.6f} seconds", seconds);
 }
 
-#if defined(_USE_OPENCL_) || defined(_USE_CUDA_)
+#if defined(_USE_GPU_)
 std::pair<unsigned int, unsigned int> Utils::getMaxImageSize()
 {
 #if defined(_USE_OPENCL_)

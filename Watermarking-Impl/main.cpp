@@ -18,21 +18,21 @@
 #endif
 
 #include "buffer.hpp"
+#include "host_memory.h"
 #include "utils.hpp"
 #include "videoprocessingcontext.hpp"
 #include "video_utils.hpp"
+#include "WatermarkBase.hpp"
 #include <cstdio>
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
 #include <format>
-#include "host_memory.h"
 #include <INIReader.h>
 #include <iostream>
 #include <memory>
 #include <sstream>
 #include <string>
-#include "WatermarkBase.hpp"
 #include <utility>
 
 extern "C" {
@@ -40,19 +40,11 @@ extern "C" {
 #include <libavformat/avformat.h>
 #include <libavutil/frame.h>
 #include <libavutil/log.h>
-#include "libavcodec/codec_par.h"
 }
-
-#if defined(_USE_OPENCL_) || defined(_USE_CUDA_)
-#define _USE_GPU_
-#endif
 
 #if defined(_USE_EIGEN_)
 using namespace cimg_library;
 using namespace Eigen;
-using GrayBuffer = Array<uint8_t, Dynamic, Dynamic>;
-#elif defined(_USE_GPU_) 
-using GrayBuffer = af::array;
 #endif
 
 using std::cout;
