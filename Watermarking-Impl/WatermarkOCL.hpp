@@ -3,6 +3,7 @@
 #include "WatermarkGpu.hpp"
 #include <af/opencl.h>
 #include <arrayfire.h>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -42,6 +43,17 @@ private:
 	af::array computeScaledNeighbors(const af::array& coefficients) const override;
 	void computePredictionErrorData(const af::array& image, af::array& errorSequence, af::array& coefficients) const override;
 	void copyDataToTexture(const af::array& image) const override;
+
+	template<typename Func>
+	void executeKernel(const Func& kernelFunc, const std::string& context) const
+	{
+		try {
+			kernelFunc();
+		}
+		catch (const cl::Error& ex) {
+			throw std::runtime_error("OpenCL Error in " + context + ": " + std::string(ex.what()) + " Error code: " + std::to_string(ex.err()) + "\n");
+		}
+	}
 
 public:
 	WatermarkOCL(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const int p, const float psnr);

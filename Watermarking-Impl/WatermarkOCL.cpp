@@ -64,19 +64,15 @@ af::array WatermarkOCL::computeCustomMask() const
 	const af::array customMask(baseRows, baseCols);
 	const std::unique_ptr<cl_mem> outputMem(customMask.device<cl_mem>());
 	const int localMemElements = (16 + p) * (16 + p);
-	//execute kernel
-	try {
+	executeKernel([&]() {
 		cl::Buffer buff(*outputMem.get(), true);
 		queue.enqueueNDRangeKernel(
-			cl_utils::KernelBuilder(programs[0],"nvf").args(image2d, buff, cl::Local(sizeof(float) * localMemElements)).build(),
+			cl_utils::KernelBuilder(programs[0], "nvf").args(image2d, buff, cl::Local(sizeof(float) * localMemElements)).build(),
 			cl::NDRange(), cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(16, 16));
 		queue.finish();
 		unlockArrays(customMask);
-		return customMask;
-	}
-	catch (const cl::Error& ex) {
-		throw std::runtime_error("ERROR in nvf: " + string(ex.what()) + " Error code: " + std::to_string(ex.err()) + "\n");
-	}
+	}, "nvf");
+	return customMask;
 }
 
 af::array WatermarkOCL::computeScaledNeighbors(const af::array& coefficients) const
@@ -84,8 +80,7 @@ af::array WatermarkOCL::computeScaledNeighbors(const af::array& coefficients) co
 	const af::array neighbors(baseRows, baseCols);
 	const std::unique_ptr<cl_mem> coeffsMem(coefficients.device<cl_mem>());
 	const std::unique_ptr<cl_mem> neighborsMem(neighbors.device<cl_mem>());
-	//execute kernel
-	try {
+	executeKernel([&]() {
 		cl::Buffer neighborsBuff(*neighborsMem.get(), true);
 		cl::Buffer coeffsBuff(*coeffsMem.get(), true);
 		queue.enqueueNDRangeKernel(
@@ -93,11 +88,8 @@ af::array WatermarkOCL::computeScaledNeighbors(const af::array& coefficients) co
 			cl::NDRange(), cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(16, 16));
 		queue.finish();
 		unlockArrays(coefficients, neighbors);
-		return neighbors;
-	}
-	catch (const cl::Error& ex) {
-		throw std::runtime_error("ERROR in scaled_neighbors_p3: " + string(ex.what()) + " Error code: " + std::to_string(ex.err()) + "\n");
-	}
+	}, "scaled_neighbors_p3");
+	return neighbors;
 }
 
 void WatermarkOCL::computePredictionErrorData(const af::array& image, af::array& errorSequence, af::array& coefficients) const
@@ -106,7 +98,7 @@ void WatermarkOCL::computePredictionErrorData(const af::array& image, af::array&
 	const af::array rxPartial(baseRows, meKernelDims.cols / 8);
 	const std::unique_ptr<cl_mem> RxPartialMem(RxPartial.device<cl_mem>());
 	const std::unique_ptr<cl_mem> rxPartialMem(rxPartial.device<cl_mem>());
-	try {
+	executeKernel([&]() {
 		//initialize custom kernel memory
 		cl::Buffer Rx_buff(*RxPartialMem.get(), true);
 		cl::Buffer rx_buff(*rxPartialMem.get(), true);
@@ -117,22 +109,18 @@ void WatermarkOCL::computePredictionErrorData(const af::array& image, af::array&
 			cl::NDRange(), cl::NDRange(meKernelDims.cols, meKernelDims.rows), cl::NDRange(64, 1));
 		//finish and return memory to arrayfire
 		queue.finish();
-	}
-	catch (const cl::Error& ex) {
-		throw std::runtime_error(string("ERROR in compute_me_mask(): " + string(ex.what()) + " Error code: " + std::to_string(ex.err()) + "\n"));
-	}
-
-	unlockArrays(RxPartial, rxPartial);
-	//calculation of coefficients, error sequence and mask
-	const auto correlationArrays = transformCorrelationArrays(RxPartial, rxPartial);
-	//solve() may crash in OpenCL ArrayFire implementation if the system is not solvable.
-	try {
-		coefficients = af::solve(correlationArrays.first, correlationArrays.second);
-	}
-	catch (const af::exception&) {
-		coefficients = af::array(0, f32);
-		return;
-	}
-	//call scaled neighbors kernel and compute error sequence
-	errorSequence = image - computeScaledNeighbors(coefficients);
+		unlockArrays(RxPartial, rxPartial);
+		//calculation of coefficients, error sequence and mask
+		const auto correlationArrays = transformCorrelationArrays(RxPartial, rxPartial);
+		//solve() may crash in OpenCL ArrayFire implementation if the system is not solvable.
+		try {
+			coefficients = af::solve(correlationArrays.first, correlationArrays.second);
+		}
+		catch (const af::exception&) {
+			coefficients = af::array(0, f32);
+			return;
+		}
+		//call scaled neighbors kernel and compute error sequence
+		errorSequence = image - computeScaledNeighbors(coefficients);
+	}, "me");
 }
