@@ -47,7 +47,7 @@ ArrayXXf eigen3dArrayToGrayscaleArray(const EigenArrayRGB& arrayRgb, const float
 //save the provided Eigen RGB array containing a watermarked image to disk
 void saveWatermarkedImage(const string& imagePath, const string& suffix, const EigenArrayRGB& watermark, const IMAGE_TYPE type)
 {
-	const string watermarkedFile = Utilities::addSuffixBeforeExtension(imagePath, suffix);
+	const string watermarkedFile = Utils::addSuffixBeforeExtension(imagePath, suffix);
 	type == IMAGE_TYPE::PNG ? eigen3dArrayToCimg(watermark).save_png(watermarkedFile.c_str())
 		: eigen3dArrayToCimg(watermark).save_jpeg(watermarkedFile.c_str(), 100);
 }

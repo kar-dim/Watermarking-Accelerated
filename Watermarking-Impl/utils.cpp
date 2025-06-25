@@ -1,7 +1,9 @@
 #include "buffer.hpp"
 #include "utils.hpp"
 #include "WatermarkBase.hpp"
+#include <format>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #if defined(_USE_OPENCL_)
 #include "WatermarkOCL.hpp"
@@ -16,27 +18,26 @@
 #include "eigen_utils.hpp"
 #include "WatermarkEigen.hpp"
 #endif
-#include <stdexcept>
 
 using std::string;
 
-string Utilities::addSuffixBeforeExtension(const string& file, const string& suffix)
+string Utils::addSuffixBeforeExtension(const string& file, const string& suffix)
 {
 	auto dot = file.find_last_of('.');
 	return dot == string::npos ? file + suffix : file.substr(0, dot) + suffix + file.substr(dot);
 }
 
-void Utilities::saveImage(const string& imagePath, const string& suffix, const BufferType& watermark)
+void Utils::saveImage(const string& imagePath, const string& suffix, const BufferType& watermark)
 {
 #if defined(_USE_EIGEN_)
-	const string watermarkedFile = Utilities::addSuffixBeforeExtension(imagePath, suffix);
+	const string watermarkedFile = Utils::addSuffixBeforeExtension(imagePath, suffix);
 	eigen3dArrayToCimg(watermark.getRGB()).save_png(watermarkedFile.c_str());
 #elif defined(_USE_OPENCL_) || defined(_USE_CUDA_)
 	af::saveImageNative(addSuffixBeforeExtension(imagePath, suffix).c_str(), watermark.as(u8));
 #endif
 }
 
-std::unique_ptr<WatermarkBase> Utilities::createWatermarkObject(const unsigned int height, const unsigned int width, const string& randomMatrixPath, const int p, const float psnr)
+std::unique_ptr<WatermarkBase> Utils::createWatermarkObject(const unsigned int height, const unsigned int width, const string& randomMatrixPath, const int p, const float psnr)
 {
 	std::unique_ptr<WatermarkBase> watermarkObj;
 #if defined(_USE_OPENCL_)
@@ -61,9 +62,20 @@ std::unique_ptr<WatermarkBase> Utilities::createWatermarkObject(const unsigned i
 	return watermarkObj;
 }
 
-//returns the maximum image size supported by the device (cols, rows)
+void Utils::checkError(const bool isError, const string& errorMsg) 
+{ 
+	if (isError) 
+		throw std::runtime_error(errorMsg); 
+};
+
+//helper method to calculate execution time in FPS or in seconds
+string Utils::formatExecutionTime(const bool showFps, const double seconds)
+{
+	return showFps ? std::format("FPS: {:.2f} FPS", 1.0 / seconds) : std::format("{:.6f} seconds", seconds);
+}
+
 #if defined(_USE_OPENCL_) || defined(_USE_CUDA_)
-std::pair<unsigned int, unsigned int> Utilities::getMaxImageSize()
+std::pair<unsigned int, unsigned int> Utils::getMaxImageSize()
 {
 #if defined(_USE_OPENCL_)
 	const cl::Device device(afcl::getDeviceId(), false);

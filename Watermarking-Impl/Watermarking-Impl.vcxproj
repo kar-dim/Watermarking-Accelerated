@@ -297,6 +297,7 @@ xcopy "$(ProjectDir)libs\ffmpeg\bin\ffmpeg.exe" "$(OutDir)" /y /D</Command>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='EIGEN_Release|x64'">true</ExcludedFromBuild>
     </ClCompile>
     <ClCompile Include="utils.cpp" />
+    <ClCompile Include="video_utils.cpp" />
     <ClCompile Include="WatermarkGpu.cpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='EIGEN_Release|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='EIGEN_Debug|x64'">true</ExcludedFromBuild>
@@ -378,6 +379,7 @@ xcopy "$(ProjectDir)libs\ffmpeg\bin\ffmpeg.exe" "$(OutDir)" /y /D</Command>
     </ClInclude>
     <ClInclude Include="utils.hpp" />
     <ClInclude Include="videoprocessingcontext.hpp" />
+    <ClInclude Include="video_utils.hpp" />
     <ClInclude Include="WatermarkCuda.cuh">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='OPENCL_Release|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='EIGEN_Release|x64'">true</ExcludedFromBuild>
