@@ -21,8 +21,13 @@ The aim of this project is to compare the performance (primarily execution speed
 # Run the pre-built binaries
 
 - Get the latest binaries [here](https://github.com/kar-dim/Watermarking-Accelerated/releases) for Eigen, OpenCL or CUDA platform. The binary contains the sample application and the embedded CUDA/OpenCL kernels. Before we can emded the watermark, we have to create it first (the prebuilt binaries already include generated watermarks for each sample image and video size).
-- The watermark generation is based on Normal-distributed random values with zero mean and standard deviation of one. The ```Watermarking-Generate``` project produces pseudo-random values. A bat file is included to generate the watermarks, with sizes exactly the same as the provided sample images. Of course, one can generate a random watermark for any desired image size like this:  
+- The watermark generation is based on Normal-distributed random values with zero mean and standard deviation of one. 
+- The pre-built binaries come with a bundled archive named ```Watermarking-Generate_and_samples```, which includes:
+    - Sample video and audio files.
+    - Pre-generated watermark data (A bat file is included which generates the watermarks, with sizes exactly the same as the provided sample images.)
+    - The ```Watermarking-Generate``` binary. This produces pseudo-random values. The archive already includes the sample watermarks, but one can generate a random watermark for any desired image size like this:  
 ```Watermarking-Generate.exe [rows] [cols] [seed] [fileName]```  then pass the provided watermark file path in the sample project configuration.
+To use these samples, simply extract the archive (ideally) to the root directory of the binary you're using. By default, the binaries are configured to load video and image samples from the ```samples``` subdirectory relative to their location. If you'd like to change this behavior, you can do so by editing the ```settings.ini``` file (explained in a later section).
 
 The sample application:
    - Embeds the watermark using the NVF and the proposed Prediction-Error mask for a video or image.
