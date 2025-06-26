@@ -22,6 +22,7 @@ extern "C" {
 #include "libavutil/error.h"
 #include "libavutil/avutil.h"
 #include "libavcodec/codec.h"
+#include "libavutil/rational.h"
 }
 
 #if defined(_USE_EIGEN_)
