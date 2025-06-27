@@ -1,5 +1,5 @@
 #pragma once
-#if defined(_USE_CUDA_) || defined(_USE_OPENCL_)
+#if defined(_USE_GPU_)
 #include <arrayfire.h>
 using BufferType = af::array;
 using GrayBuffer = af::array;

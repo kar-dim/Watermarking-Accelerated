@@ -98,7 +98,7 @@ int main(void)
 		//TODO GPU: for p>3 we have problems with ME masking buffers
 		Utils::checkError(p != 3, "For now, only p=3 is allowed");
 #endif
-#if defined(_USE_EIGEN_) || defined(_USE_CUDA_)
+#if defined(_USE_CUDA_) || defined(_USE_EIGEN_)
 //initialize openmp
 #pragma omp parallel
 { }
