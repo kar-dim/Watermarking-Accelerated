@@ -102,8 +102,8 @@ The solution provides multiple build configurations, each targeting a specific b
 | `OPENCL_Release` | OpenCL      | Most recommended backend with very high performance. There is **no debug version** due to some known issues |
 | `CUDA_Release`   | CUDA        | Recommended for systems with NVIDIA GPUs. Slightly faster than OpenCL backend    |
 | `CUDA_Debug`     | CUDA        | Use for debugging CUDA-specific code        |
-| `EIGEN_Release`  | Eigen (CPU) | Optimized CPU-based implementation (clang-cl toolset is used for maximum performance).         |
-| `EIGEN_Debug`    | Eigen (CPU) | Use for debugging CPU implementation (clang-cl)      |
+| `EIGEN_Release`  | Eigen       | Optimized CPU-based implementation (clang-cl toolset is used for maximum performance).         |
+| `EIGEN_Debug`    | Eigen       | Use for debugging CPU implementation (clang-cl)      |
 
 ### Build Instructions
 
@@ -118,27 +118,11 @@ The same applies for CPU backend, where we copy the relevant libraries required 
 All backends require FFmpeg which is also copied (most libav* DLLs).
 
 
-**CUDA dependencies**:
-- FreeImage.dll
-- afcuda.dll
-
-**OpenCL dependencies**:
-- FreeImage.dll
-- afopencl.dll
-- forge.dll
-- glfw3.dll
-- libiomp5md.dll
-- mkl_core.2.dll
-- mkl_def.2.dll
-- mkl_intel_thread.2.dll
-- mkl_rt.2.dll
-- mkl_tbb_thread.2.dll
-
-**Eigen dependencies**:
-- zlib1.dll
-- libpng16.dll
-- jpeg62.dll
-- libomp.dll
+| Backend | Dependencies |
+|---------|--------------|
+| **CUDA**   | FreeImage.dll<br>afcuda.dll |
+| **OpenCL** | FreeImage.dll<br>afopencl.dll<br>forge.dll<br>glfw3.dll<br>libiomp5md.dll<br>mkl_core.2.dll<br>mkl_def.2.dll<br>mkl_intel_thread.2.dll<br>mkl_rt.2.dll<br>mkl_tbb_thread.2.dll |
+| **Eigen**  | zlib1.dll<br>libpng16.dll<br>jpeg62.dll<br>libomp.dll |
 
 
 # Libraries Used
