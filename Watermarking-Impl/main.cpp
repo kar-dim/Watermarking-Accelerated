@@ -1,6 +1,5 @@
 #if defined(_USE_CUDA_)
 #include "WatermarkCuda.cuh"
-#include <omp.h>
 
 #elif defined(_USE_OPENCL_)
 #include "opencl_init.h"
@@ -13,7 +12,6 @@
 #include "WatermarkEigen.hpp"
 #include <algorithm>
 #include <Eigen/Dense>
-#include <omp.h>
 #include <thread>
 #endif
 
@@ -31,6 +29,7 @@
 #include <INIReader.h>
 #include <iostream>
 #include <memory>
+#include <omp.h>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -98,11 +97,11 @@ int main(void)
 		//TODO GPU: for p>3 we have problems with ME masking buffers
 		Utils::checkError(p != 3, "For now, only p=3 is allowed");
 #endif
-#if defined(_USE_CUDA_) || defined(_USE_EIGEN_)
-//initialize openmp
+
+		//initialize openmp
 #pragma omp parallel
-{ }
-#endif
+		{ }
+
 		Utils::checkError(psnr <= 0, "PSNR must be a positive number");
 
 		//test algorithms
@@ -199,10 +198,6 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 	if (inir.GetBoolean("options", "save_watermarked_files_to_disk", false)) 
 	{
 		cout << "\nSaving watermarked files to disk...\n";
-#if defined(_USE_OPENCL_)
-		Utils::saveImage(imageFile, "W_NVF", watermarkNVF);
-		Utils::saveImage(imageFile, "W_ME", watermarkME);
-#elif defined(_USE_CUDA_) || defined(_USE_EIGEN_)
 #pragma omp parallel sections
 		{
 #pragma omp section
@@ -210,7 +205,6 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 #pragma omp section
 			Utils::saveImage(imageFile, "W_ME", watermarkME);
 		}
-#endif
 		cout << "Successully saved to disk\n";
 	}
 	return EXIT_SUCCESS;

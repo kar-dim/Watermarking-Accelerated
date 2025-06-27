@@ -159,7 +159,6 @@ xcopy "$(AF_PATH)\lib\afcuda.dll" "$(OutDir)" /y /D</Command>
       <SDLCheck>true</SDLCheck>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <FunctionLevelLinking>true</FunctionLevelLinking>
-      <OpenMPSupport>true</OpenMPSupport>
       <ConformanceMode>true</ConformanceMode>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
@@ -171,7 +170,7 @@ xcopy "$(AF_PATH)\lib\afcuda.dll" "$(OutDir)" /y /D</Command>
     </CudaCompile>
     <Link>
       <AdditionalLibraryDirectories>$(AF_PATH)\lib;$(ProjectDir)libs\opencl\lib;$(ProjectDir)libs\ffmpeg\lib;</AdditionalLibraryDirectories>
-      <AdditionalDependencies>afopencl.lib;OpenCL.lib;avutil.lib;avformat.lib;swscale.lib;avcodec.lib;</AdditionalDependencies>
+      <AdditionalDependencies>afopencl.lib;OpenCL.lib;libiomp5md.lib;avutil.lib;avformat.lib;swscale.lib;avcodec.lib</AdditionalDependencies>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Console</SubSystem>
     </Link>
