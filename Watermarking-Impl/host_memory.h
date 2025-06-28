@@ -3,6 +3,7 @@
 #include <cuda_runtime.h>
 #elif defined(_USE_OPENCL_)
 #include "opencl_init.h"
+#include <af/opencl.h>
 #elif defined(_USE_EIGEN_)
 #include <memory>
 #endif

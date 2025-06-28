@@ -1,17 +1,10 @@
-#if defined(_USE_CUDA_)
-#include "WatermarkCuda.cuh"
-
-#elif defined(_USE_OPENCL_)
-#include "opencl_init.h"
-#include "WatermarkOCL.hpp"
-#include <af/opencl.h>
-
+#if defined(_USE_GPU_)
+#include <arrayfire.h>
 #elif defined(_USE_EIGEN_)
 #include "cimg_init.h"
 #include "eigen_utils.hpp"
-#include "WatermarkEigen.hpp"
-#include <algorithm>
 #include <Eigen/Dense>
+#include <omp.h>
 #include <thread>
 #endif
 
@@ -29,7 +22,6 @@
 #include <INIReader.h>
 #include <iostream>
 #include <memory>
-#include <omp.h>
 #include <sstream>
 #include <string>
 #include <utility>
