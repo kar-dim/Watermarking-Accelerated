@@ -138,8 +138,8 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 	BufferType rgbImage, image;
 	//load image from disk into CImg and copy from CImg object to Eigen arrays
 	double secs = Utils::executionTime([&] {
-		rgbImage = cimgToEigen3dArray(CImg<float>(imageFile.c_str()));
-		image = eigen3dArrayToGrayscaleArray(rgbImage.getRGB(), rPercent, gPercent, bPercent);
+		rgbImage = eigen_utils::cimgToEigenRgb(CImg<float>(imageFile.c_str()));
+		image = eigen_utils::eigenRgbToGray(rgbImage.getRGB(), rPercent, gPercent, bPercent);
 	});
 	const auto rows = image.getGray().rows();
 	const auto cols = image.getGray().cols();
@@ -160,10 +160,10 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 
 	BufferType watermarkNVF, watermarkME;
 	//make NVF watermark
-	secs = Utils::executionTime([&]() { makeRgbWatermarkBuffer(watermarkObj, image, rgbImage, watermarkNVF, watermarkStrength, MASK_TYPE::NVF); }, loops);
+	secs = Utils::executionTime([&]() { video_utils::makeRgbWatermark(watermarkObj, image, rgbImage, watermarkNVF, watermarkStrength, MASK_TYPE::NVF); }, loops);
 	cout << std::format("Watermark strength (parameter a): {}\nCalculation of NVF mask with {} rows and {} columns and parameters:\np = {}  PSNR(dB) = {}\n{}\n\n", watermarkStrength, rows, cols, p, psnr, Utils::formatExecutionTime(showFps, secs / loops));
 	//make ME watermark
-	secs = Utils::executionTime([&]() { makeRgbWatermarkBuffer(watermarkObj, image, rgbImage, watermarkME, watermarkStrength, MASK_TYPE::ME); }, loops);
+	secs = Utils::executionTime([&]() { video_utils::makeRgbWatermark(watermarkObj, image, rgbImage, watermarkME, watermarkStrength, MASK_TYPE::ME); }, loops);
 	cout << std::format("Watermark strength (parameter a): {}\nCalculation of ME mask with {} rows and {} columns and parameters:\np = {}  PSNR(dB) = {}\n{}\n\n", watermarkStrength, rows, cols, p, psnr, Utils::formatExecutionTime(showFps, secs / loops));
 
 #if defined(_USE_GPU_)
@@ -173,8 +173,8 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 	watermarkObj->detectWatermark(watermarkedNVFgray, MASK_TYPE::NVF);
 	watermarkObj->detectWatermark(watermarkedMEgray, MASK_TYPE::ME);
 #elif defined(_USE_EIGEN_)
-	const BufferType watermarkedNVFgray(eigen3dArrayToGrayscaleArray(watermarkNVF.getRGB(), rPercent, gPercent, bPercent));
-	const BufferType watermarkedMEgray(eigen3dArrayToGrayscaleArray(watermarkME.getRGB(), rPercent, gPercent, bPercent));
+	const BufferType watermarkedNVFgray(eigen_utils::eigenRgbToGray(watermarkNVF.getRGB(), rPercent, gPercent, bPercent));
+	const BufferType watermarkedMEgray(eigen_utils::eigenRgbToGray(watermarkME.getRGB(), rPercent, gPercent, bPercent));
 #endif
 
 	float correlationNvf, correlationMe;
@@ -219,9 +219,9 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 	av_dump_format(inputFormatCtx.get(), 0, videoFile.c_str(), 0);
 
 	//find video stream and open video decoder
-	const int videoStreamIndex = findVideoStreamIndex(inputFormatCtx.get());
+	const int videoStreamIndex = video_utils::findVideoStream(inputFormatCtx.get());
 	Utils::checkError(videoStreamIndex == -1, "ERROR: No video stream found");
-	const AVCodecContextPtr inputDecoderCtx(openDecoderContext(inputFormatCtx->streams[videoStreamIndex]->codecpar), [](AVCodecContext* ctx) { avcodec_free_context(&ctx); });
+	const AVCodecContextPtr inputDecoderCtx(video_utils::openDecoder(inputFormatCtx->streams[videoStreamIndex]->codecpar), [](AVCodecContext* ctx) { avcodec_free_context(&ctx); });
 
 	//initialize watermark functions class and host pinned memory for fast GPU<->CPU transfers, or simple Eigen memory for CPU implementation
 	const int height = inputFormatCtx->streams[videoStreamIndex]->codecpar->height;
@@ -240,7 +240,7 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 		//build the FFmpeg command
 		std::ostringstream ffmpegCmd;
 		ffmpegCmd << "ffmpeg -y -f rawvideo -pix_fmt yuv420p " << "-s " << width << "x" << height
-			<< " -r " << getVideoFrameRate(inputFormatCtx.get(), videoStreamIndex) << " -i - -i " << videoFile << " " << ffmpegOptions
+			<< " -r " << video_utils::getFrameRate(inputFormatCtx.get(), videoStreamIndex) << " -i - -i " << videoFile << " " << ffmpegOptions
 			<< " -c:s copy -c:a copy -map 1:s? -map 0:v -map 1:a? -max_interleave_delta 0 " << makeWatermarkVideoPath;
 		cout << "\nFFmpeg encode command: " << ffmpegCmd.str() << "\n\n";
 
@@ -251,8 +251,8 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 		BufferType inputFrame;
 		GrayBuffer watermarkedFrame;
 		//embed watermark on the video frames
-		double secs = Utils::executionTime([&] { processFrames(videoData, [&](AVFrame* frame, int& framesCount) { embedWatermarkFrame(videoData, inputFrame, watermarkedFrame, framesCount, frame, ffmpegPipe.get()); }); });
-		processFrames(videoData, [&](AVFrame* frame, int& framesCount) { embedWatermarkFrame(videoData, inputFrame, watermarkedFrame, framesCount, frame, ffmpegPipe.get()); });
+		double secs = Utils::executionTime([&] { video_utils::processFrames(videoData, [&](AVFrame* frame, int& framesCount) { video_utils::embedWatermark(videoData, inputFrame, watermarkedFrame, framesCount, frame, ffmpegPipe.get()); }); });
+		video_utils::processFrames(videoData, [&](AVFrame* frame, int& framesCount) { video_utils::embedWatermark(videoData, inputFrame, watermarkedFrame, framesCount, frame, ffmpegPipe.get()); });
 		cout << "\nWatermark embedding total execution time: " << Utils::formatExecutionTime(false, secs) << "\n";
 	}
 
@@ -262,7 +262,7 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 		BufferType inputFrame;
 		//detect watermark on the video frames
 		int framesCount = 1;
-		double secs = Utils::executionTime([&] { framesCount = processFrames(videoData, [&](AVFrame* frame, int& framesCount) { detectFrameWatermark(videoData, inputFrame, framesCount, frame); }); });
+		double secs = Utils::executionTime([&] { framesCount = video_utils::processFrames(videoData, [&](AVFrame* frame, int& framesCount) { video_utils::detectWatermark(videoData, inputFrame, framesCount, frame); }); });
 		cout << "\nWatermark detection total execution time: " << Utils::formatExecutionTime(false, secs) << "\n";
 		cout << "\nWatermark detection average execution time per frame: " << Utils::formatExecutionTime(showFps, secs / framesCount) << "\n";
 	}

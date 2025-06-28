@@ -4,6 +4,10 @@
 #include <cuda_runtime.h>
 #include <string>
 
+/*!
+ *  \brief  Functions for watermark computation and detection, CUDA implementation.
+ *  \author Dimitris Karatzas
+ */
 class WatermarkCuda : public WatermarkGPU
 {
 private:

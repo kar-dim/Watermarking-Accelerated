@@ -16,7 +16,7 @@ enum MASK_TYPE
 };
 
 /*!
- *  \brief  Functions for watermark computation and detection
+ *  \brief  Functions for watermark computation and detection, Base class.
  *  \author Dimitris Karatzas
  */
 class WatermarkBase 

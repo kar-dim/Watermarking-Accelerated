@@ -2,6 +2,10 @@
 #include "opencl_init.h"
 #include <vector>
 
+/*!
+ *  \brief  Helper utility functions related to OpenCL.
+ *  \author Dimitris Karatzas
+ */
 namespace cl_utils 
 {
     class KernelBuilder 

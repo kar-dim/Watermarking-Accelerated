@@ -7,8 +7,10 @@ extern "C" {
 #include <libavformat/avformat.h>
 }
 
-// Struct to hold common data for video watermarking and detection
-// holds pointers and references, does not own any resources
+/*!
+ *  \brief  Struct to hold common data for video watermarking and detection. Hholds pointers and references, does not own any resources.
+ *  \author Dimitris Karatzas
+ */
 struct VideoProcessingContext 
 {
     AVFormatContext* inputFormatCtx;

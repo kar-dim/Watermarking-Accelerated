@@ -31,7 +31,7 @@ void Utils::saveImage(const string& imagePath, const string& suffix, const Buffe
 {
 #if defined(_USE_EIGEN_)
 	const string watermarkedFile = Utils::addSuffixBeforeExtension(imagePath, suffix);
-	eigen3dArrayToCimg(watermark.getRGB()).save_png(watermarkedFile.c_str());
+	eigen_utils::eigenRgbToCimg(watermark.getRGB()).save_png(watermarkedFile.c_str());
 #elif defined(_USE_GPU_)
 	af::saveImageNative(addSuffixBeforeExtension(imagePath, suffix).c_str(), watermark.as(u8));
 #endif

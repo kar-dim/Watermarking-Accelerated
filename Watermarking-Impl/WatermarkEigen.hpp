@@ -10,6 +10,10 @@
 #include <omp.h>
 #include <string>
 
+/*!
+ *  \brief  Functions for watermark computation and detection, Eigen implementation.
+ *  \author Dimitris Karatzas
+ */
 template<int p>
 class WatermarkEigen : public WatermarkBase 
 {

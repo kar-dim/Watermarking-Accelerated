@@ -12,7 +12,7 @@
 #include "WatermarkBase.hpp"
 
 /*!
- *  \brief  Helper utility methods for testing the watermark algorithms
+ *  \brief  Helper utility methods.
  *  \author Dimitris Karatzas
  */
 class Utils

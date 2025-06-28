@@ -3,7 +3,7 @@
 #include <utility>
 
 /*!
- *  \brief  Helper utility functions related to CUDA
+ *  \brief  Helper utility functions related to CUDA.
  *  \author Dimitris Karatzas
  */
 namespace cuda_utils 

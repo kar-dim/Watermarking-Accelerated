@@ -4,6 +4,10 @@
 #include <utility>
 #include <variant>
 
+/*!
+ *  \brief  Holds either an Eigen array or Eigen RGB array by using std::variant. CPU implementation.
+ *  \author Dimitris Karatzas
+ */
 class EigenImage 
 {
 private:

@@ -14,7 +14,7 @@ struct dim2
 };
 
 /*!
- *  \brief  Functions for watermark computation and detection
+ *  \brief  Functions for watermark computation and detection, OpenCL implementation.
  *  \author Dimitris Karatzas
  */
 class WatermarkOCL : public WatermarkGPU 

@@ -7,6 +7,11 @@
 #include <string>
 #include <utility>
 
+/*!
+ *  \brief  Functions for watermark computation and detection, Base GPU class.
+ *			GPU implementations must inherit from this class.
+ *  \author Dimitris Karatzas
+ */
 class WatermarkGPU : public WatermarkBase
 {
 public:

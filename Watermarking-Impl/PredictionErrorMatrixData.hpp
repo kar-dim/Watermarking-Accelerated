@@ -2,6 +2,11 @@
 #include <Eigen/Dense>
 #include <vector>
 
+/*!
+ *  \brief  Helper class holding Prediction Error Matrix Data and common operations,
+ *			used by the Eigen implementation.
+ *  \author Dimitris Karatzas
+ */
 template <int p>
 class PredictionErrorMatrixData
 {
