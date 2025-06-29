@@ -240,8 +240,8 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 		//build the FFmpeg command
 		std::ostringstream ffmpegCmd;
 		ffmpegCmd << "ffmpeg -y -f rawvideo -pix_fmt yuv420p " << "-s " << width << "x" << height
-			<< " -r " << video_utils::getFrameRate(inputFormatCtx.get(), videoStreamIndex) << " -i - -i " << videoFile << " " << ffmpegOptions
-			<< " -c:s copy -c:a copy -map 1:s? -map 0:v -map 1:a? -max_interleave_delta 0 " << makeWatermarkVideoPath;
+			<< " -r " << video_utils::getFrameRate(inputFormatCtx.get(), videoStreamIndex) << " -i - -i \"" << videoFile << "\" " << ffmpegOptions
+			<< " -c:s copy -c:a copy -map 1:s? -map 0:v -map 1:a? -max_interleave_delta 0 \"" << makeWatermarkVideoPath << "\"";
 		cout << "\nFFmpeg encode command: " << ffmpegCmd.str() << "\n\n";
 
 		//open FFmpeg process (with pipe) for writing
