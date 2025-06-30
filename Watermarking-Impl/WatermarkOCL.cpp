@@ -5,7 +5,6 @@
 #include "WatermarkOCL.hpp"
 #include <arrayfire.h>
 #include <memory>
-#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
