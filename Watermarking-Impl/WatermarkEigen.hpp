@@ -15,7 +15,7 @@
  *  \author Dimitris Karatzas
  */
 template<int p>
-class WatermarkEigen : public WatermarkBase 
+class WatermarkEigen final : public WatermarkBase 
 {
 private:
 	static constexpr int pSquared = p * p;

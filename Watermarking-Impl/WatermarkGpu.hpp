@@ -30,8 +30,6 @@ public:
 
 	float detectWatermark(const BufferType& inputImage, const MASK_TYPE maskType) override;
 
-	virtual ~WatermarkGPU() = default;
-
 	//helper method to unlock multiple af::arrays (return memory to ArrayFire)
 	template<std::same_as<af::array>... Args>
 	static void unlockArrays(const Args&... arrays) { (arrays.unlock(), ...); }

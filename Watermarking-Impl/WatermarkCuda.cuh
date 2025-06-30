@@ -8,7 +8,7 @@
  *  \brief  Functions for watermark computation and detection, CUDA implementation.
  *  \author Dimitris Karatzas
  */
-class WatermarkCuda : public WatermarkGPU
+class WatermarkCuda final : public WatermarkGPU
 {
 private:
 	static constexpr dim3 texKernelBlockSize{ 16, 16 }, meKernelBlockSize{ 64, 1 };
@@ -30,5 +30,5 @@ public:
 	WatermarkCuda(WatermarkCuda&& other) noexcept;
 	WatermarkCuda& operator=(WatermarkCuda&& other) noexcept;
 	WatermarkCuda& operator=(const WatermarkCuda& other);
-	~WatermarkCuda();
+	~WatermarkCuda() override;
 };

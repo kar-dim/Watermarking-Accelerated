@@ -12,11 +12,9 @@ using std::string;
 
 namespace cl_utils 
 {
-    KernelBuilder::KernelBuilder(const cl::Program& program, const char* name)
-    {
-        kernel = cl::Kernel(program, name);
-        argsCounter = 0;
-    }
+    KernelBuilder::KernelBuilder(const cl::Program& program, const char* name) 
+		: kernel(program, name), argsCounter(0)
+    { }
 
     cl::Kernel KernelBuilder::build() const { return kernel; }
 
