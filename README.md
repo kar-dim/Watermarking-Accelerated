@@ -16,7 +16,7 @@ The aim of this project is to compare the performance (primarily execution speed
 # Key Features
 
 - Implementation of watermark embedding and detection algorithms for images and video.
-- Comparative performance analysis between CPU and GPU implementations.
+- Comparative performance analysis between CPU and GPU implementations (check [Releases](https://github.com/kar-dim/Watermarking-Accelerated/releases)).
 
 # Run the pre-built binaries
 
