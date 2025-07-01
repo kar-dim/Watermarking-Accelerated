@@ -3,26 +3,27 @@
 inline const std::string scaled_neighbors_p3 = R"CLC(
 
 __kernel void scaled_neighbors_p3(
-    __read_only image2d_t image, 
+    __global const float* __restrict__ input, 
     __global float* __restrict__ x_,
     __constant float* __restrict__ coeffs,
+    const unsigned int width,
+    const unsigned int height,
     __local float region[16 + 2][16 + 2]) //hold the 18 x 18 region for this 16 x 16 block
 {
     const int x = get_global_id(1);
     const int y = get_global_id(0);
     const int localId = get_local_id(1) * get_local_size(0) + get_local_id(0);
-    const sampler_t sampler = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP_TO_EDGE | CLK_FILTER_NEAREST;
-    //image2d is transposed, so we read the opposite dimensions
-    const int width = get_image_height(image), height = get_image_width(image);
 
     //load cooperatively the 18 x 18 region for this 16 x 16 block
     for (int i = localId; i < 324; i += get_local_size(0) * get_local_size(1))
     {
         const int tileRow = i / 18;
         const int tileCol = i % 18;
-        const int globalX =  get_group_id(1) * get_local_size(1) + tileCol - 1;
-        const int globalY = get_group_id(0) * get_local_size(0) + tileRow - 1;
-        region[tileRow][tileCol] = read_imagef(image, sampler, (int2)(globalY, globalX)).x;
+        int globalX =  get_group_id(1) * get_local_size(1) + tileCol - 1;
+        int globalY = get_group_id(0) * get_local_size(0) + tileRow - 1;
+        globalX = max(0, min(globalX, (int)(width - 1)));
+        globalY = max(0, min(globalY, (int)(height - 1)));
+        region[tileRow][tileCol] = input[globalX * height + globalY];
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 

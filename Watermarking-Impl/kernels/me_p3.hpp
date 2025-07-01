@@ -20,43 +20,59 @@ void me_p3_RxCalculate(__local half RxLocal[64][36], const int localId, const fl
     vstore_half4((float4)(x_6 * x_8, x_7 * x_7, x_7 * x_8, x_8 * x_8), 0, &RxLocal[localId][32]);
 }
 
-__kernel void me(__read_only image2d_t image,
+__kernel void me(__global const float* __restrict__ input,
     __global float* __restrict__ Rx,
     __global float* __restrict__ rx,
     __constant int* __restrict__ RxMappings,
-    __local half RxLocal[64][36]) //64 local threads, 36 values each (8 for rx, this is a shared memory for both Rx,rx)
+    const unsigned int width,
+    const unsigned int paddedWidth,
+    const unsigned int height,
+    __local half RxLocal[64][36], //64 local threads, 36 values each (8 for rx, this is a shared memory for both Rx,rx)
+    __local float blockValues[3][66]) //64 local threads (+2 halos), 3 values each
 
 {
-    const int x = get_global_id(0), y = get_global_id(1);
-    const int width = get_image_height(image); //image2d is transposed, so we read the opposite dimensions
-    const int paddedWidth = get_global_size(0);
-    const int localId = get_local_id(0);
+    const int x = get_global_id(0);
+    const int y = get_global_id(1);
     const int outputIndex = (y * paddedWidth) + x;
+    const int localId = get_local_id(0);
 
-    //initialize shared memory, assign a portion for all threads for parallelism
     #pragma unroll
     for (int i = 0; i < 4; i++)
         vstore_half8((float8)(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f), 0, &RxLocal[localId][i * 8]);
     vstore_half4((float4)(0.0f, 0.0f, 0.0f, 0.0f), 0, &RxLocal[localId][32]);
 
-    float x_0, x_1, x_2, x_3, currentPixel, x_5, x_6, x_7, x_8;
-    if (x < width)
+    if (y >= height)
+        return;
+
+    for (int i = localId; i < 3 * 66; i += get_local_size(0))
     {
-        const sampler_t sampler = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP_TO_EDGE | CLK_FILTER_NEAREST;
-        x_0 = read_imagef(image, sampler, (int2)(y - 1, x - 1)).x;
-        x_1 = read_imagef(image, sampler, (int2)(y - 1, x)).x;
-        x_2 = read_imagef(image, sampler, (int2)(y - 1, x + 1)).x;
-        x_3 = read_imagef(image, sampler, (int2)(y, x - 1)).x;
-        currentPixel = read_imagef(image, sampler, (int2)(y, x)).x;
-        x_5 = read_imagef(image, sampler, (int2)(y, x + 1)).x;
-        x_6 = read_imagef(image, sampler, (int2)(y + 1, x - 1)).x;
-        x_7 = read_imagef(image, sampler, (int2)(y + 1, x)).x;
-        x_8 = read_imagef(image, sampler, (int2)(y + 1, x + 1)).x;
-        me_p3_rxCalculate(RxLocal, localId, x_0, x_1, x_2, x_3, currentPixel, x_5, x_6, x_7, x_8);
+        const int col = i / 3;
+        const int row = i % 3;
+        int globalX = get_group_id(0) * get_local_size(0) + col - 1;
+        int globalY = get_group_id(1) * get_local_size(1) + row - 1;
+        globalX = max(0, min(globalX, (int)(width - 1)));
+        globalY = max(0, min(globalY, (int)(height - 1)));
+        blockValues[row][col] = input[globalX * height + globalY];
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    //simplified summation for rx
+    float x_0, x_1, x_2, x_3, x_4, x_5, x_6, x_7, x_8;
+    if (x < width)
+    {
+        const int localX = localId + 1;
+        x_0 = blockValues[0][localX - 1];
+        x_1 = blockValues[0][localX];
+        x_2 = blockValues[0][localX + 1];
+        x_3 = blockValues[1][localX - 1];
+        x_4 = blockValues[1][localX];
+        x_5 = blockValues[1][localX + 1];
+        x_6 = blockValues[2][localX - 1];
+        x_7 = blockValues[2][localX];
+        x_8 = blockValues[2][localX + 1];
+        me_p3_rxCalculate(RxLocal, localId, x_0, x_1, x_2, x_3, x_4, x_5, x_6, x_7, x_8);
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+
     //TODO can be optimized
     if (localId < 8)
     {
@@ -68,12 +84,10 @@ __kernel void me(__read_only image2d_t image,
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    //calculate 36 Rx values
     if (x < width)
         me_p3_RxCalculate(RxLocal, localId, x_0, x_1, x_2, x_3, x_5, x_6, x_7, x_8);
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    //simplified summation for Rx
     //TODO can be optimized
     float sum = 0.0f;
 #pragma unroll

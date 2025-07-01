@@ -15,27 +15,17 @@ cudaStream_t WatermarkCuda::afStream = afcu::getStream(afcu::getNativeId(af::get
 //initialize data and memory
 WatermarkCuda::WatermarkCuda(const unsigned int rows, const unsigned int cols, const string& randomMatrixPath, const int p, const float psnr)
 	: WatermarkGPU(rows, cols, randomMatrixPath, psnr, p), meKernelDims(align<64>(cols), rows)
-{
-	initializeGpuMemory();
-}
+{ }
 
 //copy constructor
 WatermarkCuda::WatermarkCuda(const WatermarkCuda& other) : WatermarkGPU(other.baseRows, other.baseCols, other.randomMatrix, other.strengthFactor, other.p),
 	meKernelDims(other.meKernelDims)
-{
-	//we don't need to copy the internal buffers data, only to allocate the correct size based on other
-	initializeGpuMemory();
-}
+{ }
 
 //move constructor
-WatermarkCuda::WatermarkCuda(WatermarkCuda&& other) noexcept : WatermarkGPU(other.baseRows, other.baseCols, std::move(other.randomMatrix), other.strengthFactor, other.p),
-	meKernelDims(other.meKernelDims)
-{
-	static constexpr auto moveMember = [](auto& thisData, auto& otherData, auto value) { thisData = otherData; otherData = value; };
-	//move texture data and nullify other
-	moveMember(texObj, other.texObj, 0);
-	moveMember(texArray, other.texArray, nullptr);
-}
+WatermarkCuda::WatermarkCuda(WatermarkCuda&& other) noexcept : 
+	WatermarkGPU(other.baseRows, other.baseCols, std::move(other.randomMatrix), other.strengthFactor, other.p), meKernelDims(other.meKernelDims)
+{ }
 
 //helper method to copy the parameters of another watermark object (for move/copy operators)
 void WatermarkCuda::copyParams(const WatermarkCuda& other) noexcept
@@ -47,23 +37,12 @@ void WatermarkCuda::copyParams(const WatermarkCuda& other) noexcept
 	strengthFactor = other.strengthFactor;
 }
 
-void WatermarkCuda::copyDataToTexture(const af::array& image) const
-{
-	cuda_utils::copyDataToCudaArray(image.device<float>(), baseCols, baseRows, texArray);
-	unlockArrays(image);
-}
-
 //move assignment operator
 WatermarkCuda& WatermarkCuda::operator=(WatermarkCuda&& other) noexcept
 {
-	static constexpr auto moveAndDestroyMember = [](auto& thisData, auto& otherData, auto& deleter, auto value) { deleter(thisData); thisData = otherData; otherData = value; };
 	if (this != &other) 
 	{
 		copyParams(other);
-		//move texture object/array and arrayfire arrays
-		moveAndDestroyMember(texObj, other.texObj, cudaDestroyTextureObject, 0);
-		moveAndDestroyMember(texArray, other.texArray, cudaFreeArray, nullptr);
-		//move arrayfire arrays
 		randomMatrix = std::move(other.randomMatrix);
 	}
 	return *this;
@@ -75,28 +54,9 @@ WatermarkCuda& WatermarkCuda::operator=(const WatermarkCuda& other)
 	if (this != &other) 
 	{
 		copyParams(other);
-		cudaDestroyTextureObject(texObj);
-		cudaFreeArray(texArray);
-		initializeGpuMemory();
 		randomMatrix = other.randomMatrix;
 	}
 	return *this;
-}
-
-//destroy texture data (texture object, cuda array) only if they have not been moved
-WatermarkCuda::~WatermarkCuda()
-{
-	static constexpr auto destroy = [](auto&& resource, auto&& deleter) { if (resource) deleter(resource); };
-	destroy(texObj, cudaDestroyTextureObject);
-	destroy(texArray, cudaFreeArray);
-}
-
-void WatermarkCuda::initializeGpuMemory()
-{
-	//initialize texture (transposed dimensions, arrayfire is column wise, we skip an extra transpose)
-	auto textureData = cuda_utils::createTextureData(baseCols, baseRows);
-	texObj = textureData.first;
-	texArray = textureData.second;
 }
 
 af::array WatermarkCuda::computeCustomMask(const af::array& inputImage) const

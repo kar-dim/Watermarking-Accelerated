@@ -36,13 +36,10 @@ private:
 	const cl::Buffer RxMappingsBuff{ context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(int) * 64, (void*)RxMappings, NULL };
 	dim2 texKernelDims, meKernelDims;
 	std::vector<cl::Program> programs { 3 };
-	cl::Image2D image2d;
 
-	void initializeGpuMemory() override;
-	af::array computeCustomMask() const override;
-	af::array computeScaledNeighbors(const af::array& coefficients) const override;
+	af::array computeCustomMask(const af::array& image) const override;
+	af::array computeScaledNeighbors(const af::array& image, const af::array& coefficients) const override;
 	void computePredictionErrorData(const af::array& image, af::array& errorSequence, af::array& coefficients) const override;
-	void copyDataToTexture(const af::array& image) const override;
 
 	template<typename Func>
 	void executeKernel(const Func& kernelFunc, const std::string& context) const

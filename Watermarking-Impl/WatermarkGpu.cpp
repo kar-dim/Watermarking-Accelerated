@@ -15,15 +15,14 @@ void WatermarkGPU::displayArray(const af::array& array, const int width, const i
 BufferType WatermarkGPU::makeWatermark(const BufferType& inputImage, const BufferType& outputImage, float& watermarkStrength, const MASK_TYPE maskType)
 {
 	af::array mask, inputErrorSequence, inputCoefficients;
-	//copyDataToTexture(inputImage);
 	if (maskType == MASK_TYPE::ME)
 	{
-		//copyDataToTexture(inputImage);
 		computePredictionErrorData(inputImage, inputErrorSequence, inputCoefficients);
 		//if the system is not solvable, don't waste time embeding the watermark, return output image without modification
 		if (inputCoefficients.elements() == 0)
 			return outputImage;
 		mask = computePredictionErrorMask(inputErrorSequence);
+		//displayArray(mask * 20);
 	}
 	else
 		mask = computeCustomMask(inputImage);
@@ -35,7 +34,6 @@ BufferType WatermarkGPU::makeWatermark(const BufferType& inputImage, const Buffe
 float WatermarkGPU::detectWatermark(const BufferType& inputImage, const MASK_TYPE maskType)
 {
 	af::array mask, errorSequenceW, coefficients;
-	//copyDataToTexture(inputImage);
 	computePredictionErrorData(inputImage, errorSequenceW, coefficients);
 	//if the system is not solvable, don't waste time computing the correlation, there is no watermark
 	if (coefficients.elements() == 0)
@@ -58,7 +56,6 @@ float WatermarkGPU::computeCorrelation(const af::array& e_u, const af::array& e_
 
 af::array WatermarkGPU::computeErrorSequence(const af::array& u, const af::array& coefficients) const
 {
-	//copyDataToTexture(u);
 	return u - computeScaledNeighbors(u, coefficients);
 }
 

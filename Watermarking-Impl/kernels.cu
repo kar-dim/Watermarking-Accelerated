@@ -64,7 +64,7 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
     half8* RxLocalVec8 = reinterpret_cast<half8*>(RxLocal[threadIdx.x]);
 
     //shared memory for 3x3 window
-    __shared__ float smem[3][66];
+    __shared__ half blockValues[3][66];
 
     //initialize shared memory, assign a portion for all threads for parallelism
     #pragma unroll
@@ -81,10 +81,10 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
         const int row = i % 3;
         int globalX = blockIdx.x * blockDim.x + col - 1;
         int globalY = blockIdx.y * blockDim.y + row - 1;
-        // clamp
+        // clamp (mimic cudaAddressModeClamp)
         globalX = max(0, min(globalX, (int)(width - 1)));
         globalY = max(0, min(globalY, (int)(height - 1)));
-        smem[row][col] = input[globalX * height + globalY];
+        blockValues[row][col] = HALF(input[globalX * height + globalY]);
     }
     __syncthreads();
 
@@ -93,16 +93,16 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
     if (x < width)
     {
         // local coordinate of this thread's central pixel in smem
-        int localX = threadIdx.x + 1; // center
-        x_0 = HALF(smem[0][localX - 1]);
-        x_1 = HALF(smem[0][localX]);
-        x_2 = HALF(smem[0][localX + 1]);
-        x_3 = HALF(smem[1][localX - 1]);
-        x_4 = HALF(smem[1][localX]);
-        x_5 = HALF(smem[1][localX + 1]);
-        x_6 = HALF(smem[2][localX - 1]);
-        x_7 = HALF(smem[2][localX]);
-        x_8 = HALF(smem[2][localX + 1]);
+        const int localX = threadIdx.x + 1; // center
+        x_0 = blockValues[0][localX - 1];
+        x_1 = blockValues[0][localX];
+        x_2 = blockValues[0][localX + 1];
+        x_3 = blockValues[1][localX - 1];
+        x_4 = blockValues[1][localX];
+        x_5 = blockValues[1][localX + 1];
+        x_6 = blockValues[2][localX - 1];
+        x_7 = blockValues[2][localX];
+        x_8 = blockValues[2][localX + 1];
         //calculate this thread's 8 rx values
         me_p3_rxCalculate(RxLocalVec8, x_0, x_1, x_2, x_3, x_4, x_5, x_6, x_7, x_8);
     }

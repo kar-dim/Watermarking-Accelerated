@@ -26,6 +26,8 @@ public:
 			throw std::invalid_argument("Unsupported value for p. Allowed values: 3, 5, 7, 9.");
 	}
 
+	~WatermarkGPU() override = default;
+
 	BufferType makeWatermark(const BufferType& inputImage, const BufferType& outputImage, float& watermarkStrength, const MASK_TYPE maskType) override;
 
 	float detectWatermark(const BufferType& inputImage, const MASK_TYPE maskType) override;
@@ -40,9 +42,6 @@ public:
 protected:
 	int p;
 
-	//initialize internal GPU buffers
-	virtual void initializeGpuMemory() = 0;
-
 	//computes custom Mask
 	virtual af::array computeCustomMask(const af::array& image) const = 0;
 	
@@ -55,9 +54,6 @@ protected:
 	
 	//compute prediction error mask
 	af::array computePredictionErrorMask(const af::array& errorSequence) const;
-
-	//copy data to texture and transfer ownership back to arrayfire
-	virtual void copyDataToTexture(const af::array& image) const = 0;
 
 	//helper method used in detectors
 	float computeCorrelation(const af::array& e_u, const af::array& e_z) const;

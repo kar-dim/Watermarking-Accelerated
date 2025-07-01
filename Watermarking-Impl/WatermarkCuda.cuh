@@ -13,15 +13,11 @@ class WatermarkCuda final : public WatermarkGPU
 private:
 	static constexpr dim3 texKernelBlockSize{ 16, 16 }, meKernelBlockSize{ 64, 1 };
 	dim3 meKernelDims;
-	cudaTextureObject_t texObj;
-	cudaArray* texArray;
 	static cudaStream_t afStream;
 
-	void initializeGpuMemory() override;
 	af::array computeCustomMask(const af::array& image) const override;
 	af::array computeScaledNeighbors(const af::array& image, const af::array& coefficients) const override;
 	void computePredictionErrorData(const af::array& image, af::array& errorSequence, af::array& coefficients) const override;
-	void copyDataToTexture(const af::array& image) const override;
 	void copyParams(const WatermarkCuda& other) noexcept;
 
 public:
@@ -30,5 +26,5 @@ public:
 	WatermarkCuda(WatermarkCuda&& other) noexcept;
 	WatermarkCuda& operator=(WatermarkCuda&& other) noexcept;
 	WatermarkCuda& operator=(const WatermarkCuda& other);
-	~WatermarkCuda() override;
+	~WatermarkCuda() override = default;
 };
