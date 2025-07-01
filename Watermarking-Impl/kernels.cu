@@ -2,6 +2,7 @@
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
+#include <stdio.h>
 
 #define HALF(x) __float2half(x)
 #define FLOAT(x) __half2float(x)
@@ -52,15 +53,18 @@ __device__ void me_p3_RxCalculate(half8* RxLocalVec8, const half& x_0, const hal
     RxLocalVec8[4] = make_half8(x_6 * x_8, x_7 * x_7, x_7 * x_8, x_8 * x_8, zero, zero, zero, zero);
 }
 
-__global__ void me_p3(cudaTextureObject_t texObj, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int paddedWidth, const unsigned int height)
+__global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int paddedWidth, const unsigned int height)
 {
-    const int y = blockIdx.y * blockDim.y + threadIdx.y;
     const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
 	const int outputIndex = (y * paddedWidth) + x;
 
     //re-use shared memory for Rx and rx calculation, helps with occupancy
     __shared__ half RxLocal[64][40]; //36 + 4 for 16-byte alignment (in order to use vectorized 128-bit load/store)
     half8* RxLocalVec8 = reinterpret_cast<half8*>(RxLocal[threadIdx.x]);
+
+    //shared memory for 3x3 window
+    __shared__ float smem[3][66];
 
     //initialize shared memory, assign a portion for all threads for parallelism
     #pragma unroll
@@ -70,19 +74,35 @@ __global__ void me_p3(cudaTextureObject_t texObj, float* __restrict__ Rx, float*
     if (y >= height)
         return;
 
-    //load 3x3 window
+	// cooperatively load the 3 x 66 block (window size 3x3, for all threads in the block)
+    for (int i = threadIdx.x; i < 3 * 66; i += blockDim.x)
+    {
+        const int col = i / 3;
+        const int row = i % 3;
+        int globalX = blockIdx.x * blockDim.x + col - 1;
+        int globalY = blockIdx.y * blockDim.y + row - 1;
+        // clamp
+        globalX = max(0, min(globalX, (int)(width - 1)));
+        globalY = max(0, min(globalY, (int)(height - 1)));
+        smem[row][col] = input[globalX * height + globalY];
+    }
+    __syncthreads();
+
+    //read the 3x3 window from shared memory
     half x_0, x_1, x_2, x_3, x_4, x_5, x_6, x_7, x_8;
     if (x < width)
     {
-        x_0 = HALF(tex2D<float>(texObj, y - 1, x - 1));
-        x_1 = HALF(tex2D<float>(texObj, y - 1, x));
-        x_2 = HALF(tex2D<float>(texObj, y - 1, x + 1));
-        x_3 = HALF(tex2D<float>(texObj, y, x - 1));
-        x_4 = HALF(tex2D<float>(texObj, y, x)); //x_4 is central pixel
-        x_5 = HALF(tex2D<float>(texObj, y, x + 1));
-        x_6 = HALF(tex2D<float>(texObj, y + 1, x - 1));
-        x_7 = HALF(tex2D<float>(texObj, y + 1, x));
-        x_8 = HALF(tex2D<float>(texObj, y + 1, x + 1));
+        // local coordinate of this thread's central pixel in smem
+        int localX = threadIdx.x + 1; // center
+        x_0 = HALF(smem[0][localX - 1]);
+        x_1 = HALF(smem[0][localX]);
+        x_2 = HALF(smem[0][localX + 1]);
+        x_3 = HALF(smem[1][localX - 1]);
+        x_4 = HALF(smem[1][localX]);
+        x_5 = HALF(smem[1][localX + 1]);
+        x_6 = HALF(smem[2][localX - 1]);
+        x_7 = HALF(smem[2][localX]);
+        x_8 = HALF(smem[2][localX + 1]);
         //calculate this thread's 8 rx values
         me_p3_rxCalculate(RxLocalVec8, x_0, x_1, x_2, x_3, x_4, x_5, x_6, x_7, x_8);
     }

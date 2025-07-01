@@ -8,7 +8,7 @@
  */
 namespace cuda_utils 
 {
-    dim3 gridSizeCalculate(const dim3 blockSize, const int rows, const int cols, const bool rowsFirst = false);
+    dim3 gridSizeCalculate(const dim3 blockSize, const int rows, const int cols);
     cudaArray* cudaMallocArray(const std::size_t cols, const std::size_t rows);
     cudaResourceDesc createResourceDescriptor(cudaArray* cuArray);
     cudaTextureDesc createTextureDescriptor();

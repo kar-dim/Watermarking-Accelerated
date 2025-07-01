@@ -18,7 +18,7 @@ BufferType WatermarkGPU::makeWatermark(const BufferType& inputImage, const Buffe
 	//copyDataToTexture(inputImage);
 	if (maskType == MASK_TYPE::ME)
 	{
-		copyDataToTexture(inputImage);
+		//copyDataToTexture(inputImage);
 		computePredictionErrorData(inputImage, inputErrorSequence, inputCoefficients);
 		//if the system is not solvable, don't waste time embeding the watermark, return output image without modification
 		if (inputCoefficients.elements() == 0)
@@ -35,7 +35,7 @@ BufferType WatermarkGPU::makeWatermark(const BufferType& inputImage, const Buffe
 float WatermarkGPU::detectWatermark(const BufferType& inputImage, const MASK_TYPE maskType)
 {
 	af::array mask, errorSequenceW, coefficients;
-	copyDataToTexture(inputImage);
+	//copyDataToTexture(inputImage);
 	computePredictionErrorData(inputImage, errorSequenceW, coefficients);
 	//if the system is not solvable, don't waste time computing the correlation, there is no watermark
 	if (coefficients.elements() == 0)

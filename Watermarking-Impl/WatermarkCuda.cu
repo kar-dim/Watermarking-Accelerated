@@ -101,7 +101,7 @@ void WatermarkCuda::initializeGpuMemory()
 
 af::array WatermarkCuda::computeCustomMask(const af::array& inputImage) const
 {
-	const dim3 gridSize = cuda_utils::gridSizeCalculate(texKernelBlockSize, baseRows, baseCols, true);
+	const dim3 gridSize = cuda_utils::gridSizeCalculate(texKernelBlockSize, baseRows, baseCols);
 	const af::array customMask(baseRows, baseCols);
 	//call NVF kernel
 	nvf<3> << <gridSize, texKernelBlockSize, 0, afStream >> > (inputImage.device<float>(), customMask.device<float>(), baseCols, baseRows);
@@ -112,7 +112,7 @@ af::array WatermarkCuda::computeCustomMask(const af::array& inputImage) const
 
 af::array WatermarkCuda::computeScaledNeighbors(const af::array& image, const af::array& coefficients) const
 {
-	const dim3 gridSize = cuda_utils::gridSizeCalculate(texKernelBlockSize, baseRows, baseCols, true);
+	const dim3 gridSize = cuda_utils::gridSizeCalculate(texKernelBlockSize, baseRows, baseCols);
 	const af::array neighbors(baseRows, baseCols);
 	setCoeffs(coefficients.device<float>());
 	calculate_scaled_neighbors_p3 << <gridSize, texKernelBlockSize, 0, afStream >> > (image.device<float>(), neighbors.device<float>(), baseCols, baseRows);
@@ -123,12 +123,12 @@ af::array WatermarkCuda::computeScaledNeighbors(const af::array& image, const af
 
 void WatermarkCuda::computePredictionErrorData(const af::array& image, af::array& errorSequence, af::array& coefficients) const
 {
-	const dim3 gridSize = cuda_utils::gridSizeCalculate(meKernelBlockSize, meKernelDims.y, meKernelDims.x);
+	const dim3 gridSize = cuda_utils::gridSizeCalculate(meKernelBlockSize, meKernelDims.x, meKernelDims.y);
 	//call prediction error mask kernel
 	const af::array RxPartial(baseRows, meKernelDims.x);
 	const af::array rxPartial(baseRows, meKernelDims.x / 8);
-	me_p3 <<<gridSize, meKernelBlockSize, 0, afStream >>> (texObj, RxPartial.device<float>(), rxPartial.device<float>(), baseCols, meKernelDims.x, baseRows);
-	unlockArrays(RxPartial, rxPartial);
+	me_p3 <<<gridSize, meKernelBlockSize, 0, afStream >>> (image.device<float>(), RxPartial.device<float>(), rxPartial.device<float>(), baseCols, meKernelDims.x, baseRows);
+	unlockArrays(image, RxPartial, rxPartial);
 	//calculation of coefficients, error sequence and mask
 	const auto correlationArrays = transformCorrelationArrays(RxPartial, rxPartial);
 	coefficients = af::solve(correlationArrays.first, correlationArrays.second);
