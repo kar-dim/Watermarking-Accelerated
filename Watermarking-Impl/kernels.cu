@@ -115,7 +115,7 @@ __global__ void me_p3(cudaTextureObject_t texObj, float* __restrict__ Rx, float*
     Rx[outputIndex] = sum;
 }
 
-__global__ void calculate_scaled_neighbors_p3(cudaTextureObject_t texObj, float* x_, const unsigned int width, const unsigned int height)
+__global__ void calculate_scaled_neighbors_p3(const float* __restrict__ input, float* __restrict__ x_, const unsigned int width, const unsigned int height)
 {
     constexpr int sharedSize = 16 + 2;
     const int x = blockIdx.y * blockDim.y + threadIdx.y;
@@ -129,9 +129,13 @@ __global__ void calculate_scaled_neighbors_p3(cudaTextureObject_t texObj, float*
     {
         const int tileRow = i / sharedSize;
         const int tileCol = i % sharedSize;
-        const int globalX = blockIdx.y * blockDim.y + tileCol - 1;
-        const int globalY = blockIdx.x * blockDim.x + tileRow - 1;
-        region[tileRow][tileCol] = tex2D<float>(texObj, globalY, globalX);
+        int globalX = blockIdx.y * blockDim.y + tileCol - 1;
+        int globalY = blockIdx.x * blockDim.x + tileRow - 1;
+        // clamp (mimic cudaAddressModeClamp)
+        globalX = max(0, min(globalX, (int)(width - 1)));
+        globalY = max(0, min(globalY, (int)(height - 1)));
+
+        region[tileRow][tileCol] = input[globalX * height + globalY];
     }
     __syncthreads();
 

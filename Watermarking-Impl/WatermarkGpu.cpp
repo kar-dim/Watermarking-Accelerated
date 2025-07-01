@@ -15,9 +15,10 @@ void WatermarkGPU::displayArray(const af::array& array, const int width, const i
 BufferType WatermarkGPU::makeWatermark(const BufferType& inputImage, const BufferType& outputImage, float& watermarkStrength, const MASK_TYPE maskType)
 {
 	af::array mask, inputErrorSequence, inputCoefficients;
-	copyDataToTexture(inputImage);
+	//copyDataToTexture(inputImage);
 	if (maskType == MASK_TYPE::ME)
 	{
+		copyDataToTexture(inputImage);
 		computePredictionErrorData(inputImage, inputErrorSequence, inputCoefficients);
 		//if the system is not solvable, don't waste time embeding the watermark, return output image without modification
 		if (inputCoefficients.elements() == 0)
@@ -25,7 +26,7 @@ BufferType WatermarkGPU::makeWatermark(const BufferType& inputImage, const Buffe
 		mask = computePredictionErrorMask(inputErrorSequence);
 	}
 	else
-		mask = computeCustomMask();
+		mask = computeCustomMask(inputImage);
 	const af::array u = mask * randomMatrix;
 	watermarkStrength = strengthFactor / static_cast<float>(af::norm(u) / std::sqrt(inputImage.elements()));
 	return af::clamp(outputImage + (u * watermarkStrength), 0, 255);
@@ -39,7 +40,7 @@ float WatermarkGPU::detectWatermark(const BufferType& inputImage, const MASK_TYP
 	//if the system is not solvable, don't waste time computing the correlation, there is no watermark
 	if (coefficients.elements() == 0)
 		return 0.0f;
-	mask = maskType == MASK_TYPE::NVF ? computeCustomMask() : computePredictionErrorMask(errorSequenceW);
+	mask = maskType == MASK_TYPE::NVF ? computeCustomMask(inputImage) : computePredictionErrorMask(errorSequenceW);
 	const af::array u = mask * randomMatrix;
 	return computeCorrelation(computeErrorSequence(u, coefficients), errorSequenceW);
 }
@@ -57,8 +58,8 @@ float WatermarkGPU::computeCorrelation(const af::array& e_u, const af::array& e_
 
 af::array WatermarkGPU::computeErrorSequence(const af::array& u, const af::array& coefficients) const
 {
-	copyDataToTexture(u);
-	return u - computeScaledNeighbors(coefficients);
+	//copyDataToTexture(u);
+	return u - computeScaledNeighbors(u, coefficients);
 }
 
 std::pair<af::array, af::array> WatermarkGPU::transformCorrelationArrays(const af::array& RxPartial, const af::array& rxPartial) const

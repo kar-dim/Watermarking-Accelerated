@@ -99,25 +99,25 @@ void WatermarkCuda::initializeGpuMemory()
 	texArray = textureData.second;
 }
 
-af::array WatermarkCuda::computeCustomMask() const
+af::array WatermarkCuda::computeCustomMask(const af::array& inputImage) const
 {
 	const dim3 gridSize = cuda_utils::gridSizeCalculate(texKernelBlockSize, baseRows, baseCols, true);
 	const af::array customMask(baseRows, baseCols);
 	//call NVF kernel
-	nvf<3> << <gridSize, texKernelBlockSize, 0, afStream >> > (texObj, customMask.device<float>(), baseCols, baseRows);
+	nvf<3> << <gridSize, texKernelBlockSize, 0, afStream >> > (inputImage.device<float>(), customMask.device<float>(), baseCols, baseRows);
 	//transfer ownership to arrayfire and return output array
-	unlockArrays(customMask);
+	unlockArrays(inputImage, customMask);
 	return customMask;
 }
 
-af::array WatermarkCuda::computeScaledNeighbors(const af::array& coefficients) const
+af::array WatermarkCuda::computeScaledNeighbors(const af::array& image, const af::array& coefficients) const
 {
 	const dim3 gridSize = cuda_utils::gridSizeCalculate(texKernelBlockSize, baseRows, baseCols, true);
 	const af::array neighbors(baseRows, baseCols);
 	setCoeffs(coefficients.device<float>());
-	calculate_scaled_neighbors_p3 << <gridSize, texKernelBlockSize, 0, afStream >> > (texObj, neighbors.device<float>(), baseCols, baseRows);
+	calculate_scaled_neighbors_p3 << <gridSize, texKernelBlockSize, 0, afStream >> > (image.device<float>(), neighbors.device<float>(), baseCols, baseRows);
 	//transfer ownership to arrayfire and return output array
-	unlockArrays(neighbors, coefficients);
+	unlockArrays(image, neighbors, coefficients);
 	return neighbors;
 }
 
@@ -139,5 +139,5 @@ void WatermarkCuda::computePredictionErrorData(const af::array& image, af::array
 		return;
 	}
 	//call scaled neighbors kernel and compute error sequence
-	errorSequence = image - computeScaledNeighbors(coefficients);
+	errorSequence = image - computeScaledNeighbors(image, coefficients);
 }

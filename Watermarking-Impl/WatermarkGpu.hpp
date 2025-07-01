@@ -44,10 +44,10 @@ protected:
 	virtual void initializeGpuMemory() = 0;
 
 	//computes custom Mask
-	virtual af::array computeCustomMask() const = 0;
+	virtual af::array computeCustomMask(const af::array& image) const = 0;
 	
 	//computes scaled neighbors array used in prediction error mask
-	virtual af::array computeScaledNeighbors(const af::array& coefficients) const = 0;
+	virtual af::array computeScaledNeighbors(const af::array& image, const af::array& coefficients) const = 0;
 	
 	//Used in both creation and detection of the watermark.
 	//Calculates error sequence and prediction error filter (coefficients)

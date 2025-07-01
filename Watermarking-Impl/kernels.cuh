@@ -19,7 +19,7 @@ __device__ void me_p3_RxCalculate(half8* RxLocalVec, const half& x_0, const half
 // NVF kernel, calculates NVF values for each pixel in the image
 // works for all p values (3,5,7 and 9)
 template<int p, int pSquared = p * p, int pad = p / 2>
-__global__ void nvf(cudaTextureObject_t texObj, float* nvf, const unsigned int width, const unsigned int height)
+__global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, const unsigned int width, const unsigned int height)
 {
     constexpr int sharedSize = 16 + (2 * pad);
     const int x = blockIdx.y * blockDim.y + threadIdx.y;
@@ -33,9 +33,12 @@ __global__ void nvf(cudaTextureObject_t texObj, float* nvf, const unsigned int w
     {
         const int tileRow = i / sharedSize;
         const int tileCol = i % sharedSize;
-        const int globalX = blockIdx.y * blockDim.y + tileCol - pad;
-        const int globalY = blockIdx.x * blockDim.x + tileRow - pad;
-        region[tileRow][tileCol] = tex2D<float>(texObj, globalY, globalX);
+        int globalX = blockIdx.y * blockDim.y + tileCol - pad;
+        int globalY = blockIdx.x * blockDim.x + tileRow - pad;
+        // clamp (mimic cudaAddressModeClamp)
+        globalX = max(0, min(globalX, (int)(width - 1)));
+        globalY = max(0, min(globalY, (int)(height - 1)));
+		region[tileRow][tileCol] = input[globalX * height + globalY];
     }
     __syncthreads();
 
@@ -69,4 +72,4 @@ __global__ void nvf(cudaTextureObject_t texObj, float* nvf, const unsigned int w
 __global__ void me_p3(cudaTextureObject_t texObj, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int paddedWidth, const unsigned int height);
 
 //main kernel for scaled neighbors calculation. used in ME kernel
-__global__ void calculate_scaled_neighbors_p3(cudaTextureObject_t texObj, float* x_, const unsigned int width, const unsigned int height);
+__global__ void calculate_scaled_neighbors_p3(const float* __restrict__ input, float* __restrict__ x_, const unsigned int width, const unsigned int height);

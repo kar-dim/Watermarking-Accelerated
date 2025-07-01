@@ -18,8 +18,8 @@ private:
 	static cudaStream_t afStream;
 
 	void initializeGpuMemory() override;
-	af::array computeCustomMask() const override;
-	af::array computeScaledNeighbors(const af::array& coefficients) const override;
+	af::array computeCustomMask(const af::array& image) const override;
+	af::array computeScaledNeighbors(const af::array& image, const af::array& coefficients) const override;
 	void computePredictionErrorData(const af::array& image, af::array& errorSequence, af::array& coefficients) const override;
 	void copyDataToTexture(const af::array& image) const override;
 	void copyParams(const WatermarkCuda& other) noexcept;
