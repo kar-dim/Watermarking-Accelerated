@@ -61,7 +61,7 @@ Needs to be parameterized from the corresponding ```settings.ini``` file. Here i
 
 # FFmpeg Command Used for Video Encoding
 
-The following FFmpeg command is used to encode a new video while preserving the original input's metadata, subtitles, and audio tracks. It reads raw video frames from standard input (stdin) and copies audio/subtitles from the original input file as is. You can customize encoding settings (codec, CRF, etc) via the ```encode_options``` option as described above.
+The following FFmpeg command is used to encode a new video while preserving the original input's metadata, subtitles, and audio tracks. It decodes the input video, embeds the watermark, and passes the resulting frames into standard input (stdin) for encoding, while copying audio/subtitles from the original input file as is. You can customize **video codec** encoding settings (codec, CRF, presets, etc) via the ```encode_options``` option as described above.
 ```
 ffmpeg -y -f rawvideo -pix_fmt yuv420p -s <width>x<height>
   -r <frame_rate>
