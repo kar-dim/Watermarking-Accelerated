@@ -112,6 +112,8 @@ int main(void)
 //embed watermark for static images
 int testForImage(const INIReader& inir, const int p, const float psnr)
 {
+	//not hardware specific, but a reasonable limit for images
+	constexpr auto maxImageDims = std::pair<unsigned int, unsigned int>(65536, 65536);
 	constexpr float rPercent = 0.299f;
 	constexpr float gPercent = 0.587f;
 	constexpr float bPercent = 0.114f;
@@ -120,11 +122,11 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 	int loops = inir.GetInteger("parameters", "loops_for_test", 5);
 	loops = loops <= 0 ? 5 : loops;
 	cout << "Each test will be executed " << loops << " times. Average time will be shown below\n";
+	
+	BufferType rgbImage, image;
 
 #if defined(_USE_GPU_)
-	const auto maxImageDims = Utils::getMaxImageSize();
 	//load image from disk into an arrayfire array
-	BufferType rgbImage, image;
 	double secs = Utils::executionTime([&] {
 		rgbImage = af::loadImage(imageFile.c_str(), true);
 		image = af::rgb2gray(rgbImage, rPercent, gPercent, bPercent);
@@ -134,8 +136,6 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 	const auto cols = static_cast<unsigned int>(image.dims(1));
 	cout << "Time to load and transfer RGB image from disk to VRAM: " << secs << "\n\n";
 #elif defined(_USE_EIGEN_)
-	constexpr auto maxImageDims = std::pair<unsigned int, unsigned int>(65536, 65536);
-	BufferType rgbImage, image;
 	//load image from disk into CImg and copy from CImg object to Eigen arrays
 	double secs = Utils::executionTime([&] {
 		rgbImage = eigen_utils::cimgToEigenRgb(CImg<float>(imageFile.c_str()));

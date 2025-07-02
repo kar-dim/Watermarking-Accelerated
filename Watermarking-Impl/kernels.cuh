@@ -22,8 +22,8 @@ template<int p, int pSquared = p * p, int pad = p / 2>
 __global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, const unsigned int width, const unsigned int height)
 {
     constexpr int sharedSize = 16 + (2 * pad);
-    const int x = blockIdx.x * blockDim.x + threadIdx.x;
-    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+    const int x = blockIdx.y * blockDim.y + threadIdx.y;
+    const int y = blockIdx.x * blockDim.x + threadIdx.x;
     const int localId = threadIdx.y * blockDim.x + threadIdx.x; // 0 to 255 for 16 x 16 block
 
     __shared__ float region[sharedSize][sharedSize]; //hold the region for this 16 x 16 block
@@ -33,8 +33,8 @@ __global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, co
     {
         const int tileRow = i / sharedSize;
         const int tileCol = i % sharedSize;
-        int globalX = blockIdx.x * blockDim.x + tileCol - pad;
-        int globalY = blockIdx.y * blockDim.y + tileRow - pad;
+        int globalX = blockIdx.y * blockDim.y + tileCol - pad;
+        int globalY = blockIdx.x * blockDim.x + tileRow - pad;
         // clamp (mimic cudaAddressModeClamp)
         globalX = max(0, min(globalX, (int)(width - 1)));
         globalY = max(0, min(globalY, (int)(height - 1)));
@@ -47,8 +47,8 @@ __global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, co
         return;
 
     // Local (shared memory) coordinates for center pixel
-    const int shX = threadIdx.x + pad;
-    const int shY = threadIdx.y + pad;
+    const int shX = threadIdx.y + pad;
+    const int shY = threadIdx.x + pad;
 
     float sum = 0.0f, sumSq = 0.0f;
     for (int i = -pad; i <= pad; i++)

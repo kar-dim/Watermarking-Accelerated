@@ -42,8 +42,4 @@ public:
 		}
 		return totalSecs;
 	}
-	//returns the maximum image size supported by the GPU device (cols, rows)
-#if defined(_USE_GPU_)
-	static std::pair<unsigned int, unsigned int> getMaxImageSize();
-#endif
 };

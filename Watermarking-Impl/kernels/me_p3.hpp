@@ -5,13 +5,13 @@ inline const std::string me_p3 = R"CLC(
 #pragma OPENCL EXTENSION cl_khr_fp16 : enable
 
 //manual loop unrolled calculation of rx in local memory
-void me_p3_rxCalculate(__local half RxLocal[64][36], const int localId, const float x_0, const float x_1, const float x_2, const float x_3, const float currentPixel, const float x_5, const float x_6, const float x_7, const float x_8)
+void me_p3_rxCalculate(__local half RxLocal[64][36], const int localId, const half x_0, const half x_1, const half x_2, const half x_3, const half x_4, const half x_5, const half x_6, const half x_7, const half x_8)
 {
-    vstore_half8((float8)(x_0 * currentPixel, x_1 * currentPixel, x_2 * currentPixel, x_3 * currentPixel, x_5 * currentPixel, x_6 * currentPixel, x_7 * currentPixel, x_8 * currentPixel), 0, &RxLocal[localId][0]);
+    vstore_half8((float8)(x_0 * x_4, x_1 * x_4, x_2 * x_4, x_3 * x_4, x_5 * x_4, x_6 * x_4, x_7 * x_4, x_8 * x_4), 0, &RxLocal[localId][0]);
 }
 
 //manual loop unrolled calculation of Rx in local memory
-void me_p3_RxCalculate(__local half RxLocal[64][36], const int localId, const float x_0, const float x_1, const float x_2, const float x_3, const float x_5, const float x_6, const float x_7, const float x_8)
+void me_p3_RxCalculate(__local half RxLocal[64][36], const int localId, const half x_0, const half x_1, const half x_2, const half x_3, const half x_5, const half x_6, const half x_7, const half x_8)
 {
     vstore_half8((float8)(x_0 * x_0, x_0 * x_1, x_0 * x_2, x_0 * x_3, x_0 * x_5, x_0 * x_6, x_0 * x_7, x_0 * x_8), 0, &RxLocal[localId][0]);
     vstore_half8((float8)(x_1 * x_1, x_1 * x_2, x_1 * x_3, x_1 * x_5, x_1 * x_6, x_1 * x_7, x_1 * x_8, x_2 * x_2), 0, &RxLocal[localId][8]);
@@ -28,7 +28,7 @@ __kernel void me(__global const float* __restrict__ input,
     const unsigned int paddedWidth,
     const unsigned int height,
     __local half RxLocal[64][36], //64 local threads, 36 values each (8 for rx, this is a shared memory for both Rx,rx)
-    __local float blockValues[3][66]) //64 local threads (+2 halos), 3 values each
+    __local half blockValues[3][66]) //64 local threads (+2 halos), 3 values each
 
 {
     const int x = get_global_id(0);
@@ -52,11 +52,11 @@ __kernel void me(__global const float* __restrict__ input,
         int globalY = get_group_id(1) * get_local_size(1) + row - 1;
         globalX = max(0, min(globalX, (int)(width - 1)));
         globalY = max(0, min(globalY, (int)(height - 1)));
-        blockValues[row][col] = input[globalX * height + globalY];
+        vstore_half(input[globalX * height + globalY], 0, &blockValues[row][col]);
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    float x_0, x_1, x_2, x_3, x_4, x_5, x_6, x_7, x_8;
+    half x_0, x_1, x_2, x_3, x_4, x_5, x_6, x_7, x_8;
     if (x < width)
     {
         const int localX = localId + 1;

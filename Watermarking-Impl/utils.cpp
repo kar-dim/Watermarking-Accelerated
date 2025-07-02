@@ -73,19 +73,3 @@ string Utils::formatExecutionTime(const bool showFps, const double seconds)
 {
 	return showFps ? std::format("FPS: {:.2f} FPS", 1.0 / seconds) : std::format("{:.6f} seconds", seconds);
 }
-
-#if defined(_USE_GPU_)
-std::pair<unsigned int, unsigned int> Utils::getMaxImageSize()
-{
-#if defined(_USE_OPENCL_)
-	const cl::Device device(afcl::getDeviceId(), false);
-	return std::pair<unsigned int, unsigned int>(
-		static_cast<unsigned int>(device.getInfo<CL_DEVICE_IMAGE2D_MAX_WIDTH>()), 
-		static_cast<unsigned int>(device.getInfo<CL_DEVICE_IMAGE2D_MAX_HEIGHT>())
-	);
-#elif defined(_USE_CUDA_)
-	const auto properties = cuda_utils::getDeviceProperties();
-	return std::pair<unsigned int, unsigned int>(properties.maxTexture2D[0], properties.maxTexture2D[1]);
-#endif
-}
-#endif

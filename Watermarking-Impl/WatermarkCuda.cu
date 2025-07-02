@@ -61,10 +61,11 @@ WatermarkCuda& WatermarkCuda::operator=(const WatermarkCuda& other)
 
 af::array WatermarkCuda::computeCustomMask(const af::array& inputImage) const
 {
-	const dim3 gridSize = cuda_utils::gridSizeCalculate(texKernelBlockSize, baseRows, baseCols);
+	//transposed grid dimensions because of column-major order in arrayfire
+	const dim3 gridSize = cuda_utils::gridSizeCalculate(windowKernelBlockSize, baseCols, baseRows);
 	const af::array customMask(baseRows, baseCols);
 	//call NVF kernel
-	nvf<3> << <gridSize, texKernelBlockSize, 0, afStream >> > (inputImage.device<float>(), customMask.device<float>(), baseCols, baseRows);
+	nvf<3> << <gridSize, windowKernelBlockSize, 0, afStream >> > (inputImage.device<float>(), customMask.device<float>(), baseCols, baseRows);
 	//transfer ownership to arrayfire and return output array
 	unlockArrays(inputImage, customMask);
 	return customMask;
@@ -72,10 +73,11 @@ af::array WatermarkCuda::computeCustomMask(const af::array& inputImage) const
 
 af::array WatermarkCuda::computeScaledNeighbors(const af::array& image, const af::array& coefficients) const
 {
-	const dim3 gridSize = cuda_utils::gridSizeCalculate(texKernelBlockSize, baseRows, baseCols);
+	//transposed grid dimensions because of column-major order in arrayfire
+	const dim3 gridSize = cuda_utils::gridSizeCalculate(windowKernelBlockSize, baseCols, baseRows);
 	const af::array neighbors(baseRows, baseCols);
 	setCoeffs(coefficients.device<float>());
-	calculate_scaled_neighbors_p3 << <gridSize, texKernelBlockSize, 0, afStream >> > (image.device<float>(), neighbors.device<float>(), baseCols, baseRows);
+	calculate_scaled_neighbors_p3 << <gridSize, windowKernelBlockSize, 0, afStream >> > (image.device<float>(), neighbors.device<float>(), baseCols, baseRows);
 	//transfer ownership to arrayfire and return output array
 	unlockArrays(image, neighbors, coefficients);
 	return neighbors;

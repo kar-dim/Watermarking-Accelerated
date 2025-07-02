@@ -11,16 +11,16 @@ __kernel void nvf(__global const float* __restrict__ input,
 	const int pad = p / 2;
 	const int pSquared = p * p;
     const int sharedSize = 16 + (2 * pad);
-	const int x = get_global_id(0);
-    const int y = get_global_id(1);
+	const int x = get_global_id(1);
+    const int y = get_global_id(0);
     const int localId = get_local_id(1) * get_local_size(0) + get_local_id(0);
 
     for (int i = localId; i < sharedSize * sharedSize; i += get_local_size(0) * get_local_size(1))
     {
         const int tileRow = i / sharedSize;
         const int tileCol = i % sharedSize;
-        int globalX =  get_group_id(0) * get_local_size(0) + tileCol - pad;
-        int globalY = get_group_id(1) * get_local_size(1) + tileRow - pad;
+        int globalX =  get_group_id(1) * get_local_size(1) + tileCol - pad;
+        int globalY = get_group_id(0) * get_local_size(0) + tileRow - pad;
 		globalX = max(0, min(globalX, (int)(width - 1)));
         globalY = max(0, min(globalY, (int)(height - 1)));
         region[tileRow][tileCol] = input[globalX * height + globalY];
@@ -30,8 +30,8 @@ __kernel void nvf(__global const float* __restrict__ input,
     if (y >= height || x >= width)
         return;
 
-    const int shX = get_local_id(0) + pad;
-    const int shY = get_local_id(1) + pad;
+    const int shX = get_local_id(1) + pad;
+    const int shY = get_local_id(0) + pad;
 
 	float sum = 0.0f, sumSq = 0.0f;
 	for (int i = -pad; i <= pad; i++)

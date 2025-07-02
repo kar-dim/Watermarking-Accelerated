@@ -11,7 +11,7 @@
 class WatermarkCuda final : public WatermarkGPU
 {
 private:
-	static constexpr dim3 texKernelBlockSize{ 16, 16 }, meKernelBlockSize{ 64, 1 };
+	static constexpr dim3 windowKernelBlockSize{ 16, 16 }, meKernelBlockSize{ 64, 1 };
 	dim3 meKernelDims;
 	static cudaStream_t afStream;
 

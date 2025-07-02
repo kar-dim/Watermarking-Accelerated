@@ -47,12 +47,13 @@ af::array WatermarkOCL::computeCustomMask(const af::array& image) const
 	const std::unique_ptr<cl_mem> imageMem(image.device<cl_mem>());
 	const std::unique_ptr<cl_mem> outputMem(customMask.device<cl_mem>());
 	const int localMemElements = (16 + p) * (16 + p);
+	//transposed global dimensions because of column-major order in arrayfire
 	executeKernel([&]() {
 		cl::Buffer imageBuff(*imageMem.get(), true);
 		cl::Buffer outputBuff(*outputMem.get(), true);
 		queue.enqueueNDRangeKernel(
 			cl_utils::KernelBuilder(programs[0], "nvf").args(imageBuff, outputBuff, baseCols, baseRows, cl::Local(sizeof(float) * localMemElements)).build(),
-			cl::NDRange(), cl::NDRange(texKernelDims.cols, texKernelDims.rows), cl::NDRange(16, 16));
+			cl::NDRange(), cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(16, 16));
 		queue.finish();
 		unlockArrays(image, customMask);
 	}, "nvf");
@@ -65,13 +66,14 @@ af::array WatermarkOCL::computeScaledNeighbors(const af::array& image, const af:
 	const std::unique_ptr<cl_mem> imageMem(image.device<cl_mem>());
 	const std::unique_ptr<cl_mem> coeffsMem(coefficients.device<cl_mem>());
 	const std::unique_ptr<cl_mem> neighborsMem(neighbors.device<cl_mem>());
+	//transposed global dimensions because of column-major order in arrayfire
 	executeKernel([&]() {
 		cl::Buffer imageBuff(*imageMem.get(), true);
 		cl::Buffer neighborsBuff(*neighborsMem.get(), true);
 		cl::Buffer coeffsBuff(*coeffsMem.get(), true);
 		queue.enqueueNDRangeKernel(
 			cl_utils::KernelBuilder(programs[2], "scaled_neighbors_p3").args(imageBuff, neighborsBuff, coeffsBuff, baseCols, baseRows, cl::Local(sizeof(float) * 324)).build(),
-			cl::NDRange(), cl::NDRange(texKernelDims.cols, texKernelDims.rows), cl::NDRange(16, 16));
+			cl::NDRange(), cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(16, 16));
 		queue.finish();
 		unlockArrays(image, coefficients, neighbors);
 	}, "scaled_neighbors_p3");
@@ -93,7 +95,7 @@ void WatermarkOCL::computePredictionErrorData(const af::array& image, af::array&
 		//call prediction error mask kernel
 		queue.enqueueNDRangeKernel(
 			cl_utils::KernelBuilder(programs[1], "me").args(imageBuff, Rx_buff, rx_buff, RxMappingsBuff, baseCols, static_cast<unsigned int>(meKernelDims.cols), baseRows,
-			cl::Local(sizeof(cl_half) * 2304), cl::Local(sizeof(float) * 198)).build(),
+			cl::Local(sizeof(cl_half) * 2304), cl::Local(sizeof(cl_half) * 198)).build(),
 			cl::NDRange(), cl::NDRange(meKernelDims.cols, meKernelDims.rows), cl::NDRange(64, 1));
 		//finish and return memory to arrayfire
 		queue.finish();
