@@ -22,7 +22,6 @@ BufferType WatermarkGPU::makeWatermark(const BufferType& inputImage, const Buffe
 		if (inputCoefficients.elements() == 0)
 			return outputImage;
 		mask = computePredictionErrorMask(inputErrorSequence);
-		//displayArray(mask * 20);
 	}
 	else
 		mask = computeCustomMask(inputImage);

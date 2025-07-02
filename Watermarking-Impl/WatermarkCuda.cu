@@ -83,7 +83,7 @@ af::array WatermarkCuda::computeScaledNeighbors(const af::array& image, const af
 
 void WatermarkCuda::computePredictionErrorData(const af::array& image, af::array& errorSequence, af::array& coefficients) const
 {
-	const dim3 gridSize = cuda_utils::gridSizeCalculate(meKernelBlockSize, meKernelDims.x, meKernelDims.y);
+	const dim3 gridSize = cuda_utils::gridSizeCalculate(meKernelBlockSize, meKernelDims.y, meKernelDims.x);
 	//call prediction error mask kernel
 	const af::array RxPartial(baseRows, meKernelDims.x);
 	const af::array rxPartial(baseRows, meKernelDims.x / 8);

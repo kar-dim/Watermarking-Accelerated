@@ -13,7 +13,7 @@ using std::string;
 
 //initialize data and memory
 WatermarkOCL::WatermarkOCL(const unsigned int rows, const unsigned int cols, const string& randomMatrixPath, const int p, const float psnr)
-	: WatermarkGPU(rows, cols, randomMatrixPath, psnr, p), texKernelDims({ align<16>(rows), align<16>(cols) }), meKernelDims({ align<64>(rows), align<64>(cols) })
+	: WatermarkGPU(rows, cols, randomMatrixPath, psnr, p), texKernelDims({ align<16>(rows), align<16>(cols) }), meKernelDims({ rows, align<64>(cols) })
 {
 	//compile opencl kernels and initialize memory
 	cl_utils::buildKernels(programs, p);
@@ -52,7 +52,7 @@ af::array WatermarkOCL::computeCustomMask(const af::array& image) const
 		cl::Buffer outputBuff(*outputMem.get(), true);
 		queue.enqueueNDRangeKernel(
 			cl_utils::KernelBuilder(programs[0], "nvf").args(imageBuff, outputBuff, baseCols, baseRows, cl::Local(sizeof(float) * localMemElements)).build(),
-			cl::NDRange(), cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(16, 16));
+			cl::NDRange(), cl::NDRange(texKernelDims.cols, texKernelDims.rows), cl::NDRange(16, 16));
 		queue.finish();
 		unlockArrays(image, customMask);
 	}, "nvf");
@@ -71,7 +71,7 @@ af::array WatermarkOCL::computeScaledNeighbors(const af::array& image, const af:
 		cl::Buffer coeffsBuff(*coeffsMem.get(), true);
 		queue.enqueueNDRangeKernel(
 			cl_utils::KernelBuilder(programs[2], "scaled_neighbors_p3").args(imageBuff, neighborsBuff, coeffsBuff, baseCols, baseRows, cl::Local(sizeof(float) * 324)).build(),
-			cl::NDRange(), cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(16, 16));
+			cl::NDRange(), cl::NDRange(texKernelDims.cols, texKernelDims.rows), cl::NDRange(16, 16));
 		queue.finish();
 		unlockArrays(image, coefficients, neighbors);
 	}, "scaled_neighbors_p3");
@@ -94,7 +94,7 @@ void WatermarkOCL::computePredictionErrorData(const af::array& image, af::array&
 		queue.enqueueNDRangeKernel(
 			cl_utils::KernelBuilder(programs[1], "me").args(imageBuff, Rx_buff, rx_buff, RxMappingsBuff, baseCols, static_cast<unsigned int>(meKernelDims.cols), baseRows,
 			cl::Local(sizeof(cl_half) * 2304), cl::Local(sizeof(float) * 198)).build(),
-			cl::NDRange(), cl::NDRange(meKernelDims.rows, meKernelDims.cols), cl::NDRange(64, 1));
+			cl::NDRange(), cl::NDRange(meKernelDims.cols, meKernelDims.rows), cl::NDRange(64, 1));
 		//finish and return memory to arrayfire
 		queue.finish();
 		unlockArrays(image, RxPartial, rxPartial);
