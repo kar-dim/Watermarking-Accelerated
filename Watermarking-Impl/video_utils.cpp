@@ -35,12 +35,16 @@ using std::cout;
 namespace video_utils
 {
 	//main frames loop logic for video watermark embedding and detection
-	int processFrames(const VideoProcessingContext& data, std::function<void(AVFrame*, int&)> processFrame)
+	int processFrames(const VideoProcessingContext& data, std::function<void(const AVFrame*, int&)> processFrame)
 	{
 		const AVPacketPtr packet(av_packet_alloc(), [](AVPacket* pkt) { av_packet_free(&pkt); });
 		const AVFramePtr frame(av_frame_alloc(), [](AVFrame* frame) { av_frame_free(&frame); });
 		int framesCount = 0;
-
+		auto processValidFrame = [&](const AVFrame* f)
+		{
+			Utils::checkError(f->format != AV_PIX_FMT_YUV420P && f->format != AV_PIX_FMT_YUVJ420P,"Error: Video frame format not supported, aborting");
+			processFrame(f, framesCount);
+		};
 		//read video frames loop
 		while (av_read_frame(data.inputFormatCtx, packet.get()) >= 0)
 		{
@@ -61,8 +65,7 @@ namespace video_utils
 					av_packet_unref(packet.get());
 					throw std::runtime_error(string("FFmpeg decoding error: ") + errbuf);
 				}
-				Utils::checkError(frame->format != AV_PIX_FMT_YUV420P && frame->format != AV_PIX_FMT_YUVJ420P, "Error: Video frame format not supported, aborting");
-				processFrame(frame.get(), framesCount);
+				processValidFrame(frame.get());
 			}
 			av_packet_unref(packet.get());
 		}
@@ -70,14 +73,13 @@ namespace video_utils
 		avcodec_send_packet(data.inputDecoderCtx, nullptr);
 		while (avcodec_receive_frame(data.inputDecoderCtx, frame.get()) == 0)
 		{
-			Utils::checkError(frame->format != AV_PIX_FMT_YUV420P && frame->format != AV_PIX_FMT_YUVJ420P, "Error: Video frame format not supported, aborting");
-			processFrame(frame.get(), framesCount);
+			processValidFrame(frame.get());
 		}
 		return framesCount;
 	}
 
 	//embed watermark in a video frame
-	void embedWatermark(const VideoProcessingContext& data, BufferType& inputFrame, GrayBuffer& watermarkedFrame, int& framesCount, AVFrame* frame, FILE* ffmpegPipe)
+	void embedWatermark(const VideoProcessingContext& data, BufferType& inputFrame, GrayBuffer& watermarkedFrame, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe)
 	{
 		const bool embedWatermark = framesCount % data.watermarkInterval == 0;
 		//if there is row padding (for alignment), we must copy the data to a contiguous block!
@@ -113,7 +115,7 @@ namespace video_utils
 	}
 
 	//detect the watermark for a video frame
-	void detectWatermark(const VideoProcessingContext& data, BufferType& inputFrame, int& framesCount, AVFrame* frame)
+	void detectWatermark(const VideoProcessingContext& data, BufferType& inputFrame, int& framesCount, const AVFrame* frame)
 	{
 		//detect watermark after X frames
 		if (framesCount % data.watermarkInterval == 0)
@@ -181,7 +183,7 @@ namespace video_utils
 #endif
 	}
 	//runs the watermark creation for a video frame and writes the watermarked frame to the ffmpeg pipe
-	void writeWatermarkeFrame(const VideoProcessingContext& data, BufferType& inputFrame, GrayBuffer& watermarkedFrame, AVFrame* frame, FILE* ffmpegPipe)
+	void writeWatermarkeFrame(const VideoProcessingContext& data, BufferType& inputFrame, GrayBuffer& watermarkedFrame, const AVFrame* frame, FILE* ffmpegPipe)
 	{
 		float watermarkStrength;
 #if defined(_USE_GPU_)
@@ -197,7 +199,7 @@ namespace video_utils
 	}
 
 	//runs the watermark creation for a video frame and writes the watermarked frame to the ffmpeg pipe, if the watermark is embedded, or writes the original frame data otherwise
-	void writeConditionalWatermarkFrame(const bool embedWatermark, const VideoProcessingContext& data, BufferType& inputFrame, GrayBuffer& watermarkedFrame, AVFrame* frame, FILE* ffmpegPipe)
+	void writeConditionalWatermarkFrame(const bool embedWatermark, const VideoProcessingContext& data, BufferType& inputFrame, GrayBuffer& watermarkedFrame, const AVFrame* frame, FILE* ffmpegPipe)
 	{
 		if (embedWatermark)
 		{

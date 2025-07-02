@@ -1,9 +1,5 @@
 #pragma once
 
-#if defined(_USE_EIGEN_)
-#include <cstdint>
-#endif
-
 #include "buffer.hpp"
 #include "videoprocessingcontext.hpp"
 #include "WatermarkBase.hpp"
@@ -35,10 +31,10 @@ namespace video_utils
 	int findVideoStream(const AVFormatContext* inputFormatCtx);
 	AVCodecContext* openDecoder(const AVCodecParameters* params);
 	std::string getFrameRate(const AVFormatContext* inputFormatCtx, const int videoStreamIndex);
-	void embedWatermark(const VideoProcessingContext& data, BufferType& inputFrame, GrayBuffer& watermarkedFrame, int& framesCount, AVFrame* frame, FILE* ffmpegPipe);
-	void detectWatermark(const VideoProcessingContext& data, BufferType& inputFrame, int& framesCount, AVFrame* frame);
-	int processFrames(const VideoProcessingContext& data, std::function<void(AVFrame*, int&)> processFrame);
+	void embedWatermark(const VideoProcessingContext& data, BufferType& inputFrame, GrayBuffer& watermarkedFrame, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe);
+	void detectWatermark(const VideoProcessingContext& data, BufferType& inputFrame, int& framesCount, const AVFrame* frame);
+	int processFrames(const VideoProcessingContext& data, std::function<void(const AVFrame*, int&)> processFrame);
 	void makeRgbWatermark(const std::unique_ptr<WatermarkBase>& watermarkObj, const BufferType& image, const BufferType& rgbImage, BufferType& output, float& watermarkStrength, MASK_TYPE maskType);
-	void writeWatermarkeFrame(const VideoProcessingContext& data, BufferType& inputFrame, GrayBuffer& watermarkedFrame, AVFrame* frame, FILE* ffmpegPipe);
-	void writeConditionalWatermarkFrame(const bool embedWatermark, const VideoProcessingContext& data, BufferType& inputFrame, GrayBuffer& watermarkedFrame, AVFrame* frame, FILE* ffmpegPipe);
+	void writeWatermarkeFrame(const VideoProcessingContext& data, BufferType& inputFrame, GrayBuffer& watermarkedFrame, const AVFrame* frame, FILE* ffmpegPipe);
+	void writeConditionalWatermarkFrame(const bool embedWatermark, const VideoProcessingContext& data, BufferType& inputFrame, GrayBuffer& watermarkedFrame, const AVFrame* frame, FILE* ffmpegPipe);
 }

@@ -251,8 +251,11 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 		BufferType inputFrame;
 		GrayBuffer watermarkedFrame;
 		//embed watermark on the video frames
-		double secs = Utils::executionTime([&] { video_utils::processFrames(videoData, [&](AVFrame* frame, int& framesCount) { video_utils::embedWatermark(videoData, inputFrame, watermarkedFrame, framesCount, frame, ffmpegPipe.get()); }); });
-		video_utils::processFrames(videoData, [&](AVFrame* frame, int& framesCount) { video_utils::embedWatermark(videoData, inputFrame, watermarkedFrame, framesCount, frame, ffmpegPipe.get()); });
+		double secs = Utils::executionTime([&] { 
+			video_utils::processFrames(videoData, [&](const AVFrame* frame, int& framesCount) { 
+				video_utils::embedWatermark(videoData, inputFrame, watermarkedFrame, framesCount, frame, ffmpegPipe.get()); 
+			}); 
+		});
 		cout << "\nWatermark embedding total execution time: " << Utils::formatExecutionTime(false, secs) << "\n";
 	}
 
@@ -262,7 +265,11 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 		BufferType inputFrame;
 		//detect watermark on the video frames
 		int framesCount = 1;
-		double secs = Utils::executionTime([&] { framesCount = video_utils::processFrames(videoData, [&](AVFrame* frame, int& framesCount) { video_utils::detectWatermark(videoData, inputFrame, framesCount, frame); }); });
+		double secs = Utils::executionTime([&] { 
+			framesCount = video_utils::processFrames(videoData, [&](const AVFrame* frame, int& framesCount) { 
+				video_utils::detectWatermark(videoData, inputFrame, framesCount, frame); 
+			}); 
+		});
 		cout << "\nWatermark detection total execution time: " << Utils::formatExecutionTime(false, secs) << "\n";
 		cout << "\nWatermark detection average execution time per frame: " << Utils::formatExecutionTime(showFps, secs / framesCount) << "\n";
 	}
