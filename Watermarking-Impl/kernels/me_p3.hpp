@@ -46,13 +46,11 @@ __kernel void me(__global const float* __restrict__ input,
 
     for (int i = localId; i < 3 * 66; i += get_local_size(0))
     {
-        const int col = i / 3;
-        const int row = i % 3;
-        int globalX = get_group_id(0) * get_local_size(0) + col - 1;
-        int globalY = get_group_id(1) * get_local_size(1) + row - 1;
-        globalX = max(0, min(globalX, (int)(width - 1)));
-        globalY = max(0, min(globalY, (int)(height - 1)));
-        vstore_half(input[globalX * height + globalY], 0, &blockValues[row][col]);
+        const int tileCol = i / 3;
+        const int tileRow = i % 3;
+        const int globalX = clamp((int)(get_group_id(0) * get_local_size(0)) + tileCol - 1, 0, (int) width - 1);
+        const int globalY = clamp((int)(get_group_id(1) * get_local_size(1)) + tileRow - 1, 0, (int) height - 1);
+        vstore_half(input[globalX * height + globalY], 0, &blockValues[tileRow][tileCol]);
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 

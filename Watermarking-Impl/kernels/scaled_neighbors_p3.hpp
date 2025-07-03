@@ -14,17 +14,7 @@ __kernel void scaled_neighbors_p3(
     const int y = get_global_id(0);
     const int localId = get_local_id(1) * get_local_size(0) + get_local_id(0);
 
-    //load cooperatively the 18 x 18 region for this 16 x 16 block
-    for (int i = localId; i < 18 * 18; i += get_local_size(0) * get_local_size(1))
-    {
-        const int tileRow = i / 18;
-        const int tileCol = i % 18;
-        int globalX =  get_group_id(1) * get_local_size(1) + tileCol - 1;
-        int globalY = get_group_id(0) * get_local_size(0) + tileRow - 1;
-        globalX = max(0, min(globalX, (int)(width - 1)));
-        globalY = max(0, min(globalY, (int)(height - 1)));
-        region[tileRow][tileCol] = input[globalX * height + globalY];
-    }
+    fillBlock(input, region, width, height);
     barrier(CLK_LOCAL_MEM_FENCE);
 
     //calculate the dot product of the coefficients and the neighborhood for this pixel

@@ -5,7 +5,6 @@
 #include <arrayfire.h>
 #include <stdexcept>
 #include <string>
-#include <vector>
 
 struct dim2
 {

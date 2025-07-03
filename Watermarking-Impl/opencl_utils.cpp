@@ -1,3 +1,4 @@
+#include "kernels/helpers.hpp"
 #include "kernels/me_p3.hpp"
 #include "kernels/nvf.hpp"
 #include "kernels/scaled_neighbors_p3.hpp"
@@ -26,8 +27,8 @@ namespace cl_utils
 		cl::Program program;
 		//compile opencl kernels
 		try {
-			program = cl::Program(context, nvf + me_p3 + scaled_neighbors_p3);
-			program.build(device, ("-cl-mad-enable -Dp=" + std::to_string(p)).c_str());
+			program = cl::Program(context, helpers + nvf + me_p3 + scaled_neighbors_p3);
+			program.build(device, ("-cl-mad-enable -DWINDOW_SIZE=" + std::to_string(p)).c_str());
 			return program;
 		}
 		catch (const cl::Error& e) {

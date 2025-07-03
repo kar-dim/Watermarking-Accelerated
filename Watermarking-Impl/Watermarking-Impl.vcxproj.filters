@@ -1,10 +1,10 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
-    <CudaCompile Include="kernels.cu">
+    <CudaCompile Include="WatermarkCuda.cu">
       <Filter>Source Files\cuda</Filter>
     </CudaCompile>
-    <CudaCompile Include="WatermarkCuda.cu">
+    <CudaCompile Include="kernels\kernels.cu">
       <Filter>Source Files\cuda</Filter>
     </CudaCompile>
   </ItemGroup>
@@ -81,9 +81,6 @@
     <ClInclude Include="cuda_utils.hpp">
       <Filter>Header Files\cuda</Filter>
     </ClInclude>
-    <ClInclude Include="kernels.cuh">
-      <Filter>Header Files\cuda</Filter>
-    </ClInclude>
     <ClInclude Include="WatermarkCuda.cuh">
       <Filter>Header Files\cuda</Filter>
     </ClInclude>
@@ -140,6 +137,12 @@
     </ClInclude>
     <ClInclude Include="video_utils.hpp">
       <Filter>Header Files\util</Filter>
+    </ClInclude>
+    <ClInclude Include="kernels\kernels.cuh">
+      <Filter>Header Files\cuda</Filter>
+    </ClInclude>
+    <ClInclude Include="kernels\helpers.hpp">
+      <Filter>Header Files\opencl</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>
