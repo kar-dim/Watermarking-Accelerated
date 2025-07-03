@@ -1,6 +1,5 @@
 #pragma once
 #include "opencl_init.h"
-#include <vector>
 
 /*!
  *  \brief  Helper utility functions related to OpenCL.
@@ -29,5 +28,5 @@ namespace cl_utils
     };
 
     //helper method to build opencl kernels from source
-    bool buildKernels(std::vector<cl::Program>& programs, const int p);
+    cl::Program buildKernels(const int p);
 }

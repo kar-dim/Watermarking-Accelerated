@@ -13,11 +13,9 @@ using std::string;
 
 //initialize data and memory
 WatermarkOCL::WatermarkOCL(const unsigned int rows, const unsigned int cols, const string& randomMatrixPath, const int p, const float psnr)
-	: WatermarkGPU(rows, cols, randomMatrixPath, psnr, p), texKernelDims({ align<16>(rows), align<16>(cols) }), meKernelDims({ rows, align<64>(cols) })
-{
-	//compile opencl kernels and initialize memory
-	cl_utils::buildKernels(programs, p);
-}
+	: WatermarkGPU(rows, cols, randomMatrixPath, psnr, p), texKernelDims({ align<16>(rows), align<16>(cols) }), meKernelDims({ rows, align<64>(cols) }),
+	  programs(cl_utils::buildKernels(p))
+{ }
 
 //copy constructor
 WatermarkOCL::WatermarkOCL(const WatermarkOCL& other) : WatermarkGPU(other.baseRows, other.baseCols, other.randomMatrix, other.strengthFactor, other.p),
@@ -52,7 +50,7 @@ af::array WatermarkOCL::computeCustomMask(const af::array& image) const
 		cl::Buffer imageBuff(*imageMem.get(), true);
 		cl::Buffer outputBuff(*outputMem.get(), true);
 		queue.enqueueNDRangeKernel(
-			cl_utils::KernelBuilder(programs[0], "nvf").args(imageBuff, outputBuff, baseCols, baseRows, cl::Local(sizeof(float) * localMemElements)).build(),
+			cl_utils::KernelBuilder(programs, "nvf").args(imageBuff, outputBuff, baseCols, baseRows, cl::Local(sizeof(float) * localMemElements)).build(),
 			cl::NDRange(), cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(16, 16));
 		queue.finish();
 		unlockArrays(image, customMask);
@@ -72,7 +70,7 @@ af::array WatermarkOCL::computeScaledNeighbors(const af::array& image, const af:
 		cl::Buffer neighborsBuff(*neighborsMem.get(), true);
 		cl::Buffer coeffsBuff(*coeffsMem.get(), true);
 		queue.enqueueNDRangeKernel(
-			cl_utils::KernelBuilder(programs[2], "scaled_neighbors_p3").args(imageBuff, neighborsBuff, coeffsBuff, baseCols, baseRows, cl::Local(sizeof(float) * 324)).build(),
+			cl_utils::KernelBuilder(programs, "scaled_neighbors_p3").args(imageBuff, neighborsBuff, coeffsBuff, baseCols, baseRows, cl::Local(sizeof(float) * 324)).build(),
 			cl::NDRange(), cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(16, 16));
 		queue.finish();
 		unlockArrays(image, coefficients, neighbors);
@@ -94,7 +92,7 @@ void WatermarkOCL::computePredictionErrorData(const af::array& image, af::array&
 		cl::Buffer rx_buff(*rxPartialMem.get(), true);
 		//call prediction error mask kernel
 		queue.enqueueNDRangeKernel(
-			cl_utils::KernelBuilder(programs[1], "me").args(imageBuff, Rx_buff, rx_buff, RxMappingsBuff, baseCols, static_cast<unsigned int>(meKernelDims.cols), baseRows,
+			cl_utils::KernelBuilder(programs, "me").args(imageBuff, Rx_buff, rx_buff, RxMappingsBuff, baseCols, static_cast<unsigned int>(meKernelDims.cols), baseRows,
 			cl::Local(sizeof(cl_half) * 2304), cl::Local(sizeof(cl_half) * 198)).build(),
 			cl::NDRange(), cl::NDRange(meKernelDims.cols, meKernelDims.rows), cl::NDRange(64, 1));
 		//finish and return memory to arrayfire

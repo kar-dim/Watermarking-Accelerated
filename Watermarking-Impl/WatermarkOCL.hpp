@@ -35,7 +35,7 @@ private:
 	const cl::CommandQueue queue{ afcl::getQueue(false) };
 	const cl::Buffer RxMappingsBuff{ context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(int) * 64, (void*)RxMappings, NULL };
 	dim2 texKernelDims, meKernelDims;
-	std::vector<cl::Program> programs { 3 };
+	cl::Program programs;
 
 	af::array computeCustomMask(const af::array& image) const override;
 	af::array computeScaledNeighbors(const af::array& image, const af::array& coefficients) const override;
