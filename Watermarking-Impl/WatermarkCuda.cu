@@ -1,5 +1,5 @@
 #include "cuda_utils.hpp"
-#include "kernels.cuh"
+#include "kernels/kernels.cuh"
 #include "WatermarkCuda.cuh"
 #include "WatermarkGpu.hpp"
 #include <af/cuda.h>
