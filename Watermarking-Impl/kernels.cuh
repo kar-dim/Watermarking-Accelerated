@@ -12,6 +12,25 @@ __host__ void setCoeffs(const float* c);
 __device__ half8 make_half8(const float& a, const float& b, const float& c, const float& d, const float& e, const float& f, const float& g, const float& h);
 __device__ half8 make_half8(const half& a, const half& b, const half& c, const half& d, const half& e, const half& f, const half& g, const half& h);
 
+//helper method to clamp a value between two limits
+template<typename T>
+__device__ __host__ inline T clamp(const T& val, const T& lo, const T& hi) { return (val < lo) ? lo : (val > hi) ? hi : val; }
+
+//helper method to fill block-wide shared memory cooperatively for scaled neighbors and NVF kernels
+template<int p, int pad = p / 2, int sharedSize = 16 + (2 * pad)>
+__device__ void fillBlock(const float* __restrict__ input, float* __restrict__ sharedMem, const int width, const int height)
+{
+    for (int i = threadIdx.y * blockDim.x + threadIdx.x; i < sharedSize * sharedSize; i += blockDim.x * blockDim.y)
+    {
+        const int tileRow = i / sharedSize;
+        const int tileCol = i % sharedSize;
+        // clamp (mimic cudaAddressModeClamp)
+        const int globalX = clamp<int>((int)(blockIdx.y * blockDim.y) + tileCol - pad, 0, width - 1);
+        const int globalY = clamp<int>((int)(blockIdx.x * blockDim.x) + tileRow - pad, 0, height - 1);
+        sharedMem[tileRow * sharedSize + tileCol] = input[globalX * height + globalY];
+    }
+}
+
 //helper methods of ME kernel, to calculate block-wide Rx/rx values in shared memory
 __device__ void me_p3_rxCalculate(half8* RxLocalVec, const half& x_0, const half& x_1, const half& x_2, const half& x_3, const half& x_4, const half& x_5, const half& x_6, const half& x_7, const half& x_8);
 __device__ void me_p3_RxCalculate(half8* RxLocalVec, const half& x_0, const half& x_1, const half& x_2, const half& x_3, const half& x_5, const half& x_6, const half& x_7, const half& x_8);
@@ -24,22 +43,10 @@ __global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, co
     constexpr int sharedSize = 16 + (2 * pad);
     const int x = blockIdx.y * blockDim.y + threadIdx.y;
     const int y = blockIdx.x * blockDim.x + threadIdx.x;
-    const int localId = threadIdx.y * blockDim.x + threadIdx.x; // 0 to 255 for 16 x 16 block
 
     __shared__ float region[sharedSize][sharedSize]; //hold the region for this 16 x 16 block
 
-    //load cooperatively the padded region for this 16 x 16 block
-    for (int i = localId; i < sharedSize * sharedSize; i += blockDim.x * blockDim.y)
-    {
-        const int tileRow = i / sharedSize;
-        const int tileCol = i % sharedSize;
-        int globalX = blockIdx.y * blockDim.y + tileCol - pad;
-        int globalY = blockIdx.x * blockDim.x + tileRow - pad;
-        // clamp (mimic cudaAddressModeClamp)
-        globalX = max(0, min(globalX, (int)(width - 1)));
-        globalY = max(0, min(globalY, (int)(height - 1)));
-		region[tileRow][tileCol] = input[globalX * height + globalY];
-    }
+	fillBlock<p>(input, &region[0][0], width, height);
     __syncthreads();
 
     // Bounds check
