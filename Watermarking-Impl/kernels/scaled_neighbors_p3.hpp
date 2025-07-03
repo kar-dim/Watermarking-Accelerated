@@ -12,7 +12,6 @@ __kernel void scaled_neighbors_p3(
 {
     const int x = get_global_id(1);
     const int y = get_global_id(0);
-    const int localId = get_local_id(1) * get_local_size(0) + get_local_id(0);
 
     fillBlock(input, region, width, height);
     barrier(CLK_LOCAL_MEM_FENCE);

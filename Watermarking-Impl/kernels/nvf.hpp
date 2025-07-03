@@ -10,10 +10,8 @@ __kernel void nvf(__global const float* __restrict__ input,
 {	
 	const int pad = WINDOW_SIZE / 2;
 	const int pSquared = WINDOW_SIZE * WINDOW_SIZE;
-    const int sharedSize = 16 + (2 * pad);
 	const int x = get_global_id(1);
     const int y = get_global_id(0);
-    const int localId = get_local_id(1) * get_local_size(0) + get_local_id(0);
 
 	fillBlock(input, region, width, height);
     barrier(CLK_LOCAL_MEM_FENCE);
