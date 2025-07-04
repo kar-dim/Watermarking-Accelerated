@@ -96,15 +96,6 @@
     <ClInclude Include="WatermarkOCL.hpp">
       <Filter>Header Files\opencl</Filter>
     </ClInclude>
-    <ClInclude Include="kernels\me_p3.hpp">
-      <Filter>Header Files\opencl</Filter>
-    </ClInclude>
-    <ClInclude Include="kernels\nvf.hpp">
-      <Filter>Header Files\opencl</Filter>
-    </ClInclude>
-    <ClInclude Include="kernels\scaled_neighbors_p3.hpp">
-      <Filter>Header Files\opencl</Filter>
-    </ClInclude>
     <ClInclude Include="WatermarkBase.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -141,7 +132,7 @@
     <ClInclude Include="kernels\kernels.cuh">
       <Filter>Header Files\cuda</Filter>
     </ClInclude>
-    <ClInclude Include="kernels\helpers.hpp">
+    <ClInclude Include="kernels\kernels.hpp">
       <Filter>Header Files\opencl</Filter>
     </ClInclude>
   </ItemGroup>

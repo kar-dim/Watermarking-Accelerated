@@ -1,16 +1,100 @@
 #pragma once
 #include <string>
-inline const std::string me_p3 = R"CLC(
+inline const std::string kernels = R"CLC(
+
+#define PAD           (WINDOW_SIZE / 2)
+#define SHAREDSIZE    (16 + 2 * PAD)
 
 #pragma OPENCL EXTENSION cl_khr_fp16 : enable
 
-//manual loop unrolled calculation of rx in local memory
+inline void fillBlock(
+    __global const float* __restrict__ input,
+    __local float* __restrict__ sharedMem,
+    const int width,
+    const int height)
+{
+    for (int i = get_local_id(1) * get_local_size(0) + get_local_id(0); i < SHAREDSIZE * SHAREDSIZE; i += get_local_size(0) * get_local_size(1))
+    {
+        const int tileRow = i / SHAREDSIZE;
+        const int tileCol = i % SHAREDSIZE;
+        const int globalX = clamp((int)(get_group_id(1) * get_local_size(1) + tileCol - PAD), 0, width - 1);
+        const int globalY = clamp((int)(get_group_id(0) * get_local_size(0) + tileRow - PAD), 0, height - 1);
+        sharedMem[tileRow * SHAREDSIZE + tileCol] = input[globalX * height + globalY];
+    }
+}
+
+__kernel void nvf(__global const float* __restrict__ input, 
+	__global float* __restrict__ nvf,
+	const unsigned int width,
+    const unsigned int height,
+	__local float region[16 + 2 * (WINDOW_SIZE/2)][16 + 2 * (WINDOW_SIZE/2)])
+{	
+	const int pad = WINDOW_SIZE / 2;
+	const int pSquared = WINDOW_SIZE * WINDOW_SIZE;
+	const int x = get_global_id(1);
+    const int y = get_global_id(0);
+
+	fillBlock(input, region, width, height);
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    if (y >= height || x >= width)
+        return;
+
+    const int shX = get_local_id(1) + pad;
+    const int shY = get_local_id(0) + pad;
+
+	float sum = 0.0f, sumSq = 0.0f;
+	for (int i = -pad; i <= pad; i++)
+	{
+		for (int j = -pad; j <= pad; j++)
+		{
+			float pixelValue = region[shY + i][shX + j];
+			sum += pixelValue;
+			sumSq += pixelValue * pixelValue;
+		}
+	}
+	float mean = sum / pSquared;
+	float variance = (sumSq / pSquared) - (mean * mean);
+	nvf[(x * height) + y] = variance / (1 + variance);
+}
+
+__kernel void scaled_neighbors_p3(
+    __global const float* __restrict__ input, 
+    __global float* __restrict__ x_,
+    __constant float* __restrict__ coeffs,
+    const unsigned int width,
+    const unsigned int height,
+    __local float region[16 + 2][16 + 2]) //hold the 18 x 18 region for this 16 x 16 block
+{
+    const int x = get_global_id(1);
+    const int y = get_global_id(0);
+
+    fillBlock(input, region, width, height);
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    //calculate the dot product of the coefficients and the neighborhood for this pixel
+    if (x < width && y < height) 
+    {
+        const int centerCol = get_local_id(1) + 1;
+        const int centerRow = get_local_id(0) + 1;
+        float dot = 0.0f;
+        dot += coeffs[0] * region[centerRow - 1][centerCol - 1];
+        dot += coeffs[1] * region[centerRow - 1][centerCol];
+        dot += coeffs[2] * region[centerRow - 1][centerCol + 1];
+        dot += coeffs[3] * region[centerRow][centerCol - 1];
+        dot += coeffs[4] * region[centerRow][centerCol + 1];
+        dot += coeffs[5] * region[centerRow + 1][centerCol - 1];
+        dot += coeffs[6] * region[centerRow + 1][centerCol];
+        dot += coeffs[7] * region[centerRow + 1][centerCol + 1];
+		x_[(x * height + y)] = dot;
+    }
+}
+
 void me_p3_rxCalculate(__local half RxLocal[64][36], const int localId, const half x_0, const half x_1, const half x_2, const half x_3, const half x_4, const half x_5, const half x_6, const half x_7, const half x_8)
 {
     vstore_half8((float8)(x_0 * x_4, x_1 * x_4, x_2 * x_4, x_3 * x_4, x_5 * x_4, x_6 * x_4, x_7 * x_4, x_8 * x_4), 0, &RxLocal[localId][0]);
 }
 
-//manual loop unrolled calculation of Rx in local memory
 void me_p3_RxCalculate(__local half RxLocal[64][36], const int localId, const half x_0, const half x_1, const half x_2, const half x_3, const half x_5, const half x_6, const half x_7, const half x_8)
 {
     vstore_half8((float8)(x_0 * x_0, x_0 * x_1, x_0 * x_2, x_0 * x_3, x_0 * x_5, x_0 * x_6, x_0 * x_7, x_0 * x_8), 0, &RxLocal[localId][0]);
