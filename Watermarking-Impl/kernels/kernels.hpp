@@ -90,12 +90,12 @@ __kernel void scaled_neighbors_p3(
     }
 }
 
-void me_p3_rxCalculate(__local half RxLocal[64][36], const int localId, const half x_0, const half x_1, const half x_2, const half x_3, const half x_4, const half x_5, const half x_6, const half x_7, const half x_8)
+inline void me_p3_rxCalculate(__local half RxLocal[64][36], const int localId, const half x_0, const half x_1, const half x_2, const half x_3, const half x_4, const half x_5, const half x_6, const half x_7, const half x_8)
 {
     vstore_half8((float8)(x_0 * x_4, x_1 * x_4, x_2 * x_4, x_3 * x_4, x_5 * x_4, x_6 * x_4, x_7 * x_4, x_8 * x_4), 0, &RxLocal[localId][0]);
 }
 
-void me_p3_RxCalculate(__local half RxLocal[64][36], const int localId, const half x_0, const half x_1, const half x_2, const half x_3, const half x_5, const half x_6, const half x_7, const half x_8)
+inline void me_p3_RxCalculate(__local half RxLocal[64][36], const int localId, const half x_0, const half x_1, const half x_2, const half x_3, const half x_5, const half x_6, const half x_7, const half x_8)
 {
     vstore_half8((float8)(x_0 * x_0, x_0 * x_1, x_0 * x_2, x_0 * x_3, x_0 * x_5, x_0 * x_6, x_0 * x_7, x_0 * x_8), 0, &RxLocal[localId][0]);
     vstore_half8((float8)(x_1 * x_1, x_1 * x_2, x_1 * x_3, x_1 * x_5, x_1 * x_6, x_1 * x_7, x_1 * x_8, x_2 * x_2), 0, &RxLocal[localId][8]);
