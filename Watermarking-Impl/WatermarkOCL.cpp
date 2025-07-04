@@ -43,13 +43,13 @@ af::array WatermarkOCL::computeCustomMask(const af::array& image) const
 	const af::array customMask(baseRows, baseCols);
 	const std::unique_ptr<cl_mem> imageMem(image.device<cl_mem>());
 	const std::unique_ptr<cl_mem> outputMem(customMask.device<cl_mem>());
-	const int localMemElements = (16 + p) * (16 + p);
+	const int localMemBytes = sizeof(float) * (16 + p) * (16 + p);
 	//transposed global dimensions because of column-major order in arrayfire
 	executeKernel([&]() {
 		cl::Buffer imageBuff(*imageMem.get(), true);
 		cl::Buffer outputBuff(*outputMem.get(), true);
 		queue.enqueueNDRangeKernel(
-			cl_utils::KernelBuilder(programs, "nvf").args(imageBuff, outputBuff, baseCols, baseRows, cl::Local(sizeof(float) * localMemElements)).build(),
+			cl_utils::KernelBuilder(programs, "nvf").args(imageBuff, outputBuff, baseCols, baseRows, cl::Local(localMemBytes)).build(),
 			cl::NDRange(), cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(16, 16));
 		queue.finish();
 		unlockArrays(image, customMask);
@@ -63,13 +63,14 @@ af::array WatermarkOCL::computeScaledNeighbors(const af::array& image, const af:
 	const std::unique_ptr<cl_mem> imageMem(image.device<cl_mem>());
 	const std::unique_ptr<cl_mem> coeffsMem(coefficients.device<cl_mem>());
 	const std::unique_ptr<cl_mem> neighborsMem(neighbors.device<cl_mem>());
+	const int localMemBytes = sizeof(float) * (16 + p) * (16 + p);
 	//transposed global dimensions because of column-major order in arrayfire
 	executeKernel([&]() {
 		cl::Buffer imageBuff(*imageMem.get(), true);
 		cl::Buffer neighborsBuff(*neighborsMem.get(), true);
 		cl::Buffer coeffsBuff(*coeffsMem.get(), true);
 		queue.enqueueNDRangeKernel(
-			cl_utils::KernelBuilder(programs, "scaled_neighbors_p3").args(imageBuff, neighborsBuff, coeffsBuff, baseCols, baseRows, cl::Local(sizeof(float) * 324)).build(),
+			cl_utils::KernelBuilder(programs, "scaled_neighbors_p3").args(imageBuff, neighborsBuff, coeffsBuff, baseCols, baseRows, cl::Local(localMemBytes)).build(),
 			cl::NDRange(), cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(16, 16));
 		queue.finish();
 		unlockArrays(image, coefficients, neighbors);
@@ -85,11 +86,9 @@ void WatermarkOCL::computePredictionErrorData(const af::array& image, af::array&
 	const std::unique_ptr<cl_mem> RxPartialMem(RxPartial.device<cl_mem>());
 	const std::unique_ptr<cl_mem> rxPartialMem(rxPartial.device<cl_mem>());
 	executeKernel([&]() {
-		//initialize custom kernel memory
 		cl::Buffer imageBuff(*imageMem.get(), true);
 		cl::Buffer Rx_buff(*RxPartialMem.get(), true);
 		cl::Buffer rx_buff(*rxPartialMem.get(), true);
-		//call prediction error mask kernel
 		queue.enqueueNDRangeKernel(
 			cl_utils::KernelBuilder(programs, "me").args(imageBuff, Rx_buff, rx_buff, RxMappingsBuff, baseCols, static_cast<unsigned int>(meKernelDims.cols), baseRows,
 			cl::Local(sizeof(cl_half) * 2304), cl::Local(sizeof(cl_half) * 198)).build(),
@@ -97,7 +96,7 @@ void WatermarkOCL::computePredictionErrorData(const af::array& image, af::array&
 		//finish and return memory to arrayfire
 		queue.finish();
 		unlockArrays(image, RxPartial, rxPartial);
-		//calculation of coefficients, error sequence and mask
+		//calculation of coefficients and error sequence
 		const auto correlationArrays = transformCorrelationArrays(RxPartial, rxPartial);
 		//solve() may crash in OpenCL ArrayFire implementation if the system is not solvable.
 		try {

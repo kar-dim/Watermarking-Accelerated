@@ -91,7 +91,7 @@ void WatermarkCuda::computePredictionErrorData(const af::array& image, af::array
 	const af::array rxPartial(baseRows, meKernelDims.x / 8);
 	me_p3 <<<gridSize, meKernelBlockSize, 0, afStream >>> (image.device<float>(), RxPartial.device<float>(), rxPartial.device<float>(), baseCols, meKernelDims.x, baseRows);
 	unlockArrays(image, RxPartial, rxPartial);
-	//calculation of coefficients, error sequence and mask
+	//calculation of coefficients and error sequence
 	const auto correlationArrays = transformCorrelationArrays(RxPartial, rxPartial);
 	coefficients = af::solve(correlationArrays.first, correlationArrays.second);
 	//if system is not solvable, don't waste computing the error sequence, there is no watermark to embed
