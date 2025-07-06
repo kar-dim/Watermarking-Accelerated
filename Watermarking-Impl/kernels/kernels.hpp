@@ -119,7 +119,7 @@ __kernel void me(__global const float* __restrict__ input,
     const int y = get_global_id(1);
     const int outputIndex = (y * paddedWidth) + x;
     const int localId = get_local_id(0);
-    const int widthLimit = paddedWidth == width ? 64 :get_group_id(0) == get_num_groups(0) - 1 ? paddedWidth - width : 64;
+    const int widthLimit = paddedWidth == width ? 64 :get_group_id(0) == get_num_groups(0) - 1 ? 64 - (paddedWidth - width) : 64;
 
     vstore_half8((float8)(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f), 0, &RxLocal[localId][0]);
 

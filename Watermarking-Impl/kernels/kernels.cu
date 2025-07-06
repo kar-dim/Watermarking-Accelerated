@@ -57,7 +57,7 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
     const int x = blockIdx.x * blockDim.x + threadIdx.x;
     const int y = blockIdx.y * blockDim.y + threadIdx.y;
 	const int outputIndex = (y * paddedWidth) + x;
-    const int widthLimit = paddedWidth == width ? 64 : blockIdx.x == gridDim.x - 1 ? paddedWidth - width : 64;
+    const int widthLimit = paddedWidth == width ? 64 : blockIdx.x == gridDim.x - 1 ? 64 - (paddedWidth - width) : 64;
 
     //re-use shared memory for Rx and rx calculation, helps with occupancy
     __shared__ half RxLocal[64][40]; //36 + 4 for 16-byte alignment (in order to use vectorized 128-bit load/store)
