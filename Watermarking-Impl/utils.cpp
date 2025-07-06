@@ -14,6 +14,8 @@
 #include "WatermarkCuda.cuh"
 #include <utility>
 #elif defined(_USE_EIGEN_)
+#include <algorithm>
+#include <cctype>
 #include "cimg_init.h"
 #include "eigen_utils.hpp"
 #include "WatermarkEigen.hpp"
@@ -23,15 +25,24 @@ using std::string;
 
 string Utils::addSuffixBeforeExtension(const string& file, const string& suffix)
 {
-	auto dot = file.find_last_of('.');
-	return dot == string::npos ? file + suffix : file.substr(0, dot) + suffix + file.substr(dot);
+	const auto dot = file.find_last_of('.');
+	if (dot == string::npos || dot == file.size() - 1)
+		throw std::runtime_error("Filename has no valid extension: " + file);
+	return file.substr(0, dot) + suffix + file.substr(dot);
 }
 
 void Utils::saveImage(const string& imagePath, const string& suffix, const BufferType& watermark)
 {
 #if defined(_USE_EIGEN_)
 	const string watermarkedFile = Utils::addSuffixBeforeExtension(imagePath, suffix);
-	eigen_utils::eigenRgbToCimg(watermark.getRGB()).save_png(watermarkedFile.c_str());
+	string extension = watermarkedFile.substr(watermarkedFile.find_last_of('.') + 1);
+	std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
+	const auto rgbCimg = eigen_utils::eigenRgbToCimg(watermark.getRGB());
+	if (extension == "png")  rgbCimg.save_png(watermarkedFile.c_str());
+	else if (extension == "bmp")  rgbCimg.save_bmp(watermarkedFile.c_str());
+	else if (extension == "jpg" || extension == "jpeg") rgbCimg.save_jpeg(watermarkedFile.c_str());
+	else
+		throw std::runtime_error("Unsupported image format: " + extension);
 #elif defined(_USE_GPU_)
 	af::saveImageNative(addSuffixBeforeExtension(imagePath, suffix).c_str(), watermark.as(u8));
 #endif

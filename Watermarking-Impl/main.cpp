@@ -145,7 +145,6 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 	const auto cols = image.getGray().cols();
 	cout << "Time to load image from disk and initialize CImg and Eigen memory objects: " << secs << " seconds\n\n";
 #endif
-	Utils::checkError(cols < 64 || rows < 64, "Image dimensions too low");
 	Utils::checkError(cols > maxImageDims.first || rows > maxImageDims.second, "Image dimensions too high");
 
 	float watermarkStrength;
