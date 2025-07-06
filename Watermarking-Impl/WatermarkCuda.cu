@@ -65,7 +65,7 @@ af::array WatermarkCuda::computeCustomMask(const af::array& inputImage) const
 	const dim3 gridSize = cuda_utils::gridSizeCalculate(windowKernelBlockSize, baseCols, baseRows);
 	const af::array customMask(baseRows, baseCols);
 	//call NVF kernel
-	nvf<3> << <gridSize, windowKernelBlockSize, 0, afStream >> > (inputImage.device<float>(), customMask.device<float>(), baseCols, baseRows);
+	nvf<3> <<<gridSize, windowKernelBlockSize, 0, afStream>>> (inputImage.device<float>(), customMask.device<float>(), baseCols, baseRows);
 	//transfer ownership to arrayfire and return output array
 	unlockArrays(inputImage, customMask);
 	return customMask;
@@ -76,8 +76,9 @@ af::array WatermarkCuda::computeScaledNeighbors(const af::array& image, const af
 	//transposed grid dimensions because of column-major order in arrayfire
 	const dim3 gridSize = cuda_utils::gridSizeCalculate(windowKernelBlockSize, baseCols, baseRows);
 	const af::array neighbors(baseRows, baseCols);
+	//populate constant memory and call scaled neighbors kernel
 	setCoeffs(coefficients.device<float>());
-	calculate_scaled_neighbors_p3 << <gridSize, windowKernelBlockSize, 0, afStream >> > (image.device<float>(), neighbors.device<float>(), baseCols, baseRows);
+	calculate_scaled_neighbors_p3 <<<gridSize, windowKernelBlockSize, 0, afStream>>> (image.device<float>(), neighbors.device<float>(), baseCols, baseRows);
 	//transfer ownership to arrayfire and return output array
 	unlockArrays(image, neighbors, coefficients);
 	return neighbors;
@@ -89,7 +90,7 @@ void WatermarkCuda::computePredictionErrorData(const af::array& image, af::array
 	//call prediction error mask kernel
 	const af::array RxPartial(baseRows, meKernelDims.x);
 	const af::array rxPartial(baseRows, meKernelDims.x / 8);
-	me_p3 <<<gridSize, meKernelBlockSize, 0, afStream >>> (image.device<float>(), RxPartial.device<float>(), rxPartial.device<float>(), baseCols, meKernelDims.x, baseRows);
+	me_p3 <<<gridSize, meKernelBlockSize, 0, afStream>>> (image.device<float>(), RxPartial.device<float>(), rxPartial.device<float>(), baseCols, meKernelDims.x, baseRows);
 	unlockArrays(image, RxPartial, rxPartial);
 	//calculation of coefficients and error sequence
 	const auto correlationArrays = transformCorrelationArrays(RxPartial, rxPartial);

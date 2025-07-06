@@ -49,11 +49,10 @@ __global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, co
 	fillBlock<p>(input, &region[0][0], width, height);
     __syncthreads();
 
-    // Bounds check
     if (x >= width || y >= height)
         return;
 
-    // Local (shared memory) coordinates for center pixel
+    //local (shared memory) coordinates for center pixel
     const int shX = threadIdx.y + pad;
     const int shY = threadIdx.x + pad;
 
@@ -67,11 +66,8 @@ __global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, co
             sumSq += val * val;
         }
     }
-
     float mean = sum / pSquared;
     float variance = (sumSq / pSquared) - (mean * mean);
-
-    // Store result
     nvf[x * height + y] = variance / (1.0f + variance);
 }
 
