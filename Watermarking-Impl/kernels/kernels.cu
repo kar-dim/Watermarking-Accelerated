@@ -57,7 +57,7 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
     const int x = blockIdx.x * blockDim.x + threadIdx.x;
     const int y = blockIdx.y * blockDim.y + threadIdx.y;
 	const int outputIndex = (y * paddedWidth) + x;
-
+    const int widthLimit = paddedWidth == width ? 64 : blockIdx.x == gridDim.x - 1 ? paddedWidth - width : 64;
     //re-use shared memory for Rx and rx calculation, helps with occupancy
     __shared__ half RxLocal[64][40]; //36 + 4 for 16-byte alignment (in order to use vectorized 128-bit load/store)
     half8* RxLocalVec8 = reinterpret_cast<half8*>(RxLocal[threadIdx.x]);
@@ -65,10 +65,8 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
     //shared memory for 3x3 window
     __shared__ half blockValues[3][66];
 
-    //initialize shared memory, assign a portion for all threads for parallelism
-    #pragma unroll
-    for (int i = 0; i < 5; i++)
-        RxLocalVec8[i] = make_half8(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+    //initialize shared memory for rx only (needed because of warp shuffling summation), don't waste time initializing the whole memory
+    *RxLocalVec8 = make_half8(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
 
     if (y >= height)
         return;
@@ -127,7 +125,7 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
     //we cannot use warp shuffling because it introduces too much stalling for Rx
     sum = 0.0f;
     #pragma unroll
-    for (int i = 0; i < 64; i++)
+    for (int i = 0; i < widthLimit; i++)
         sum += FLOAT(RxLocal[i][RxMappings[threadIdx.x]]);
     Rx[outputIndex] = sum;
 }
