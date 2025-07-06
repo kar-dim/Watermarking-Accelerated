@@ -119,11 +119,9 @@ __kernel void me(__global const float* __restrict__ input,
     const int y = get_global_id(1);
     const int outputIndex = (y * paddedWidth) + x;
     const int localId = get_local_id(0);
+    const int widthLimit = paddedWidth == width ? 64 :get_group_id(0) == get_num_groups(0) - 1 ? paddedWidth - width : 64;
 
-    #pragma unroll
-    for (int i = 0; i < 4; i++)
-        vstore_half8((float8)(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f), 0, &RxLocal[localId][i * 8]);
-    vstore_half4((float4)(0.0f, 0.0f, 0.0f, 0.0f), 0, &RxLocal[localId][32]);
+    vstore_half8((float8)(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f), 0, &RxLocal[localId][0]);
 
     if (y >= height)
         return;
@@ -173,7 +171,7 @@ __kernel void me(__global const float* __restrict__ input,
     //TODO can be optimized
     float sum = 0.0f;
 #pragma unroll
-    for (int i = 0; i < 64; i++)
+    for (int i = 0; i < widthLimit; i++)
         sum += RxLocal[i][RxMappings[localId]];
     Rx[outputIndex] = sum;
 }
