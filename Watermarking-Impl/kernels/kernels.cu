@@ -58,11 +58,12 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
     const int y = blockIdx.y * blockDim.y + threadIdx.y;
 	const int outputIndex = (y * paddedWidth) + x;
     const int widthLimit = paddedWidth == width ? 64 : blockIdx.x == gridDim.x - 1 ? paddedWidth - width : 64;
+
     //re-use shared memory for Rx and rx calculation, helps with occupancy
     __shared__ half RxLocal[64][40]; //36 + 4 for 16-byte alignment (in order to use vectorized 128-bit load/store)
     half8* RxLocalVec8 = reinterpret_cast<half8*>(RxLocal[threadIdx.x]);
 
-    //shared memory for 3x3 window
+    //shared memory for 3x3 windows
     __shared__ half blockValues[3][66];
 
     //initialize shared memory for rx only (needed because of warp shuffling summation), don't waste time initializing the whole memory
