@@ -48,11 +48,6 @@ af::array WatermarkGPU::computePredictionErrorMask(const af::array& errorSequenc
 	return errorSequenceAbs / af::max<float>(errorSequenceAbs);
 }
 
-float WatermarkGPU::computeCorrelation(const af::array& e_u, const af::array& e_z) const
-{
-	return af::dot<float>(af::flat(e_u), af::flat(e_z)) / static_cast<float>(af::norm(e_z) * af::norm(e_u));
-}
-
 af::array WatermarkGPU::computeErrorSequence(const af::array& u, const af::array& coefficients) const
 {
 	return u - computeScaledNeighbors(u, coefficients);

@@ -11,13 +11,15 @@
 class WatermarkCuda final : public WatermarkGPU
 {
 private:
-	static constexpr dim3 windowKernelBlockSize{ 16, 16 }, meKernelBlockSize{ 64, 1 };
+	static constexpr dim3 windowBlockSize{ 16, 16 }, meBlockSize{ 64, 1 }, corrBlockSize{ 768, 1 };
+	static constexpr unsigned int corrPartialBlockSize = 256, corrFinalBlockSize = 1024;
 	dim3 meKernelDims;
 	static cudaStream_t afStream;
 
 	af::array computeCustomMask(const af::array& image) const override;
 	af::array computeScaledNeighbors(const af::array& image, const af::array& coefficients) const override;
 	void computePredictionErrorData(const af::array& image, af::array& errorSequence, af::array& coefficients) const override;
+	float computeCorrelation(const af::array& e_u, const af::array& e_z) const override;
 	void copyParams(const WatermarkCuda& other) noexcept;
 
 public:

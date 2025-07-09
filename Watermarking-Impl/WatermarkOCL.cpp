@@ -110,3 +110,8 @@ void WatermarkOCL::computePredictionErrorData(const af::array& image, af::array&
 		errorSequence = image - computeScaledNeighbors(image, coefficients);
 	}, "me");
 }
+
+float WatermarkOCL::computeCorrelation(const af::array& e_u, const af::array& e_z) const
+{
+	return 0.0f;
+}

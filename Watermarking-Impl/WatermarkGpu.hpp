@@ -52,11 +52,11 @@ protected:
 	//Calculates error sequence and prediction error filter (coefficients)
 	virtual void computePredictionErrorData(const af::array& image, af::array& errorSequence, af::array& coefficients) const = 0;
 	
+	//helper method used in detectors
+	virtual float computeCorrelation(const af::array& e_u, const af::array& e_z) const = 0;
+
 	//compute prediction error mask
 	af::array computePredictionErrorMask(const af::array& errorSequence) const;
-
-	//helper method used in detectors
-	float computeCorrelation(const af::array& e_u, const af::array& e_z) const;
 
 	//helper method that calculates the error sequence by using a supplied prediction filter coefficients
 	af::array computeErrorSequence(const af::array& u, const af::array& coefficients) const;

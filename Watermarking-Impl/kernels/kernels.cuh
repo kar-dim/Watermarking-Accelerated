@@ -76,3 +76,7 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
 
 //main kernel for scaled neighbors calculation. used in ME kernel
 __global__ void calculate_scaled_neighbors_p3(const float* __restrict__ input, float* __restrict__ x_, const unsigned int width, const unsigned int height);
+
+//main kernels for correlation calculation. used in detection.
+__global__ void calculate_partial_correlation(const float* __restrict__ e_u, const float* __restrict__ e_z, float* __restrict__ partialDots, float* __restrict__ partialNormU, float* __restrict__ partialNormZ, const unsigned int size);
+__global__ void calculate_final_correlation(const float* __restrict__ partialDots, const float* __restrict__ partialNormU, const float* __restrict__ partialNormZ, float* __restrict__ result, const unsigned int numBlocks);

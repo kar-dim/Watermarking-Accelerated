@@ -159,3 +159,124 @@ __global__ void calculate_scaled_neighbors_p3(const float* __restrict__ input, f
         x_[(x * height + y)] = dot;
     }
 }
+
+__global__ void calculate_partial_correlation(const float* __restrict__ e_u, const float* __restrict__ e_z, float* __restrict__ partialDots, float* __restrict__ partialNormU, float* __restrict__ partialNormZ, const unsigned int size)
+{
+    const int tid = threadIdx.x;
+    const int idx = blockIdx.x * blockDim.x + tid;
+    const int warpId = tid / 32;
+
+    //support for up to 1024/32 = 32 warps per block
+    __shared__ float dotCache[32];
+    __shared__ float normUCache[32];
+    __shared__ float normZCache[32];
+
+    float a = 0.0f, b = 0.0f;
+    if (idx < size) 
+    {
+        a = e_u[idx];
+        b = e_z[idx];
+    }
+
+    float dotVal = a * b;
+    float normUVal = a * a;
+    float normZVal = b * b;
+
+    //intra-warp reduction
+    for (int offset = 16; offset > 0; offset /= 2) 
+    {
+        dotVal += __shfl_down_sync(0xFFFFFFFF, dotVal, offset);
+        normUVal += __shfl_down_sync(0xFFFFFFFF, normUVal, offset);
+        normZVal += __shfl_down_sync(0xFFFFFFFF, normZVal, offset);
+    }
+
+    //warp leaders write to shared memory
+    if ((tid & 31) == 0) 
+    {
+        dotCache[warpId] = dotVal;
+        normUCache[warpId] = normUVal;
+        normZCache[warpId] = normZVal;
+    }
+    __syncthreads();
+
+    //final reduction by first warp
+    if (tid < 32) 
+    {
+        dotVal = (tid < (blockDim.x + warpSize - 1) / 32) ? dotCache[tid] : 0.0f;
+        normUVal = (tid < (blockDim.x + warpSize - 1) / 32) ? normUCache[tid] : 0.0f;
+        normZVal = (tid < (blockDim.x + warpSize - 1) / 32) ? normZCache[tid] : 0.0f;
+
+        for (int offset = 16; offset > 0; offset /= 2) 
+        {
+            dotVal += __shfl_down_sync(0xFFFFFFFF, dotVal, offset);
+            normUVal += __shfl_down_sync(0xFFFFFFFF, normUVal, offset);
+            normZVal += __shfl_down_sync(0xFFFFFFFF, normZVal, offset);
+        }
+
+        if (tid == 0) 
+        {
+            partialDots[blockIdx.x] = dotVal;
+            partialNormU[blockIdx.x] = normUVal;
+            partialNormZ[blockIdx.x] = normZVal;
+        }
+    }
+}
+
+__global__ void calculate_final_correlation(const float* __restrict__ partialDots, const float* __restrict__ partialNormU, const float* __restrict__ partialNormZ, float* __restrict__ result, const unsigned int numBlocks)
+{
+    const int tid = threadIdx.x;
+    const int lane = tid % 32;
+    const int warpId = tid / 32;
+    const int numWarps = (blockDim.x + 31) / 32;
+
+    //shared memory must match number of warps
+    __shared__ float warpDot[32];
+    __shared__ float warpU[32];
+    __shared__ float warpZ[32];
+
+    float localDot = 0.0f;
+    float localU = 0.0f;
+    float localZ = 0.0f;
+
+    for (int i = tid; i < numBlocks; i += blockDim.x) 
+    {
+        localDot += partialDots[i];
+        localU += partialNormU[i];
+        localZ += partialNormZ[i];
+    }
+
+    //intra-warp reduction
+    for (int offset = 16; offset > 0; offset >>= 1) 
+    {
+        localDot += __shfl_down_sync(0xFFFFFFFF, localDot, offset);
+        localU += __shfl_down_sync(0xFFFFFFFF, localU, offset);
+        localZ += __shfl_down_sync(0xFFFFFFFF, localZ, offset);
+    }
+    if (lane == 0) 
+    {
+        warpDot[warpId] = localDot;
+        warpU[warpId] = localU;
+        warpZ[warpId] = localZ;
+    }
+    __syncthreads();
+
+    //final warp reduces
+    if (warpId == 0) 
+    {
+        localDot = (tid < numWarps) ? warpDot[lane] : 0.0f;
+        localU = (tid < numWarps) ? warpU[lane] : 0.0f;
+        localZ = (tid < numWarps) ? warpZ[lane] : 0.0f;
+        for (int offset = 16; offset > 0; offset >>= 1) 
+        {
+            localDot += __shfl_down_sync(0xFFFFFFFF, localDot, offset);
+            localU += __shfl_down_sync(0xFFFFFFFF, localU, offset);
+            localZ += __shfl_down_sync(0xFFFFFFFF, localZ, offset);
+        }
+        if (lane == 0) 
+        {
+            float normU = sqrtf(localU);
+            float normZ = sqrtf(localZ);
+            result[0] = (normU > 0.0f && normZ > 0.0f) ? (localDot / (normU * normZ)) : 0.0f;
+        }
+    }
+}
