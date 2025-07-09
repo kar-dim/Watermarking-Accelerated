@@ -43,13 +43,12 @@ af::array WatermarkOCL::computeCustomMask(const af::array& image) const
 	const af::array customMask(baseRows, baseCols);
 	const std::unique_ptr<cl_mem> imageMem(image.device<cl_mem>());
 	const std::unique_ptr<cl_mem> outputMem(customMask.device<cl_mem>());
-	const int localMemBytes = sizeof(float) * (16 + p) * (16 + p);
 	//transposed global dimensions because of column-major order in arrayfire
 	executeKernel([&]() {
 		cl::Buffer imageBuff(*imageMem.get(), true);
 		cl::Buffer outputBuff(*outputMem.get(), true);
 		queue.enqueueNDRangeKernel(
-			cl_utils::KernelBuilder(programs, "nvf").args(imageBuff, outputBuff, baseCols, baseRows, cl::Local(localMemBytes)).build(),
+			cl_utils::KernelBuilder(programs, "nvf").args(imageBuff, outputBuff, baseCols, baseRows).build(),
 			cl::NDRange(), cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(16, 16));
 		queue.finish();
 		unlockArrays(image, customMask);
@@ -63,14 +62,13 @@ af::array WatermarkOCL::computeScaledNeighbors(const af::array& image, const af:
 	const std::unique_ptr<cl_mem> imageMem(image.device<cl_mem>());
 	const std::unique_ptr<cl_mem> coeffsMem(coefficients.device<cl_mem>());
 	const std::unique_ptr<cl_mem> neighborsMem(neighbors.device<cl_mem>());
-	const int localMemBytes = sizeof(float) * (16 + p) * (16 + p);
 	//transposed global dimensions because of column-major order in arrayfire
 	executeKernel([&]() {
 		cl::Buffer imageBuff(*imageMem.get(), true);
 		cl::Buffer neighborsBuff(*neighborsMem.get(), true);
 		cl::Buffer coeffsBuff(*coeffsMem.get(), true);
 		queue.enqueueNDRangeKernel(
-			cl_utils::KernelBuilder(programs, "scaled_neighbors_p3").args(imageBuff, neighborsBuff, coeffsBuff, baseCols, baseRows, cl::Local(localMemBytes)).build(),
+			cl_utils::KernelBuilder(programs, "scaled_neighbors_p3").args(imageBuff, neighborsBuff, coeffsBuff, baseCols, baseRows).build(),
 			cl::NDRange(), cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(16, 16));
 		queue.finish();
 		unlockArrays(image, coefficients, neighbors);
@@ -90,8 +88,7 @@ void WatermarkOCL::computePredictionErrorData(const af::array& image, af::array&
 		cl::Buffer Rx_buff(*RxPartialMem.get(), true);
 		cl::Buffer rx_buff(*rxPartialMem.get(), true);
 		queue.enqueueNDRangeKernel(
-			cl_utils::KernelBuilder(programs, "me").args(imageBuff, Rx_buff, rx_buff, RxMappingsBuff, baseCols, static_cast<unsigned int>(meKernelDims.cols), baseRows,
-			cl::Local(sizeof(cl_half) * 2304), cl::Local(sizeof(cl_half) * 198)).build(),
+			cl_utils::KernelBuilder(programs, "me").args(imageBuff, Rx_buff, rx_buff, RxMappingsBuff, baseCols, static_cast<unsigned int>(meKernelDims.cols), baseRows).build(),
 			cl::NDRange(), cl::NDRange(meKernelDims.cols, meKernelDims.rows), cl::NDRange(64, 1));
 		//finish and return memory to arrayfire
 		queue.finish();
@@ -113,5 +110,42 @@ void WatermarkOCL::computePredictionErrorData(const af::array& image, af::array&
 
 float WatermarkOCL::computeCorrelation(const af::array& e_u, const af::array& e_z) const
 {
-	return 0.0f;
+	const int N = static_cast<int>(e_u.elements());
+	const int globalSize = align<256>(N);
+	const int blocks = globalSize / 256;
+	const af::array dotPartial(blocks);
+	const af::array uNormPartial(blocks);
+	const af::array zNormPartial(blocks);
+	const af::array correlationResult(1);
+	const std::unique_ptr<cl_mem> euMem(e_u.device<cl_mem>());
+	const std::unique_ptr<cl_mem> ezMem(e_z.device<cl_mem>());
+	const std::unique_ptr<cl_mem> dotPartialMem(dotPartial.device<cl_mem>());
+	const std::unique_ptr<cl_mem> uNormPartialMem(uNormPartial.device<cl_mem>());
+	const std::unique_ptr<cl_mem> zNormPartialMem(zNormPartial.device<cl_mem>());
+	const std::unique_ptr<cl_mem> correlationResultMem(correlationResult.device<cl_mem>());
+	float correlation = 0.0f;
+	executeKernel([&]() {
+		cl::Buffer euBuff(*euMem.get(), true);
+		cl::Buffer ezBuff(*ezMem.get(), true);
+		cl::Buffer dotBuff(*dotPartialMem.get(), true);
+		cl::Buffer uNormBuff(*uNormPartialMem.get(), true);
+		cl::Buffer zNormBuff(*zNormPartialMem.get(), true);
+		cl::Buffer corrBuff(*correlationResultMem.get(), true);
+
+		//calculate partial dot products and norms
+		queue.enqueueNDRangeKernel(
+			cl_utils::KernelBuilder(programs, "calculate_partial_correlation").args(euBuff, ezBuff, dotBuff, uNormBuff, zNormBuff, N).build(),
+			cl::NDRange(), cl::NDRange(globalSize), cl::NDRange(256));
+		queue.finish();
+
+		//reduce partials and compute correlation
+		queue.enqueueNDRangeKernel(
+			cl_utils::KernelBuilder(programs, "calculate_final_correlation").args(dotBuff, uNormBuff, zNormBuff, corrBuff, blocks).build(),
+			cl::NDRange(), cl::NDRange(1024), cl::NDRange(1024));
+		queue.finish();
+
+		unlockArrays(e_u, e_z, dotPartial, uNormPartial, zNormPartial, correlationResult);
+		correlation = correlationResult.scalar<float>();
+	}, "compute correlation kernels");
+	return correlation;
 }

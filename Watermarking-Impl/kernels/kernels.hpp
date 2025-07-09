@@ -26,15 +26,15 @@ inline void fillBlock(
 __kernel void nvf(__global const float* __restrict__ input, 
 	__global float* __restrict__ nvf,
 	const unsigned int width,
-    const unsigned int height,
-	__local float region[16 + 2 * (WINDOW_SIZE/2)][16 + 2 * (WINDOW_SIZE/2)])
+    const unsigned int height)
 {	
 	const int pad = WINDOW_SIZE / 2;
 	const int pSquared = WINDOW_SIZE * WINDOW_SIZE;
 	const int x = get_global_id(1);
     const int y = get_global_id(0);
+    __local float region[16 + 2 * (WINDOW_SIZE/2)][16 + 2 * (WINDOW_SIZE/2)];
 
-	fillBlock(input, region, width, height);
+	fillBlock(input, &region[0][0], width, height);
     barrier(CLK_LOCAL_MEM_FENCE);
 
     if (y >= height || x >= width)
@@ -63,13 +63,13 @@ __kernel void scaled_neighbors_p3(
     __global float* __restrict__ x_,
     __constant float* __restrict__ coeffs,
     const unsigned int width,
-    const unsigned int height,
-    __local float region[16 + 2][16 + 2]) //hold the 18 x 18 region for this 16 x 16 block
+    const unsigned int height)
 {
     const int x = get_global_id(1);
     const int y = get_global_id(0);
+    __local float region[16 + 2][16 + 2];
 
-    fillBlock(input, region, width, height);
+    fillBlock(input, &region[0][0], width, height);
     barrier(CLK_LOCAL_MEM_FENCE);
 
     //calculate the dot product of the coefficients and the neighborhood for this pixel
@@ -110,9 +110,7 @@ __kernel void me(__global const float* __restrict__ input,
     __constant int* __restrict__ RxMappings,
     const unsigned int width,
     const unsigned int paddedWidth,
-    const unsigned int height,
-    __local half RxLocal[64][36], //64 local threads, 36 values each (8 for rx, this is a shared memory for both Rx,rx)
-    __local half blockValues[3][66]) //64 local threads (+2 halos), 3 values each
+    const unsigned int height)
 
 {
     const int x = get_global_id(0);
@@ -120,6 +118,9 @@ __kernel void me(__global const float* __restrict__ input,
     const int outputIndex = (y * paddedWidth) + x;
     const int localId = get_local_id(0);
     const int widthLimit = paddedWidth == width ? 64 :get_group_id(0) == get_num_groups(0) - 1 ? 64 - (paddedWidth - width) : 64;
+
+    __local half RxLocal[64][36];
+    __local half blockValues[3][66];
 
     if (y >= height)
         return;
@@ -173,4 +174,100 @@ __kernel void me(__global const float* __restrict__ input,
         sum += RxLocal[i][RxMappings[localId]];
     Rx[outputIndex] = sum;
 }
+
+__kernel void calculate_partial_correlation(
+    __global const float* restrict e_u,
+    __global const float* restrict e_z,
+    __global float* restrict partialDots,
+    __global float* restrict partialNormU,
+    __global float* restrict partialNormZ,
+    const unsigned int size)
+{
+    const int tid = get_local_id(0);
+    const int gid = get_global_id(0);
+    const int groupId = get_group_id(0);
+
+    __local float dotCache[256];
+    __local float normUCache[256];
+    __local float normZCache[256];
+
+    float a = 0.0f, b = 0.0f;
+    if (gid < size) 
+    {
+        a = e_u[gid];
+        b = e_z[gid];
+    }
+
+    dotCache[tid] = a * b;
+    normUCache[tid] = a * a;
+    normZCache[tid] = b * b;
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    for (int s = 128; s > 0; s >>= 1) 
+    {
+        if (tid < s) 
+        {
+            dotCache[tid] += dotCache[tid + s];
+            normUCache[tid] += normUCache[tid + s];
+            normZCache[tid] += normZCache[tid + s];
+        }
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+
+    if (tid == 0) 
+    {
+        partialDots[groupId] = dotCache[0];
+        partialNormU[groupId] = normUCache[0];
+        partialNormZ[groupId] = normZCache[0];
+    }
+}
+
+__kernel void calculate_final_correlation(
+    __global const float* restrict partialDots,
+    __global const float* restrict partialNormU,
+    __global const float* restrict partialNormZ,
+    __global float* restrict result,
+    const unsigned int numBlocks)
+{
+    const int tid = get_local_id(0);
+    float localDot = 0.0f;
+    float localU = 0.0f;
+    float localZ = 0.0f;
+
+    __local float sumDot[1024];
+    __local float sumU[1024];
+    __local float sumZ[1024];
+
+    for (int i = tid; i < numBlocks; i += 1024) 
+    {
+        localDot += partialDots[i];
+        localU += partialNormU[i];
+        localZ += partialNormZ[i];
+    }
+
+    sumDot[tid] = localDot;
+    sumU[tid] = localU;
+    sumZ[tid] = localZ;
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    for (int s = 512; s > 0; s >>= 1) 
+    {
+        if (tid < s) 
+        {
+            sumDot[tid] += sumDot[tid + s];
+            sumU[tid] += sumU[tid + s];
+            sumZ[tid] += sumZ[tid + s];
+        }
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+
+    if (tid == 0) 
+    {
+        float final_dot = sumDot[0];
+        float final_norm_u = sqrt(sumU[0]);
+        float final_norm_z = sqrt(sumZ[0]);
+        result[0] = (final_norm_u > 0.0f && final_norm_z > 0.0f) ? (final_dot / (final_norm_u * final_norm_z)) : 0.0f;
+    }
+}
+
 )CLC";
