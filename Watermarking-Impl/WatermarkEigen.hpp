@@ -70,9 +70,9 @@ public:
 #pragma omp section
 			dot_ez_eu = errorSequence.cwiseProduct(filteredEstimation).sum();
 #pragma omp section
-			d_ez = std::sqrt(errorSequence.matrix().squaredNorm());
+			d_ez = errorSequence.matrix().norm();
 #pragma omp section
-			d_eu = std::sqrt(filteredEstimation.matrix().squaredNorm());
+			d_eu = filteredEstimation.matrix().norm();
 		}
 		return dot_ez_eu / (d_ez * d_eu);
 	}
