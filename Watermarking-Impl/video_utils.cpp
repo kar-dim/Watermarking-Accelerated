@@ -133,7 +133,7 @@ namespace video_utils
 #elif defined(_USE_EIGEN_)
 			inputFrame = Map<GrayBuffer>(rowPadding ? data.inputFramePtr : frame->data[0], data.width, data.height).transpose().cast<float>();
 #endif
-			float correlation = data.watermarkObj->detectWatermark(inputFrame, MASK_TYPE::ME);
+			float correlation = data.watermarkObj->detectWatermark(inputFrame, ME);
 			cout << "Correlation for frame: " << (framesCount + 1) << ": " << correlation << "\n";
 		}
 		framesCount++;
@@ -188,12 +188,12 @@ namespace video_utils
 		float watermarkStrength;
 #if defined(_USE_GPU_)
 		inputFrame = BufferType(data.width, data.height, data.inputFramePtr, afHost).T().as(f32);
-		watermarkedFrame = data.watermarkObj->makeWatermark(inputFrame, inputFrame, watermarkStrength, MASK_TYPE::ME).as(u8).T();
+		watermarkedFrame = data.watermarkObj->makeWatermark(inputFrame, inputFrame, watermarkStrength, ME).as(u8).T();
 		watermarkedFrame.host(data.inputFramePtr);
 		fwrite(data.inputFramePtr, 1, data.width * frame->height, ffmpegPipe);
 #elif defined(_USE_EIGEN_)
 		inputFrame = Map<GrayBuffer>(data.inputFramePtr, data.width, data.height).transpose().cast<float>();
-		watermarkedFrame = data.watermarkObj->makeWatermark(inputFrame, inputFrame, watermarkStrength, MASK_TYPE::ME).getGray().transpose().cast<uint8_t>();
+		watermarkedFrame = data.watermarkObj->makeWatermark(inputFrame, inputFrame, watermarkStrength, ME).getGray().transpose().cast<uint8_t>();
 		fwrite(watermarkedFrame.data(), 1, data.width * frame->height, ffmpegPipe);
 #endif
 	}
@@ -206,13 +206,13 @@ namespace video_utils
 			float watermarkStrength;
 #if defined(_USE_GPU_)
 			inputFrame = BufferType(data.width, data.height, frame->data[0], afHost).T().as(f32);
-			watermarkedFrame = data.watermarkObj->makeWatermark(inputFrame, inputFrame, watermarkStrength, MASK_TYPE::ME).as(u8).T();
+			watermarkedFrame = data.watermarkObj->makeWatermark(inputFrame, inputFrame, watermarkStrength, ME).as(u8).T();
 			watermarkedFrame.host(data.inputFramePtr);
 		}
 		fwrite(embedWatermark ? data.inputFramePtr : frame->data[0], 1, data.width * frame->height, ffmpegPipe);
 #elif defined(_USE_EIGEN_)
 			inputFrame = BufferType(Map<GrayBuffer>(frame->data[0], data.width, data.height).transpose().cast<float>());
-			watermarkedFrame = data.watermarkObj->makeWatermark(inputFrame, inputFrame, watermarkStrength, MASK_TYPE::ME).getGray().transpose().cast<uint8_t>();
+			watermarkedFrame = data.watermarkObj->makeWatermark(inputFrame, inputFrame, watermarkStrength, ME).getGray().transpose().cast<uint8_t>();
 	}
 		fwrite(embedWatermark ? watermarkedFrame.data() : frame->data[0], 1, data.width* frame->height, ffmpegPipe);
 #endif

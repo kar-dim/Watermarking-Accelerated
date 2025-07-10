@@ -53,7 +53,7 @@ public:
 		const auto& watermarkedBuffer = inputImage.getGray();
 		//pad by using the preallocated block
 		padded.block(pad, pad, watermarkedBuffer.rows(), watermarkedBuffer.cols()) = watermarkedBuffer;
-		if (maskType == MASK_TYPE::NVF)
+		if (maskType == NVF)
 		{
 			computePredictionErrorData<maskCalcNotRequired>();
 			computeCustomMask(watermarkedBuffer);
@@ -109,7 +109,7 @@ private:
 	void computeStrengthenedWatermark(const ArrayXXf& inputImage, float& watermarkStrength, MASK_TYPE maskType)
 	{
 		padded.block(pad, pad, inputImage.rows(), inputImage.cols()) = inputImage;
-		if (maskType == MASK_TYPE::NVF)
+		if (maskType == NVF)
 			computeCustomMask(inputImage);
 		else
 			computePredictionErrorData<maskCalcRequired>();
