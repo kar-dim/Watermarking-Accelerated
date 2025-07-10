@@ -68,7 +68,7 @@ __global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, co
     }
     float mean = sum / pSquared;
     float variance = (sumSq / pSquared) - (mean * mean);
-    nvf[x * height + y] = variance / (1.0f + variance);
+    nvf[x * height + y] = fmaxf(variance / (1.0f + variance), 0.0f);
 }
 
 //main ME kernel, calculates ME values for each pixel in the image
