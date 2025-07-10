@@ -104,7 +104,7 @@ void WatermarkOCL::computePredictionErrorData(const af::array& image, af::array&
 			return;
 		}
 		//call scaled neighbors kernel and compute error sequence
-		errorSequence = image - computeScaledNeighbors(image, coefficients);
+		errorSequence = computeErrorSequence(image, coefficients);
 	}, "me");
 }
 
