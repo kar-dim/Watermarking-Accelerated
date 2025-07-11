@@ -202,9 +202,10 @@ __global__ void calculate_partial_correlation(const float* __restrict__ e_u, con
     //final reduction by first warp
     if (tid < 32) 
     {
-        dotVal = (tid < (blockDim.x + warpSize - 1) / 32) ? dotCache[tid] : 0.0f;
-        normUVal = (tid < (blockDim.x + warpSize - 1) / 32) ? normUCache[tid] : 0.0f;
-        normZVal = (tid < (blockDim.x + warpSize - 1) / 32) ? normZCache[tid] : 0.0f;
+		const bool validTid = tid < (blockDim.x + warpSize - 1) / 32;
+        dotVal = validTid ? dotCache[tid] : 0.0f;
+        normUVal = validTid ? normUCache[tid] : 0.0f;
+        normZVal = validTid ? normZCache[tid] : 0.0f;
 
         for (int offset = 16; offset > 0; offset /= 2) 
         {
@@ -263,9 +264,10 @@ __global__ void calculate_final_correlation(const float* __restrict__ partialDot
     //final warp reduces
     if (warpId == 0) 
     {
-        localDot = (tid < numWarps) ? warpDot[lane] : 0.0f;
-        localU = (tid < numWarps) ? warpU[lane] : 0.0f;
-        localZ = (tid < numWarps) ? warpZ[lane] : 0.0f;
+		const bool validTid = tid < numWarps;
+        localDot = validTid ? warpDot[lane] : 0.0f;
+        localU = validTid ? warpU[lane] : 0.0f;
+        localZ = validTid ? warpZ[lane] : 0.0f;
         for (int offset = 16; offset > 0; offset >>= 1) 
         {
             localDot += __shfl_down_sync(0xFFFFFFFF, localDot, offset);
