@@ -55,7 +55,7 @@ __kernel void nvf(__global const float* __restrict__ input,
 	}
 	float mean = sum / pSquared;
 	float variance = (sumSq / pSquared) - (mean * mean);
-	nvf[(x * height) + y] = variance / (1 + variance);
+	nvf[(x * height) + y] = fmax(variance / (1 + variance), 0.0f);
 }
 
 __kernel void scaled_neighbors_p3(
