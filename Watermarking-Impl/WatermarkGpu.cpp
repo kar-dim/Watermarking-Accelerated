@@ -26,7 +26,7 @@ BufferType WatermarkGPU::makeWatermark(const BufferType& inputImage, const Buffe
 	else
 		mask = computeCustomMask(inputImage);
 	const af::array u = mask * randomMatrix;
-	watermarkStrength = strengthFactor / static_cast<float>(af::norm(u) / std::sqrt(inputImage.elements()));
+	watermarkStrength = strengthFactor / static_cast<float>(af::norm(u) / std::sqrt(u.elements()));
 	return af::clamp(outputImage + (u * watermarkStrength), 0, 255);
 }
 
