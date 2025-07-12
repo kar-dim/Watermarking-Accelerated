@@ -58,22 +58,22 @@ af::array WatermarkOCL::computeCustomMask(const af::array& image) const
 
 af::array WatermarkOCL::computeErrorSequence(const af::array& image, const af::array& coefficients) const
 {
-	const af::array neighbors(baseRows, baseCols);
+	const af::array errorSequence(baseRows, baseCols);
 	const std::unique_ptr<cl_mem> imageMem(image.device<cl_mem>());
 	const std::unique_ptr<cl_mem> coeffsMem(coefficients.device<cl_mem>());
-	const std::unique_ptr<cl_mem> neighborsMem(neighbors.device<cl_mem>());
+	const std::unique_ptr<cl_mem> errorSequenceMem(errorSequence.device<cl_mem>());
 	//transposed global dimensions because of column-major order in arrayfire
 	executeKernel([&]() {
 		cl::Buffer imageBuff(*imageMem.get(), true);
-		cl::Buffer neighborsBuff(*neighborsMem.get(), true);
+		cl::Buffer errorSequencesBuff(*errorSequenceMem.get(), true);
 		cl::Buffer coeffsBuff(*coeffsMem.get(), true);
 		queue.enqueueNDRangeKernel(
-			cl_utils::KernelBuilder(programs, "error_sequence_p3").args(imageBuff, neighborsBuff, coeffsBuff, baseCols, baseRows).build(),
+			cl_utils::KernelBuilder(programs, "error_sequence_p3").args(imageBuff, errorSequencesBuff, coeffsBuff, baseCols, baseRows).build(),
 			cl::NDRange(), cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(16, 16));
 		queue.finish();
-		unlockArrays(image, coefficients, neighbors);
+		unlockArrays(image, coefficients, errorSequence);
 	}, "error_sequence_p3");
-	return neighbors;
+	return errorSequence;
 }
 
 void WatermarkOCL::computePredictionErrorData(const af::array& image, af::array& errorSequence, af::array& coefficients) const

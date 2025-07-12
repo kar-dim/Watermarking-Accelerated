@@ -75,13 +75,13 @@ af::array WatermarkCuda::computeErrorSequence(const af::array& image, const af::
 {
 	//transposed grid dimensions because of column-major order in arrayfire
 	const dim3 gridSize = cuda_utils::gridSizeCalculate(windowBlockSize, baseCols, baseRows);
-	const af::array neighbors(baseRows, baseCols);
+	const af::array errorSequence(baseRows, baseCols);
 	//populate constant memory and call error sequence kernel
 	setCoeffs(coefficients.device<float>());
-	calculate_error_sequence_p3 << <gridSize, windowBlockSize, 0, afStream >> > (image.device<float>(), neighbors.device<float>(), baseCols, baseRows);
+	calculate_error_sequence_p3 << <gridSize, windowBlockSize, 0, afStream >> > (image.device<float>(), errorSequence.device<float>(), baseCols, baseRows);
 	//transfer ownership to arrayfire and return output array
-	unlockArrays(image, neighbors, coefficients);
-	return neighbors;
+	unlockArrays(image, errorSequence, coefficients);
+	return errorSequence;
 }
 
 void WatermarkCuda::computePredictionErrorData(const af::array& image, af::array& errorSequence, af::array& coefficients) const
