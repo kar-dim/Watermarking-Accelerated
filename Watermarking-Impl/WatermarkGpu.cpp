@@ -48,11 +48,6 @@ af::array WatermarkGPU::computePredictionErrorMask(const af::array& errorSequenc
 	return errorSequenceAbs / af::max<float>(errorSequenceAbs);
 }
 
-af::array WatermarkGPU::computeErrorSequence(const af::array& u, const af::array& coefficients) const
-{
-	return u - computeScaledNeighbors(u, coefficients);
-}
-
 std::pair<af::array, af::array> WatermarkGPU::transformCorrelationArrays(const af::array& RxPartial, const af::array& rxPartial) const
 {
 	const int localSize = (p * p) - 1;

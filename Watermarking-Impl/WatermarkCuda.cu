@@ -71,14 +71,14 @@ af::array WatermarkCuda::computeCustomMask(const af::array& inputImage) const
 	return customMask;
 }
 
-af::array WatermarkCuda::computeScaledNeighbors(const af::array& image, const af::array& coefficients) const
+af::array WatermarkCuda::computeErrorSequence(const af::array& image, const af::array& coefficients) const
 {
 	//transposed grid dimensions because of column-major order in arrayfire
 	const dim3 gridSize = cuda_utils::gridSizeCalculate(windowBlockSize, baseCols, baseRows);
 	const af::array neighbors(baseRows, baseCols);
 	//populate constant memory and call scaled neighbors kernel
 	setCoeffs(coefficients.device<float>());
-	calculate_scaled_neighbors_p3 <<<gridSize, windowBlockSize, 0, afStream>>> (image.device<float>(), neighbors.device<float>(), baseCols, baseRows);
+	calculate_error_sequence_p3 << <gridSize, windowBlockSize, 0, afStream >> > (image.device<float>(), neighbors.device<float>(), baseCols, baseRows);
 	//transfer ownership to arrayfire and return output array
 	unlockArrays(image, neighbors, coefficients);
 	return neighbors;

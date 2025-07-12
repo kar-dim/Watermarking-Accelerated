@@ -74,8 +74,8 @@ __global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, co
 //main ME kernel, calculates ME values for each pixel in the image
 __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int paddedWidth, const unsigned int height);
 
-//main kernel for scaled neighbors calculation. used in ME kernel
-__global__ void calculate_scaled_neighbors_p3(const float* __restrict__ input, float* __restrict__ x_, const unsigned int width, const unsigned int height);
+//main kernel for error sequence calculation. used in ME kernel
+__global__ void calculate_error_sequence_p3(const float* __restrict__ input, float* __restrict__ x_, const unsigned int width, const unsigned int height);
 
 //main kernels for correlation calculation. used in detection.
 __global__ void calculate_partial_correlation(const float* __restrict__ e_u, const float* __restrict__ e_z, float* __restrict__ partialDots, float* __restrict__ partialNormU, float* __restrict__ partialNormZ, const unsigned int size);

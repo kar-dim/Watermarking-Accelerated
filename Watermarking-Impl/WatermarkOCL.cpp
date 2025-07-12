@@ -56,7 +56,7 @@ af::array WatermarkOCL::computeCustomMask(const af::array& image) const
 	return customMask;
 }
 
-af::array WatermarkOCL::computeScaledNeighbors(const af::array& image, const af::array& coefficients) const
+af::array WatermarkOCL::computeErrorSequence(const af::array& image, const af::array& coefficients) const
 {
 	const af::array neighbors(baseRows, baseCols);
 	const std::unique_ptr<cl_mem> imageMem(image.device<cl_mem>());
@@ -68,11 +68,11 @@ af::array WatermarkOCL::computeScaledNeighbors(const af::array& image, const af:
 		cl::Buffer neighborsBuff(*neighborsMem.get(), true);
 		cl::Buffer coeffsBuff(*coeffsMem.get(), true);
 		queue.enqueueNDRangeKernel(
-			cl_utils::KernelBuilder(programs, "scaled_neighbors_p3").args(imageBuff, neighborsBuff, coeffsBuff, baseCols, baseRows).build(),
+			cl_utils::KernelBuilder(programs, "error_sequence_p3").args(imageBuff, neighborsBuff, coeffsBuff, baseCols, baseRows).build(),
 			cl::NDRange(), cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(16, 16));
 		queue.finish();
 		unlockArrays(image, coefficients, neighbors);
-	}, "scaled_neighbors_p3");
+	}, "error_sequence_p3");
 	return neighbors;
 }
 

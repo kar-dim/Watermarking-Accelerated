@@ -37,7 +37,7 @@ private:
 	cl::Program programs;
 
 	af::array computeCustomMask(const af::array& image) const override;
-	af::array computeScaledNeighbors(const af::array& image, const af::array& coefficients) const override;
+	af::array computeErrorSequence(const af::array& image, const af::array& coefficients) const override;
 	void computePredictionErrorData(const af::array& image, af::array& errorSequence, af::array& coefficients) const override;
 	float computeCorrelation(const af::array& e_u, const af::array& e_z) const override;
 

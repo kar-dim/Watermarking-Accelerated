@@ -131,7 +131,7 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
     Rx[outputIndex] = sum;
 }
 
-__global__ void calculate_scaled_neighbors_p3(const float* __restrict__ input, float* __restrict__ x_, const unsigned int width, const unsigned int height)
+__global__ void calculate_error_sequence_p3(const float* __restrict__ input, float* __restrict__ x_, const unsigned int width, const unsigned int height)
 {
     constexpr int sharedSize = 16 + 2;
     const int y = blockIdx.x * blockDim.x + threadIdx.x;
@@ -156,7 +156,7 @@ __global__ void calculate_scaled_neighbors_p3(const float* __restrict__ input, f
         dot += coeffs[5] * region[centerRow + 1][centerCol - 1];
         dot += coeffs[6] * region[centerRow + 1][centerCol];
         dot += coeffs[7] * region[centerRow + 1][centerCol + 1];
-        x_[(x * height + y)] = dot;
+        x_[(x * height + y)] = region[centerRow][centerCol] - dot;
     }
 }
 

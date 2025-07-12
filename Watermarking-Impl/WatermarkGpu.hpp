@@ -45,8 +45,8 @@ protected:
 	//computes custom Mask
 	virtual af::array computeCustomMask(const af::array& image) const = 0;
 	
-	//computes scaled neighbors array used in prediction error mask
-	virtual af::array computeScaledNeighbors(const af::array& image, const af::array& coefficients) const = 0;
+	//computes error sequence, used in prediction error mask
+	virtual af::array computeErrorSequence(const af::array& image, const af::array& coefficients) const = 0;
 	
 	//Used in both creation and detection of the watermark.
 	//Calculates error sequence and prediction error filter (coefficients)
@@ -57,9 +57,6 @@ protected:
 
 	//compute prediction error mask
 	af::array computePredictionErrorMask(const af::array& errorSequence) const;
-
-	//helper method that calculates the error sequence by using a supplied prediction filter coefficients
-	af::array computeErrorSequence(const af::array& u, const af::array& coefficients) const;
 
 	//helper method to sum the incomplete Rx_partial and rxPartial arrays which were produced from the custom kernel
 	//and to transform them to the correct size, so that they can be used by the system solver

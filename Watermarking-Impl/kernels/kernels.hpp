@@ -58,7 +58,7 @@ __kernel void nvf(__global const float* __restrict__ input,
 	nvf[(x * height) + y] = fmax(variance / (1 + variance), 0.0f);
 }
 
-__kernel void scaled_neighbors_p3(
+__kernel void error_sequence_p3(
     __global const float* __restrict__ input, 
     __global float* __restrict__ x_,
     __constant float* __restrict__ coeffs,
@@ -86,7 +86,7 @@ __kernel void scaled_neighbors_p3(
         dot += coeffs[5] * region[centerRow + 1][centerCol - 1];
         dot += coeffs[6] * region[centerRow + 1][centerCol];
         dot += coeffs[7] * region[centerRow + 1][centerCol + 1];
-		x_[(x * height + y)] = dot;
+		x_[(x * height + y)] = region[centerRow][centerCol] - dot;
     }
 }
 
