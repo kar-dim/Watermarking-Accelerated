@@ -16,7 +16,7 @@ __device__ half8 make_half8(const half& a, const half& b, const half& c, const h
 template<typename T>
 __device__ __host__ inline T clamp(const T& val, const T& lo, const T& hi) { return (val < lo) ? lo : (val > hi) ? hi : val; }
 
-//helper method to fill block-wide shared memory cooperatively for scaled neighbors and NVF kernels
+//helper method to fill block-wide shared memory cooperatively for error sequence and NVF kernels
 template<int p, int pad = p / 2, int sharedSize = 16 + (2 * pad)>
 __device__ void fillBlock(const float* __restrict__ input, float* __restrict__ sharedMem, const int width, const int height)
 {
