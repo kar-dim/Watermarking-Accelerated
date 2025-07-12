@@ -173,15 +173,6 @@ namespace video_utils
 		return std::format("{:.3f}", static_cast<float>(frameRate.num) / frameRate.den);
 	}
 
-	//creates a watermarked RGB BufferType
-	void makeRgbWatermark(const std::unique_ptr<WatermarkBase>& watermarkObj, const BufferType& image, const BufferType& rgbImage, BufferType& output, float& watermarkStrength, MASK_TYPE maskType)
-	{
-#if defined(_USE_GPU_)
-		output = watermarkObj->makeWatermark(image, rgbImage, watermarkStrength, maskType);
-#elif defined(_USE_EIGEN_)
-		output = std::move(watermarkObj->makeWatermark(image, rgbImage, watermarkStrength, maskType).getRGB());
-#endif
-	}
 	//runs the watermark creation for a video frame and writes the watermarked frame to the ffmpeg pipe
 	void writeWatermarkeFrame(const VideoProcessingContext& data, BufferType& inputFrame, GrayBuffer& watermarkedFrame, const AVFrame* frame, FILE* ffmpegPipe)
 	{

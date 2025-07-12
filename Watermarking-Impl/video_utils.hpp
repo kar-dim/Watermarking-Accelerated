@@ -2,7 +2,6 @@
 
 #include "buffer.hpp"
 #include "videoprocessingcontext.hpp"
-#include "WatermarkBase.hpp"
 #include <cstdio>
 #include <functional>
 #include <memory>
@@ -34,7 +33,6 @@ namespace video_utils
 	void embedWatermark(const VideoProcessingContext& data, BufferType& inputFrame, GrayBuffer& watermarkedFrame, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe);
 	void detectWatermark(const VideoProcessingContext& data, BufferType& inputFrame, int& framesCount, const AVFrame* frame);
 	int processFrames(const VideoProcessingContext& data, std::function<void(const AVFrame*, int&)> processFrame);
-	void makeRgbWatermark(const std::unique_ptr<WatermarkBase>& watermarkObj, const BufferType& image, const BufferType& rgbImage, BufferType& output, float& watermarkStrength, MASK_TYPE maskType);
 	void writeWatermarkeFrame(const VideoProcessingContext& data, BufferType& inputFrame, GrayBuffer& watermarkedFrame, const AVFrame* frame, FILE* ffmpegPipe);
 	void writeConditionalWatermarkFrame(const bool embedWatermark, const VideoProcessingContext& data, BufferType& inputFrame, GrayBuffer& watermarkedFrame, const AVFrame* frame, FILE* ffmpegPipe);
 }
