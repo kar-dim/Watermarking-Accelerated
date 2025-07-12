@@ -45,10 +45,8 @@ af::array WatermarkOCL::computeCustomMask(const af::array& image) const
 	const std::unique_ptr<cl_mem> outputMem(customMask.device<cl_mem>());
 	//transposed global dimensions because of column-major order in arrayfire
 	executeKernel([&]() {
-		cl::Buffer imageBuff(*imageMem.get(), true);
-		cl::Buffer outputBuff(*outputMem.get(), true);
 		queue.enqueueNDRangeKernel(
-			cl_utils::KernelBuilder(programs, "nvf").args(imageBuff, outputBuff, baseCols, baseRows).build(),
+			cl_utils::KernelBuilder(programs, "nvf").args(wrap(imageMem.get()), wrap(outputMem.get()), baseCols, baseRows).build(),
 			cl::NDRange(), cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(16, 16));
 		queue.finish();
 		unlockArrays(image, customMask);
@@ -64,11 +62,8 @@ af::array WatermarkOCL::computeErrorSequence(const af::array& image, const af::a
 	const std::unique_ptr<cl_mem> errorSequenceMem(errorSequence.device<cl_mem>());
 	//transposed global dimensions because of column-major order in arrayfire
 	executeKernel([&]() {
-		cl::Buffer imageBuff(*imageMem.get(), true);
-		cl::Buffer errorSequencesBuff(*errorSequenceMem.get(), true);
-		cl::Buffer coeffsBuff(*coeffsMem.get(), true);
 		queue.enqueueNDRangeKernel(
-			cl_utils::KernelBuilder(programs, "error_sequence_p3").args(imageBuff, errorSequencesBuff, coeffsBuff, baseCols, baseRows).build(),
+			cl_utils::KernelBuilder(programs, "error_sequence_p3").args(wrap(imageMem.get()), wrap(errorSequenceMem.get()), wrap(coeffsMem.get()), baseCols, baseRows).build(),
 			cl::NDRange(), cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(16, 16));
 		queue.finish();
 		unlockArrays(image, coefficients, errorSequence);
@@ -84,11 +79,8 @@ void WatermarkOCL::computePredictionErrorData(const af::array& image, af::array&
 	const std::unique_ptr<cl_mem> RxPartialMem(RxPartial.device<cl_mem>());
 	const std::unique_ptr<cl_mem> rxPartialMem(rxPartial.device<cl_mem>());
 	executeKernel([&]() {
-		cl::Buffer imageBuff(*imageMem.get(), true);
-		cl::Buffer Rx_buff(*RxPartialMem.get(), true);
-		cl::Buffer rx_buff(*rxPartialMem.get(), true);
 		queue.enqueueNDRangeKernel(
-			cl_utils::KernelBuilder(programs, "me").args(imageBuff, Rx_buff, rx_buff, RxMappingsBuff, baseCols, static_cast<unsigned int>(meKernelDims.cols), baseRows).build(),
+			cl_utils::KernelBuilder(programs, "me").args(wrap(imageMem.get()), wrap(RxPartialMem.get()), wrap(rxPartialMem.get()), RxMappingsBuff, baseCols, static_cast<unsigned int>(meKernelDims.cols), baseRows).build(),
 			cl::NDRange(), cl::NDRange(meKernelDims.cols, meKernelDims.rows), cl::NDRange(64, 1));
 		//finish and return memory to arrayfire
 		queue.finish();
@@ -124,25 +116,19 @@ float WatermarkOCL::computeCorrelation(const af::array& e_u, const af::array& e_
 	const std::unique_ptr<cl_mem> correlationResultMem(correlationResult.device<cl_mem>());
 	float correlation = 0.0f;
 	executeKernel([&]() {
-		cl::Buffer euBuff(*euMem.get(), true);
-		cl::Buffer ezBuff(*ezMem.get(), true);
-		cl::Buffer dotBuff(*dotPartialMem.get(), true);
-		cl::Buffer uNormBuff(*uNormPartialMem.get(), true);
-		cl::Buffer zNormBuff(*zNormPartialMem.get(), true);
-		cl::Buffer corrBuff(*correlationResultMem.get(), true);
-
 		//calculate partial dot products and norms
 		queue.enqueueNDRangeKernel(
-			cl_utils::KernelBuilder(programs, "calculate_partial_correlation").args(euBuff, ezBuff, dotBuff, uNormBuff, zNormBuff, N).build(),
+			cl_utils::KernelBuilder(programs, "calculate_partial_correlation").args(
+				wrap(euMem.get()), wrap(ezMem.get()), wrap(dotPartialMem.get()), wrap(uNormPartialMem.get()), wrap(zNormPartialMem.get()), N).build(),
 			cl::NDRange(), cl::NDRange(globalSize), cl::NDRange(256));
 		queue.finish();
-
 		//reduce partials and compute correlation
 		queue.enqueueNDRangeKernel(
-			cl_utils::KernelBuilder(programs, "calculate_final_correlation").args(dotBuff, uNormBuff, zNormBuff, corrBuff, blocks).build(),
+			cl_utils::KernelBuilder(programs, "calculate_final_correlation").args(
+				wrap(dotPartialMem.get()), wrap(uNormPartialMem.get()), wrap(zNormPartialMem.get()), wrap(correlationResultMem.get()), blocks).build(),
 			cl::NDRange(), cl::NDRange(1024), cl::NDRange(1024));
 		queue.finish();
-
+		//retrieve the correlation result
 		unlockArrays(e_u, e_z, dotPartial, uNormPartial, zNormPartial, correlationResult);
 		correlation = correlationResult.scalar<float>();
 	}, "compute correlation kernels");

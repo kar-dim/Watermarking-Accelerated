@@ -36,6 +36,7 @@ private:
 	dim2 texKernelDims, meKernelDims;
 	cl::Program programs;
 
+	inline cl::Buffer wrap(const cl_mem* mem) const { return cl::Buffer(*mem, true); }
 	af::array computeCustomMask(const af::array& image) const override;
 	af::array computeErrorSequence(const af::array& image, const af::array& coefficients) const override;
 	void computePredictionErrorData(const af::array& image, af::array& errorSequence, af::array& coefficients) const override;
