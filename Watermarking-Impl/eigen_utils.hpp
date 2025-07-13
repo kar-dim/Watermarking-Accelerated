@@ -1,7 +1,8 @@
 #pragma once
+#include "buffer.hpp"
 #include "cimg_init.h"
 #include "eigen_rgb_array.hpp"
-#include <string>
+#include <optional>
 
 enum IMAGE_TYPE
 {
@@ -15,8 +16,8 @@ enum IMAGE_TYPE
  */
 namespace eigen_utils
 {
-	cimg_library::CImg<float> eigenRgbToCimg(const EigenArrayRGB& imageRgb);
+	cimg_library::CImg<float> eigenRgbToCimg(const EigenArrayRGB& imageRgb, const std::optional<BufferAlphaType>& alphaChannel);
+	void cimgAlphaZero(cimg_library::CImg<float>& rgbImage, const cimg_library::CImg<float>& alphaChannel);
 	EigenArrayRGB cimgToEigenRgb(const cimg_library::CImg<float>& rgbImage);
 	Eigen::ArrayXXf eigenRgbToGray(const EigenArrayRGB& imageRgb, const float rWeight, const float gWeight, const float bWeight);
-	void saveWatermarkedImage(const std::string& imagePath, const std::string& suffix, const EigenArrayRGB& watermark, const IMAGE_TYPE type);
 }

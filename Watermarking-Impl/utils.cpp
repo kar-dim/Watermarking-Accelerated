@@ -20,6 +20,8 @@
 #include "eigen_utils.hpp"
 #include "WatermarkEigen.hpp"
 #endif
+#include <optional>
+#include "constants.h"
 
 using std::string;
 
@@ -31,20 +33,21 @@ string Utils::addSuffixBeforeExtension(const string& file, const string& suffix)
 	return file.substr(0, dot) + suffix + file.substr(dot);
 }
 
-void Utils::saveImage(const string& imagePath, const string& suffix, const BufferType& watermark)
+void Utils::saveImage(const string& imagePath, const string& suffix, const BufferType& watermark, const std::optional<BufferAlphaType>& alphaChannel)
 {
 #if defined(_USE_EIGEN_)
 	const string watermarkedFile = Utils::addSuffixBeforeExtension(imagePath, suffix);
 	string extension = watermarkedFile.substr(watermarkedFile.find_last_of('.') + 1);
 	std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
-	const auto rgbCimg = eigen_utils::eigenRgbToCimg(watermark.getRGB());
+	const auto rgbCimg = eigen_utils::eigenRgbToCimg(watermark.getRGB(), alphaChannel);
 	if (extension == "png")  rgbCimg.save_png(watermarkedFile.c_str());
 	else if (extension == "bmp")  rgbCimg.save_bmp(watermarkedFile.c_str());
 	else if (extension == "jpg" || extension == "jpeg") rgbCimg.save_jpeg(watermarkedFile.c_str());
 	else
 		throw std::runtime_error("Unsupported image format: " + extension);
 #elif defined(_USE_GPU_)
-	af::saveImageNative(addSuffixBeforeExtension(imagePath, suffix).c_str(), watermark.as(u8));
+	const af::array& arrayToSave = alphaChannel.has_value() ? af::join(2, watermark, *alphaChannel).as(u8) : watermark.as(u8);
+	af::saveImageNative(addSuffixBeforeExtension(imagePath, suffix).c_str(), arrayToSave);
 #endif
 }
 
@@ -83,4 +86,37 @@ void Utils::checkError(const bool isError, const string& errorMsg)
 string Utils::formatExecutionTime(const bool showFps, const double seconds)
 {
 	return showFps ? std::format("FPS: {:.2f} FPS", 1.0 / seconds) : std::format("{:.6f} seconds", seconds);
+}
+
+void Utils::loadImage(BufferType& rgbImage, BufferType& image, const std::string& imageFile, std::optional<BufferAlphaType>& alphaChannel)
+{
+#if defined(_USE_GPU_)
+	rgbImage = af::loadImage(imageFile.c_str(), true);
+	const auto channels = rgbImage.dims(2);
+	if (channels != 3 && channels != 4)
+		throw std::runtime_error("Invalid image dimensions");
+	if (channels == 4)
+	{
+		alphaChannel.emplace(rgbImage(af::span, af::span, 3));
+		rgbImage = rgbImage(af::span, af::span, af::seq(0, 2));
+		image = af::rgb2gray(rgbImage, Constants::rPercent, Constants::gPercent, Constants::bPercent) * (*alphaChannel != 0);
+	}
+	else
+		image = af::rgb2gray(rgbImage, Constants::rPercent, Constants::gPercent, Constants::bPercent);
+	af::sync();
+		
+#elif defined(_USE_EIGEN_)
+	auto cimgRgb = cimg_library::CImg<float>(imageFile.c_str());
+	const auto channels = cimgRgb.spectrum();
+	if (channels != 3 && channels != 4)
+		throw std::runtime_error("Invalid image dimensions");
+	if (channels == 4)
+	{
+		alphaChannel.emplace(cimgRgb.get_channel(3));
+		cimgRgb = cimgRgb.get_channels(0, 2);
+		eigen_utils::cimgAlphaZero(cimgRgb, *alphaChannel);
+	}
+	rgbImage = eigen_utils::cimgToEigenRgb(cimgRgb);
+	image = eigen_utils::eigenRgbToGray(rgbImage.getRGB(), Constants::rPercent, Constants::gPercent, Constants::bPercent);
+#endif
 }

@@ -9,6 +9,7 @@
 #endif
 
 #include "buffer.hpp"
+#include "constants.h"
 #include "host_memory.h"
 #include "utils.hpp"
 #include "videoprocessingcontext.hpp"
@@ -22,7 +23,9 @@
 #include <INIReader.h>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <utility>
 
@@ -115,9 +118,7 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 {
 	//not hardware specific, but a reasonable limit for images
 	constexpr auto maxImageDims = std::pair<unsigned int, unsigned int>(65536, 65536);
-	constexpr float rPercent = 0.299f;
-	constexpr float gPercent = 0.587f;
-	constexpr float bPercent = 0.114f;
+
 	const string imageFile = inir.Get("paths", "image", "NO_IMAGE");
 	const bool showFps = inir.GetBoolean("options", "execution_time_in_fps", false);
 	int loops = inir.GetInteger("parameters", "loops_for_test", 5);
@@ -125,23 +126,15 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 	cout << "Each test will be executed " << loops << " times. Average time will be shown below\n";
 	
 	BufferType rgbImage, image;
-
+	std::optional<BufferAlphaType> alphaChannel;
+	
+	//load image from disk into arrayfire (GPU), or CImg and copy from CImg object to Eigen arrays (CPU)
+	double secs = Utils::executionTime([&] { Utils::loadImage(rgbImage, image, imageFile, alphaChannel); });
 #if defined(_USE_GPU_)
-	//load image from disk into an arrayfire array
-	double secs = Utils::executionTime([&] {
-		rgbImage = af::loadImage(imageFile.c_str(), true);
-		image = af::rgb2gray(rgbImage, rPercent, gPercent, bPercent);
-		af::sync();
-	});
 	const auto rows = static_cast<unsigned int>(image.dims(0));
 	const auto cols = static_cast<unsigned int>(image.dims(1));
 	cout << "Time to load and transfer RGB image from disk to VRAM: " << secs << "\n\n";
 #elif defined(_USE_EIGEN_)
-	//load image from disk into CImg and copy from CImg object to Eigen arrays
-	double secs = Utils::executionTime([&] {
-		rgbImage = eigen_utils::cimgToEigenRgb(CImg<float>(imageFile.c_str()));
-		image = eigen_utils::eigenRgbToGray(rgbImage.getRGB(), rPercent, gPercent, bPercent);
-	});
 	const auto rows = image.getGray().rows();
 	const auto cols = image.getGray().cols();
 	cout << "Time to load image from disk and initialize CImg and Eigen memory objects: " << secs << " seconds\n\n";
@@ -167,14 +160,14 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 	cout << std::format("Watermark strength (parameter a): {}\nCalculation of ME mask with {} rows and {} columns and parameters:\np = {}  PSNR(dB) = {}\n{}\n\n", watermarkStrength, rows, cols, p, psnr, Utils::formatExecutionTime(showFps, secs / loops));
 
 #if defined(_USE_GPU_)
-	const BufferType watermarkedNVFgray = af::rgb2gray(watermarkNVF, rPercent, gPercent, bPercent);
-	const BufferType watermarkedMEgray = af::rgb2gray(watermarkME, rPercent, gPercent, bPercent);
+	const BufferType watermarkedNVFgray = af::rgb2gray(watermarkNVF, Constants::rPercent, Constants::gPercent, Constants::bPercent);
+	const BufferType watermarkedMEgray = af::rgb2gray(watermarkME, Constants::rPercent, Constants::gPercent, Constants::bPercent);
 	//warmup for arrayfire
 	watermarkObj->detectWatermark(watermarkedNVFgray, NVF);
 	watermarkObj->detectWatermark(watermarkedMEgray, ME);
 #elif defined(_USE_EIGEN_)
-	const BufferType watermarkedNVFgray(eigen_utils::eigenRgbToGray(watermarkNVF.getRGB(), rPercent, gPercent, bPercent));
-	const BufferType watermarkedMEgray(eigen_utils::eigenRgbToGray(watermarkME.getRGB(), rPercent, gPercent, bPercent));
+	const BufferType watermarkedNVFgray(eigen_utils::eigenRgbToGray(watermarkNVF.getRGB(), Constants::rPercent, Constants::gPercent, Constants::bPercent));
+	const BufferType watermarkedMEgray(eigen_utils::eigenRgbToGray(watermarkME.getRGB(), Constants::rPercent, Constants::gPercent, Constants::bPercent));
 #endif
 
 	float correlationNvf, correlationMe;
@@ -193,9 +186,9 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 #pragma omp parallel sections
 		{
 #pragma omp section
-			Utils::saveImage(imageFile, "W_NVF", watermarkNVF);
+			Utils::saveImage(imageFile, "W_NVF", watermarkNVF, alphaChannel);
 #pragma omp section
-			Utils::saveImage(imageFile, "W_ME", watermarkME);
+			Utils::saveImage(imageFile, "W_ME", watermarkME, alphaChannel);
 		}
 		cout << "Successully saved to disk\n";
 	}

@@ -135,5 +135,8 @@
     <ClInclude Include="kernels\kernels.hpp">
       <Filter>Header Files\opencl</Filter>
     </ClInclude>
+    <ClInclude Include="constants.h">
+      <Filter>Header Files\util</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

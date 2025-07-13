@@ -1,29 +1,51 @@
 #include "cimg_init.h"
 #include "eigen_rgb_array.hpp"
 #include "eigen_utils.hpp"
-#include "utils.hpp"
 #include <Eigen/Dense>
-#include <string>
 
 using namespace cimg_library;
 using namespace Eigen;
-using std::string;
 
 namespace eigen_utils 
 {
-	CImg<float> eigenRgbToCimg(const EigenArrayRGB& arrayRgb)
+	CImg<float> eigenRgbToCimg(const EigenArrayRGB& arrayRgb, const std::optional<CImg<float>>& alphaChannel)
 	{
 		const auto rows = arrayRgb[0].rows();
 		const auto cols = arrayRgb[0].cols();
-		CImg<float> cimg_image(static_cast<unsigned int>(cols), static_cast<unsigned int>(rows), 1, 3);
+		const int channels = alphaChannel.has_value() ? 4 : 3;
+		CImg<float> cimg_image(static_cast<unsigned int>(cols), static_cast<unsigned int>(rows), 1, channels);
 		//a parallel pixel by pixel copy for loop is faster instead of three parallel (channel) bulk memory copies
 		//because cimg and eigen use different memory layouts, and transposing is required which would make the copy much slower
 	#pragma omp parallel for
 		for (int y = 0; y < rows; ++y)
+		{
 			for (int x = 0; x < cols; ++x)
+			{
 				for (int channel = 0; channel < 3; channel++)
+				{
 					cimg_image(x, y, 0, channel) = arrayRgb[channel](y, x);
+				}
+				if (channels == 4)
+					cimg_image(x, y, 0, 3) = (*alphaChannel)(x, y);
+			}
+		}
 		return cimg_image;
+	}
+
+	void cimgAlphaZero(cimg_library::CImg<float>& rgbImage, const cimg_library::CImg<float>& alphaChannel)
+	{
+#pragma omp parallel for
+		for (int y = 0; y < rgbImage.height(); ++y)
+		{
+			for (int x = 0; x < rgbImage.width(); ++x)
+			{
+				if (alphaChannel(x, y) == 0.0f) 
+				{
+					for (int channel = 0; channel < 3; channel++)
+						rgbImage(x, y, 0, channel) = 0.0f; //set RGB channels to zero where alpha is zero
+				}
+			}
+		}
 	}
 
 	EigenArrayRGB cimgToEigenRgb(const CImg<float>& rgbImage)
@@ -44,13 +66,5 @@ namespace eigen_utils
 	ArrayXXf eigenRgbToGray(const EigenArrayRGB& arrayRgb, const float rWeight, const float gWeight, const float bWeight)
 	{
 		return (arrayRgb[0] * rWeight) + (arrayRgb[1] * gWeight) + (arrayRgb[2] * bWeight);
-	}
-
-	//save the provided Eigen RGB array containing a watermarked image to disk
-	void saveWatermarkedImage(const string& imagePath, const string& suffix, const EigenArrayRGB& watermark, const IMAGE_TYPE type)
-	{
-		const string watermarkedFile = Utils::addSuffixBeforeExtension(imagePath, suffix);
-		type == IMAGE_TYPE::PNG ? eigenRgbToCimg(watermark).save_png(watermarkedFile.c_str())
-			: eigenRgbToCimg(watermark).save_jpeg(watermarkedFile.c_str(), 100);
 	}
 }
