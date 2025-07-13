@@ -154,24 +154,24 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 
 #if defined(_USE_GPU_)
 	//warmup for arrayfire
-	watermarkObj->makeWatermark(image, rgbImage, watermarkStrength, MASK_TYPE::NVF);
-	watermarkObj->makeWatermark(image, rgbImage, watermarkStrength, MASK_TYPE::ME);
+	watermarkObj->makeWatermark(image, rgbImage, watermarkStrength, NVF);
+	watermarkObj->makeWatermark(image, rgbImage, watermarkStrength, ME);
 #endif
 
 	BufferType watermarkNVF, watermarkME;
 	//make NVF watermark
-	secs = Utils::executionTime([&]() { makeRgbWatermark(watermarkObj, image, rgbImage, watermarkNVF, watermarkStrength, MASK_TYPE::NVF); }, loops);
+	secs = Utils::executionTime([&]() { makeRgbWatermark(watermarkObj, image, rgbImage, watermarkNVF, watermarkStrength, NVF); }, loops);
 	cout << std::format("Watermark strength (parameter a): {}\nCalculation of NVF mask with {} rows and {} columns and parameters:\np = {}  PSNR(dB) = {}\n{}\n\n", watermarkStrength, rows, cols, p, psnr, Utils::formatExecutionTime(showFps, secs / loops));
 	//make ME watermark
-	secs = Utils::executionTime([&]() { makeRgbWatermark(watermarkObj, image, rgbImage, watermarkME, watermarkStrength, MASK_TYPE::ME); }, loops);
+	secs = Utils::executionTime([&]() { makeRgbWatermark(watermarkObj, image, rgbImage, watermarkME, watermarkStrength, ME); }, loops);
 	cout << std::format("Watermark strength (parameter a): {}\nCalculation of ME mask with {} rows and {} columns and parameters:\np = {}  PSNR(dB) = {}\n{}\n\n", watermarkStrength, rows, cols, p, psnr, Utils::formatExecutionTime(showFps, secs / loops));
 
 #if defined(_USE_GPU_)
 	const BufferType watermarkedNVFgray = af::rgb2gray(watermarkNVF, rPercent, gPercent, bPercent);
 	const BufferType watermarkedMEgray = af::rgb2gray(watermarkME, rPercent, gPercent, bPercent);
 	//warmup for arrayfire
-	watermarkObj->detectWatermark(watermarkedNVFgray, MASK_TYPE::NVF);
-	watermarkObj->detectWatermark(watermarkedMEgray, MASK_TYPE::ME);
+	watermarkObj->detectWatermark(watermarkedNVFgray, NVF);
+	watermarkObj->detectWatermark(watermarkedMEgray, ME);
 #elif defined(_USE_EIGEN_)
 	const BufferType watermarkedNVFgray(eigen_utils::eigenRgbToGray(watermarkNVF.getRGB(), rPercent, gPercent, bPercent));
 	const BufferType watermarkedMEgray(eigen_utils::eigenRgbToGray(watermarkME.getRGB(), rPercent, gPercent, bPercent));
@@ -179,9 +179,9 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 
 	float correlationNvf, correlationMe;
 	//NVF and ME mask detection
-	secs = Utils::executionTime([&]() { correlationNvf = watermarkObj->detectWatermark(watermarkedNVFgray, MASK_TYPE::NVF); }, loops);
+	secs = Utils::executionTime([&]() { correlationNvf = watermarkObj->detectWatermark(watermarkedNVFgray, NVF); }, loops);
 	cout << std::format("Calculation of the watermark correlation (NVF) of an image with {} rows and {} columns and parameters:\np = {}  PSNR(dB) = {}\n{}\n\n", rows, cols, p, psnr, Utils::formatExecutionTime(showFps, secs / loops));
-	secs = Utils::executionTime([&]() { correlationMe = watermarkObj->detectWatermark(watermarkedMEgray, MASK_TYPE::ME); }, loops);
+	secs = Utils::executionTime([&]() { correlationMe = watermarkObj->detectWatermark(watermarkedMEgray, ME); }, loops);
 	cout << std::format("Calculation of the watermark correlation (ME) of an image with {} rows and {} columns and parameters:\np = {}  PSNR(dB) = {}\n{}\n\n", rows, cols, p, psnr, Utils::formatExecutionTime(showFps, secs / loops));
 	//print the correlation values
 	cout << std::format("Correlation [NVF]: {:.16f}\nCorrelation [ME]: {:.16f}\n", correlationNvf, correlationMe);
