@@ -63,7 +63,8 @@ __kernel void error_sequence_p3(
     __global float* __restrict__ x_,
     __constant float* __restrict__ coeffs,
     const unsigned int width,
-    const unsigned int height)
+    const unsigned int height,
+    const int calculateAbs)
 {
     const int x = get_global_id(1);
     const int y = get_global_id(0);
@@ -86,7 +87,8 @@ __kernel void error_sequence_p3(
         dot += coeffs[5] * region[centerRow + 1][centerCol - 1];
         dot += coeffs[6] * region[centerRow + 1][centerCol];
         dot += coeffs[7] * region[centerRow + 1][centerCol + 1];
-		x_[(x * height + y)] = region[centerRow][centerCol] - dot;
+        const float output = region[centerRow][centerCol] - dot;
+		x_[(x * height + y)] = calculateAbs ? fabs(output) : output;
     }
 }
 

@@ -17,8 +17,8 @@ private:
 	static cudaStream_t afStream;
 
 	af::array computeCustomMask(const af::array& image) const override;
-	af::array computeErrorSequence(const af::array& image, const af::array& coefficients) const override;
-	void computePredictionErrorData(const af::array& image, af::array& errorSequence, af::array& coefficients) const override;
+	af::array computeErrorSequence(const af::array& image, const af::array& coefficients, const bool calculateAbs) const override;
+	void computePredictionErrorData(const af::array& image, af::array& errorSequence, af::array& coefficients, const bool calculateAbs) const override;
 	float computeCorrelation(const af::array& e_u, const af::array& e_z) const override;
 	void copyParams(const WatermarkCuda& other) noexcept;
 

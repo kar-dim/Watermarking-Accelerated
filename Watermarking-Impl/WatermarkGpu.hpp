@@ -46,17 +46,22 @@ protected:
 	virtual af::array computeCustomMask(const af::array& image) const = 0;
 	
 	//computes error sequence, used in prediction error mask
-	virtual af::array computeErrorSequence(const af::array& image, const af::array& coefficients) const = 0;
+	virtual af::array computeErrorSequence(const af::array& image, const af::array& coefficients, const bool calculateAbs) const = 0;
 	
 	//Used in both creation and detection of the watermark.
 	//Calculates error sequence and prediction error filter (coefficients)
-	virtual void computePredictionErrorData(const af::array& image, af::array& errorSequence, af::array& coefficients) const = 0;
+	virtual void computePredictionErrorData(const af::array& image, af::array& errorSequence, af::array& coefficients, const bool calculateAbs) const = 0;
 	
 	//helper method used in detectors
 	virtual float computeCorrelation(const af::array& e_u, const af::array& e_z) const = 0;
 
 	//compute prediction error mask
-	af::array computePredictionErrorMask(const af::array& errorSequence) const;
+	template<bool CALC_ABS>
+	af::array computePredictionErrorMask(const af::array& errorSequence) const
+	{
+		const af::array& input = CALC_ABS ? af::abs(errorSequence) : errorSequence;
+		return input / af::max<float>(input);
+	}
 
 	//helper method to sum the incomplete Rx_partial and rxPartial arrays which were produced from the custom kernel
 	//and to transform them to the correct size, so that they can be used by the system solver

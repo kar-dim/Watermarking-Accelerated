@@ -54,7 +54,7 @@ af::array WatermarkOCL::computeCustomMask(const af::array& image) const
 	return customMask;
 }
 
-af::array WatermarkOCL::computeErrorSequence(const af::array& image, const af::array& coefficients) const
+af::array WatermarkOCL::computeErrorSequence(const af::array& image, const af::array& coefficients, const bool calculateAbs) const
 {
 	const af::array errorSequence(baseRows, baseCols);
 	const std::unique_ptr<cl_mem> imageMem(image.device<cl_mem>());
@@ -63,7 +63,7 @@ af::array WatermarkOCL::computeErrorSequence(const af::array& image, const af::a
 	//transposed global dimensions because of column-major order in arrayfire
 	executeKernel([&]() {
 		queue.enqueueNDRangeKernel(
-			cl_utils::KernelBuilder(programs, "error_sequence_p3").args(wrap(imageMem.get()), wrap(errorSequenceMem.get()), wrap(coeffsMem.get()), baseCols, baseRows).build(),
+			cl_utils::KernelBuilder(programs, "error_sequence_p3").args(wrap(imageMem.get()), wrap(errorSequenceMem.get()), wrap(coeffsMem.get()), baseCols, baseRows, (int)calculateAbs).build(),
 			cl::NDRange(), cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(16, 16));
 		queue.finish();
 		unlockArrays(image, coefficients, errorSequence);
@@ -71,7 +71,7 @@ af::array WatermarkOCL::computeErrorSequence(const af::array& image, const af::a
 	return errorSequence;
 }
 
-void WatermarkOCL::computePredictionErrorData(const af::array& image, af::array& errorSequence, af::array& coefficients) const
+void WatermarkOCL::computePredictionErrorData(const af::array& image, af::array& errorSequence, af::array& coefficients, const bool calculateAbs) const
 {
 	const af::array RxPartial(baseRows, meKernelDims.cols);
 	const af::array rxPartial(baseRows, meKernelDims.cols / 8);
@@ -95,7 +95,7 @@ void WatermarkOCL::computePredictionErrorData(const af::array& image, af::array&
 			coefficients = af::array(0, f32);
 			return;
 		}
-		errorSequence = computeErrorSequence(image, coefficients);
+		errorSequence = computeErrorSequence(image, coefficients, calculateAbs);
 	}, "me");
 }
 

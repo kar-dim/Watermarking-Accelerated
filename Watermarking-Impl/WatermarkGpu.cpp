@@ -17,11 +17,11 @@ BufferType WatermarkGPU::makeWatermark(const BufferType& inputImage, const Buffe
 	af::array mask, inputErrorSequence, inputCoefficients;
 	if (maskType == ME)
 	{
-		computePredictionErrorData(inputImage, inputErrorSequence, inputCoefficients);
+		computePredictionErrorData(inputImage, inputErrorSequence, inputCoefficients, true);
 		//if the system is not solvable, don't waste time embeding the watermark, return output image without modification
 		if (inputCoefficients.elements() == 0)
 			return outputImage;
-		mask = computePredictionErrorMask(inputErrorSequence);
+		mask = computePredictionErrorMask<false>(inputErrorSequence);
 	}
 	else
 		mask = computeCustomMask(inputImage);
@@ -33,19 +33,13 @@ BufferType WatermarkGPU::makeWatermark(const BufferType& inputImage, const Buffe
 float WatermarkGPU::detectWatermark(const BufferType& inputImage, const MASK_TYPE maskType)
 {
 	af::array mask, errorSequenceW, coefficients;
-	computePredictionErrorData(inputImage, errorSequenceW, coefficients);
+	computePredictionErrorData(inputImage, errorSequenceW, coefficients, false);
 	//if the system is not solvable, don't waste time computing the correlation, there is no watermark
 	if (coefficients.elements() == 0)
 		return 0.0f;
-	mask = maskType == NVF ? computeCustomMask(inputImage) : computePredictionErrorMask(errorSequenceW);
+	mask = maskType == NVF ? computeCustomMask(inputImage) : computePredictionErrorMask<true>(errorSequenceW);
 	const af::array u = mask * randomMatrix;
-	return computeCorrelation(computeErrorSequence(u, coefficients), errorSequenceW);
-}
-
-af::array WatermarkGPU::computePredictionErrorMask(const af::array& errorSequence) const
-{
-	const af::array errorSequenceAbs = af::abs(errorSequence);
-	return errorSequenceAbs / af::max<float>(errorSequenceAbs);
+	return computeCorrelation(computeErrorSequence(u, coefficients, false), errorSequenceW);
 }
 
 std::pair<af::array, af::array> WatermarkGPU::transformCorrelationArrays(const af::array& RxPartial, const af::array& rxPartial) const
