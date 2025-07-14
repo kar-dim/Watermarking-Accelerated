@@ -32,7 +32,7 @@ namespace eigen_utils
 		return cimg_image;
 	}
 
-	void cimgAlphaZero(cimg_library::CImg<float>& rgbImage, const cimg_library::CImg<float>& alphaChannel)
+	void cimgAlphaZero(cimg_library::CImg<float>& rgbImage, const CImg<float>& alphaChannel)
 	{
 #pragma omp parallel for
 		for (int y = 0; y < rgbImage.height(); ++y)
