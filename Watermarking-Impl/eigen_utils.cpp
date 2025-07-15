@@ -14,8 +14,6 @@ namespace eigen_utils
 		const auto cols = arrayRgb[0].cols();
 		const int channels = alphaChannel.has_value() ? 4 : 3;
 		CImg<float> cimg_image(static_cast<unsigned int>(cols), static_cast<unsigned int>(rows), 1, channels);
-		//a parallel pixel by pixel copy for loop is faster instead of three parallel (channel) bulk memory copies
-		//because cimg and eigen use different memory layouts, and transposing is required which would make the copy much slower
 	#pragma omp parallel for
 		for (int y = 0; y < rows; ++y)
 		{
@@ -52,12 +50,10 @@ namespace eigen_utils
 	{
 		const int rows = rgbImage.height();
 		const int cols = rgbImage.width();
-		//a parallel pixel by pixel copy for loop is faster instead of three parallel (channel) bulk memory copies
-		//because cimg and eigen use different memory layouts, and transposing is required which would make the copy much slower
 		EigenArrayRGB rgb_array = { ArrayXXf(rows,cols), ArrayXXf(rows,cols), ArrayXXf(rows, cols) };
 	#pragma omp parallel for
-		for (int y = 0; y < rgbImage.height(); y++)
-			for (int x = 0; x < rgbImage.width(); x++)
+		for (int x = 0; x < rgbImage.width(); x++)
+			for (int y = 0; y < rgbImage.height(); y++)
 				for (int channel = 0; channel < 3; channel++)
 					rgb_array[channel](y, x) = rgbImage(x, y, 0, channel);
 		return rgb_array;
