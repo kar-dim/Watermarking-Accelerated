@@ -99,10 +99,8 @@ void Utils::loadImage(BufferType& rgbImage, BufferType& image, const std::string
 	{
 		alphaChannel.emplace(rgbImage(af::span, af::span, 3));
 		rgbImage = rgbImage(af::span, af::span, af::seq(0, 2)) * (af::tile(*alphaChannel, 1, 1, 3) != 0);
-		image = af::rgb2gray(rgbImage, Constants::rPercent, Constants::gPercent, Constants::bPercent);
 	}
-	else
-		image = af::rgb2gray(rgbImage, Constants::rPercent, Constants::gPercent, Constants::bPercent);
+	image = af::rgb2gray(rgbImage, Constants::rPercent, Constants::gPercent, Constants::bPercent);
 	af::sync();
 		
 #elif defined(_USE_EIGEN_)
