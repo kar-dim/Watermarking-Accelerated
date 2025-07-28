@@ -1,6 +1,5 @@
 #pragma once
 #include <cuda_runtime.h>
-#include <utility>
 
 /*!
  *  \brief  Helper utility functions related to CUDA.
