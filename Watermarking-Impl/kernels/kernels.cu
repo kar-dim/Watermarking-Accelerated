@@ -125,9 +125,11 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
     //simplified summation for Rx
     //we cannot use warp shuffling because it introduces too much stalling for Rx
     sum = 0.0f;
-    #pragma unroll
-    for (int i = 0; i < widthLimit; i++)
-        sum += FLOAT(RxLocal[i][RxMappings[threadIdx.x]]);
+    const int mappingIdx = RxMappings[threadIdx.x];
+#pragma unroll
+    for (int i = 0; i < 64; i++) 
+        if (i < widthLimit)
+            sum += FLOAT(RxLocal[i][mappingIdx]);
     Rx[outputIndex] = sum;
 }
 
