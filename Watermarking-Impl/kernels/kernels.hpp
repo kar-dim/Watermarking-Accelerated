@@ -171,9 +171,11 @@ __kernel void me(__global const float* __restrict__ input,
 
     //TODO can be optimized
     float sum = 0.0f;
+    const int mappingIdx = RxMappings[localId];
 #pragma unroll
-    for (int i = 0; i < widthLimit; i++)
-        sum += RxLocal[i][RxMappings[localId]];
+    for (int i = 0; i < 64; i++) 
+        if (i < widthLimit)
+            sum += RxLocal[i][mappingIdx];
     Rx[outputIndex] = sum;
 }
 
