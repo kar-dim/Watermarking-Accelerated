@@ -19,8 +19,8 @@ namespace cl_utils
 
     cl::Program buildKernels(const int p)
     {
-		cl::Context context(afcl::getContext(false));
-		cl::Device device(afcl::getDeviceId(), false);
+		cl::Context context(afcl::getContext(true));
+		cl::Device device(afcl::getDeviceId(), true);
 		cl::Program program;
 		//compile opencl kernels
 		try {
