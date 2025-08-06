@@ -16,8 +16,6 @@
 #include <optional>
 #include <string>
 #include <thread>
-#include <utility>
-#include <vector>
 
 using namespace cimg_library;
 using namespace Eigen;
@@ -32,7 +30,7 @@ using std::string;
 class EigenFixture : public CommonFixture
 {
 protected:
-    //load the input image and initialize watermark object
+
     void SetUp() override 
     {
 		CommonFixture::SetUp();
@@ -40,24 +38,27 @@ protected:
         watermarkObj = Utils::createWatermarkObject(static_cast<unsigned int>(image.getGray().rows()), static_cast<unsigned int>(image.getGray().cols()), watermarkPath, p, psnr);
     }
 
-    //helper method to save the watermarked image to disk and check if it matches the expected MSE threshold
-    void testSaveToDisk(MASK_TYPE mask, const std::string& label, const std::string& outputFileName)
+    static void SetUpTestSuite()
+    {
+        CommonFixture::SetUpTestSuite();
+    }
+
+    BufferType embedAndConvertToGray(BufferType image, BufferType rgbImage, MASK_TYPE maskType) override
     {
         float strength = 0.0f;
-        FileDeleter cleanup(outputFileName); //delete the file after the test
-        const BufferType watermark = embedWatermark(image, rgbImage, strength, mask);
-        Utils::saveImage(imageFile, label, watermark, alphaChannel);
-        BufferType diskRgb, diskImage;
-        std::optional<BufferAlphaType> diskAlpha;
-        Utils::loadImage(diskRgb, diskImage, outputFileName, diskAlpha);
-        EXPECT_EQ(diskRgb.getRGB()[0].size(), watermark.getRGB()[0].size()) << "Expected disk image (" << label << ") elements to match original";
+        return eigen_utils::eigenRgbToGray(embedWatermark(image, rgbImage, strength, maskType).getRGB(), Constants::rPercent, Constants::gPercent, Constants::bPercent);
+    }
+
+    void calculateMSE(const BufferType& diskRgb, const BufferType& watermark) override
+    {
+        EXPECT_EQ(diskRgb.getRGB()[0].size(), watermark.getRGB()[0].size()) << "Expected disk image elements to match original";
         float mse = 0.0f;
 #pragma omp parallel for
         for (int i = 0; i < 3; i++)
             mse += (diskRgb.getRGB()[i] - watermark.getRGB()[i]).abs().sum();
         mse /= (3 * diskRgb.getRGB()[0].size());
-        EXPECT_LE(mse, mseThreshold) << "MSE for " << label << " is too high: " << mse << " , expected less than or equal to: " << mseThreshold;
-    }
+        EXPECT_LE(mse, mseThreshold);
+	}
 };
 
 TEST_F(EigenFixture, EmbedWatermark)
@@ -67,20 +68,11 @@ TEST_F(EigenFixture, EmbedWatermark)
 
 TEST_F(EigenFixture, DetectWatermark)
 {
-    float strengthNvf = 0.0f, strengthMe = 0.0f;
-    const BufferType watermarkedNVFgray(eigen_utils::eigenRgbToGray(embedWatermark(image, rgbImage, strengthNvf, NVF).getRGB(), Constants::rPercent, Constants::gPercent, Constants::bPercent));
-    const BufferType watermarkedMEgray(eigen_utils::eigenRgbToGray(embedWatermark(image, rgbImage, strengthMe, ME).getRGB(), Constants::rPercent, Constants::gPercent, Constants::bPercent));
-    const float correlationNvf = watermarkObj->detectWatermark(watermarkedNVFgray, NVF);
-    const float correlationMe = watermarkObj->detectWatermark(watermarkedMEgray, ME);
-    //watermark correlation of Me should be at least as NVF
-    EXPECT_GE(correlationMe, correlationNvf) << "Expected correlationMe >= correlationNvf, but got correlationMe = " << correlationMe << " and correlationNvf = " << correlationNvf;
+    EXPECT_GE(calculateCorrelation(ME), calculateCorrelation(NVF));
 }
+
 TEST_F(EigenFixture, SaveToDisk)
 {
-    std::vector<MaskDiskConfig> strategies = {
-        { NVF, "W_NVF", "../../Watermarking-Impl/samples/images/4kW_NVF.png" },
-        { ME,  "W_ME",  "../../Watermarking-Impl/samples/images/4kW_ME.png" }
-    };
     for (const auto& config : strategies)
         testSaveToDisk(config.strategy, config.label, config.outputFile);
 }
