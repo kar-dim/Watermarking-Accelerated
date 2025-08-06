@@ -6,6 +6,7 @@
 #include "eigen_utils.hpp"
 #include "FileDeleter.h"
 #include "MaskDiskConfig.h"
+#include "test_common.hpp"
 #include "utils.hpp"
 #include "WatermarkBase.hpp"
 #include <Eigen/Dense>
@@ -28,39 +29,19 @@ using std::string;
  *  \author Dimitris Karatzas
  */
 
-class TestFixture : public ::testing::Test
+class EigenFixture : public CommonFixture
 {
 protected:
-    static constexpr float psnr = 40.0f;
-    static constexpr float mseThreshold = 10.0f;
-    static constexpr int p = 3;
-
-    std::unique_ptr<WatermarkBase> watermarkObj;
-    BufferType rgbImage, image;
-    std::optional<BufferAlphaType> alphaChannel;
-    const std::string imageFile = "../../Watermarking-Impl/samples/images/4k.png";
-    const std::string watermarkPath = "../../Watermarking-Impl/samples/w_4k.dat";
-
     //load the input image and initialize watermark object
     void SetUp() override 
     {
+		CommonFixture::SetUp();
         omp_set_num_threads(std::max(omp_get_max_threads(), static_cast<int>(std::thread::hardware_concurrency())));
-#pragma omp parallel
-        {}
-        Utils::loadImage(rgbImage, image, imageFile, alphaChannel);
         watermarkObj = Utils::createWatermarkObject(static_cast<unsigned int>(image.getGray().rows()), static_cast<unsigned int>(image.getGray().cols()), watermarkPath, p, psnr);
     }
 
-    //helper method to embed watermark in the image (and check if it is successful based on watermark strength)
-    BufferType embedWatermark(BufferType& image, BufferType& outputImage, float& strength, MASK_TYPE maskType) 
-    {
-        BufferType output = std::move(watermarkObj->makeWatermark(image, outputImage, strength, maskType).getRGB());
-        EXPECT_GT(strength, 0.0f) << "Expected strength > 0.0f, but got strength = " << strength;
-        return output;
-    }
-
     //helper method to save the watermarked image to disk and check if it matches the expected MSE threshold
-    void saveToDiskTest(MASK_TYPE mask, const std::string& label, const std::string& outputFileName)
+    void testSaveToDisk(MASK_TYPE mask, const std::string& label, const std::string& outputFileName)
     {
         float strength = 0.0f;
         FileDeleter cleanup(outputFileName); //delete the file after the test
@@ -79,16 +60,12 @@ protected:
     }
 };
 
-TEST_F(TestFixture, EmbedWatermark) 
+TEST_F(EigenFixture, EmbedWatermark)
 {
-    float strengthNvf = 0.0f, strengthMe = 0.0f;
-    embedWatermark(image, rgbImage, strengthNvf, NVF);
-    embedWatermark(image, rgbImage, strengthMe, ME);
-    //watermark strength of Me should be at least as strong as NVF
-    EXPECT_GE(strengthMe, strengthNvf) << "Expected strengthMe >= strengthNvf, but got strengthMe = " << strengthMe << " and strengthNvf = " << strengthNvf;
+    testEmbedding();
 }
 
-TEST_F(TestFixture, DetectWatermark) 
+TEST_F(EigenFixture, DetectWatermark)
 {
     float strengthNvf = 0.0f, strengthMe = 0.0f;
     const BufferType watermarkedNVFgray(eigen_utils::eigenRgbToGray(embedWatermark(image, rgbImage, strengthNvf, NVF).getRGB(), Constants::rPercent, Constants::gPercent, Constants::bPercent));
@@ -98,12 +75,12 @@ TEST_F(TestFixture, DetectWatermark)
     //watermark correlation of Me should be at least as NVF
     EXPECT_GE(correlationMe, correlationNvf) << "Expected correlationMe >= correlationNvf, but got correlationMe = " << correlationMe << " and correlationNvf = " << correlationNvf;
 }
-TEST_F(TestFixture, SaveToDisk) 
+TEST_F(EigenFixture, SaveToDisk)
 {
     std::vector<MaskDiskConfig> strategies = {
         { NVF, "W_NVF", "../../Watermarking-Impl/samples/images/4kW_NVF.png" },
         { ME,  "W_ME",  "../../Watermarking-Impl/samples/images/4kW_ME.png" }
     };
     for (const auto& config : strategies)
-        saveToDiskTest(config.strategy, config.label, config.outputFile);
+        testSaveToDisk(config.strategy, config.label, config.outputFile);
 }

@@ -4,12 +4,10 @@
 #include "constants.h"
 #include "FileDeleter.h"
 #include "MaskDiskConfig.h"
+#include "test_common.hpp"
 #include "utils.hpp"
 #include "WatermarkBase.hpp"
 #include <arrayfire.h>
-#if defined(_USE_OPENCL_)
-#include <exception>
-#endif
 #include <iostream>
 #include <memory>
 #include <optional>
@@ -24,48 +22,32 @@ using std::string;
  *  \author Dimitris Karatzas
  */
 
-class TestFixture : public ::testing::Test 
+class GpuFixture : public CommonFixture 
 {
 protected:
-    static constexpr float psnr = 40.0f;
-    static constexpr float mseThreshold = 10.0f;
-    static constexpr int p = 3;
-	static constexpr int openclDevice = 1;
-
-    std::unique_ptr<WatermarkBase> watermarkObj;
-    BufferType rgbImage, image;
-    std::optional<BufferAlphaType> alphaChannel;
-	const std::string imageFile = "../../Watermarking-Impl/samples/images/4k.png";
-	const std::string watermarkPath = "../../Watermarking-Impl/samples/w_4k.dat";
-
 	//load the input image and initialize watermark object
     void SetUp() override 
     {
-#pragma omp parallel
-        {}
+        CommonFixture::SetUp();
+        watermarkObj = Utils::createWatermarkObject(static_cast<unsigned int>(image.dims(0)), static_cast<unsigned int>(image.dims(1)), watermarkPath, p, psnr);
+    }
+
 #if defined(_USE_OPENCL_)
+    static void SetUpTestSuite() 
+    {
+        static constexpr int openclDevice = 0;
         try {
             af::setDevice(openclDevice);
         }
         catch (const std::exception&) {
-            cout << "NOTE: Invalid OpenCL device specified, using default 0" << "\n";
+            std::cout << "NOTE: Invalid OpenCL device specified, using default 0\n";
             af::setDevice(0);
         }
-#endif
-        Utils::loadImage(rgbImage, image, imageFile, alphaChannel);
-        watermarkObj = Utils::createWatermarkObject(static_cast<unsigned int>(image.dims(0)), static_cast<unsigned int>(image.dims(1)), watermarkPath, p, psnr);
     }
-
-	//helper method to embed watermark in the image (and check if it is successful based on watermark strength)
-    BufferType embedWatermark(BufferType& image, BufferType& outputImage, float& strength, MASK_TYPE maskType) 
-    {
-        BufferType output = watermarkObj->makeWatermark(image, outputImage, strength, maskType);
-        EXPECT_GT(strength, 0.0f) << "Expected strength > 0.0f, but got strength = " << strength;
-        return output;
-	}
+#endif
 
 	//helper method to save the watermarked image to disk and check if it matches the expected MSE threshold
-    void saveToDiskTest(MASK_TYPE mask, const std::string& label, const std::string& outputFileName)
+    void testSaveToDisk(MASK_TYPE mask, const std::string& label, const std::string& outputFileName)
     {
         float strength = 0.0f;
 		FileDeleter cleanup(outputFileName); //delete the file after the test
@@ -76,20 +58,16 @@ protected:
         Utils::loadImage(diskRgb, diskImage, outputFileName, diskAlpha);
         EXPECT_EQ(diskRgb.elements(), watermark.elements()) << "Expected disk image (" << label << ") elements to match original";
         const float mse = af::sum<float>(af::abs(diskRgb - watermark)) / diskRgb.elements();
-        EXPECT_LE(mse, mseThreshold) << "MSE for " << label << " is too high: " << mse << " , expected less than or equal to: " << mseThreshold;
+        EXPECT_LE(mse, mseThreshold);
     }
 };
 
-TEST_F(TestFixture, EmbedWatermark) 
+TEST_F(GpuFixture, EmbedWatermark)
 {
-    float strengthNvf = 0.0f, strengthMe = 0.0f;
-    embedWatermark(image, rgbImage, strengthNvf, NVF);
-	embedWatermark(image, rgbImage, strengthMe, ME);
-	//watermark strength of Me should be at least as strong as NVF
-	EXPECT_GE(strengthMe, strengthNvf) << "Expected strengthMe >= strengthNvf, but got strengthMe = " << strengthMe << " and strengthNvf = " << strengthNvf;
+    testEmbedding();
 }
 
-TEST_F(TestFixture, DetectWatermark) 
+TEST_F(GpuFixture, DetectWatermark)
 {
     float strengthNvf = 0.0f, strengthMe = 0.0f;
     const BufferType watermarkedNVFgray = af::rgb2gray(embedWatermark(image, rgbImage, strengthNvf, NVF), Constants::rPercent, Constants::gPercent, Constants::bPercent);
@@ -97,10 +75,10 @@ TEST_F(TestFixture, DetectWatermark)
     const float correlationNvf = watermarkObj->detectWatermark(watermarkedNVFgray, NVF);
     const float correlationMe = watermarkObj->detectWatermark(watermarkedMEgray, ME);
     //watermark correlation of Me should be at least as NVF
-    EXPECT_GE(correlationMe, correlationNvf) << "Expected correlationMe >= correlationNvf, but got correlationMe = " << correlationMe << " and correlationNvf = " << correlationNvf;
+    EXPECT_GE(correlationMe, correlationNvf);
 }
 
-TEST_F(TestFixture, SaveToDisk) 
+TEST_F(GpuFixture, SaveToDisk)
 {
     std::vector<MaskDiskConfig> strategies = 
     {
@@ -108,5 +86,5 @@ TEST_F(TestFixture, SaveToDisk)
         { ME,  "W_ME",  "../../Watermarking-Impl/samples/images/4kW_ME.png" }
     };
     for (const auto& config : strategies)
-        saveToDiskTest(config.strategy, config.label, config.outputFile);
+        testSaveToDisk(config.strategy, config.label, config.outputFile);
 }

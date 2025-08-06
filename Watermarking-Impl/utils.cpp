@@ -1,18 +1,16 @@
 #include "buffer.hpp"
+#include "constants.h"
 #include "utils.hpp"
 #include "WatermarkBase.hpp"
 #include <format>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #if defined(_USE_OPENCL_)
 #include "WatermarkOCL.hpp"
-#include <af/opencl.h>
-#include <utility>
 #elif defined(_USE_CUDA_)
-#include "cuda_utils.hpp"
 #include "WatermarkCuda.cuh"
-#include <utility>
 #elif defined(_USE_EIGEN_)
 #include <algorithm>
 #include <cctype>
@@ -20,8 +18,6 @@
 #include "eigen_utils.hpp"
 #include "WatermarkEigen.hpp"
 #endif
-#include <optional>
-#include "constants.h"
 
 using std::string;
 
