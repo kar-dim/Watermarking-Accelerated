@@ -4,6 +4,7 @@
 #include "eigen_rgb_array.hpp"
 #include "PredictionErrorMatrixData.hpp"
 #include "WatermarkBase.hpp"
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <Eigen/Dense>
@@ -96,10 +97,19 @@ private:
 		{
 			for (int i = pad; i < baseRows + pad; i++)
 			{
-				const auto& neighb = padded.block<p, p>(i - blockRadius, j - blockRadius);
-				const float mean = neighb.mean();
-				const float variance = (neighb - mean).square().sum() / pSquared;
-				mask(i - pad, j - pad) = variance / (1.0f + variance);
+				float sum = 0.0f, sumSq = 0.0f;
+				for (int jj = -pad; jj <= pad; jj++)
+				{
+					for (int ii = -pad; ii <= pad; ii++)
+					{
+						float pixelValue = padded(i + ii, j + jj);
+						sum += pixelValue;
+						sumSq += pixelValue * pixelValue;
+					}
+				}
+				float mean = sum / pSquared;
+				float variance = (sumSq / pSquared) - (mean * mean);
+				mask(i - pad, j - pad) = std::max(variance / (1.0f + variance), 0.0f);
 			}
 		}
 	}

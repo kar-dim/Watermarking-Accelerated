@@ -47,7 +47,6 @@ using std::string;
  *  \brief  Helper functions for testing the watermark algorithms
  *  \author Dimitris Karatzas
  */
-void makeRgbWatermark(const std::unique_ptr<WatermarkBase>& watermarkObj, const BufferType& image, const BufferType& rgbImage, BufferType& output, float& watermarkStrength, MASK_TYPE maskType);
 int testForImage(const INIReader& inir, const int p, const float psnr);
 int testForVideo(const INIReader& inir, const string& videoFile, const int p, const float psnr);
 
@@ -155,10 +154,10 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 #endif
 
 	//make NVF watermark
-	secs = Utils::executionTime([&]() { makeRgbWatermark(watermarkObj, image, rgbImage, watermarkNVF, watermarkStrength, NVF); }, loops);
+	secs = Utils::executionTime([&]() { watermarkObj->makeWatermark(image, rgbImage, watermarkNVF, watermarkStrength, NVF); }, loops);
 	cout << std::format("Watermark strength (parameter a): {}\nCalculation of NVF mask with {} rows and {} columns and parameters:\np = {}  PSNR(dB) = {}\n{}\n\n", watermarkStrength, rows, cols, p, psnr, Utils::formatExecutionTime(showFps, secs / loops));
 	//make ME watermark
-	secs = Utils::executionTime([&]() { makeRgbWatermark(watermarkObj, image, rgbImage, watermarkME, watermarkStrength, ME); }, loops);
+	secs = Utils::executionTime([&]() { watermarkObj->makeWatermark(image, rgbImage, watermarkME, watermarkStrength, ME); }, loops);
 	cout << std::format("Watermark strength (parameter a): {}\nCalculation of ME mask with {} rows and {} columns and parameters:\np = {}  PSNR(dB) = {}\n{}\n\n", watermarkStrength, rows, cols, p, psnr, Utils::formatExecutionTime(showFps, secs / loops));
 
 #if defined(_USE_GPU_)
@@ -265,14 +264,4 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 		cout << "\nWatermark detection average execution time per frame: " << Utils::formatExecutionTime(showFps, secs / framesCount) << "\n";
 	}
 	return EXIT_SUCCESS;
-}
-
-//creates a watermarked RGB BufferType
-void makeRgbWatermark(const std::unique_ptr<WatermarkBase>& watermarkObj, const BufferType& image, const BufferType& rgbImage, BufferType& output, float& watermarkStrength, MASK_TYPE maskType)
-{
-#if defined(_USE_GPU_)
-	watermarkObj->makeWatermark(image, rgbImage, output, watermarkStrength, maskType);
-#elif defined(_USE_EIGEN_)
-	watermarkObj->makeWatermark(image, rgbImage, output, watermarkStrength, maskType);
-#endif
 }
