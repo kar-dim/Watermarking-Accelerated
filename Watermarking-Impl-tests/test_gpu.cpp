@@ -24,7 +24,7 @@ using std::string;
 class GpuFixture : public CommonFixture 
 {
 protected:
-	//load the input image and initialize watermark object
+
     void SetUp() override 
     {
         CommonFixture::SetUp();
@@ -40,7 +40,7 @@ protected:
             af::setDevice(openclDevice);
         }
         catch (const std::exception&) {
-            std::cout << "NOTE: Invalid OpenCL device specified, using default 0\n";
+            cout << "NOTE: Invalid OpenCL device specified, using default 0\n";
             af::setDevice(0);
         }
 #endif
@@ -67,7 +67,6 @@ TEST_F(GpuFixture, EmbedWatermark)
 
 TEST_F(GpuFixture, DetectWatermark)
 {
-    //watermark correlation of Me should be at least as high NVF
     EXPECT_GE(calculateCorrelation(ME), calculateCorrelation(NVF));
 }
 

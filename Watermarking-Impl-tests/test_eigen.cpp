@@ -12,7 +12,6 @@
 #include <Eigen/Dense>
 #include <iostream>
 #include <memory>
-#include <omp.h>
 #include <optional>
 #include <string>
 #include <thread>
@@ -34,7 +33,6 @@ protected:
     void SetUp() override 
     {
 		CommonFixture::SetUp();
-        omp_set_num_threads(std::max(omp_get_max_threads(), static_cast<int>(std::thread::hardware_concurrency())));
         watermarkObj = Utils::createWatermarkObject(static_cast<unsigned int>(image.getGray().rows()), static_cast<unsigned int>(image.getGray().cols()), watermarkPath, p, psnr);
     }
 
