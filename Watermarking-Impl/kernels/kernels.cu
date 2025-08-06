@@ -3,8 +3,8 @@
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 
-#define HALF(x) __float2half(x)
-#define FLOAT(x) __half2float(x)
+__device__ inline half HALF(float x) { return __float2half(x); }
+__device__ inline float FLOAT(half x) { return __half2float(x); }
 
 __constant__ float coeffs[8];
 

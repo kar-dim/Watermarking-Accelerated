@@ -69,8 +69,9 @@ protected:
         float strengthNvf = 0.0f, strengthMe = 0.0f;
         embedWatermark(image, rgbImage, strengthNvf, NVF);
         embedWatermark(image, rgbImage, strengthMe, ME);
-        //watermark strength of Me should be at least as strong as NVF
-        EXPECT_GE(strengthMe, strengthNvf);
+        //for this specific test image we expect the below specific strengths
+        EXPECT_NEAR(strengthNvf, 8.4817f, 0.1f);
+        EXPECT_NEAR(strengthMe, 316.85f, 0.5f);
     }
 
     //helper method to save the watermarked image to disk and check if it matches the expected MSE threshold
