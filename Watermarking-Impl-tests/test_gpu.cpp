@@ -2,7 +2,6 @@
 
 #include "buffer.hpp"
 #include "constants.h"
-#include "FileDeleter.h"
 #include "MaskDiskConfig.h"
 #include "test_common.hpp"
 #include "utils.hpp"
@@ -10,8 +9,11 @@
 #include <arrayfire.h>
 #include <iostream>
 #include <memory>
-#include <optional>
 #include <string>
+
+#if defined(_USE_OPENCL_)
+#include <exception>
+#endif
 
 using std::cout;
 using std::string;
