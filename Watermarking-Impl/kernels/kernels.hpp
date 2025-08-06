@@ -234,6 +234,8 @@ __kernel void calculate_final_correlation(
     const unsigned int numBlocks)
 {
     const int tid = get_local_id(0);
+    const int localSize = get_local_size(0);
+
     float localDot = 0.0f;
     float localU = 0.0f;
     float localZ = 0.0f;
@@ -242,7 +244,7 @@ __kernel void calculate_final_correlation(
     __local float sumU[1024];
     __local float sumZ[1024];
 
-    for (int i = tid; i < numBlocks; i += 1024) 
+    for (int i = tid; i < numBlocks; i += localSize) 
     {
         localDot += partialDots[i];
         localU += partialNormU[i];
@@ -254,7 +256,7 @@ __kernel void calculate_final_correlation(
     sumZ[tid] = localZ;
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    for (int s = 512; s > 0; s >>= 1) 
+    for (int s = localSize / 2; s > 0; s >>= 1) 
     {
         if (tid < s) 
         {

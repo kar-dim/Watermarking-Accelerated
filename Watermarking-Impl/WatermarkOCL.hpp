@@ -2,6 +2,7 @@
 #include "opencl_init.h"
 #include "WatermarkGpu.hpp"
 #include <af/opencl.h>
+#include <algorithm>
 #include <arrayfire.h>
 #include <stdexcept>
 #include <string>
@@ -32,8 +33,9 @@ private:
 	};
 	const cl::Context context{ afcl::getContext(true) };
 	const cl::CommandQueue queue{ afcl::getQueue(true) };
+	const cl::Device device{ afcl::getDeviceId(), true };
 	const cl::Buffer RxMappingsBuff{ context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(int) * 64, (void*)RxMappings, NULL };
-	dim2 texKernelDims, meKernelDims;
+	dim2 texKernelDims, meKernelDims, corrFinalLocalSize{ 1, std::min(1024, static_cast<int>(device.getInfo<CL_DEVICE_MAX_WORK_GROUP_SIZE>())) };
 	cl::Program programs;
 
 	inline cl::Buffer wrap(const cl_mem* mem) const { return cl::Buffer(*mem, true); }
