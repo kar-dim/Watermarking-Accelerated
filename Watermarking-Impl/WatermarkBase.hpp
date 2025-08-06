@@ -36,9 +36,9 @@ public:
     virtual ~WatermarkBase() = default;
 
 	//main watermark embedding method
-	//it embeds the watermark computed fom "inputImage" (always grayscale)
-	//into a new array based on "outputImage" (RGB or grayscale)
-	virtual BufferType makeWatermark(const BufferType& inputImage, const BufferType& outputImage, float& watermarkStrength, const MASK_TYPE maskType) = 0;
+	//it embeds the watermark computed from "inputGrayImage" (always grayscale, 2D)
+	//into a new array "output" based on "inputImage" (RGB or grayscale)
+	virtual void makeWatermark(const BufferType& inputGrayImage, const BufferType& inputImage, BufferType& output, float& watermarkStrength, const MASK_TYPE maskType) = 0;
 	
 	//the main mask detector function
 	virtual float detectWatermark(const BufferType& inputImage, const MASK_TYPE maskType) = 0;

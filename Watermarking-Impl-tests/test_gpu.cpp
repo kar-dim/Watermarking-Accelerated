@@ -64,7 +64,8 @@ protected:
 
 TEST_F(GpuFixture, EmbedWatermark)
 {
-    testEmbedding();
+    af::array output;
+    testEmbedding(output);
 }
 
 TEST_F(GpuFixture, DetectWatermark)

@@ -2,6 +2,7 @@
 #include <arrayfire.h>
 #elif defined(_USE_EIGEN_)
 #include "cimg_init.h"
+#include "eigen_rgb_array.hpp"
 #include "eigen_utils.hpp"
 #include <Eigen/Dense>
 #include <omp.h>
@@ -145,12 +146,15 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 	const auto watermarkObj = Utils::createWatermarkObject(rows, cols, inir.Get("paths", "watermark", ""), p, psnr);
 
 #if defined(_USE_GPU_)
+	BufferType watermarkNVF, watermarkME;
 	//warmup for arrayfire
-	watermarkObj->makeWatermark(image, rgbImage, watermarkStrength, NVF);
-	watermarkObj->makeWatermark(image, rgbImage, watermarkStrength, ME);
+	watermarkObj->makeWatermark(image, rgbImage, watermarkNVF, watermarkStrength, NVF);
+	watermarkObj->makeWatermark(image, rgbImage, watermarkME, watermarkStrength, ME);
+#elif defined(_USE_EIGEN_)
+	BufferType watermarkNVF([](int r, int c) { return EigenArrayRGB{ ArrayXXf(r, c), ArrayXXf(r, c), ArrayXXf(r, c) }; } (rows, cols));
+	BufferType watermarkME([](int r, int c) { return EigenArrayRGB{ ArrayXXf(r, c), ArrayXXf(r, c), ArrayXXf(r, c) }; } (rows, cols));
 #endif
 
-	BufferType watermarkNVF, watermarkME;
 	//make NVF watermark
 	secs = Utils::executionTime([&]() { makeRgbWatermark(watermarkObj, image, rgbImage, watermarkNVF, watermarkStrength, NVF); }, loops);
 	cout << std::format("Watermark strength (parameter a): {}\nCalculation of NVF mask with {} rows and {} columns and parameters:\np = {}  PSNR(dB) = {}\n{}\n\n", watermarkStrength, rows, cols, p, psnr, Utils::formatExecutionTime(showFps, secs / loops));
@@ -240,8 +244,7 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 		FILEPtr ffmpegPipe(_popen(ffmpegCmd.str().c_str(), "wb"), _pclose);
 		Utils::checkError(!ffmpegPipe.get(), "Error: Could not open FFmpeg pipe");
 
-		BufferType inputFrame;
-		GrayBuffer watermarkedFrame;
+		BufferType inputFrame, watermarkedFrame(ArrayXXf(height, width));
 		//embed watermark on the video frames
 		double secs = Utils::executionTime([&] { 
 			video_utils::processFrames(videoData, [&](const AVFrame* frame, int& framesCount) { 
@@ -272,8 +275,8 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 void makeRgbWatermark(const std::unique_ptr<WatermarkBase>& watermarkObj, const BufferType& image, const BufferType& rgbImage, BufferType& output, float& watermarkStrength, MASK_TYPE maskType)
 {
 #if defined(_USE_GPU_)
-	output = watermarkObj->makeWatermark(image, rgbImage, watermarkStrength, maskType);
+	watermarkObj->makeWatermark(image, rgbImage, output, watermarkStrength, maskType);
 #elif defined(_USE_EIGEN_)
-	output = std::move(watermarkObj->makeWatermark(image, rgbImage, watermarkStrength, maskType).getRGB());
+	watermarkObj->makeWatermark(image, rgbImage, output, watermarkStrength, maskType);
 #endif
 }

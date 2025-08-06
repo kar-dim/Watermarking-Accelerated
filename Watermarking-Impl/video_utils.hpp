@@ -30,9 +30,9 @@ namespace video_utils
 	int findVideoStream(const AVFormatContext* inputFormatCtx);
 	AVCodecContext* openDecoder(const AVCodecParameters* params);
 	std::string getFrameRate(const AVFormatContext* inputFormatCtx, const int videoStreamIndex);
-	void embedWatermark(const VideoProcessingContext& data, BufferType& inputFrame, GrayBuffer& watermarkedFrame, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe);
+	void embedWatermark(const VideoProcessingContext& data, BufferType& inputFrame, BufferType& watermarkedFrame, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe);
 	void detectWatermark(const VideoProcessingContext& data, BufferType& inputFrame, int& framesCount, const AVFrame* frame);
 	int processFrames(const VideoProcessingContext& data, std::function<void(const AVFrame*, int&)> processFrame);
-	void writeWatermarkeFrame(const VideoProcessingContext& data, BufferType& inputFrame, GrayBuffer& watermarkedFrame, const AVFrame* frame, FILE* ffmpegPipe);
-	void writeConditionalWatermarkFrame(const bool embedWatermark, const VideoProcessingContext& data, BufferType& inputFrame, GrayBuffer& watermarkedFrame, const AVFrame* frame, FILE* ffmpegPipe);
+	void writeWatermarkeFrame(const VideoProcessingContext& data, BufferType& inputFrame, BufferType& watermarkedFrame, const AVFrame* frame, FILE* ffmpegPipe);
+	void writeConditionalWatermarkFrame(const bool embedWatermark, const VideoProcessingContext& data, BufferType& inputFrame, BufferType& watermarkedFrame, const AVFrame* frame, FILE* ffmpegPipe);
 }

@@ -3,6 +3,7 @@
 #include "buffer.hpp"
 #include "cimg_init.h"
 #include "constants.h"
+#include "eigen_rgb_array.hpp"
 #include "eigen_utils.hpp"
 #include "FileDeleter.h"
 #include "MaskDiskConfig.h"
@@ -44,7 +45,10 @@ protected:
     BufferType embedAndConvertToGray(BufferType image, BufferType rgbImage, MASK_TYPE maskType) override
     {
         float strength = 0.0f;
-        return eigen_utils::eigenRgbToGray(embedWatermark(image, rgbImage, strength, maskType).getRGB(), Constants::rPercent, Constants::gPercent, Constants::bPercent);
+        BufferType watermarkedImage([](int r, int c) 
+            { return EigenArrayRGB { ArrayXXf(r, c), ArrayXXf(r, c), ArrayXXf(r, c) }; } (image.getGray().rows(), image.getGray().cols()));
+        embedWatermark(image, rgbImage, watermarkedImage, strength, maskType);
+        return eigen_utils::eigenRgbToGray(watermarkedImage.getRGB(), Constants::rPercent, Constants::gPercent, Constants::bPercent);
     }
 
     void calculateMSE(const BufferType& diskRgb, const BufferType& watermark) override
@@ -61,7 +65,9 @@ protected:
 
 TEST_F(EigenFixture, EmbedWatermark)
 {
-    testEmbedding();
+    BufferType output([](int r, int c)
+        { return EigenArrayRGB{ ArrayXXf(r, c), ArrayXXf(r, c), ArrayXXf(r, c) }; } (image.getGray().rows(), image.getGray().cols()));
+    testEmbedding(output);
 }
 
 TEST_F(EigenFixture, DetectWatermark)

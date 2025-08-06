@@ -51,9 +51,9 @@ protected:
     virtual void calculateMSE(const BufferType& diskRgb, const BufferType& watermark) = 0;
 
     //helper method to embed watermark in the image (and check if it is successful based on watermark strength)
-    BufferType embedWatermark(BufferType& image, BufferType& outputImage, float& strength, MASK_TYPE maskType)
+    BufferType embedWatermark(BufferType& image, BufferType& imageRgb, BufferType& output, float& strength, MASK_TYPE maskType)
     {
-        BufferType output = watermarkObj->makeWatermark(image, outputImage, strength, maskType);
+        watermarkObj->makeWatermark(image, imageRgb, output, strength, maskType);
         EXPECT_GT(strength, 0.0f);
         return output;
     }
@@ -64,11 +64,11 @@ protected:
     }
 
 	//helper methhod to embed watermark for both mask types and check if the strength of ME is at least as strong as NVF
-    void testEmbedding() 
+    void testEmbedding(BufferType& output) 
     {
         float strengthNvf = 0.0f, strengthMe = 0.0f;
-        embedWatermark(image, rgbImage, strengthNvf, NVF);
-        embedWatermark(image, rgbImage, strengthMe, ME);
+        embedWatermark(image, rgbImage, output, strengthNvf, NVF);
+        embedWatermark(image, rgbImage, output, strengthMe, ME);
         //for this specific test image we expect the below specific strengths
         EXPECT_NEAR(strengthNvf, 8.4817f, 0.1f);
         EXPECT_NEAR(strengthMe, 316.85f, 0.5f);
@@ -79,7 +79,8 @@ protected:
     {
         float strength = 0.0f;
         FileDeleter cleanup(outputFileName); //delete the file after the test
-        const BufferType watermark = embedWatermark(image, rgbImage, strength, mask);
+        BufferType watermark;
+        embedWatermark(image, rgbImage, watermark, strength, mask);
         Utils::saveImage(imageFile, label, watermark, alphaChannel);
         BufferType diskRgb, diskImage;
         std::optional<BufferAlphaType> diskAlpha;

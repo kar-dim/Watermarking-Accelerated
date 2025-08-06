@@ -28,7 +28,7 @@ public:
 
 	~WatermarkGPU() override = default;
 
-	BufferType makeWatermark(const BufferType& inputImage, const BufferType& outputImage, float& watermarkStrength, const MASK_TYPE maskType) override;
+	void makeWatermark(const BufferType& inputGrayImage, const BufferType& inputImage, BufferType& output, float& watermarkStrength, const MASK_TYPE maskType) override;
 
 	float detectWatermark(const BufferType& inputImage, const MASK_TYPE maskType) override;
 

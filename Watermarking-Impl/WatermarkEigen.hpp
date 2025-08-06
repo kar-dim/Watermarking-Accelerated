@@ -31,21 +31,20 @@ public:
 		WatermarkBase(rows, cols, randomMatrixPath, psnr), paddedRows(rows + 2 * pad),
 		paddedCols(cols + 2 * pad), padded(ArrayXXf::Zero(paddedRows, paddedCols)),
 		mask(rows, cols), errorSequence(rows, cols), filteredEstimation(rows, cols), u(rows, cols), uStrengthened(rows, cols),
-		watermarkedImage{ [](int r, int c) { return std::array<ArrayXXf, 3>{ ArrayXXf(r, c), ArrayXXf(r, c), ArrayXXf(r, c) }; }(rows, cols) },
 		meMatrixData(omp_get_max_threads())
 	{ }
 
-	BufferType makeWatermark(const BufferType& inputImage, const BufferType& outputImage, float& watermarkStrength, MASK_TYPE type) override
+	void makeWatermark(const BufferType& inputGrayImage, const BufferType& inputImage, BufferType& output, float& watermarkStrength, const MASK_TYPE maskType) override
 	{
-		computeStrengthenedWatermark(inputImage.getGray(), watermarkStrength, type);
-		if (outputImage.isRGB())
+		computeStrengthenedWatermark(inputGrayImage.getGray(), watermarkStrength, maskType);
+		if (inputImage.isRGB())
 		{
 #pragma omp parallel for
 			for (int channel = 0; channel < 3; channel++)
-				watermarkedImage[channel] = (outputImage.getRGB()[channel] + uStrengthened).cwiseMax(0).cwiseMin(255);
-			return watermarkedImage;
+				output.getRGB()[channel] = (inputImage.getRGB()[channel] + uStrengthened).cwiseMax(0).cwiseMin(255);
+			return;
 		}
-		return BufferType((outputImage.getGray() + uStrengthened).cwiseMax(0).cwiseMin(255));
+		output = (inputImage.getGray() + uStrengthened).cwiseMax(0).cwiseMin(255);
 	}
 
 	float detectWatermark(const BufferType& inputImage, MASK_TYPE maskType) override
@@ -79,7 +78,6 @@ public:
 private:
 	unsigned int paddedRows, paddedCols;
 	ArrayXXf padded, mask, errorSequence, filteredEstimation, u, uStrengthened;
-	EigenArrayRGB watermarkedImage;
 	PredictionErrorMatrixData<p> meMatrixData;
 
 	//generate (p x p) - 1 neighbors

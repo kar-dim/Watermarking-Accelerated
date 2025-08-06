@@ -12,22 +12,22 @@ void WatermarkGPU::displayArray(const af::array& array, const int width, const i
 		window.image(array);
 }
 
-BufferType WatermarkGPU::makeWatermark(const BufferType& inputImage, const BufferType& outputImage, float& watermarkStrength, const MASK_TYPE maskType)
+void WatermarkGPU::makeWatermark(const BufferType& inputGrayImage, const BufferType& inputImage, BufferType& output, float& watermarkStrength, const MASK_TYPE maskType)
 {
 	af::array mask, inputErrorSequence, inputCoefficients;
 	if (maskType == ME)
 	{
-		computePredictionErrorData(inputImage, inputErrorSequence, inputCoefficients, true);
-		//if the system is not solvable, don't waste time embeding the watermark, return output image without modification
+		computePredictionErrorData(inputGrayImage, inputErrorSequence, inputCoefficients, true);
+		//if the system is not solvable, don't waste time embeding the watermark
 		if (inputCoefficients.elements() == 0)
-			return outputImage;
+			return;
 		mask = computePredictionErrorMask<false>(inputErrorSequence);
 	}
 	else
-		mask = computeCustomMask(inputImage);
+		mask = computeCustomMask(inputGrayImage);
 	const af::array u = mask * randomMatrix;
 	watermarkStrength = strengthFactor / static_cast<float>(af::norm(u) / std::sqrt(u.elements()));
-	return af::clamp(outputImage + (u * watermarkStrength), 0, 255);
+	output = af::clamp(inputImage + (u * watermarkStrength), 0, 255);
 }
 
 float WatermarkGPU::detectWatermark(const BufferType& inputImage, const MASK_TYPE maskType)
