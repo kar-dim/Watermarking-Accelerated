@@ -48,10 +48,11 @@ protected:
 #endif
     }
 
-    BufferType embedAndConvertToGray(BufferType image, BufferType rgbImage, MASK_TYPE maskType) override
+    BufferType embedAndConvertToGray(MASK_TYPE maskType) override
     {
         float strength = 0.0f;
-        return af::rgb2gray(embedWatermark(image, rgbImage, strength, maskType), Constants::rPercent, Constants::gPercent, Constants::bPercent);
+        BufferType watermarkedImage;
+        return af::rgb2gray(embedWatermark(watermarkedImage, strength, maskType), Constants::rPercent, Constants::gPercent, Constants::bPercent);
     }
 
     void calculateMSE(const BufferType& diskRgb, const BufferType& watermark) override
@@ -64,7 +65,7 @@ protected:
 
 TEST_F(GpuFixture, EmbedWatermark)
 {
-    af::array output;
+    BufferType output;
     testEmbedding(output);
 }
 
@@ -75,6 +76,7 @@ TEST_F(GpuFixture, DetectWatermark)
 
 TEST_F(GpuFixture, SaveToDisk)
 {
+    BufferType watermark;
     for (const auto& config : strategies)
-        testSaveToDisk(config.strategy, config.label, config.outputFile);
+        testSaveToDisk(watermark, config.strategy, config.label, config.outputFile);
 }

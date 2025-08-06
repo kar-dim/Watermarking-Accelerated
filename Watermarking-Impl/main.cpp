@@ -2,7 +2,6 @@
 #include <arrayfire.h>
 #elif defined(_USE_EIGEN_)
 #include "cimg_init.h"
-#include "eigen_rgb_array.hpp"
 #include "eigen_utils.hpp"
 #include <Eigen/Dense>
 #include <omp.h>
@@ -151,8 +150,8 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 	watermarkObj->makeWatermark(image, rgbImage, watermarkNVF, watermarkStrength, NVF);
 	watermarkObj->makeWatermark(image, rgbImage, watermarkME, watermarkStrength, ME);
 #elif defined(_USE_EIGEN_)
-	BufferType watermarkNVF([](int r, int c) { return EigenArrayRGB{ ArrayXXf(r, c), ArrayXXf(r, c), ArrayXXf(r, c) }; } (rows, cols));
-	BufferType watermarkME([](int r, int c) { return EigenArrayRGB{ ArrayXXf(r, c), ArrayXXf(r, c), ArrayXXf(r, c) }; } (rows, cols));
+	BufferType watermarkNVF(eigen_utils::makeEigenRGB(rows, cols));
+	BufferType watermarkME(eigen_utils::makeEigenRGB(rows, cols));
 #endif
 
 	//make NVF watermark
@@ -226,7 +225,7 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 	HostMemory<uint8_t> framePinned(width * height);
 
 	//group common video data for both embedding and detection
-	const VideoProcessingContext videoData(inputFormatCtx.get(), inputDecoderCtx.get(), videoStreamIndex, watermarkObj.get(), height, width, watermarkInterval, framePinned.get());
+	VideoProcessingContext videoData(inputFormatCtx.get(), inputDecoderCtx.get(), videoStreamIndex, watermarkObj.get(), height, width, watermarkInterval, framePinned.get());
 
 	//realtime watermarking of raw video
 	const string makeWatermarkVideoPath = inir.Get("parameters_video", "encode_watermark_file_path", "");
@@ -243,12 +242,10 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 		//open FFmpeg process (with pipe) for writing
 		FILEPtr ffmpegPipe(_popen(ffmpegCmd.str().c_str(), "wb"), _pclose);
 		Utils::checkError(!ffmpegPipe.get(), "Error: Could not open FFmpeg pipe");
-
-		BufferType inputFrame, watermarkedFrame(ArrayXXf(height, width));
 		//embed watermark on the video frames
 		double secs = Utils::executionTime([&] { 
 			video_utils::processFrames(videoData, [&](const AVFrame* frame, int& framesCount) { 
-				video_utils::embedWatermark(videoData, inputFrame, watermarkedFrame, framesCount, frame, ffmpegPipe.get()); 
+				video_utils::embedWatermark(videoData, framesCount, frame, ffmpegPipe.get()); 
 			}); 
 		});
 		cout << "\nWatermark embedding total execution time: " << Utils::formatExecutionTime(false, secs) << "\n";
@@ -257,12 +254,11 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 	//realtime watermarked video detection
 	else if (inir.GetBoolean("parameters_video", "watermark_detection", false))
 	{
-		BufferType inputFrame;
 		//detect watermark on the video frames
 		int framesCount = 1;
 		double secs = Utils::executionTime([&] { 
 			framesCount = video_utils::processFrames(videoData, [&](const AVFrame* frame, int& framesCount) { 
-				video_utils::detectWatermark(videoData, inputFrame, framesCount, frame); 
+				video_utils::detectWatermark(videoData, framesCount, frame); 
 			}); 
 		});
 		cout << "\nWatermark detection total execution time: " << Utils::formatExecutionTime(false, secs) << "\n";

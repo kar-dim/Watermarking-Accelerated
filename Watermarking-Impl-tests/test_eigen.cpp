@@ -3,7 +3,6 @@
 #include "buffer.hpp"
 #include "cimg_init.h"
 #include "constants.h"
-#include "eigen_rgb_array.hpp"
 #include "eigen_utils.hpp"
 #include "FileDeleter.h"
 #include "MaskDiskConfig.h"
@@ -42,12 +41,11 @@ protected:
         CommonFixture::SetUpTestSuite();
     }
 
-    BufferType embedAndConvertToGray(BufferType image, BufferType rgbImage, MASK_TYPE maskType) override
+    BufferType embedAndConvertToGray(MASK_TYPE maskType) override
     {
         float strength = 0.0f;
-        BufferType watermarkedImage([](int r, int c) 
-            { return EigenArrayRGB { ArrayXXf(r, c), ArrayXXf(r, c), ArrayXXf(r, c) }; } (image.getGray().rows(), image.getGray().cols()));
-        embedWatermark(image, rgbImage, watermarkedImage, strength, maskType);
+        BufferType watermarkedImage(eigen_utils::makeEigenRGB(image.getGray().rows(), image.getGray().cols()));
+        embedWatermark(watermarkedImage, strength, maskType);
         return eigen_utils::eigenRgbToGray(watermarkedImage.getRGB(), Constants::rPercent, Constants::gPercent, Constants::bPercent);
     }
 
@@ -65,8 +63,7 @@ protected:
 
 TEST_F(EigenFixture, EmbedWatermark)
 {
-    BufferType output([](int r, int c)
-        { return EigenArrayRGB{ ArrayXXf(r, c), ArrayXXf(r, c), ArrayXXf(r, c) }; } (image.getGray().rows(), image.getGray().cols()));
+    BufferType output(eigen_utils::makeEigenRGB(image.getGray().rows(), image.getGray().cols()));
     testEmbedding(output);
 }
 
@@ -77,6 +74,7 @@ TEST_F(EigenFixture, DetectWatermark)
 
 TEST_F(EigenFixture, SaveToDisk)
 {
+	BufferType watermark(eigen_utils::makeEigenRGB(image.getGray().rows(), image.getGray().cols()));
     for (const auto& config : strategies)
-        testSaveToDisk(config.strategy, config.label, config.outputFile);
+        testSaveToDisk(watermark, config.strategy, config.label, config.outputFile);
 }

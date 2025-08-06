@@ -1,4 +1,5 @@
 #pragma once
+#include "buffer.hpp"
 #include "WatermarkBase.hpp"
 #include <cstdint>
 
@@ -20,11 +21,14 @@ struct VideoProcessingContext
     const int height;
     const int width;
     const int watermarkInterval;
-    uint8_t* inputFramePtr;
+    uint8_t* hostFramePtr;
+    BufferType inputFrame;
+    BufferType watermarkedFrame;
+    GrayBuffer grayFrame;
 
     VideoProcessingContext(AVFormatContext* inputCtx, AVCodecContext* decoderCtx, const int streamIdx,
         WatermarkBase* watermark, const int h, const int w, const int interval, uint8_t* inputFrame)
         : inputFormatCtx(inputCtx), inputDecoderCtx(decoderCtx), videoStreamIndex(streamIdx), watermarkObj(watermark),
-        height(h), width(w), watermarkInterval(interval), inputFramePtr(inputFrame)
+		height(h), width(w), watermarkInterval(interval), hostFramePtr(inputFrame), inputFrame({ h, w }), watermarkedFrame({ h, w }), grayFrame({ h, w })
     { }
 };

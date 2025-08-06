@@ -103,7 +103,7 @@ private:
 			}
 		}
 	}
-	//compute the strengthened watermark, calcaulated by multiplying the mask with the strengthened watermark (random matrix)
+	//compute the strengthened watermark, calcalated by multiplying the mask with the strengthened watermark (random matrix)
 	void computeStrengthenedWatermark(const ArrayXXf& inputImage, float& watermarkStrength, MASK_TYPE maskType)
 	{
 		padded.block(pad, pad, inputImage.rows(), inputImage.cols()) = inputImage;
