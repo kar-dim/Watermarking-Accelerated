@@ -24,14 +24,15 @@ private:
 	static constexpr int localSize = pSquared - 1;
 	static constexpr int blockRadius = p / 2;
 	static constexpr int halfNeighborsSize = localSize / 2;
+	static constexpr int tileSize = 64; //Tile size per thread (rows per tile)
 	using LocalVector = Eigen::Matrix<float, localSize, 1>;
+	using TileMatrix = Eigen::Matrix<float, localSize, tileSize>;
 	using ArrayXXf = Eigen::ArrayXXf;
 
 public:
 	WatermarkEigen<p>(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr) :
-		WatermarkBase(rows, cols, randomMatrixPath, psnr), paddedRows(rows + 2 * pad),
-		paddedCols(cols + 2 * pad), padded(ArrayXXf::Zero(paddedRows, paddedCols)),
-		mask(rows, cols), errorSequence(rows, cols), filteredEstimation(rows, cols), u(rows, cols), uStrengthened(rows, cols),
+		WatermarkBase(rows, cols, randomMatrixPath, psnr), padded(ArrayXXf::Zero(rows + 2 * pad, cols + 2 * pad)),
+		mask(rows, cols), errorSequence(rows, cols), filteredEstimation(rows, cols), uStrengthened(rows, cols),
 		meMatrixData(omp_get_max_threads())
 	{ }
 
@@ -77,17 +78,50 @@ public:
 		return dot_ez_eu / (d_ez * d_eu);
 	}
 private:
-	unsigned int paddedRows, paddedCols;
-	ArrayXXf padded, mask, errorSequence, filteredEstimation, u, uStrengthened;
+	ArrayXXf padded, mask, errorSequence, filteredEstimation, uStrengthened;
 	PredictionErrorMatrixData<p> meMatrixData;
 
-	//generate (p x p) - 1 neighbors
-	void createNeighbors(const ArrayXXf& array, LocalVector& x_, const int i, const int j) const
+	//generate (p x p) - 1 neighbors for a tile
+	void fillLocalTile(const Eigen::ArrayXXf& padded, int i, int j, TileMatrix& tile, int tileRows)
 	{
-		const auto& block = array.block<p, p>(i - blockRadius, j - blockRadius).reshaped();
-		//ignore the central pixel value
-		x_.head(halfNeighborsSize) = block.head(halfNeighborsSize);
-		x_.tail(pSquared - halfNeighborsSize - 1) = block.tail(halfNeighborsSize);
+		constexpr int center = pad;
+		for (int a = 0; a < tileRows; ++a)
+		{
+			int k = 0;
+			for (int dj = 0; dj < p; ++dj)
+			{
+				for (int di = 0; di < p; ++di)
+				{
+					if (di == center && dj == center)
+						continue;
+					tile(k++, a) = padded(i + a + di - center, j + dj - center);
+				}
+			}
+		}
+	}
+
+	//helper method for custom mask sums accumulation
+	template <bool ADD = true>
+	inline void computeCustomMaskSums(const float pixelValue, float& sum, float& sumSq)
+	{
+		if constexpr (ADD)
+		{
+			sum += pixelValue;
+			sumSq += pixelValue * pixelValue;
+		}
+		else
+		{
+			sum -= pixelValue;
+			sumSq -= pixelValue * pixelValue;
+		}
+	}
+
+	//helper method for custom mask calculation per pixel
+	inline void computeCustomMaskPixel(const float sum, const float sumSq, const int i, const int j)
+	{
+		float mean = sum / pSquared;
+		float variance = (sumSq / pSquared) - (mean * mean);
+		mask(i, j) = std::max(variance / (1.0f + variance), 0.0f);
 	}
 
 	void computeCustomMask(const ArrayXXf& image)
@@ -95,24 +129,26 @@ private:
 #pragma omp parallel for
 		for (int j = pad; j < baseCols + pad; j++)
 		{
-			for (int i = pad; i < baseRows + pad; i++)
+			float sum = 0.0f, sumSq = 0.0f;
+			//initialize window and process first pixel in this column
+			for (int jj = -pad; jj <= pad; jj++)
+				for (int ii = -pad; ii <= pad; ii++)
+					computeCustomMaskSums<true>(padded(pad + ii, j + jj), sum, sumSq);
+			computeCustomMaskPixel(sum, sumSq, 0, j - pad);
+
+			//slide window down for remaining pixels in this column
+			for (int i = pad + 1; i < baseRows + pad; i++)
 			{
-				float sum = 0.0f, sumSq = 0.0f;
+				//remove top row and add bottom row of window
 				for (int jj = -pad; jj <= pad; jj++)
-				{
-					for (int ii = -pad; ii <= pad; ii++)
-					{
-						float pixelValue = padded(i + ii, j + jj);
-						sum += pixelValue;
-						sumSq += pixelValue * pixelValue;
-					}
-				}
-				float mean = sum / pSquared;
-				float variance = (sumSq / pSquared) - (mean * mean);
-				mask(i - pad, j - pad) = std::max(variance / (1.0f + variance), 0.0f);
+					computeCustomMaskSums<false>(padded(i - pad - 1, j + jj), sum, sumSq);
+				for (int jj = -pad; jj <= pad; jj++)
+					computeCustomMaskSums<true>(padded(i + pad, j + jj), sum, sumSq);
+				computeCustomMaskPixel(sum, sumSq, i - pad, j - pad);
 			}
 		}
 	}
+
 	//compute the strengthened watermark, calcalated by multiplying the mask with the strengthened watermark (random matrix)
 	void computeStrengthenedWatermark(const ArrayXXf& inputImage, float& watermarkStrength, MASK_TYPE maskType)
 	{
@@ -121,7 +157,7 @@ private:
 			computeCustomMask(inputImage);
 		else
 			computePredictionErrorData<maskCalcRequired>();
-		u = mask * randomMatrix.getGray();
+		const auto u = mask * randomMatrix.getGray();
 		watermarkStrength = strengthFactor / sqrt(u.square().sum() / (baseRows * baseCols));
 		uStrengthened = u * watermarkStrength;
 	}
@@ -133,15 +169,15 @@ private:
 		meMatrixData.setZero();
 
 #pragma omp parallel for
-		for (int j = pad; j < baseCols + pad; j++)
+		for (int j = pad; j < baseCols + pad; ++j)
 		{
-			LocalVector x_;
-			for (int i = pad; i < baseRows + pad; i++)
+			TileMatrix tile;
+			for (int i = pad; i < baseRows + pad; i += tileSize)
 			{
-				//calculate p^2 - 1 neighbors
-				createNeighbors(padded, x_, i, j);
-				//calculate Rx optimized by using a vector representing the lower-triangular only instead of a matrix
-				meMatrixData.computePredictionErrorMatrices(x_, padded(i, j), omp_get_thread_num());
+				const int tileRows = std::min(static_cast<int>(baseRows + pad - i), tileSize);
+				fillLocalTile(padded, i, j, tile, tileRows);
+				for (int tileRow = 0; tileRow < tileRows; tileRow++)
+					meMatrixData.computePredictionErrorMatrices(tile.col(tileRow), padded(i + tileRow, j), omp_get_thread_num());
 			}
 		}
 		meMatrixData.computeCoefficients();
@@ -158,16 +194,17 @@ private:
 	void computeErrorSequence(ArrayXXf& outputErrorSequence)
 	{
 		const auto& coefficients = meMatrixData.getCoefficients();
+
 #pragma omp parallel for
-		for (int j = 0; j < baseCols; j++)
+		for (int j = pad; j < baseCols + pad; ++j)
 		{
-			LocalVector x_;
-			const int jPad = j + pad;
-			for (int i = 0; i < baseRows; i++)
+			TileMatrix tile;
+			for (int i = pad; i < baseRows + pad; i += tileSize)
 			{
-				const int iPad = i + pad;
-				createNeighbors(padded, x_, iPad, jPad);
-				outputErrorSequence(i, j) = padded(iPad, jPad) - x_.dot(coefficients);
+				int tileRows = std::min(static_cast<int>(baseRows + pad - i), tileSize);
+				fillLocalTile(padded, i, j, tile, tileRows);
+				for (int tileRow = 0; tileRow < tileRows; tileRow++)
+					outputErrorSequence(i - pad + tileRow, j - pad) = padded(i + tileRow, j) - tile.col(tileRow).dot(coefficients);
 			}
 		}
 	}
