@@ -19,6 +19,7 @@ template<int p>
 class WatermarkEigen final : public WatermarkBase 
 {
 private:
+	enum class Op { ADD, SUB };
 	static constexpr int pSquared = p * p;
 	static constexpr int pad = p / 2;
 	static constexpr int localSize = pSquared - 1;
@@ -101,10 +102,10 @@ private:
 	}
 
 	//helper method for custom mask sums accumulation
-	template <bool ADD = true>
+	template <Op OP>
 	inline void computeCustomMaskSums(const float pixelValue, float& sum, float& sumSq)
 	{
-		if constexpr (ADD)
+		if constexpr (OP == Op::ADD)
 		{
 			sum += pixelValue;
 			sumSq += pixelValue * pixelValue;
@@ -133,7 +134,7 @@ private:
 			//initialize window and process first pixel in this column
 			for (int jj = -pad; jj <= pad; jj++)
 				for (int ii = -pad; ii <= pad; ii++)
-					computeCustomMaskSums<true>(padded(pad + ii, j + jj), sum, sumSq);
+					computeCustomMaskSums<Op::ADD>(padded(pad + ii, j + jj), sum, sumSq);
 			computeCustomMaskPixel(sum, sumSq, 0, j - pad);
 
 			//slide window down for remaining pixels in this column
@@ -141,9 +142,9 @@ private:
 			{
 				//remove top row and add bottom row of window
 				for (int jj = -pad; jj <= pad; jj++)
-					computeCustomMaskSums<false>(padded(i - pad - 1, j + jj), sum, sumSq);
+					computeCustomMaskSums<Op::SUB>(padded(i - pad - 1, j + jj), sum, sumSq);
 				for (int jj = -pad; jj <= pad; jj++)
-					computeCustomMaskSums<true>(padded(i + pad, j + jj), sum, sumSq);
+					computeCustomMaskSums<Op::ADD>(padded(i + pad, j + jj), sum, sumSq);
 				computeCustomMaskPixel(sum, sumSq, i - pad, j - pad);
 			}
 		}
