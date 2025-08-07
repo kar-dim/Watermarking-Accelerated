@@ -169,16 +169,19 @@ private:
 	{
 		meMatrixData.setZero();
 
-#pragma omp parallel for
-		for (int j = pad; j < baseCols + pad; ++j)
+#pragma omp parallel
 		{
 			TileMatrix tile;
-			for (int i = pad; i < baseRows + pad; i += tileSize)
+#pragma omp for collapse(2) schedule(dynamic, 4)
+			for (int j = pad; j < baseCols + pad; ++j)
 			{
-				const int tileRows = std::min(static_cast<int>(baseRows + pad - i), tileSize);
-				fillLocalTile(padded, i, j, tile, tileRows);
-				for (int tileRow = 0; tileRow < tileRows; tileRow++)
-					meMatrixData.computePredictionErrorMatrices(tile.col(tileRow), padded(i + tileRow, j), omp_get_thread_num());
+				for (int i = pad; i < baseRows + pad; i += tileSize)
+				{
+					const int tileRows = std::min(static_cast<int>(baseRows + pad - i), tileSize);
+					fillLocalTile(padded, i, j, tile, tileRows);
+					for (int tileRow = 0; tileRow < tileRows; tileRow++)
+						meMatrixData.computePredictionErrorMatrices(tile.col(tileRow), padded(i + tileRow, j), omp_get_thread_num());
+				}
 			}
 		}
 		meMatrixData.computeCoefficients();
@@ -195,17 +198,19 @@ private:
 	void computeErrorSequence(ArrayXXf& outputErrorSequence)
 	{
 		const auto& coefficients = meMatrixData.getCoefficients();
-
-#pragma omp parallel for
-		for (int j = pad; j < baseCols + pad; ++j)
+#pragma omp parallel
 		{
 			TileMatrix tile;
-			for (int i = pad; i < baseRows + pad; i += tileSize)
+#pragma omp for collapse(2) schedule(dynamic, 4)
+			for (int j = pad; j < baseCols + pad; ++j)
 			{
-				int tileRows = std::min(static_cast<int>(baseRows + pad - i), tileSize);
-				fillLocalTile(padded, i, j, tile, tileRows);
-				for (int tileRow = 0; tileRow < tileRows; tileRow++)
-					outputErrorSequence(i - pad + tileRow, j - pad) = padded(i + tileRow, j) - tile.col(tileRow).dot(coefficients);
+				for (int i = pad; i < baseRows + pad; i += tileSize)
+				{
+					int tileRows = std::min(static_cast<int>(baseRows + pad - i), tileSize);
+					fillLocalTile(padded, i, j, tile, tileRows);
+					for (int tileRow = 0; tileRow < tileRows; tileRow++)
+						outputErrorSequence(i - pad + tileRow, j - pad) = padded(i + tileRow, j) - tile.col(tileRow).dot(coefficients);
+				}
 			}
 		}
 	}
