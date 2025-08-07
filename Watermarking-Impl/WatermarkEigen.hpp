@@ -16,7 +16,7 @@
  *  \author Dimitris Karatzas
  */
 template<int p>
-class WatermarkEigen final : public WatermarkBase 
+class WatermarkEigen final : public WatermarkBase
 {
 private:
 	enum class Op { ADD, SUB };
@@ -150,7 +150,7 @@ private:
 		}
 	}
 
-	//compute the strengthened watermark, calcalated by multiplying the mask with the strengthened watermark (random matrix)
+	//compute the strengthened watermark, calculated by multiplying the mask with the strengthened watermark (random matrix)
 	void computeStrengthenedWatermark(const ArrayXXf& inputImage, float& watermarkStrength, MASK_TYPE maskType)
 	{
 		padded.block(pad, pad, inputImage.rows(), inputImage.cols()) = inputImage;
@@ -163,27 +163,38 @@ private:
 		uStrengthened = u * watermarkStrength;
 	}
 
-	//compute Prediction error data (coefficients, error sequence), and if needed, prediction error mask
-	template<bool maskNeeded>
-	void computePredictionErrorData()
+	//helper method to calculate a tile and apply a function to each
+	//used in prediction error calculations
+	template <typename Func>
+	inline void applyToTilesParallel(Func&& func)
 	{
-		meMatrixData.setZero();
-
 #pragma omp parallel
 		{
 			TileMatrix tile;
+			const int threadId = omp_get_thread_num();
+			const int rowsLimit = static_cast<int>(baseRows + pad);
 #pragma omp for collapse(2) schedule(dynamic, 4)
 			for (int j = pad; j < baseCols + pad; ++j)
 			{
 				for (int i = pad; i < baseRows + pad; i += tileSize)
 				{
-					const int tileRows = std::min(static_cast<int>(baseRows + pad - i), tileSize);
+					const int tileRows = std::min(rowsLimit - i, tileSize);
 					fillLocalTile(padded, i, j, tile, tileRows);
 					for (int tileRow = 0; tileRow < tileRows; tileRow++)
-						meMatrixData.computePredictionErrorMatrices(tile.col(tileRow), padded(i + tileRow, j), omp_get_thread_num());
+						func(tile, i, j, tileRow, threadId);
 				}
 			}
 		}
+	}
+
+	//compute Prediction error data (coefficients, error sequence), and if needed, prediction error mask
+	template<bool maskNeeded>
+	void computePredictionErrorData()
+	{
+		meMatrixData.setZero();
+		applyToTilesParallel([&](const TileMatrix& tile, const int i, const int j, const int tileRow, const int threadId) {
+			meMatrixData.computePredictionErrorMatrices(tile.col(tileRow), padded(i + tileRow, j), threadId);
+		});
 		meMatrixData.computeCoefficients();
 		//calculate ex(i,j)
 		computeErrorSequence(errorSequence);
@@ -198,20 +209,8 @@ private:
 	void computeErrorSequence(ArrayXXf& outputErrorSequence)
 	{
 		const auto& coefficients = meMatrixData.getCoefficients();
-#pragma omp parallel
-		{
-			TileMatrix tile;
-#pragma omp for collapse(2) schedule(dynamic, 4)
-			for (int j = pad; j < baseCols + pad; ++j)
-			{
-				for (int i = pad; i < baseRows + pad; i += tileSize)
-				{
-					int tileRows = std::min(static_cast<int>(baseRows + pad - i), tileSize);
-					fillLocalTile(padded, i, j, tile, tileRows);
-					for (int tileRow = 0; tileRow < tileRows; tileRow++)
-						outputErrorSequence(i - pad + tileRow, j - pad) = padded(i + tileRow, j) - tile.col(tileRow).dot(coefficients);
-				}
-			}
-		}
+		applyToTilesParallel([&](const TileMatrix& tile, const int i, const int j, const int tileRow, const int) {
+			outputErrorSequence(i - pad + tileRow, j - pad) = padded(i + tileRow, j) - tile.col(tileRow).dot(coefficients);
+		});
 	}
 };
