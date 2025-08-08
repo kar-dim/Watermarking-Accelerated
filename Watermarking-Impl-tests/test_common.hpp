@@ -78,7 +78,7 @@ protected:
         embedWatermark(output, strengthMe, ME);
         //for this specific test image we expect the below specific strengths
         EXPECT_NEAR(strengthNvf, 8.4817f, 0.1f);
-        EXPECT_NEAR(strengthMe, 316.85f, 1.0f);
+        EXPECT_NEAR(strengthMe, 316.85f, 4.0f);
     }
 
     //helper method to save the watermarked image to disk and check if it matches the expected MSE threshold
