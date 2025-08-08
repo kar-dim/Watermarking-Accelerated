@@ -81,23 +81,10 @@ private:
 	ArrayXXf padded, mask, errorSequence, filteredEstimation, uStrengthened;
 	PredictionErrorMatrixData<p> meMatrixData;
 
-	//generate (p x p) - 1 neighbors for a tile
-	void fillLocalTile(const Eigen::ArrayXXf& padded, int i, int j, TileMatrix& tile, int tileRows)
+	//helper method to clamp the pixel value to the image boundaries if out of bounds
+	inline float clampedValue(const ArrayXXf& img, int r, int c, const int rows, const int cols) 
 	{
-		constexpr int center = pad;
-		for (int a = 0; a < tileRows; ++a)
-		{
-			int k = 0;
-			for (int dj = 0; dj < p; ++dj)
-			{
-				for (int di = 0; di < p; ++di)
-				{
-					if (di == center && dj == center)
-						continue;
-					tile(k++, a) = padded(i + a + di - center, j + dj - center);
-				}
-			}
-		}
+		return img(std::clamp(r, 0, rows - 1), std::clamp(c, 0, cols - 1));
 	}
 
 	//helper method for custom mask sums accumulation
@@ -124,32 +111,31 @@ private:
 		mask(i, j) = std::max(variance / (1.0f + variance), 0.0f);
 	}
 
-	inline float clampedValue(const ArrayXXf& img, int r, int c, const int rows, const int cols) {
-		return img(std::clamp(r, 0, rows - 1), std::clamp(c, 0, cols - 1));
-	}
-
+	//main method to compute the custom mask
 	void computeCustomMask(const ArrayXXf& image)
 	{
 		const int rows = static_cast<int>(baseRows);
 		const int cols = static_cast<int>(baseCols);
+		//helper lambda to process the border pixels (clamp if out of bounds)
 		auto processBorder = [&](const int iStart, const int iEnd, int const jStart, const int jEnd)
 		{
 #pragma omp parallel for collapse(2) schedule(dynamic, 8)
-			for (int i = iStart; i < iEnd; ++i)
-			{
-				for (int j = jStart; j < jEnd; ++j)
+			for (int j = jStart; j < jEnd; j++)
+			{ 
+				for (int i = iStart; i < iEnd; i++)
 				{
 					float sum = 0.0f, sumSq = 0.0f;
 					for (int jj = -pad; jj <= pad; jj++)
 						for (int ii = -pad; ii <= pad; ii++)
-							computeCustomMaskSums<Op::ADD>(clampedValue(image, i + ii, j + jj, rows, cols),sum, sumSq);
+							computeCustomMaskSums<Op::ADD>(clampedValue(image, i + ii, j + jj, rows, cols), sum, sumSq);
 					computeCustomMaskPixel(sum, sumSq, i, j);
 				}
 			}
 		};
 
 		//1) Center region
-		if (rows > 2 * pad && cols > 2 * pad) {
+		if (rows > 2 * pad && cols > 2 * pad) 
+		{
 #pragma omp parallel for
 			for (int j = pad; j < cols - pad; j++)
 			{
@@ -207,6 +193,7 @@ private:
 	inline void applyToTilesParallel(Func&& func)
 	{
 		const int rowsLimit = static_cast<int>(baseRows + pad);
+		constexpr int center = pad;
 #pragma omp parallel
 		{
 			TileMatrix tile;
@@ -216,8 +203,22 @@ private:
 			{
 				for (int i = pad; i < baseRows + pad; i += tileSize)
 				{
+					//generate (p x p) - 1 neighbors for each tile
 					const int tileRows = std::min(rowsLimit - i, tileSize);
-					fillLocalTile(padded, i, j, tile, tileRows);
+					for (int a = 0; a < tileRows; ++a)
+					{
+						int k = 0;
+						for (int dj = 0; dj < p; ++dj)
+						{
+							for (int di = 0; di < p; ++di)
+							{
+								if (di == center && dj == center)
+									continue;
+								tile(k++, a) = padded(i + a + di - center, j + dj - center);
+							}
+						}
+					}
+					//call provided function for each tile
 					for (int tileRow = 0; tileRow < tileRows; tileRow++)
 						func(tile, i, j, tileRow, threadId);
 				}
