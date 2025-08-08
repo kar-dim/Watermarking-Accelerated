@@ -1,7 +1,6 @@
 #pragma once
 
 #include "buffer.hpp"
-#include "eigen_rgb_array.hpp"
 #include "PredictionErrorMatrixData.hpp"
 #include "WatermarkBase.hpp"
 #include <algorithm>
@@ -25,7 +24,7 @@ private:
 	static constexpr int localSize = pSquared - 1;
 	static constexpr int blockRadius = p / 2;
 	static constexpr int halfNeighborsSize = localSize / 2;
-	static constexpr int tileSize = 64; //Tile size per thread (rows per tile)
+	static constexpr int tileSize = 64;
 	using LocalVector = Eigen::Matrix<float, localSize, 1>;
 	using TileMatrix = Eigen::Matrix<float, localSize, tileSize>;
 	using ArrayXXf = Eigen::ArrayXXf;
@@ -159,7 +158,7 @@ private:
 		else
 			computePredictionErrorData<maskCalcRequired>();
 		const auto u = mask * randomMatrix.getGray();
-		watermarkStrength = strengthFactor / sqrt(u.square().sum() / (baseRows * baseCols));
+		watermarkStrength = strengthFactor / std::sqrt(u.square().sum() / (baseRows * baseCols));
 		uStrengthened = u * watermarkStrength;
 	}
 
@@ -168,11 +167,11 @@ private:
 	template <typename Func>
 	inline void applyToTilesParallel(Func&& func)
 	{
+		const int rowsLimit = static_cast<int>(baseRows + pad);
 #pragma omp parallel
 		{
 			TileMatrix tile;
 			const int threadId = omp_get_thread_num();
-			const int rowsLimit = static_cast<int>(baseRows + pad);
 #pragma omp for collapse(2) schedule(dynamic, 4)
 			for (int j = pad; j < baseCols + pad; ++j)
 			{
