@@ -172,7 +172,7 @@ private:
 		{
 			TileMatrix tile;
 			const int threadId = omp_get_thread_num();
-#pragma omp for collapse(2) schedule(dynamic, 4)
+#pragma omp for
 			for (int j = pad; j < baseCols + pad; ++j)
 			{
 				for (int i = pad; i < baseRows + pad; i += tileSize)
