@@ -74,6 +74,7 @@ public:
 		}
 		return dot_ez_eu / (d_ez * d_eu);
 	}
+
 private:
 	ArrayXXf mask, errorSequence, filteredEstimation, u, uStrengthened;
 	PredictionErrorMatrixData<p> meMatrixData;
