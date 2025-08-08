@@ -31,9 +31,8 @@ private:
 
 public:
 	WatermarkEigen<p>(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr) :
-		WatermarkBase(rows, cols, randomMatrixPath, psnr), padded(ArrayXXf::Zero(rows + 2 * pad, cols + 2 * pad)),
-		mask(rows, cols), errorSequence(rows, cols), filteredEstimation(rows, cols), uStrengthened(rows, cols),
-		meMatrixData(omp_get_max_threads())
+		WatermarkBase(rows, cols, randomMatrixPath, psnr), mask(rows, cols), errorSequence(rows, cols), 
+		filteredEstimation(rows, cols), u(rows, cols), uStrengthened(rows, cols), meMatrixData(omp_get_max_threads())
 	{ }
 
 	void makeWatermark(const BufferType& inputGrayImage, const BufferType& inputImage, BufferType& output, float& watermarkStrength, const MASK_TYPE maskType) override
@@ -52,18 +51,16 @@ public:
 	float detectWatermark(const BufferType& inputImage, MASK_TYPE maskType) override
 	{
 		const auto& watermarkedBuffer = inputImage.getGray();
-		//pad by using the preallocated block
-		padded.block(pad, pad, watermarkedBuffer.rows(), watermarkedBuffer.cols()) = watermarkedBuffer;
 		if (maskType == NVF)
 		{
-			computePredictionErrorData<maskCalcNotRequired>();
+			computePredictionErrorData<maskCalcNotRequired>(watermarkedBuffer);
 			computeCustomMask(watermarkedBuffer);
 		}
 		else
-			computePredictionErrorData<maskCalcRequired>();
+			computePredictionErrorData<maskCalcRequired>(watermarkedBuffer);
 
-		padded.block(pad, pad, watermarkedBuffer.rows(), watermarkedBuffer.cols()) = (mask * randomMatrix.getGray());
-		computeErrorSequence(filteredEstimation);
+		u = mask * randomMatrix.getGray();
+		computeErrorSequence(u, filteredEstimation);
 		float dot_ez_eu, d_ez, d_eu;
 
 #pragma omp parallel sections
@@ -78,7 +75,7 @@ public:
 		return dot_ez_eu / (d_ez * d_eu);
 	}
 private:
-	ArrayXXf padded, mask, errorSequence, filteredEstimation, uStrengthened;
+	ArrayXXf mask, errorSequence, filteredEstimation, u, uStrengthened;
 	PredictionErrorMatrixData<p> meMatrixData;
 
 	//helper method to clamp the pixel value to the image boundaries if out of bounds
@@ -116,12 +113,17 @@ private:
 	{
 		const int rows = static_cast<int>(baseRows);
 		const int cols = static_cast<int>(baseCols);
+		const int centerStartRow = pad;
+		const int centerEndRow = rows - pad;
+		const int centerStartCol = pad;
+		const int centerEndCol = cols - pad;
+		const bool hasCenterRegion = (centerEndRow > centerStartRow) && (centerEndCol > centerStartCol);
 		//helper lambda to process the border pixels (clamp if out of bounds)
 		auto processBorder = [&](const int iStart, const int iEnd, int const jStart, const int jEnd)
 		{
 #pragma omp parallel for collapse(2) schedule(dynamic, 8)
 			for (int j = jStart; j < jEnd; j++)
-			{ 
+			{
 				for (int i = iStart; i < iEnd; i++)
 				{
 					float sum = 0.0f, sumSq = 0.0f;
@@ -133,22 +135,22 @@ private:
 			}
 		};
 
-		//1) Center region
-		if (rows > 2 * pad && cols > 2 * pad) 
+		//process CENTER region
+		if (hasCenterRegion)
 		{
 #pragma omp parallel for
-			for (int j = pad; j < cols - pad; j++)
+			for (int j = centerStartCol; j < centerEndCol; j++)
 			{
 				float sum = 0.0f, sumSq = 0.0f;
-				for (int jj = -pad; jj <= pad; jj++) 
-					for (int ii = -pad; ii <= pad; ii++) 
+				for (int jj = -pad; jj <= pad; jj++)
+					for (int ii = -pad; ii <= pad; ii++)
 						computeCustomMaskSums<Op::ADD>(image(pad + ii, j + jj), sum, sumSq);
 				computeCustomMaskPixel(sum, sumSq, pad, j);
 				//slide window down for remaining center rows in this column
-				for (int i = pad + 1; i < rows - pad; ++i)
+				for (int i = centerStartRow + 1; i < centerEndRow; i++)
 				{
 					//remove top row and add new bottom row
-					for (int jj = -pad; jj <= pad; jj++) 
+					for (int jj = -pad; jj <= pad; jj++)
 						computeCustomMaskSums<Op::SUB>(image(i - pad - 1, j + jj), sum, sumSq);
 					for (int jj = -pad; jj <= pad; jj++)
 						computeCustomMaskSums<Op::ADD>(image(i + pad, j + jj), sum, sumSq);
@@ -157,19 +159,15 @@ private:
 			}
 		}
 
-		//2) BORDER region
-		//process all pixels outside the core region with clamped sampling.
-		//top border
-		processBorder(0, std::min(pad, rows), 0, cols);
-		//bottom border
-		if (rows > pad)
-			processBorder(std::max(rows - pad, 0), rows, 0, cols);
-		//left border
-		if (cols > 0)
-			processBorder(pad, rows - pad, 0, std::min(pad, cols));
-		//right border
-		if (cols > pad)
-			processBorder(pad, rows - pad, std::max(cols - pad, 0), cols);
+		//process BORDER region
+		if (centerStartRow > 0)
+			processBorder(0, centerStartRow, 0, cols);
+		if (centerEndRow < rows)
+			processBorder(centerEndRow, rows, 0, cols);
+		if (centerStartCol > 0 && hasCenterRegion)
+			processBorder(centerStartRow, centerEndRow, 0, centerStartCol);
+		if (centerEndCol < cols && hasCenterRegion)
+			processBorder(centerStartRow, centerEndRow, centerEndCol, cols);
 	}
 
 	//compute the strengthened watermark, calculated by multiplying the mask with the strengthened watermark (random matrix)
@@ -178,65 +176,106 @@ private:
 		if (maskType == NVF)
 			computeCustomMask(inputImage);
 		else 
-		{
-			padded.block(pad, pad, inputImage.rows(), inputImage.cols()) = inputImage;
-			computePredictionErrorData<maskCalcRequired>();
-		}
+			computePredictionErrorData<maskCalcRequired>(inputImage);
 		const auto u = mask * randomMatrix.getGray();
 		watermarkStrength = strengthFactor / std::sqrt(u.square().sum() / (baseRows * baseCols));
 		uStrengthened = u * watermarkStrength;
 	}
 
-	//helper method to calculate a tile and apply a function to each
-	//used in prediction error calculations
-	template <typename Func>
-	inline void applyToTilesParallel(Func&& func)
+	//helper method to load a tile block from the image into the tile matrix (either direct or clamped access for border pixels)
+	template<typename PixelAccessor>
+	void loadTileBlock(TileMatrix& tile, const ArrayXXf& image, int i, int j, int tileRows, PixelAccessor&& pixelAccessor)
 	{
-		const int rowsLimit = static_cast<int>(baseRows + pad);
 		constexpr int center = pad;
-#pragma omp parallel
+		int k;
+		for (int a = 0; a < tileRows; a++)
 		{
-			TileMatrix tile;
-			const int threadId = omp_get_thread_num();
-#pragma omp for
-			for (int j = pad; j < baseCols + pad; ++j)
+			k = 0;
+			for (int dj = 0; dj < p; dj++)
 			{
-				for (int i = pad; i < baseRows + pad; i += tileSize)
+				for (int di = 0; di < p; di++)
 				{
-					//generate (p x p) - 1 neighbors for each tile
-					const int tileRows = std::min(rowsLimit - i, tileSize);
-					for (int a = 0; a < tileRows; ++a)
-					{
-						int k = 0;
-						for (int dj = 0; dj < p; ++dj)
-						{
-							for (int di = 0; di < p; ++di)
-							{
-								if (di == center && dj == center)
-									continue;
-								tile(k++, a) = padded(i + a + di - center, j + dj - center);
-							}
-						}
-					}
-					//call provided function for each tile
-					for (int tileRow = 0; tileRow < tileRows; tileRow++)
-						func(tile, i, j, tileRow, threadId);
+					if (di == center && dj == center)
+						continue;
+					tile(k++, a) = pixelAccessor(i + a + di - center, j + dj - center);
 				}
 			}
 		}
 	}
 
+	//helper method to calculate a tile and apply a function to each
+	//used in prediction error calculations
+	template <typename Func>
+	inline void applyToTilesParallel(const ArrayXXf& image, Func&& func)
+	{
+		const int rows = static_cast<int>(baseRows);
+		const int cols = static_cast<int>(baseCols);
+		const int centerStartRow = pad;
+		const int centerEndRow = rows - pad;
+		const int centerStartCol = pad;
+		const int centerEndCol = cols - pad;
+		const bool hasCenterRegion = (centerEndRow > centerStartRow) && (centerEndCol > centerStartCol);
+		auto directAccessor = [&](int x, int y) { return image(x, y); };
+		auto clampedAccessor = [&](int x, int y) { return clampedValue(image, x, y, rows, cols); };
+#pragma omp parallel
+		{
+			TileMatrix tile;
+			const int threadId = omp_get_thread_num();
+			//process CENTER region
+			if (hasCenterRegion)
+			{
+#pragma omp for
+				for (int j = centerStartCol; j < centerEndCol; j++)
+				{
+					for (int i = centerStartRow; i < centerEndRow; i += tileSize)
+					{
+						const int tileRows = std::min(centerEndRow - i, tileSize);
+						loadTileBlock(tile, image, i, j, tileRows, directAccessor);
+						for (int tileRow = 0; tileRow < tileRows; tileRow++)
+							func(tile, i, j, tileRow, threadId);
+					}
+				}
+			}
+
+			//helper lambda to process BORDER regions
+			auto processBorder = [&](int rowStart, int rowEnd, int colStart, int colEnd)
+			{
+#pragma omp for collapse(2) schedule(dynamic, 8)
+				for (int j = colStart; j < colEnd; j++)
+				{
+					for (int i = rowStart; i < rowEnd; i += tileSize)
+					{
+						const int tileRows = std::min(rowEnd - i, tileSize);
+						loadTileBlock(tile, image, i, j, tileRows, clampedAccessor);
+						for (int tileRow = 0; tileRow < tileRows; tileRow++)
+							func(tile, i, j, tileRow, threadId);
+					}
+				}
+			};
+
+			//process BORDER regions
+			if (centerStartRow > 0)
+				processBorder(0, centerStartRow, 0, cols);
+			if (centerEndRow < rows)
+				processBorder(centerEndRow, rows, 0, cols);
+			if (centerStartCol > 0 && hasCenterRegion)
+				processBorder(centerStartRow, centerEndRow, 0, centerStartCol);
+			if (centerEndCol < cols && hasCenterRegion)
+				processBorder(centerStartRow, centerEndRow, centerEndCol, cols);
+		}
+	}
+
 	//compute Prediction error data (coefficients, error sequence), and if needed, prediction error mask
 	template<bool maskNeeded>
-	void computePredictionErrorData()
+	void computePredictionErrorData(const ArrayXXf& image)
 	{
 		meMatrixData.setZero();
-		applyToTilesParallel([&](const TileMatrix& tile, const int i, const int j, const int tileRow, const int threadId) {
-			meMatrixData.computePredictionErrorMatrices(tile.col(tileRow), padded(i + tileRow, j), threadId);
+		applyToTilesParallel(image, [&](const TileMatrix& tile, const int i, const int j, const int tileRow, const int threadId) {
+			meMatrixData.computePredictionErrorMatrices(tile.col(tileRow), image(i + tileRow, j), threadId);
 		});
 		meMatrixData.computeCoefficients();
 		//calculate ex(i,j)
-		computeErrorSequence(errorSequence);
+		computeErrorSequence(image, errorSequence);
 		if constexpr (maskNeeded)
 		{
 			auto errorSequenceAbs = errorSequence.abs();
@@ -244,12 +283,12 @@ private:
 		}
 	}
 
-	//computes the prediction error sequence of the padded input image
-	void computeErrorSequence(ArrayXXf& outputErrorSequence)
+	//computes the prediction error sequence of the input image
+	void computeErrorSequence(const ArrayXXf& image, ArrayXXf& outputErrorSequence)
 	{
 		const auto& coefficients = meMatrixData.getCoefficients();
-		applyToTilesParallel([&](const TileMatrix& tile, const int i, const int j, const int tileRow, const int) {
-			outputErrorSequence(i - pad + tileRow, j - pad) = padded(i + tileRow, j) - tile.col(tileRow).dot(coefficients);
+		applyToTilesParallel(image, [&](const TileMatrix& tile, const int i, const int j, const int tileRow, const int) {
+			outputErrorSequence(i + tileRow, j) = image(i + tileRow, j) - tile.col(tileRow).dot(coefficients);
 		});
 	}
 };
