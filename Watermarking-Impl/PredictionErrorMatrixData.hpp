@@ -2,6 +2,15 @@
 #include <Eigen/Dense>
 #include <vector>
 
+//Aligned matrix to 64 bytes boundary (cache-line friendly),
+//improves performance massively when used in parallel computations
+template<typename T>
+struct alignas(64) AlignedMatrix
+{
+	T vec;
+	void setZero() { vec.setZero(); }
+};
+
 /*!
  *  \brief  Helper class holding Prediction Error Matrix Data and common operations,
  *			used by the Eigen implementation.
@@ -18,8 +27,8 @@ private:
 	LocalVectorDiag RxVec;
 	LocalVector coefficients, rx;
 	LocalMatrix Rx;
-	std::vector<LocalVectorDiag> RxVec_all;
-	std::vector<LocalVector> rx_all;
+	std::vector<AlignedMatrix<LocalVectorDiag>> RxVec_all;
+	std::vector<AlignedMatrix<LocalVector>> rx_all;
 
 public:
 	//initialize prediction error matrix data (allocate memory) for a given number of threads
@@ -40,12 +49,12 @@ public:
 	void computePredictionErrorMatrices(const LocalVector& x_, const float pixelValue, const int index)
 	{
 		//calculate Rx optimized by using a vector representing the lower-triangular only instead of a matrix
-		auto& currentRx = RxVec_all[index];
+		auto& currentRx = RxVec_all[index].vec;
 		for (int i = 0, k = 0; i < localSize; i++)
 			for (int j = 0; j <= i; j++, k++)
 				currentRx(k) += x_(i) * x_(j);
 		//calculate rx vector
-		rx_all[index].noalias() += x_ * pixelValue;
+		rx_all[index].vec.noalias() += x_ * pixelValue;
 	}
 
 	//calculates the coefficients by reducing (sum) the Rx/rx matrices calculated by each thread, and reconstructing the full Rx matrix
@@ -53,9 +62,9 @@ public:
 	{
 		//reduction sums of Rx,rx of each thread
 		for (const auto& RxVal : RxVec_all)
-			RxVec.noalias() += RxVal;
+			RxVec.noalias() += RxVal.vec;
 		for (const auto& rxVal : rx_all)
-			rx.noalias() += rxVal;
+			rx.noalias() += rxVal.vec;
 		//Reconstruct full Rx matrix from the vector
 		for (int i = 0, k = 0; i < localSize; i++) 
 		{
