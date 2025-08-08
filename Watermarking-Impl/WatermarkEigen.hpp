@@ -124,39 +124,78 @@ private:
 		mask(i, j) = std::max(variance / (1.0f + variance), 0.0f);
 	}
 
+	inline float clampedValue(const ArrayXXf& img, int r, int c, const int rows, const int cols) {
+		return img(std::clamp(r, 0, rows - 1), std::clamp(c, 0, cols - 1));
+	}
+
 	void computeCustomMask(const ArrayXXf& image)
 	{
-#pragma omp parallel for
-		for (int j = pad; j < baseCols + pad; j++)
+		const int rows = static_cast<int>(baseRows);
+		const int cols = static_cast<int>(baseCols);
+		auto processBorder = [&](const int iStart, const int iEnd, int const jStart, const int jEnd)
 		{
-			float sum = 0.0f, sumSq = 0.0f;
-			//initialize window and process first pixel in this column
-			for (int jj = -pad; jj <= pad; jj++)
-				for (int ii = -pad; ii <= pad; ii++)
-					computeCustomMaskSums<Op::ADD>(padded(pad + ii, j + jj), sum, sumSq);
-			computeCustomMaskPixel(sum, sumSq, 0, j - pad);
-
-			//slide window down for remaining pixels in this column
-			for (int i = pad + 1; i < baseRows + pad; i++)
+#pragma omp parallel for collapse(2) schedule(dynamic, 8)
+			for (int i = iStart; i < iEnd; ++i)
 			{
-				//remove top row and add bottom row of window
-				for (int jj = -pad; jj <= pad; jj++)
-					computeCustomMaskSums<Op::SUB>(padded(i - pad - 1, j + jj), sum, sumSq);
-				for (int jj = -pad; jj <= pad; jj++)
-					computeCustomMaskSums<Op::ADD>(padded(i + pad, j + jj), sum, sumSq);
-				computeCustomMaskPixel(sum, sumSq, i - pad, j - pad);
+				for (int j = jStart; j < jEnd; ++j)
+				{
+					float sum = 0.0f, sumSq = 0.0f;
+					for (int jj = -pad; jj <= pad; jj++)
+						for (int ii = -pad; ii <= pad; ii++)
+							computeCustomMaskSums<Op::ADD>(clampedValue(image, i + ii, j + jj, rows, cols),sum, sumSq);
+					computeCustomMaskPixel(sum, sumSq, i, j);
+				}
+			}
+		};
+
+		//1) Center region
+		if (rows > 2 * pad && cols > 2 * pad) {
+#pragma omp parallel for
+			for (int j = pad; j < cols - pad; j++)
+			{
+				float sum = 0.0f, sumSq = 0.0f;
+				for (int jj = -pad; jj <= pad; jj++) 
+					for (int ii = -pad; ii <= pad; ii++) 
+						computeCustomMaskSums<Op::ADD>(image(pad + ii, j + jj), sum, sumSq);
+				computeCustomMaskPixel(sum, sumSq, pad, j);
+				//slide window down for remaining center rows in this column
+				for (int i = pad + 1; i < rows - pad; ++i)
+				{
+					//remove top row and add new bottom row
+					for (int jj = -pad; jj <= pad; jj++) 
+						computeCustomMaskSums<Op::SUB>(image(i - pad - 1, j + jj), sum, sumSq);
+					for (int jj = -pad; jj <= pad; jj++)
+						computeCustomMaskSums<Op::ADD>(image(i + pad, j + jj), sum, sumSq);
+					computeCustomMaskPixel(sum, sumSq, i, j);
+				}
 			}
 		}
+
+		//2) BORDER region
+		//process all pixels outside the core region with clamped sampling.
+		//top border
+		processBorder(0, std::min(pad, rows), 0, cols);
+		//bottom border
+		if (rows > pad)
+			processBorder(std::max(rows - pad, 0), rows, 0, cols);
+		//left border
+		if (cols > 0)
+			processBorder(pad, rows - pad, 0, std::min(pad, cols));
+		//right border
+		if (cols > pad)
+			processBorder(pad, rows - pad, std::max(cols - pad, 0), cols);
 	}
 
 	//compute the strengthened watermark, calculated by multiplying the mask with the strengthened watermark (random matrix)
 	void computeStrengthenedWatermark(const ArrayXXf& inputImage, float& watermarkStrength, MASK_TYPE maskType)
 	{
-		padded.block(pad, pad, inputImage.rows(), inputImage.cols()) = inputImage;
 		if (maskType == NVF)
 			computeCustomMask(inputImage);
-		else
+		else 
+		{
+			padded.block(pad, pad, inputImage.rows(), inputImage.cols()) = inputImage;
 			computePredictionErrorData<maskCalcRequired>();
+		}
 		const auto u = mask * randomMatrix.getGray();
 		watermarkStrength = strengthFactor / std::sqrt(u.square().sum() / (baseRows * baseCols));
 		uStrengthened = u * watermarkStrength;
