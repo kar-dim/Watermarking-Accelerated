@@ -109,16 +109,30 @@ private:
 		mask(i, j) = std::max(variance / (1.0f + variance), 0.0f);
 	}
 
+	//helper method for calling lambda border handlers for both custom and prediction error masks
+	template <typename ProcessBorderFunc>
+	void computeMaskBorders(const int startRow, const int endRow, const int startCol, const int endCol, bool hasCenterRegion, ProcessBorderFunc&& processBorder)
+	{
+		if (startRow > 0)
+			processBorder(0, startRow, 0, baseCols);
+		if (endRow < baseRows)
+			processBorder(endRow, baseRows, 0, baseCols);
+		if (startCol > 0 && hasCenterRegion)
+			processBorder(startRow, endRow, 0, startCol);
+		if (endCol < baseCols && hasCenterRegion)
+			processBorder(startRow, endRow, endCol, baseCols);
+	}
+
 	//main method to compute the custom mask
 	void computeCustomMask(const ArrayXXf& image)
 	{
 		const int rows = static_cast<int>(baseRows);
 		const int cols = static_cast<int>(baseCols);
-		const int centerStartRow = pad;
-		const int centerEndRow = rows - pad;
-		const int centerStartCol = pad;
-		const int centerEndCol = cols - pad;
-		const bool hasCenterRegion = (centerEndRow > centerStartRow) && (centerEndCol > centerStartCol);
+		const int startRow = pad;
+		const int endRow = rows - pad;
+		const int startCol = pad;
+		const int endCol = cols - pad;
+		const bool hasCenterRegion = (endRow > startRow) && (endCol > startCol);
 		//helper lambda to process the border pixels (clamp if out of bounds)
 		auto processBorder = [&](const int iStart, const int iEnd, int const jStart, const int jEnd)
 		{
@@ -140,7 +154,7 @@ private:
 		if (hasCenterRegion)
 		{
 #pragma omp parallel for
-			for (int j = centerStartCol; j < centerEndCol; j++)
+			for (int j = startCol; j < endCol; j++)
 			{
 				float sum = 0.0f, sumSq = 0.0f;
 				for (int jj = -pad; jj <= pad; jj++)
@@ -148,7 +162,7 @@ private:
 						computeCustomMaskSums<Op::ADD>(image(pad + ii, j + jj), sum, sumSq);
 				computeCustomMaskPixel(sum, sumSq, pad, j);
 				//slide window down for remaining center rows in this column
-				for (int i = centerStartRow + 1; i < centerEndRow; i++)
+				for (int i = startRow + 1; i < endRow; i++)
 				{
 					//remove top row and add new bottom row
 					for (int jj = -pad; jj <= pad; jj++)
@@ -159,16 +173,8 @@ private:
 				}
 			}
 		}
-
 		//process BORDER region
-		if (centerStartRow > 0)
-			processBorder(0, centerStartRow, 0, cols);
-		if (centerEndRow < rows)
-			processBorder(centerEndRow, rows, 0, cols);
-		if (centerStartCol > 0 && hasCenterRegion)
-			processBorder(centerStartRow, centerEndRow, 0, centerStartCol);
-		if (centerEndCol < cols && hasCenterRegion)
-			processBorder(centerStartRow, centerEndRow, centerEndCol, cols);
+		computeMaskBorders(startRow, endRow, startCol, endCol, hasCenterRegion, processBorder);
 	}
 
 	//compute the strengthened watermark, calculated by multiplying the mask with the strengthened watermark (random matrix)
@@ -185,7 +191,7 @@ private:
 
 	//helper method to load a tile block from the image into the tile matrix (either direct or clamped access for border pixels)
 	template<typename PixelAccessor>
-	void loadTileBlock(TileMatrix& tile, const ArrayXXf& image, int i, int j, int tileRows, PixelAccessor&& pixelAccessor)
+	void loadTileBlock(TileMatrix& tile, const ArrayXXf& image, const int i, const int j, const int tileRows, PixelAccessor&& pixelAccessor)
 	{
 		constexpr int center = pad;
 		int k;
@@ -207,15 +213,15 @@ private:
 	//helper method to calculate a tile and apply a function to each
 	//used in prediction error calculations
 	template <typename Func>
-	inline void applyToTilesParallel(const ArrayXXf& image, Func&& func)
+	void applyToTilesParallel(const ArrayXXf& image, Func&& func)
 	{
 		const int rows = static_cast<int>(baseRows);
 		const int cols = static_cast<int>(baseCols);
-		const int centerStartRow = pad;
-		const int centerEndRow = rows - pad;
-		const int centerStartCol = pad;
-		const int centerEndCol = cols - pad;
-		const bool hasCenterRegion = (centerEndRow > centerStartRow) && (centerEndCol > centerStartCol);
+		const int startRow = pad;
+		const int endRow = rows - pad;
+		const int startCol = pad;
+		const int endCol = cols - pad;
+		const bool hasCenterRegion = (endRow > startRow) && (endCol > startCol);
 		auto directAccessor = [&](int x, int y) { return image(x, y); };
 		auto clampedAccessor = [&](int x, int y) { return clampedValue(image, x, y, rows, cols); };
 #pragma omp parallel
@@ -226,11 +232,11 @@ private:
 			if (hasCenterRegion)
 			{
 #pragma omp for
-				for (int j = centerStartCol; j < centerEndCol; j++)
+				for (int j = startCol; j < endCol; j++)
 				{
-					for (int i = centerStartRow; i < centerEndRow; i += tileSize)
+					for (int i = startRow; i < endRow; i += tileSize)
 					{
-						const int tileRows = std::min(centerEndRow - i, tileSize);
+						const int tileRows = std::min(endRow - i, tileSize);
 						loadTileBlock(tile, image, i, j, tileRows, directAccessor);
 						for (int tileRow = 0; tileRow < tileRows; tileRow++)
 							func(tile, i, j, tileRow, threadId);
@@ -239,7 +245,7 @@ private:
 			}
 
 			//helper lambda to process BORDER regions
-			auto processBorder = [&](int rowStart, int rowEnd, int colStart, int colEnd)
+			auto processBorder = [&](const int rowStart, const int rowEnd, const int colStart, const int colEnd)
 			{
 #pragma omp for collapse(2) schedule(dynamic, 8)
 				for (int j = colStart; j < colEnd; j++)
@@ -255,14 +261,7 @@ private:
 			};
 
 			//process BORDER regions
-			if (centerStartRow > 0)
-				processBorder(0, centerStartRow, 0, cols);
-			if (centerEndRow < rows)
-				processBorder(centerEndRow, rows, 0, cols);
-			if (centerStartCol > 0 && hasCenterRegion)
-				processBorder(centerStartRow, centerEndRow, 0, centerStartCol);
-			if (centerEndCol < cols && hasCenterRegion)
-				processBorder(centerStartRow, centerEndRow, centerEndCol, cols);
+			computeMaskBorders(startRow, endRow, startCol, endCol, hasCenterRegion, processBorder);
 		}
 	}
 

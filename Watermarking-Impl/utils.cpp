@@ -57,16 +57,11 @@ std::unique_ptr<WatermarkBase> Utils::createWatermarkObject(const unsigned int h
 #elif defined(_USE_EIGEN_)
 	switch (p)
 	{
-	case 3:
-		watermarkObj = std::make_unique<WatermarkEigen<3>>(height, width, randomMatrixPath, psnr); break;
-	case 5:
-		watermarkObj = std::make_unique<WatermarkEigen<5>>(height, width, randomMatrixPath, psnr); break;
-	case 7:
-		watermarkObj = std::make_unique<WatermarkEigen<7>>(height, width, randomMatrixPath, psnr); break;
-	case 9:
-		watermarkObj = std::make_unique<WatermarkEigen<9>>(height, width, randomMatrixPath, psnr); break;
-	default:
-		throw std::invalid_argument("Unsupported value for p. Allowed values: 3, 5, 7, 9.");
+	case 3: watermarkObj = std::make_unique<WatermarkEigen<3>>(height, width, randomMatrixPath, psnr); break;
+	case 5: watermarkObj = std::make_unique<WatermarkEigen<5>>(height, width, randomMatrixPath, psnr); break;
+	case 7: watermarkObj = std::make_unique<WatermarkEigen<7>>(height, width, randomMatrixPath, psnr); break;
+	case 9: watermarkObj = std::make_unique<WatermarkEigen<9>>(height, width, randomMatrixPath, psnr); break;
+	default: throw std::invalid_argument("Unsupported value for p. Allowed values: 3, 5, 7, 9.");
 	}
 #endif
 	return watermarkObj;
