@@ -115,7 +115,9 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 	const bool showFps = inir.GetBoolean("options", "execution_time_in_fps", false);
 	int loops = inir.GetInteger("parameters", "loops_for_test", 5);
 	loops = loops <= 0 ? 5 : loops;
+#if defined(_USE_EIGEN_)
 	cout << "Using " << omp_get_max_threads() << " parallel threads for Watermark calculations.\n";
+#endif
 	cout << "Each test will be executed " << loops << " times. Average time will be shown below\n";
 	
 	BufferType rgbImage, image;
@@ -225,9 +227,11 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 	const string makeWatermarkVideoPath = inir.Get("parameters_video", "encode_watermark_file_path", "");
 	if (makeWatermarkVideoPath != "")
 	{
+#if defined(_USE_EIGEN_)
 		//for video embedding only, set the number of openmp/eigen threads to physical cores
 		eigen_utils::setThreadsToPhysicalCores();
 		cout << "\nUsing " << omp_get_max_threads() << " parallel threads for Watermark calculations.\n";
+#endif
 		const string ffmpegOptions = inir.Get("parameters_video", "encode_options", "-c:v libx265 -preset fast -crf 23");
 		//build the FFmpeg command
 		std::ostringstream ffmpegCmd;
@@ -251,7 +255,9 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 	//realtime watermarked video detection
 	else if (inir.GetBoolean("parameters_video", "watermark_detection", false))
 	{
+#if defined(_USE_EIGEN_)
 		cout << "\nUsing " << omp_get_max_threads() << " parallel threads for Watermark calculations.\n";
+#endif
 		//detect watermark on the video frames
 		int framesCount = 1;
 		double secs = Utils::executionTime([&] { 
