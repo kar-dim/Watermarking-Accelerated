@@ -11,7 +11,11 @@ The deprecated original Thesis code is in the archived repository <a href="https
 
 # Overview
 
-The aim of this project is to compare the performance (primarily execution speed) of watermarking algorithms when implemented on CPU versus GPU. This repository includes all the relevant implementations.
+The aim of this project is to implement and compare the performance (execution speed) of watermarking algorithms when implemented on CPU versus GPU. This repository includes all the relevant implementations.
+
+Implementations are optimized for maximum performance:
+- CPU Implementation: Uses the Eigen library for efficient linear algebra operations. The application utilizes all available logical CPU cores for maximum performance but smartly limits the thread count to the number of physical cores specifically during watermark video embedding to prevent oversubscription and reduce context switching, since other heavy CPU work comes from FFmpeg itself.
+- GPU Implementation: Provides both OpenCL and CUDA backends. The GPU kernels are highly optimized to maximize throughput and minimize latency.
 
 # Key Features
 
@@ -46,10 +50,9 @@ Needs to be parameterized from the corresponding ```settings.ini``` file. Here i
 | psnr                              | PSNR (Peak Signal-to-Noise Ratio). Higher values correspond to less watermark in the image, reducing noise, but making detection harder.   |
 | loops_for_test                    | Loops the algorithms many times, simulating more work. A value of ```100~1000``` produces consistent execution times.                          |
 | opencl_device                     | ```[OpenCL only / Number]```: Works only for OpenCL binary. If multiple OpenCL devices are found, then set this to the desired device. Set it to 0 if one device is found. |
-| threads                           | ```[CPU only / Number]```: Maximum number of threads. Set to 0 to automatically find the maximum concurrent threads supported, or set them manually here.    |
+
 
 **Video-only settings:**
-
 
 | Parameter                         | Description                                                                                                                 |
 |-----------------------------------|-----------------------------------------------------------------------------------------------------------------------------                |
