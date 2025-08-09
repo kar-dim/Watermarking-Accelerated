@@ -1,8 +1,12 @@
 #include "cimg_init.h"
 #include "eigen_rgb_array.hpp"
 #include "eigen_utils.hpp"
+#include <cstdint>
 #include <Eigen/Dense>
+#include <omp.h>
 #include <optional>
+#include <vector>
+#include <windows.h>
 
 using namespace cimg_library;
 using namespace Eigen;
@@ -63,5 +67,29 @@ namespace eigen_utils
 	ArrayXXf eigenRgbToGray(const EigenArrayRGB& arrayRgb, const float rWeight, const float gWeight, const float bWeight)
 	{
 		return (arrayRgb[0] * rWeight) + (arrayRgb[1] * gWeight) + (arrayRgb[2] * bWeight);
+	}
+
+	//sets the number of OpenMP (watermarking) threads based on physical cores
+	//it is used only for video embedding, to improve performance by reducing
+	//context switching between openmp and ffmpeg's threads
+	void setThreadsToPhysicalCores()
+	{
+		DWORD len = 0;
+		GetLogicalProcessorInformationEx(RelationProcessorCore, nullptr, &len);
+		std::vector<uint8_t> buffer(len);
+		auto info = reinterpret_cast<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(buffer.data());
+		if (!GetLogicalProcessorInformationEx(RelationProcessorCore, info, &len)) 
+			return;
+		unsigned count = 0;
+		char* ptr = reinterpret_cast<char*>(info);
+		char* end = ptr + len;
+		while (ptr < end) 
+		{
+			auto p = reinterpret_cast<SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*>(ptr);
+			if (p->Relationship == RelationProcessorCore) count++;
+			ptr += p->Size;
+		}
+		omp_set_num_threads(count);
+		Eigen::setNbThreads(count);
 	}
 }

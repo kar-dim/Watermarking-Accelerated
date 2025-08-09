@@ -20,6 +20,7 @@ namespace eigen_utils
 	void cimgAlphaZero(cimg_library::CImg<float>& rgbImage, const cimg_library::CImg<float>& alphaChannel);
 	EigenArrayRGB cimgToEigenRgb(const cimg_library::CImg<float>& rgbImage);
 	Eigen::ArrayXXf eigenRgbToGray(const EigenArrayRGB& imageRgb, const float rWeight, const float gWeight, const float bWeight);
+	void setThreadsToPhysicalCores();
 	inline EigenArrayRGB makeEigenRGB(int rows, int cols)
 	{
 		return { Eigen::ArrayXXf(rows, cols), Eigen::ArrayXXf(rows, cols), Eigen::ArrayXXf(rows, cols) };

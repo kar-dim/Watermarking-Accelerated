@@ -80,18 +80,12 @@ int main(void)
 		const float psnr = inir.GetFloat("parameters", "psnr", -1.0f);
 
 #if defined(_USE_EIGEN_)
-		int numThreads = inir.GetInteger("parameters", "threads", 0);
-		if (numThreads <= 0)
-			numThreads = std::max(omp_get_max_threads(), static_cast<int>(std::thread::hardware_concurrency()));
-		omp_set_num_threads(numThreads);
 		//check valid parameter values
 		Utils::checkError(p <= 1 || p % 2 != 1 || p > 9, "p parameter must be a positive odd number greater than or equal to 3 and less than or equal to 9");
-		cout << "Using " << numThreads << " parallel threads.\n";
 #else
 		//TODO GPU: for p>3 we have problems with ME masking buffers
 		Utils::checkError(p != 3, "For now, only p=3 is allowed");
 #endif
-
 		//initialize openmp
 #pragma omp parallel
 		{ }
@@ -121,6 +115,7 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 	const bool showFps = inir.GetBoolean("options", "execution_time_in_fps", false);
 	int loops = inir.GetInteger("parameters", "loops_for_test", 5);
 	loops = loops <= 0 ? 5 : loops;
+	cout << "Using " << omp_get_max_threads() << " parallel threads for Watermark calculations.\n";
 	cout << "Each test will be executed " << loops << " times. Average time will be shown below\n";
 	
 	BufferType rgbImage, image;
@@ -230,6 +225,9 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 	const string makeWatermarkVideoPath = inir.Get("parameters_video", "encode_watermark_file_path", "");
 	if (makeWatermarkVideoPath != "")
 	{
+		//for video embedding only, set the number of openmp/eigen threads to physical cores
+		eigen_utils::setThreadsToPhysicalCores();
+		cout << "\nUsing " << omp_get_max_threads() << " parallel threads for Watermark calculations.\n";
 		const string ffmpegOptions = inir.Get("parameters_video", "encode_options", "-c:v libx265 -preset fast -crf 23");
 		//build the FFmpeg command
 		std::ostringstream ffmpegCmd;
@@ -253,6 +251,7 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 	//realtime watermarked video detection
 	else if (inir.GetBoolean("parameters_video", "watermark_detection", false))
 	{
+		cout << "\nUsing " << omp_get_max_threads() << " parallel threads for Watermark calculations.\n";
 		//detect watermark on the video frames
 		int framesCount = 1;
 		double secs = Utils::executionTime([&] { 
