@@ -140,7 +140,7 @@ All backends require FFmpeg which is also copied (most libav* DLLs).
 - CPU Implementation: LibPNG and LibJPEG and zlib are also included, and are used internally by CImg for loading and saving of images.
 - ArrayFire should be installed globally, with default installation options. Environment Variable "AF_PATH" will be defined automatically.
 - FFmpeg must exist on system PATH (Pre-build binaries already include FFmpeg binaries and DLLs).
-- 
+
 
 # Profiling Tools
 | Tool                  | Description                                   |                                 |
