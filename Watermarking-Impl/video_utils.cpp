@@ -1,17 +1,11 @@
 #include "buffer.hpp"
-#include "utils.hpp"
 #include "video_utils.hpp"
 #include "videoprocessingcontext.hpp"
 #include "WatermarkBase.hpp"
-#include <cerrno>
 #include <cstdio>
-#include <cstdint>
 #include <cstring>
 #include <format>
-#include <functional>
 #include <iostream>
-#include <memory>
-#include <stdexcept>
 #include <string>
 
 extern "C" {
@@ -19,8 +13,6 @@ extern "C" {
 #include <libavformat/avformat.h>
 #include "libavcodec/codec_par.h"
 #include "libavutil/frame.h"
-#include "libavutil/pixfmt.h"
-#include "libavutil/error.h"
 #include "libavutil/avutil.h"
 #include "libavcodec/codec.h"
 #include "libavutil/rational.h"
@@ -35,50 +27,6 @@ using std::cout;
 
 namespace video_utils
 {
-	//main frames loop logic for video watermark embedding and detection
-	int processFrames(const VideoProcessingContext& data, std::function<void(const AVFrame*, int&)> processFrame)
-	{
-		const AVPacketPtr packet(av_packet_alloc(), [](AVPacket* pkt) { av_packet_free(&pkt); });
-		const AVFramePtr frame(av_frame_alloc(), [](AVFrame* frame) { av_frame_free(&frame); });
-		int framesCount = 0;
-		auto processValidFrame = [&](const AVFrame* f)
-		{
-			Utils::checkError(f->format != AV_PIX_FMT_YUV420P && f->format != AV_PIX_FMT_YUVJ420P,"Error: Video frame format not supported, aborting");
-			processFrame(f, framesCount);
-		};
-		//read video frames loop
-		while (av_read_frame(data.inputFormatCtx, packet.get()) >= 0)
-		{
-			if (packet->stream_index != data.videoStreamIndex || avcodec_send_packet(data.inputDecoderCtx, packet.get()) < 0)
-			{
-				av_packet_unref(packet.get());
-				continue;
-			}
-			while (true)
-			{
-				int ret = avcodec_receive_frame(data.inputDecoderCtx, frame.get());
-				if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
-					break;
-				if (ret < 0)
-				{
-					char errbuf[256];
-					av_strerror(ret, errbuf, sizeof(errbuf));
-					av_packet_unref(packet.get());
-					throw std::runtime_error(string("FFmpeg decoding error: ") + errbuf);
-				}
-				processValidFrame(frame.get());
-			}
-			av_packet_unref(packet.get());
-		}
-		//ensure all remaining frames are flushed
-		avcodec_send_packet(data.inputDecoderCtx, nullptr);
-		while (avcodec_receive_frame(data.inputDecoderCtx, frame.get()) == 0)
-		{
-			processValidFrame(frame.get());
-		}
-		return framesCount;
-	}
-
 	//embed watermark in a video frame
 	void embedWatermark(VideoProcessingContext& data, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe)
 	{

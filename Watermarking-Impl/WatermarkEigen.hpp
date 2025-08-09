@@ -113,7 +113,7 @@ private:
 
 	//helper method for calling lambda border handlers for both custom and prediction error masks
 	template <typename ProcessBorderFunc>
-	inline void computeMaskBorders(const int startRow, const int endRow, const int startCol, const int endCol, bool hasCenterRegion, ProcessBorderFunc&& processBorder)
+	inline void computeMaskBorders(const int startRow, const int endRow, const int startCol, const int endCol, bool hasCenterRegion, const ProcessBorderFunc& processBorder)
 	{
 		if (startRow > 0)
 			processBorder(0, startRow, 0, baseCols);
@@ -203,7 +203,7 @@ private:
 
 	//helper method to load a tile block from the image into the tile matrix (either direct or clamped access for border pixels)
 	template<typename PixelAccessor>
-	void loadTileBlock(TileMatrix& tile, const ArrayXXf& image, const int i, const int j, const int tileRows, PixelAccessor&& pixelAccessor)
+	void loadTileBlock(TileMatrix& tile, const ArrayXXf& image, const int i, const int j, const int tileRows, const PixelAccessor& pixelAccessor)
 	{
 		constexpr int center = pad;
 		int k;
