@@ -35,6 +35,7 @@ public:
 		filteredEstimation(rows, cols), u(rows, cols), uStrengthened(rows, cols), meMatrixData(omp_get_max_threads())
 	{ }
 
+	//main watermark embedding method
 	void makeWatermark(const BufferType& inputGrayImage, const BufferType& inputImage, BufferType& output, float& watermarkStrength, const MASK_TYPE maskType) override
 	{
 		computeStrengthenedWatermark(inputGrayImage.getGray(), watermarkStrength, maskType);
@@ -48,6 +49,7 @@ public:
 		output = (inputImage.getGray() + uStrengthened).cwiseMax(0).cwiseMin(255);
 	}
 
+	//main watermark detection method
 	float detectWatermark(const BufferType& inputImage, MASK_TYPE maskType) override
 	{
 		const auto& watermarkedBuffer = inputImage.getGray();
@@ -111,7 +113,7 @@ private:
 
 	//helper method for calling lambda border handlers for both custom and prediction error masks
 	template <typename ProcessBorderFunc>
-	void computeMaskBorders(const int startRow, const int endRow, const int startCol, const int endCol, bool hasCenterRegion, ProcessBorderFunc&& processBorder)
+	inline void computeMaskBorders(const int startRow, const int endRow, const int startCol, const int endCol, bool hasCenterRegion, ProcessBorderFunc&& processBorder)
 	{
 		if (startRow > 0)
 			processBorder(0, startRow, 0, baseCols);
@@ -184,9 +186,19 @@ private:
 			computeCustomMask(inputImage);
 		else 
 			computePredictionErrorData<maskCalcRequired>(inputImage);
-		const auto u = mask * randomMatrix.getGray();
-		watermarkStrength = strengthFactor / std::sqrt(u.square().sum() / (baseRows * baseCols));
-		uStrengthened = u * watermarkStrength;
+		const auto& gray = randomMatrix.getGray();
+
+		//optimized calculation of the strengthened watermark
+		float sumSq = 0.0f;
+#pragma omp parallel for reduction(+:sumSq)
+		for (auto i = 0; i < mask.size(); i++) 
+		{
+			float u = mask(i) * gray(i);
+			uStrengthened(i) = u;
+			sumSq += u * u;
+		}
+		watermarkStrength = strengthFactor / std::sqrt(sumSq / (baseRows * baseCols));
+		uStrengthened *= watermarkStrength;
 	}
 
 	//helper method to load a tile block from the image into the tile matrix (either direct or clamped access for border pixels)
