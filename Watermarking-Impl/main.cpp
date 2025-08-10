@@ -207,19 +207,31 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 	Utils::checkError(avformat_open_input(&rawInputCtx, videoFile.c_str(), nullptr, nullptr) < 0, "ERROR: Failed to open input video file");
 	AVFormatContextPtr inputFormatCtx(rawInputCtx, [](AVFormatContext* ctx) { if (ctx) { avformat_close_input(&ctx); } });
 	avformat_find_stream_info(inputFormatCtx.get(), nullptr);
-	av_dump_format(inputFormatCtx.get(), 0, videoFile.c_str(), 0);
+	//av_dump_format(inputFormatCtx.get(), 0, videoFile.c_str(), 0);
 
 	//find video stream and open video decoder
 	const int videoStreamIndex = video_utils::findVideoStream(inputFormatCtx.get());
 	Utils::checkError(videoStreamIndex == -1, "ERROR: No video stream found");
+#if defined(_USE_CUDA_)
+	const string hwCodec = inir.Get("parameters_video", "cuda_hw_decoder", "");
+	bool useHwDecoder = false;
+	const AVCodecContextPtr inputDecoderCtx(video_utils::openDecoderHWAccel(inputFormatCtx->streams[videoStreamIndex]->codecpar, hwCodec, useHwDecoder), [](AVCodecContext* ctx) { avcodec_free_context(&ctx); });
+	if (!hwCodec.empty() && !useHwDecoder)
+		cout << "WARNING: Hardware decoder '" << hwCodec << "' was requested, but not available. Using software decoder instead.\n";
+#else
 	const AVCodecContextPtr inputDecoderCtx(video_utils::openDecoder(inputFormatCtx->streams[videoStreamIndex]->codecpar), [](AVCodecContext* ctx) { avcodec_free_context(&ctx); });
-
+#endif
 	//initialize watermark functions class and host pinned memory for fast GPU<->CPU transfers, or simple Eigen memory for CPU implementation
 	const int height = inputFormatCtx->streams[videoStreamIndex]->codecpar->height;
 	const int width = inputFormatCtx->streams[videoStreamIndex]->codecpar->width;
 	const auto watermarkObj = Utils::createWatermarkObject(height, width, inir.Get("paths", "watermark", ""), p, psnr);
+#if defined(_USE_CUDA_)
+	//if HW decoder is used , allocate pinned memory for YUV420 frames (3 planes: Y, U, V),
+	//because they have to be returned to the host to be piped
+	HostMemory<uint8_t> framePinned(useHwDecoder ? width * height * 3 / 2 : width * height);
+#else
 	HostMemory<uint8_t> framePinned(width * height);
-
+#endif
 	//group common video data for both embedding and detection
 	VideoProcessingContext videoData(inputFormatCtx.get(), inputDecoderCtx.get(), videoStreamIndex, watermarkObj.get(), height, width, watermarkInterval, framePinned.get());
 
@@ -245,9 +257,21 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 		Utils::checkError(!ffmpegPipe.get(), "Error: Could not open FFmpeg pipe");
 		//embed watermark on the video frames
 		double secs = Utils::executionTime([&] { 
-			video_utils::processFrames(videoData, [&](const AVFrame* frame, int& framesCount) { 
-				video_utils::embedWatermark(videoData, framesCount, frame, ffmpegPipe.get()); 
-			}); 
+
+#if defined(_USE_CUDA_)
+			if (useHwDecoder)
+				video_utils::processFrames<true>(videoData, [&](const AVFrame* frame, int& framesCount) {
+					video_utils::embedWatermarkHWAccel(videoData, framesCount, frame, ffmpegPipe.get());
+				});
+			else
+				video_utils::processFrames(videoData, [&](const AVFrame* frame, int& framesCount) {
+					video_utils::embedWatermark(videoData, framesCount, frame, ffmpegPipe.get());
+				});
+#else	
+			video_utils::processFrames(videoData, [&](const AVFrame* frame, int& framesCount) {
+				video_utils::embedWatermark(videoData, framesCount, frame, ffmpegPipe.get());
+			});
+#endif
 		});
 		cout << "\nWatermark embedding total execution time: " << Utils::formatExecutionTime(false, secs) << "\n";
 	}
@@ -261,9 +285,20 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 		//detect watermark on the video frames
 		int framesCount = 1;
 		double secs = Utils::executionTime([&] { 
-			framesCount = video_utils::processFrames(videoData, [&](const AVFrame* frame, int& framesCount) { 
+#if defined(_USE_CUDA_)
+			if (useHwDecoder)
+				framesCount = video_utils::processFrames<true>(videoData, [&](const AVFrame* frame, int& framesCount) {
+					video_utils::detectWatermarkHWAccel(videoData, framesCount, frame);
+			});
+			else
+				framesCount = video_utils::processFrames(videoData, [&](const AVFrame* frame, int& framesCount) {
+					video_utils::detectWatermark(videoData, framesCount, frame);
+			});
+#else	
+			framesCount = video_utils::processFrames(videoData, [&](const AVFrame* frame, int& framesCount) {
 				video_utils::detectWatermark(videoData, framesCount, frame); 
 			}); 
+#endif
 		});
 		cout << "\nWatermark detection total execution time: " << Utils::formatExecutionTime(false, secs) << "\n";
 		cout << "\nWatermark detection average execution time per frame: " << Utils::formatExecutionTime(showFps, secs / framesCount) << "\n";

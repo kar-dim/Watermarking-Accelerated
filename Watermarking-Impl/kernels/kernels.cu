@@ -1,4 +1,5 @@
 ﻿#include "kernels.cuh"
+#include <cstdint>
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -282,6 +283,35 @@ __global__ void calculate_final_correlation(const float* __restrict__ partialDot
             float normU = sqrtf(localU);
             float normZ = sqrtf(localZ);
             result[0] = (normU > 0.0f && normZ > 0.0f) ? (localDot / (normU * normZ)) : 0.0f;
+        }
+    }
+}
+
+__global__ void NV12ToYUV420p(const uint8_t* __restrict__ uvSrc, const int uvPitch, uint8_t* __restrict__ uvDst, const int uvWidth, const int uvHeight)
+{
+    constexpr int pairsPerThread = 4; //4 UV pairs (per thread)
+    const int totalUVPixels = uvWidth * uvHeight;
+    const int startPair = (blockIdx.x * blockDim.x + threadIdx.x) * pairsPerThread;
+
+    if (startPair >= totalUVPixels)
+        return;
+
+    const int y = startPair / uvWidth;
+    const int x = startPair % uvWidth;
+
+    //load 16 bytes (8 chroma samples)
+    const uint4 uvVals = *reinterpret_cast<const uint4*>(uvSrc + y * uvPitch + 2 * x);
+    const uint8_t* bytes = reinterpret_cast<const uint8_t*>(&uvVals);
+
+#pragma unroll
+    for (int i = 0; i < pairsPerThread; i++) 
+    {
+		//bounds check, not all pairs may fit
+        if (x + i < uvWidth) 
+        {
+            int dstIdx = y * uvWidth + (x + i);
+            uvDst[dstIdx] = bytes[i * 2]; //U
+            uvDst[totalUVPixels + dstIdx] = bytes[i * 2 + 1]; //V
         }
     }
 }

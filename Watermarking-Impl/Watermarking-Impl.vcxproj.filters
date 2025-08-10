@@ -7,6 +7,9 @@
     <CudaCompile Include="kernels\kernels.cu">
       <Filter>Source Files\cuda</Filter>
     </CudaCompile>
+    <CudaCompile Include="cuda_utils.cu">
+      <Filter>Source Files\cuda</Filter>
+    </CudaCompile>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Header Files">
@@ -54,9 +57,6 @@
     </ClCompile>
     <ClCompile Include="main.cpp">
       <Filter>Source Files</Filter>
-    </ClCompile>
-    <ClCompile Include="cuda_utils.cpp">
-      <Filter>Source Files\cuda</Filter>
     </ClCompile>
     <ClCompile Include="opencl_utils.cpp">
       <Filter>Source Files\opencl</Filter>

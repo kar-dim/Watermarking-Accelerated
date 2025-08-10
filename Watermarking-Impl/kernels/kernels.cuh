@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -80,3 +81,6 @@ __global__ void calculate_error_sequence_p3(const float* __restrict__ input, flo
 //main kernels for correlation calculation. used in detection.
 __global__ void calculate_partial_correlation(const float* __restrict__ e_u, const float* __restrict__ e_z, float* __restrict__ partialDots, float* __restrict__ partialNormU, float* __restrict__ partialNormZ, const unsigned int size);
 __global__ void calculate_final_correlation(const float* __restrict__ partialDots, const float* __restrict__ partialNormU, const float* __restrict__ partialNormZ, float* __restrict__ result, const unsigned int numBlocks);
+
+//used for converting NV12 to YUV420p format, in HW accelerated video decoding
+__global__ void NV12ToYUV420p(const uint8_t* __restrict__ uvSrc, const int uvPitch, uint8_t* __restrict__ uvDst, const int uvWidth, const int uvHeight);

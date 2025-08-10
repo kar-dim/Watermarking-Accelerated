@@ -1,13 +1,24 @@
 #pragma once
 
+#include "buffer.hpp"
 #include "utils.hpp"
 #include "videoprocessingcontext.hpp"
+#include "WatermarkBase.hpp"
+#include <algorithm>
 #include <cerrno>
 #include <cstdio>
+#include <cstring>
 #include <functional>
+#include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <string>
+
+#if defined(_USE_CUDA_)
+#include <cuda_runtime.h>
+#include <cuda.h>
+#include "libavutil/hwcontext.h"
+#endif
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -31,25 +42,37 @@ using FILEPtr = std::unique_ptr<FILE, decltype(&_pclose)>;
  */
 namespace video_utils
 {
-	int findVideoStream(const AVFormatContext* inputFormatCtx);
-	AVCodecContext* openDecoder(const AVCodecParameters* params);
+#if defined(_USE_CUDA_)
+	AVCodecContext* openDecoderHWAccel(const AVCodecParameters* inputCodecParams, const std::string& userHwDecoder, bool &useHwDecoder);
+	void embedWatermarkHWAccel(VideoProcessingContext& data, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe);
+	void detectWatermarkHWAccel(VideoProcessingContext& data, int& framesCount, const AVFrame* frame);
+#endif
+	AVCodecContext* openDecoder(const AVCodecParameters* inputCodecParams);
 	std::string getFrameRate(const AVFormatContext* inputFormatCtx, const int videoStreamIndex);
 	void embedWatermark(VideoProcessingContext& data, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe);
+	int findVideoStream(const AVFormatContext* inputFormatCtx);
 	void detectWatermark(VideoProcessingContext& data, int& framesCount, const AVFrame* frame);
 	void writeWatermarkeFrame(VideoProcessingContext& data, const AVFrame* frame, FILE* ffmpegPipe);
 	void writeConditionalWatermarkFrame(const bool embedWatermark, VideoProcessingContext& data, const AVFrame* frame, FILE* ffmpegPipe);
 
 	//main frames loop logic for video watermark embedding and detection
-	template<typename Func>
+	template<bool HW_ACCEL = false, typename Func>
 	int processFrames(const VideoProcessingContext& data, Func&& processFrame)
 	{
 		const AVPacketPtr packet(av_packet_alloc(), [](AVPacket* pkt) { av_packet_free(&pkt); });
 		const AVFramePtr frame(av_frame_alloc(), [](AVFrame* frame) { av_frame_free(&frame); });
 		int framesCount = 0;
-		auto processValidFrame = [&](const AVFrame* f)
+		auto processValidFrame = [&]()
 		{
-			Utils::checkError(f->format != AV_PIX_FMT_YUV420P && f->format != AV_PIX_FMT_YUVJ420P, "Error: Video frame format not supported, aborting");
-			std::forward<Func>(processFrame)(f, framesCount);
+			static constexpr AVPixelFormat supportedFormats[] = { AV_PIX_FMT_YUV420P, AV_PIX_FMT_YUVJ420P, AV_PIX_FMT_CUDA };
+			auto frameFormat = static_cast<AVPixelFormat>(frame->format);
+			bool isValidFormat = std::ranges::any_of(supportedFormats, [frameFormat](auto f) { return f == frameFormat; });
+#if defined(_USE_CUDA_)
+			if constexpr (HW_ACCEL)
+				isValidFormat = isValidFormat && ((AVHWFramesContext*)(frame->hw_frames_ctx->data))->sw_format == AV_PIX_FMT_NV12;
+#endif
+			Utils::checkError(!isValidFormat, "Error: Video frame format not supported, aborting");
+			std::forward<Func>(processFrame)(frame.get(), framesCount);
 		};
 		//read video frames loop
 		while (av_read_frame(data.inputFormatCtx, packet.get()) >= 0)
@@ -71,7 +94,7 @@ namespace video_utils
 					av_packet_unref(packet.get());
 					throw std::runtime_error(std::string("FFmpeg decoding error: ") + errbuf);
 				}
-				processValidFrame(frame.get());
+				processValidFrame();
 			}
 			av_packet_unref(packet.get());
 		}
@@ -79,7 +102,7 @@ namespace video_utils
 		avcodec_send_packet(data.inputDecoderCtx, nullptr);
 		while (avcodec_receive_frame(data.inputDecoderCtx, frame.get()) == 0)
 		{
-			processValidFrame(frame.get());
+			processValidFrame();
 		}
 		return framesCount;
 	}
