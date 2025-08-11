@@ -31,10 +31,10 @@ private:
 		6,  13, 19, 24, 28, 31, 33, 34,
 		7,  14, 20, 25, 29, 32, 34, 35
 	};
-	const cl::Context context{ afcl::getContext(true) };
-	const cl::CommandQueue queue{ afcl::getQueue(true) };
-	const cl::Device device{ afcl::getDeviceId(), true };
-	const cl::Buffer RxMappingsBuff{ context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(int) * 64, (void*)RxMappings, NULL };
+	cl::Context context{ afcl::getContext(true) };
+	cl::CommandQueue queue{ afcl::getQueue(true) };
+	cl::Device device{ afcl::getDeviceId(), true };
+	cl::Buffer RxMappingsBuff{ context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(int) * 64, (void*)RxMappings, NULL };
 	dim2 texKernelDims, meKernelDims, corrFinalLocalSize{ 1, std::min(1024, static_cast<int>(device.getInfo<CL_DEVICE_MAX_WORK_GROUP_SIZE>())) };
 	cl::Program programs;
 
@@ -57,8 +57,8 @@ private:
 
 public:
 	WatermarkOCL(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const int p, const float psnr);
-	WatermarkOCL(const WatermarkOCL& other);
-	WatermarkOCL(WatermarkOCL&& other) noexcept = delete;
-	WatermarkOCL& operator=(WatermarkOCL&& other) noexcept = delete;
-	WatermarkOCL& operator=(const WatermarkOCL& other);
+	WatermarkOCL(const WatermarkOCL& other) = default;
+	WatermarkOCL(WatermarkOCL&& other) noexcept = default;
+	WatermarkOCL& operator=(WatermarkOCL&& other) noexcept = default;
+	WatermarkOCL& operator=(const WatermarkOCL& other) = default;
 };

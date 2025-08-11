@@ -1,3 +1,4 @@
+#include "cuda_stream_manager.hpp"
 #include "cuda_utils.hpp"
 #include "kernels/kernels.cuh"
 #include "WatermarkCuda.cuh"
@@ -10,54 +11,10 @@
 
 using std::string;
 
-cudaStream_t WatermarkCuda::afStream = afcu::getStream(afcu::getNativeId(af::getDevice()));
-
 //initialize data and memory
 WatermarkCuda::WatermarkCuda(const unsigned int rows, const unsigned int cols, const string& randomMatrixPath, const int p, const float psnr)
-	: WatermarkGPU(rows, cols, randomMatrixPath, psnr, p), meKernelDims(align<64>(cols), rows)
+	: WatermarkGPU(rows, cols, randomMatrixPath, psnr, p), meKernelDims(align<64>(cols), rows), afStream(CudaStreamManager::getAfStream())
 { }
-
-//copy constructor
-WatermarkCuda::WatermarkCuda(const WatermarkCuda& other) : WatermarkGPU(other.baseRows, other.baseCols, other.randomMatrix, other.strengthFactor, other.p),
-	meKernelDims(other.meKernelDims)
-{ }
-
-//move constructor
-WatermarkCuda::WatermarkCuda(WatermarkCuda&& other) noexcept : 
-	WatermarkGPU(other.baseRows, other.baseCols, std::move(other.randomMatrix), other.strengthFactor, other.p), meKernelDims(other.meKernelDims)
-{ }
-
-//helper method to copy the parameters of another watermark object (for move/copy operators)
-void WatermarkCuda::copyParams(const WatermarkCuda& other) noexcept
-{
-	baseRows = other.baseRows;
-	baseCols = other.baseCols;
-	meKernelDims = other.meKernelDims;
-	p = other.p;
-	strengthFactor = other.strengthFactor;
-}
-
-//move assignment operator
-WatermarkCuda& WatermarkCuda::operator=(WatermarkCuda&& other) noexcept
-{
-	if (this != &other) 
-	{
-		copyParams(other);
-		randomMatrix = std::move(other.randomMatrix);
-	}
-	return *this;
-}
-
-//copy assignment operator
-WatermarkCuda& WatermarkCuda::operator=(const WatermarkCuda& other)
-{
-	if (this != &other) 
-	{
-		copyParams(other);
-		randomMatrix = other.randomMatrix;
-	}
-	return *this;
-}
 
 af::array WatermarkCuda::computeCustomMask(const af::array& inputImage) const
 {

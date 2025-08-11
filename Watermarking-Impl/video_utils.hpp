@@ -1,22 +1,16 @@
 #pragma once
 
-#include "buffer.hpp"
 #include "utils.hpp"
 #include "videoprocessingcontext.hpp"
-#include "WatermarkBase.hpp"
 #include <algorithm>
 #include <cerrno>
 #include <cstdio>
-#include <cstring>
 #include <functional>
-#include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <string>
 
 #if defined(_USE_CUDA_)
-#include <cuda_runtime.h>
-#include <cuda.h>
 #include "libavutil/hwcontext.h"
 #endif
 
@@ -43,7 +37,7 @@ using FILEPtr = std::unique_ptr<FILE, decltype(&_pclose)>;
 namespace video_utils
 {
 #if defined(_USE_CUDA_)
-	AVCodecContext* openDecoderHWAccel(const AVCodecParameters* inputCodecParams, const std::string& userHwDecoder, bool &useHwDecoder);
+	AVCodecContext* openDecoderHWAccel(const AVCodecParameters* inputCodecParams, const std::string& userHwDecoder, bool& useHwDecoder);
 	void embedWatermarkHWAccel(VideoProcessingContext& data, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe);
 	void detectWatermarkHWAccel(VideoProcessingContext& data, int& framesCount, const AVFrame* frame);
 #endif
@@ -63,17 +57,17 @@ namespace video_utils
 		const AVFramePtr frame(av_frame_alloc(), [](AVFrame* frame) { av_frame_free(&frame); });
 		int framesCount = 0;
 		auto processValidFrame = [&]()
-		{
-			static constexpr AVPixelFormat supportedFormats[] = { AV_PIX_FMT_YUV420P, AV_PIX_FMT_YUVJ420P, AV_PIX_FMT_CUDA };
-			auto frameFormat = static_cast<AVPixelFormat>(frame->format);
-			bool isValidFormat = std::ranges::any_of(supportedFormats, [frameFormat](auto f) { return f == frameFormat; });
+			{
+				static constexpr AVPixelFormat supportedFormats[] = { AV_PIX_FMT_YUV420P, AV_PIX_FMT_YUVJ420P, AV_PIX_FMT_CUDA };
+				auto frameFormat = static_cast<AVPixelFormat>(frame->format);
+				bool isValidFormat = std::ranges::any_of(supportedFormats, [frameFormat](auto f) { return f == frameFormat; });
 #if defined(_USE_CUDA_)
-			if constexpr (HW_ACCEL)
-				isValidFormat = isValidFormat && ((AVHWFramesContext*)(frame->hw_frames_ctx->data))->sw_format == AV_PIX_FMT_NV12;
+				if constexpr (HW_ACCEL)
+					isValidFormat = isValidFormat && ((AVHWFramesContext*)(frame->hw_frames_ctx->data))->sw_format == AV_PIX_FMT_NV12;
 #endif
-			Utils::checkError(!isValidFormat, "Error: Video frame format not supported, aborting");
-			std::forward<Func>(processFrame)(frame.get(), framesCount);
-		};
+				Utils::checkError(!isValidFormat, "Error: Video frame format not supported, aborting");
+				std::forward<Func>(processFrame)(frame.get(), framesCount);
+			};
 		//read video frames loop
 		while (av_read_frame(data.inputFormatCtx, packet.get()) >= 0)
 		{
@@ -101,9 +95,7 @@ namespace video_utils
 		//ensure all remaining frames are flushed
 		avcodec_send_packet(data.inputDecoderCtx, nullptr);
 		while (avcodec_receive_frame(data.inputDecoderCtx, frame.get()) == 0)
-		{
 			processValidFrame();
-		}
 		return framesCount;
 	}
 }

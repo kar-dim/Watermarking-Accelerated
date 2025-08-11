@@ -16,28 +16,6 @@ WatermarkOCL::WatermarkOCL(const unsigned int rows, const unsigned int cols, con
 	  programs(cl_utils::buildKernels(p))
 { }
 
-//copy constructor
-WatermarkOCL::WatermarkOCL(const WatermarkOCL& other) : WatermarkGPU(other.baseRows, other.baseCols, other.randomMatrix, other.strengthFactor, other.p),
-	texKernelDims(other.texKernelDims), meKernelDims(other.meKernelDims), programs(other.programs)
-{ }
-
-//copy assignment operator
-WatermarkOCL& WatermarkOCL::operator=(const WatermarkOCL& other)
-{
-	if (this != &other) 
-	{
-		baseRows = other.baseRows;
-		baseCols = other.baseCols;
-		randomMatrix = other.randomMatrix;
-		texKernelDims = other.texKernelDims;
-		meKernelDims = other.meKernelDims;
-		programs = other.programs;
-		p = other.p;
-		strengthFactor = other.strengthFactor;
-	}
-	return *this;
-}
-
 af::array WatermarkOCL::computeCustomMask(const af::array& image) const
 {
 	const af::array customMask(baseRows, baseCols);

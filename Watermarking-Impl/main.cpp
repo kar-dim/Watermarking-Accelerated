@@ -5,9 +5,10 @@
 #include "eigen_utils.hpp"
 #include <Eigen/Dense>
 #include <omp.h>
-#include <thread>
 #endif
-
+#if defined(_USE_CUDA_)
+#include "cuda_stream_manager.hpp"
+#endif
 #include "buffer.hpp"
 #include "constants.h"
 #include "host_memory.h"
@@ -63,6 +64,7 @@ int main(void)
 		const INIReader inir("settings.ini");
 		Utils::checkError(inir.ParseError() < 0, "Could not load settings.ini file");
 
+//initialize GPU specific backend data (OpenCL and CUDA)
 #if defined(_USE_OPENCL_)
 		try {
 			af::setDevice(inir.GetInteger("options", "opencl_device", 0));
@@ -71,6 +73,8 @@ int main(void)
 			cout << "NOTE: Invalid OpenCL device specified, using default 0" << "\n";
 			af::setDevice(0);
 		}
+#elif defined(_USE_CUDA_)
+		CudaStreamManager::init();
 #endif
 #if defined(_USE_GPU_)
 		af::info();
