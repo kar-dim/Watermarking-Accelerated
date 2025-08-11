@@ -3,13 +3,30 @@
 #include <af/cuda.h>
 #include <arrayfire.h>
 
-CudaStreamManager::CudaStreamManager() { cudaStreamCreate(&stream_); }
-CudaStreamManager::~CudaStreamManager() { cudaStreamDestroy(stream_); }
-void CudaStreamManager::init() { getStream(); }
-cudaStream_t CudaStreamManager::getAfStream() { return afcu::getStream(afcu::getNativeId(af::getDevice())); }
+CudaStreamManager::CudaStreamManager()
+{
+    cudaStreamCreate(&m_stream);
+    m_afStream = afcu::getStream(afcu::getNativeId(af::getDevice()));
+}
 
-cudaStream_t& CudaStreamManager::getStream() 
+CudaStreamManager::~CudaStreamManager()
+{
+    if (m_stream)
+        cudaStreamDestroy(m_stream);
+}
+
+CudaStreamManager& CudaStreamManager::getInstance()
 {
     static CudaStreamManager instance;
-    return instance.stream_;
+    return instance;
+}
+
+cudaStream_t CudaStreamManager::getCustomStream() const
+{
+    return m_stream;
+}
+
+cudaStream_t CudaStreamManager::getAfStream() const
+{
+    return m_afStream;
 }

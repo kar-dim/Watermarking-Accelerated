@@ -85,8 +85,8 @@ namespace video_utils
 	//embed watermark in a video frame by using CUDA hardware acceleration
 	void embedWatermarkHWAccel(VideoProcessingContext& data, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe)
 	{
-		const auto afStream = CudaStreamManager::getAfStream();
-		const auto videoStream = CudaStreamManager::getStream();
+		const auto afStream = CudaStreamManager::getInstance().getAfStream();
+		const auto videoStream = CudaStreamManager::getInstance().getCustomStream();
 		const BufferType lumaBuffer(data.height, data.width, f32);
 		const BufferType chromaBuffer(data.width, data.height / 2, u8);
 
@@ -123,7 +123,7 @@ namespace video_utils
 	//directly use the GPU memory from the cuda decoder, no need to copy the data to host and back to GPU
 	void detectWatermarkHWAccel(VideoProcessingContext& data, int& framesCount, const AVFrame* frame)
 	{
-		const auto afStream = CudaStreamManager::getAfStream();
+		const auto afStream = CudaStreamManager::getInstance().getAfStream();
 		const BufferType lumaBuffer(data.height, data.width, f32);
 		if (framesCount % data.watermarkInterval == 0)
 		{
@@ -186,9 +186,7 @@ namespace video_utils
 					memcpy(data.hostFramePtr + y * data.width, frame->data[0] + y * frame->linesize[0], data.width);
 			}
 			//supply the input frame to the GPU and run the detection of the watermark
-#if defined(_USE_CUDA_)
-			data.inputFrame = GrayBuffer(data.width, data.height, rowPadding ? data.hostFramePtr : frame->data[0], afHost).T().as(f32);
-#elif defined(_USE_OPENCL_)
+#if defined(_USE_GPU_)
 			data.inputFrame = GrayBuffer(data.width, data.height, rowPadding ? data.hostFramePtr : frame->data[0], afHost).T().as(f32);
 #else
 			data.inputFrame = Map<GrayBuffer>(rowPadding ? data.hostFramePtr : frame->data[0], data.width, data.height).transpose().cast<float>();

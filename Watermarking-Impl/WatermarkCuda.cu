@@ -12,7 +12,7 @@ using std::string;
 
 //initialize data and memory
 WatermarkCuda::WatermarkCuda(const unsigned int rows, const unsigned int cols, const string& randomMatrixPath, const int p, const float psnr)
-	: WatermarkGPU(rows, cols, randomMatrixPath, psnr, p), meKernelDims(align<64>(cols), rows), afStream(CudaStreamManager::getAfStream())
+	: WatermarkGPU(rows, cols, randomMatrixPath, psnr, p), meKernelDims(align<64>(cols), rows), afStream(CudaStreamManager::getInstance().getAfStream())
 { }
 
 af::array WatermarkCuda::computeCustomMask(const af::array& inputImage) const

@@ -8,15 +8,19 @@
 class CudaStreamManager
 {
 public:
-    static void init();
-    static cudaStream_t& getStream();
-    static cudaStream_t getAfStream();
-private:
-    cudaStream_t stream_;
-    CudaStreamManager();
-    ~CudaStreamManager();
+    static CudaStreamManager& getInstance();
+
+    cudaStream_t getCustomStream() const;
+    cudaStream_t getAfStream() const;
+
     CudaStreamManager(const CudaStreamManager&) = delete;
     CudaStreamManager& operator=(const CudaStreamManager&) = delete;
     CudaStreamManager(CudaStreamManager&&) = delete;
     CudaStreamManager& operator=(CudaStreamManager&&) = delete;
+
+private:
+    CudaStreamManager();
+    ~CudaStreamManager();
+    cudaStream_t m_stream;
+    cudaStream_t m_afStream;
 };

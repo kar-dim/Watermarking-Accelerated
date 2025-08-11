@@ -73,8 +73,6 @@ int main(void)
 			cout << "NOTE: Invalid OpenCL device specified, using default 0" << "\n";
 			af::setDevice(0);
 		}
-#elif defined(_USE_CUDA_)
-		CudaStreamManager::init();
 #endif
 #if defined(_USE_GPU_)
 		af::info();
@@ -216,9 +214,10 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 	//find video stream and open video decoder
 	const int videoStreamIndex = video_utils::findVideoStream(inputFormatCtx.get());
 	Utils::checkError(videoStreamIndex == -1, "ERROR: No video stream found");
+
+	bool useHwDecoder = false;
 #if defined(_USE_CUDA_)
 	const string hwCodec = inir.Get("parameters_video", "cuda_hw_decoder", "");
-	bool useHwDecoder = false;
 	const AVCodecContextPtr inputDecoderCtx(video_utils::openDecoderHWAccel(inputFormatCtx->streams[videoStreamIndex]->codecpar, hwCodec, useHwDecoder), [](AVCodecContext* ctx) { avcodec_free_context(&ctx); });
 	if (!hwCodec.empty() && !useHwDecoder)
 		cout << "WARNING: Hardware decoder '" << hwCodec << "' was requested, but not available. Using software decoder instead.\n";
@@ -229,13 +228,8 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 	const int height = inputFormatCtx->streams[videoStreamIndex]->codecpar->height;
 	const int width = inputFormatCtx->streams[videoStreamIndex]->codecpar->width;
 	const auto watermarkObj = Utils::createWatermarkObject(height, width, inir.Get("paths", "watermark", ""), p, psnr);
-#if defined(_USE_CUDA_)
-	//if HW decoder is used , allocate pinned memory for YUV420 frames (3 planes: Y, U, V),
-	//because they have to be returned to the host to be piped
+	//if CUDA HW decoder is used, allocate more pinned memory for YUV420 frames (3 planes: Y, U, V)
 	HostMemory<uint8_t> framePinned(useHwDecoder ? width * height * 3 / 2 : width * height);
-#else
-	HostMemory<uint8_t> framePinned(width * height);
-#endif
 	//group common video data for both embedding and detection
 	VideoProcessingContext videoData(inputFormatCtx.get(), inputDecoderCtx.get(), videoStreamIndex, watermarkObj.get(), height, width, watermarkInterval, framePinned.get());
 
