@@ -11,6 +11,7 @@
 #if defined(_USE_CUDA_)
 #include "cuda_utils.hpp"
 #include "cuda_stream_manager.hpp"
+#include "WatermarkGPU.hpp"
 #include <cstdint>
 extern "C" {
 #include "libavutil/buffer.h"
@@ -84,53 +85,37 @@ namespace video_utils
 	//embed watermark in a video frame by using CUDA hardware acceleration
 	void embedWatermarkHWAccel(VideoProcessingContext& data, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe)
 	{
-		//TODO MAY FIX PERFORMANCE HMM
-		const BufferType lumaBuffer(data.width, data.height, u8);
+		const auto afStream = CudaStreamManager::getAfStream();
+		const auto videoStream = CudaStreamManager::getStream();
+		const BufferType lumaBuffer(data.height, data.width, f32);
 		const BufferType chromaBuffer(data.width, data.height / 2, u8);
-		//TODO: if it works -> try to OVERLAP kernels/memory copies etc
-		cuda_utils::launchNV12ToYUV420pKernel(frame->data[1], frame->linesize[1], chromaBuffer.device<uint8_t>(), data.width / 2, data.height / 2);
-		chromaBuffer.unlock();
-		chromaBuffer.host(data.hostFramePtr + (data.width * data.height));
-		const bool embedWatermark = framesCount % data.watermarkInterval == 0;
-		//if there is row padding (for alignment), we must copy the data to a contiguous block!
-		if (frame->linesize[0] != data.width)
-		{
-			cudaMemcpy2D(lumaBuffer.device<void>(), data.width * sizeof(uint8_t), frame->data[0], frame->linesize[0], data.width * sizeof(uint8_t), data.height, cudaMemcpyDeviceToDevice);
-			lumaBuffer.unlock();
-			//WatermarkGPU::displayArray(data.inputFrame.as(u8));
-			if (embedWatermark)
-			{
-				float watermarkStrength;
-				data.inputFrame = lumaBuffer.T().as(f32);
-				data.watermarkObj->makeWatermark(data.inputFrame, data.inputFrame, data.watermarkedFrame, watermarkStrength, ME);
-				data.watermarkedFrame.as(u8).T().host(data.hostFramePtr);
-				//write Y
-				fwrite(data.hostFramePtr, 1, data.width * data.height, ffmpegPipe);
-			}
-			else
-			{
-				lumaBuffer.host(data.hostFramePtr);
-				//write Y
-				fwrite(data.hostFramePtr, 1, data.width * data.height, ffmpegPipe);
-			}
-			//write UV packed
-			fwrite(data.hostFramePtr + (data.width * data.height), 1, chromaBuffer.elements(), ffmpegPipe);
-		}
 
-		//no row padding, read and write data directly
+		//launch NV12 to YUV420 kernel
+		cuda_utils::launchNV12ToYUV420pKernel(frame->data[1], frame->linesize[1], chromaBuffer.device<uint8_t>(), data.width / 2, data.height / 2, afStream);
+		chromaBuffer.unlock();
+
+		if (framesCount % data.watermarkInterval == 0)
+		{
+			//try to overlap kernel and host copy
+			cuda_utils::launchU8PitchedToFloatKernel(frame->data[0], lumaBuffer.device<float>(), data.width, data.height, frame->linesize[0], videoStream);
+			chromaBuffer.host(data.hostFramePtr + (data.width * data.height));
+			cudaStreamSynchronize(videoStream);
+			float watermarkStrength;
+			data.watermarkObj->makeWatermark(lumaBuffer, lumaBuffer, data.watermarkedFrame, watermarkStrength, ME);
+			data.watermarkedFrame.as(u8).T().host(data.hostFramePtr);
+			//write Y + UV packed
+			cudaStreamSynchronize(afStream);
+			fwrite(data.hostFramePtr, 1, data.width * data.height * 3 / 2, ffmpegPipe);
+		}
 		else
 		{
-			if (embedWatermark)
-			{
-				float watermarkStrength;
-				data.inputFrame = BufferType(data.width, data.height, frame->data[0], afDevice).T().as(f32);
-				data.watermarkObj->makeWatermark(data.inputFrame, data.inputFrame, data.watermarkedFrame, watermarkStrength, ME);
-				data.watermarkedFrame.as(u8).T().host(data.hostFramePtr);
-				//write Y
-				fwrite(data.hostFramePtr, 1, data.width * data.height, ffmpegPipe);
-			}
-			//write UV packed
-			fwrite(data.hostFramePtr + (data.width * data.height), 1, chromaBuffer.elements(), ffmpegPipe);
+			//try to overlap D2D and D2H copies
+			cudaMemcpy2DAsync(data.hostFramePtr, data.width, frame->data[0], frame->linesize[0], data.width, data.height, cudaMemcpyDeviceToHost, videoStream);
+			chromaBuffer.host(data.hostFramePtr + (data.width * data.height));
+			cudaStreamSynchronize(videoStream);
+			cudaStreamSynchronize(afStream);
+			//write Y + UV packed
+			fwrite(data.hostFramePtr, 1, data.width * data.height * 3 / 2, ffmpegPipe);
 		}
 		framesCount++;
 	}
@@ -139,21 +124,13 @@ namespace video_utils
 	//directly use the GPU memory from the cuda decoder, no need to copy the data to host and back to GPU
 	void detectWatermarkHWAccel(VideoProcessingContext& data, int& framesCount, const AVFrame* frame)
 	{
-		const BufferType lumaBuffer(data.width, data.height, u8);
+		const auto afStream = CudaStreamManager::getAfStream();
+		const BufferType lumaBuffer(data.height, data.width, f32);
 		if (framesCount % data.watermarkInterval == 0)
 		{
-			//if there is row padding (for alignment), we must copy the data to a contiguous block!
-			if (frame->linesize[0] != data.width)
-			{
-				cudaMemcpy2D(lumaBuffer.device<uint8_t>(), data.width, frame->data[0], frame->linesize[0], data.width, data.height, cudaMemcpyDeviceToDevice);
-				lumaBuffer.unlock();
-				data.inputFrame = lumaBuffer.T().as(f32);
-			}
-			//read from GPU memory directly (needs transposing, since arrayfire uses column-major order)
-			else
-				data.inputFrame = BufferType(data.width, data.height, frame->data[0], afDevice).T().as(f32);
-
-			float correlation = data.watermarkObj->detectWatermark(data.inputFrame, ME);
+			cuda_utils::launchU8PitchedToFloatKernel(frame->data[0], lumaBuffer.device<float>(), data.width, data.height, frame->linesize[0], afStream);
+			lumaBuffer.unlock();
+			float correlation = data.watermarkObj->detectWatermark(lumaBuffer, ME);
 			std::cout << "Correlation for frame: " << (framesCount + 1) << ": " << correlation << "\n";
 		}
 		framesCount++;

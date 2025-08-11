@@ -3,7 +3,6 @@
 #include "kernels/kernels.cuh"
 #include "WatermarkCuda.cuh"
 #include "WatermarkGpu.hpp"
-#include <af/cuda.h>
 #include <arrayfire.h>
 #include <cuda_runtime.h>
 #include <string>

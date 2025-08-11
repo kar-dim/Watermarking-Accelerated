@@ -287,7 +287,7 @@ __global__ void calculate_final_correlation(const float* __restrict__ partialDot
     }
 }
 
-__global__ void NV12ToYUV420p(const uint8_t* __restrict__ uvSrc, const int uvPitch, uint8_t* __restrict__ uvDst, const int uvWidth, const int uvHeight)
+__global__ void nV12ToYUV420p(const uint8_t* __restrict__ uvSrc, const int uvPitch, uint8_t* __restrict__ uvDst, const int uvWidth, const int uvHeight)
 {
     constexpr int pairsPerThread = 4; //4 UV pairs (per thread)
     const int totalUVPixels = uvWidth * uvHeight;
@@ -314,4 +314,22 @@ __global__ void NV12ToYUV420p(const uint8_t* __restrict__ uvSrc, const int uvPit
             uvDst[totalUVPixels + dstIdx] = bytes[i * 2 + 1]; //V
         }
     }
+}
+
+__global__ void u8PitchedToFloat(const uint8_t* __restrict__ input, float* __restrict__ output, const int width, const int height, const int pitch)
+{
+    __shared__ float block[16][16 + 1]; //+1 to avoid bank conflicts
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+    if (x < width && y < height)
+        block[threadIdx.y][threadIdx.x] = static_cast<float>(input[y * pitch + x]);
+    else
+        block[threadIdx.y][threadIdx.x] = 0;
+    __syncthreads();
+
+    //write transposed data (coalesced writes to column-major output)
+    const int dstX = blockIdx.y * blockDim.y + threadIdx.x;
+    const int dstY = blockIdx.x * blockDim.x + threadIdx.y;
+    if (dstX < height && dstY < width)
+        output[dstY * height + dstX] = block[threadIdx.x][threadIdx.y];
 }

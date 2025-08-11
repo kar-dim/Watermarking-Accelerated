@@ -19,8 +19,12 @@ void WatermarkGPU::makeWatermark(const BufferType& inputGrayImage, const BufferT
 	{
 		computePredictionErrorData(inputGrayImage, inputErrorSequence, inputCoefficients, true);
 		//if the system is not solvable, don't waste time embeding the watermark
-		if (inputCoefficients.elements() == 0)
+		//set the output to the input image and exit
+		if (inputCoefficients.elements() == 0) 
+		{
+			output = inputImage;
 			return;
+		}
 		mask = computePredictionErrorMask<false>(inputErrorSequence);
 	}
 	else
