@@ -109,11 +109,10 @@ namespace video_utils
 		}
 		else
 		{
-			//try to overlap D2D and D2H copies
+			//try to overlap the two D2H copies
 			cudaMemcpy2DAsync(data.hostFramePtr, data.width, frame->data[0], frame->linesize[0], data.width, data.height, cudaMemcpyDeviceToHost, videoStream);
 			chromaBuffer.host(data.hostFramePtr + (data.width * data.height));
 			cudaStreamSynchronize(videoStream);
-			cudaStreamSynchronize(afStream);
 			//write Y + UV packed
 			fwrite(data.hostFramePtr, 1, data.width * data.height * 3 / 2, ffmpegPipe);
 		}
