@@ -22,10 +22,12 @@ extern "C" {
 #include "libavutil/error.h"
 #include "libavutil/frame.h"
 #include "libavcodec/packet.h"
+#include "libavutil/buffer.h"
 }
 
 using AVPacketPtr = std::unique_ptr<AVPacket, std::function<void(AVPacket*)>>;
 using AVFramePtr = std::unique_ptr<AVFrame, std::function<void(AVFrame*)>>;
+using AVBufferRefPtr = std::unique_ptr<AVBufferRef, std::function<void(AVBufferRef*)>>;
 using AVFormatContextPtr = std::unique_ptr<AVFormatContext, std::function<void(AVFormatContext*)>>;
 using AVCodecContextPtr = std::unique_ptr<AVCodecContext, std::function<void(AVCodecContext*)>>;
 using FILEPtr = std::unique_ptr<FILE, decltype(&_pclose)>;

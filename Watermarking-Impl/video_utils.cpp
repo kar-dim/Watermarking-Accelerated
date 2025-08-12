@@ -11,7 +11,6 @@
 #if defined(_USE_CUDA_)
 #include "cuda_utils.hpp"
 #include "cuda_stream_manager.hpp"
-#include "WatermarkGPU.hpp"
 #include <cstdint>
 extern "C" {
 #include "libavutil/buffer.h"
@@ -50,36 +49,23 @@ namespace video_utils
 		const AVCodec* inputDecoder = avcodec_find_decoder_by_name(userHwDecoder.c_str());
 		if (!inputDecoder)
 			return openDecoder(inputCodecParams);
-		AVCodecContext* inputDecoderCtx = avcodec_alloc_context3(inputDecoder);
-		if (!inputDecoderCtx)
+		AVCodecContextPtr ctx(avcodec_alloc_context3(inputDecoder), [](AVCodecContext* c) { avcodec_free_context(&c); });
+		if (!ctx)
 			return openDecoder(inputCodecParams);
-		if (avcodec_parameters_to_context(inputDecoderCtx, inputCodecParams) < 0)
-		{
-			avcodec_free_context(&inputDecoderCtx);
+		if (avcodec_parameters_to_context(ctx.get(), inputCodecParams) < 0)
 			return openDecoder(inputCodecParams);
-		}
-		AVBufferRef* hw_device_ctx = nullptr;
-		if (av_hwdevice_ctx_create(&hw_device_ctx, AV_HWDEVICE_TYPE_CUDA, NULL, NULL, AV_CUDA_USE_CURRENT_CONTEXT) < 0)
-		{
-			avcodec_free_context(&inputDecoderCtx);
+		AVBufferRef* raw_hw_device_ctx = nullptr;
+		if (av_hwdevice_ctx_create(&raw_hw_device_ctx, AV_HWDEVICE_TYPE_CUDA, NULL, NULL, AV_CUDA_USE_CURRENT_CONTEXT) < 0)
 			return openDecoder(inputCodecParams);
-		}
-		if (av_hwdevice_ctx_init(hw_device_ctx) < 0)
-		{
-			av_buffer_unref(&hw_device_ctx);
-			avcodec_free_context(&inputDecoderCtx);
+		AVBufferRefPtr hw_device_ctx(raw_hw_device_ctx, [](AVBufferRef* ref) { av_buffer_unref(&ref); });
+		if (av_hwdevice_ctx_init(hw_device_ctx.get()) < 0)
 			return openDecoder(inputCodecParams);
-		}
-		inputDecoderCtx->hw_device_ctx = av_buffer_ref(hw_device_ctx);
-		av_buffer_unref(&hw_device_ctx);
-		inputDecoderCtx->get_format = [](AVCodecContext* ctx, const enum AVPixelFormat* pix_fmts) { return AV_PIX_FMT_CUDA; };
-		if (avcodec_open2(inputDecoderCtx, inputDecoder, nullptr) < 0)
-		{
-			avcodec_free_context(&inputDecoderCtx);
+		ctx->hw_device_ctx = av_buffer_ref(hw_device_ctx.get());
+		ctx->get_format = [](AVCodecContext* ctx, const enum AVPixelFormat* pix_fmts) { return AV_PIX_FMT_CUDA; };
+		if (avcodec_open2(ctx.get(), inputDecoder, nullptr) < 0)
 			return openDecoder(inputCodecParams);
-		}
 		useHwDecoder = true;
-		return inputDecoderCtx;
+		return ctx.release();
 	}
 
 	//embed watermark in a video frame by using CUDA hardware acceleration
@@ -210,18 +196,24 @@ namespace video_utils
 	AVCodecContext* openDecoder(const AVCodecParameters* inputCodecParams)
 	{
 		const AVCodec* inputDecoder = avcodec_find_decoder(inputCodecParams->codec_id);
-		AVCodecContext* inputDecoderCtx = avcodec_alloc_context3(inputDecoder);
-		avcodec_parameters_to_context(inputDecoderCtx, inputCodecParams);
+		if (!inputDecoder)
+			return nullptr;
+		AVCodecContextPtr ctx(avcodec_alloc_context3(inputDecoder), [](AVCodecContext* ctx) { avcodec_free_context(&ctx); });
+		if (!ctx)
+			return nullptr;
+		if (avcodec_parameters_to_context(ctx.get(), inputCodecParams) < 0)
+			return nullptr;
 		//multithreading decode
-		inputDecoderCtx->thread_count = 0;
+		ctx->thread_count = 0;
 		if (inputDecoder->capabilities & AV_CODEC_CAP_FRAME_THREADS)
-			inputDecoderCtx->thread_type = FF_THREAD_FRAME;
+			ctx->thread_type = FF_THREAD_FRAME;
 		else if (inputDecoder->capabilities & AV_CODEC_CAP_SLICE_THREADS)
-			inputDecoderCtx->thread_type = FF_THREAD_SLICE;
+			ctx->thread_type = FF_THREAD_SLICE;
 		else
-			inputDecoderCtx->thread_count = 1; //don't use multithreading
-		avcodec_open2(inputDecoderCtx, inputDecoder, nullptr);
-		return inputDecoderCtx;
+			ctx->thread_count = 1; //don't use multithreading
+		if (avcodec_open2(ctx.get(), inputDecoder, nullptr) < 0)
+			return nullptr;
+		return ctx.release();
 	}
 
 	//get the input video FPS (average)

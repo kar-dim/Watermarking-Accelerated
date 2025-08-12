@@ -50,6 +50,9 @@ using std::string;
  */
 int testForImage(const INIReader& inir, const int p, const float psnr);
 int testForVideo(const INIReader& inir, const string& videoFile, const int p, const float psnr);
+inline string info(const string& str) { return "\033[38;5;208m" + str + "\033[0m"; }
+inline string err(const string& str) { return "\033[91m" + str + "\033[0m"; }
+inline string success(const string& str) { return "\033[92m" + str + "\033[0m"; }
 
 /*!
  *  \brief  This is a project implementation of my Thesis with title:
@@ -70,7 +73,7 @@ int main(void)
 			af::setDevice(inir.GetInteger("options", "opencl_device", 0));
 		}
 		catch (const std::exception&) {
-			cout << "NOTE: Invalid OpenCL device specified, using default 0" << "\n";
+			cout << info("NOTE: Invalid OpenCL device specified, using default 0\n");
 			af::setDevice(0);
 		}
 #endif
@@ -101,7 +104,7 @@ int main(void)
 		return code;
 	}
 	catch (const std::exception& ex) {
-		cout << "Fatal error: " << ex.what() << "\n";
+		cout << err(string("Fatal error: ") + ex.what() + "\n");
 		return EXIT_FAILURE;
 	}
 	return EXIT_SUCCESS;
@@ -118,7 +121,7 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 	int loops = inir.GetInteger("parameters", "loops_for_test", 5);
 	loops = loops <= 0 ? 5 : loops;
 #if defined(_USE_EIGEN_)
-	cout << "Using " << omp_get_max_threads() << " parallel threads for Watermark calculations.\n";
+	cout << info("\nUsing " + std::to_string(omp_get_max_threads()) + " parallel threads for Watermark calculations.\n");
 #endif
 	cout << "Each test will be executed " << loops << " times. Average time will be shown below\n";
 	
@@ -190,7 +193,7 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 #pragma omp section
 			Utils::saveImage(imageFile, "W_ME", watermarkME, alphaChannel);
 		}
-		cout << "Successully saved to disk\n";
+		cout << success("Successully saved to disk\n");
 	}
 	return EXIT_SUCCESS;
 }
@@ -220,10 +223,12 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 	const string hwCodec = inir.Get("parameters_video", "cuda_hw_decoder", "");
 	const AVCodecContextPtr inputDecoderCtx(video_utils::openDecoderHWAccel(inputFormatCtx->streams[videoStreamIndex]->codecpar, hwCodec, useHwDecoder), [](AVCodecContext* ctx) { avcodec_free_context(&ctx); });
 	if (!hwCodec.empty() && !useHwDecoder)
-		cout << "WARNING: Hardware decoder '" << hwCodec << "' was requested, but not available. Using software decoder instead.\n";
+		cout << info("WARNING: Hardware decoder '" + hwCodec + "' was requested, but not available. Using software decoder instead.\n");
 #else
 	const AVCodecContextPtr inputDecoderCtx(video_utils::openDecoder(inputFormatCtx->streams[videoStreamIndex]->codecpar), [](AVCodecContext* ctx) { avcodec_free_context(&ctx); });
 #endif
+	Utils::checkError(!inputDecoderCtx.get(), "ERROR: Could not open video decoder");
+
 	//initialize watermark functions class and host pinned memory for fast GPU<->CPU transfers, or simple Eigen memory for CPU implementation
 	const int height = inputFormatCtx->streams[videoStreamIndex]->codecpar->height;
 	const int width = inputFormatCtx->streams[videoStreamIndex]->codecpar->width;
@@ -240,7 +245,7 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 #if defined(_USE_EIGEN_)
 		//for video embedding only, set the number of openmp/eigen threads to physical cores
 		eigen_utils::setThreadsToPhysicalCores();
-		cout << "\nUsing " << omp_get_max_threads() << " parallel threads for Watermark calculations.\n";
+		cout << info("\nUsing " + std::to_string(omp_get_max_threads()) + " parallel threads for Watermark calculations.\n");
 #endif
 		const string ffmpegOptions = inir.Get("parameters_video", "encode_options", "-c:v libx265 -preset fast -crf 23");
 		//build the FFmpeg command
@@ -248,14 +253,13 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 		ffmpegCmd << "ffmpeg -y -f rawvideo -pix_fmt yuv420p " << "-s " << width << "x" << height
 			<< " -r " << video_utils::getFrameRate(inputFormatCtx.get(), videoStreamIndex) << " -i - -i \"" << videoFile << "\" " << ffmpegOptions
 			<< " -c:s copy -c:a copy -map 1:s? -map 0:v -map 1:a? -max_interleave_delta 0 \"" << makeWatermarkVideoPath << "\"";
-		cout << "\nFFmpeg encode command: " << ffmpegCmd.str() << "\n\n";
+		cout << info("\nFFmpeg encode command: " + ffmpegCmd.str() + "\n\n");
 
 		//open FFmpeg process (with pipe) for writing
 		FILEPtr ffmpegPipe(_popen(ffmpegCmd.str().c_str(), "wb"), _pclose);
 		Utils::checkError(!ffmpegPipe.get(), "Error: Could not open FFmpeg pipe");
 		//embed watermark on the video frames
 		double secs = Utils::executionTime([&] { 
-
 #if defined(_USE_CUDA_)
 			if (useHwDecoder)
 				video_utils::processFrames<true>(videoData, [&](const AVFrame* frame, int& framesCount) {
@@ -271,14 +275,14 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 			});
 #endif
 		});
-		cout << "\nWatermark embedding total execution time: " << Utils::formatExecutionTime(false, secs) << "\n";
+		cout << info("\n\nWatermark embedding total execution time: " + Utils::formatExecutionTime(false, secs) + "\n\n");
 	}
 
 	//realtime watermarked video detection
 	else if (inir.GetBoolean("parameters_video", "watermark_detection", false))
 	{
 #if defined(_USE_EIGEN_)
-		cout << "\nUsing " << omp_get_max_threads() << " parallel threads for Watermark calculations.\n";
+		cout << info("\nUsing " + std::to_string(omp_get_max_threads()) + " parallel threads for Watermark calculations.\n");
 #endif
 		//detect watermark on the video frames
 		int framesCount = 1;
@@ -298,8 +302,8 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 			}); 
 #endif
 		});
-		cout << "\nWatermark detection total execution time: " << Utils::formatExecutionTime(false, secs) << "\n";
-		cout << "\nWatermark detection average execution time per frame: " << Utils::formatExecutionTime(showFps, secs / framesCount) << "\n";
+		cout << info("\nWatermark detection total execution time: " + Utils::formatExecutionTime(false, secs) + "\n");
+		cout << info("\nWatermark detection average execution time per frame: " + Utils::formatExecutionTime(showFps, secs / framesCount) + "\n");
 	}
 	return EXIT_SUCCESS;
 }

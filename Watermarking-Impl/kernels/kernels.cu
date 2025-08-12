@@ -318,7 +318,7 @@ __global__ void nV12ToYUV420p(const uint8_t* __restrict__ uvSrc, const int uvPit
 
 __global__ void u8PitchedToFloat(const uint8_t* __restrict__ input, float* __restrict__ output, const int width, const int height, const int pitch)
 {
-    __shared__ float block[32][32 + 1]; //+1 to avoid bank conflicts
+    __shared__ float block[16][16 + 1]; //+1 to avoid bank conflicts
     const int x = blockIdx.x * blockDim.x + threadIdx.x;
     const int y = blockIdx.y * blockDim.y + threadIdx.y;
     if (x < width && y < height)
