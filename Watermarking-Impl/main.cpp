@@ -50,9 +50,9 @@ using std::string;
  */
 int testForImage(const INIReader& inir, const int p, const float psnr);
 int testForVideo(const INIReader& inir, const string& videoFile, const int p, const float psnr);
-inline string info(const string& str) { return "\033[38;5;208m" + str + "\033[0m"; }
-inline string err(const string& str) { return "\033[91m" + str + "\033[0m"; }
-inline string success(const string& str) { return "\033[92m" + str + "\033[0m"; }
+static inline string info(const string& str) { return "\033[38;5;208m" + str + "\033[0m"; }
+static inline string err(const string& str) { return "\033[91m" + str + "\033[0m"; }
+static inline string success(const string& str) { return "\033[92m" + str + "\033[0m"; }
 
 /*!
  *  \brief  This is a project implementation of my Thesis with title:
