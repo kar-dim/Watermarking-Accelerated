@@ -19,7 +19,7 @@ Implementations are optimized for maximum performance:
 
 # Key Features
 
-- Implementation of watermark embedding and detection algorithms for images and video.
+- Implementation of highly optimized watermark embedding and detection algorithms for images and video.
 - Comparative performance analysis between CPU and GPU implementations (check [Releases](https://github.com/kar-dim/Watermarking-Accelerated/releases)).
 
 # Run the pre-built binaries
@@ -58,6 +58,7 @@ Needs to be parameterized from the corresponding ```settings.ini``` file. Here i
 |-----------------------------------|-----------------------------------------------------------------------------------------------------------------------------                |
 | video                             | Path to the video file, if we want to embed or detect the watermark for a video. This will set the sample application to ```video mode``` and will read the video-only settings that are described in this section. |
 | watermark_interval                | ```[Number]```: Embed or try to detect the watermark every X frames. If set to 1 when embedding, the watermark will be embedded for all frames, which degrades video quality.|
+| cuda_hw_decoder                   | ```[CUDA only]```: Offload decoding to the GPU using **NVDEC**. This is most effective for high-resolution videos (4K and above) and tasks like watermark detection, as software decoders are generally faster for lower resolutions. However, using NVDEC avoids a PCI-E transfer, so performance may vary depending on your specific setup. Valid options are ```hevc_cuvid``` and ```h264_cuvid```. If these decoders aren't available, the application will automatically fall back to CPU decoding.
 | encode_watermark_file_path        | Set this value to a file path, in order to embed watermark and save the watermarked file to disk.                                           |
 | encode_options                    | These are FFmpeg options for encoding. Example: ```-c:v libx265 -preset fast -crf 23```  will pass these encoding options to FFmpeg.|
 | watermark_detection               | ```[true/false]```: Set to true to try to detect the watermark of the "video" parameter. The detection occurs after ```watermark_interval``` frames. It is ignored when ```encode_watermark_file_path``` is set. |
