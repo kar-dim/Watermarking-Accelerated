@@ -1,6 +1,7 @@
 ﻿#include "cuda_stream_manager.hpp"
 #include "cuda_utils.hpp"
 #include "kernels/kernels.cuh"
+#include <cstdint>
 #include <cuda_runtime.h>
 
 namespace cuda_utils 
