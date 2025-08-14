@@ -17,11 +17,9 @@ namespace cuda_utils
 
     void launchNV12ToYUV420pKernel(const uint8_t* uvSrc, const int uvPitch, uint8_t* uvDst, const int uvWidth, const int uvHeight, const cudaStream_t stream)
     {
-        constexpr int pairsPerThread = 4; //uint4 -> 4 UV pairs (pixels) per thread
-        constexpr int blockSize = 256;
+        constexpr int blockSize = 256; // threads per block
         const int totalPixels = uvWidth * uvHeight;
-        const int threadsNeeded = (totalPixels + pairsPerThread - 1) / pairsPerThread;
-        const int gridSize = (threadsNeeded + blockSize - 1) / blockSize;
+        const int gridSize = (totalPixels + blockSize - 1) / blockSize;
         nV12ToYUV420p << <gridSize, blockSize, 0, stream >> > (uvSrc, uvPitch, uvDst, uvWidth, uvHeight);
     }
 

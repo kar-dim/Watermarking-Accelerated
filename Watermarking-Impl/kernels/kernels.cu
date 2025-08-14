@@ -289,31 +289,14 @@ __global__ void calculate_final_correlation(const float* __restrict__ partialDot
 
 __global__ void nV12ToYUV420p(const uint8_t* __restrict__ uvSrc, const int uvPitch, uint8_t* __restrict__ uvDst, const int uvWidth, const int uvHeight)
 {
-    constexpr int pairsPerThread = 4; //4 UV pairs (per thread)
-    const int totalUVPixels = uvWidth * uvHeight;
-    const int startPair = (blockIdx.x * blockDim.x + threadIdx.x) * pairsPerThread;
-
-    if (startPair >= totalUVPixels)
+    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= uvWidth * uvHeight)
         return;
-
-    const int y = startPair / uvWidth;
-    const int x = startPair % uvWidth;
-
-    //load 16 bytes (8 chroma samples)
-    const uint4 uvVals = *reinterpret_cast<const uint4*>(uvSrc + y * uvPitch + 2 * x);
-    const uint8_t* bytes = reinterpret_cast<const uint8_t*>(&uvVals);
-
-#pragma unroll
-    for (int i = 0; i < pairsPerThread; i++) 
-    {
-		//bounds check, not all pairs may fit
-        if (x + i < uvWidth) 
-        {
-            int dstIdx = y * uvWidth + (x + i);
-            uvDst[dstIdx] = bytes[i * 2]; //U
-            uvDst[totalUVPixels + dstIdx] = bytes[i * 2 + 1]; //V
-        }
-    }
+    const int y = idx / uvWidth;
+    const int x = idx % uvWidth;
+    const uint8_t* src = uvSrc + y * uvPitch + 2 * x;
+    uvDst[idx] = src[0];
+    uvDst[uvWidth * uvHeight + idx] = src[1];
 }
 
 __global__ void u8PitchedToFloat(const uint8_t* __restrict__ input, float* __restrict__ output, const int width, const int height, const int pitch)

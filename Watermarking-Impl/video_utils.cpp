@@ -2,6 +2,7 @@
 #include "video_utils.hpp"
 #include "videoprocessingcontext.hpp"
 #include "WatermarkBase.hpp"
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <format>
@@ -11,7 +12,6 @@
 #if defined(_USE_CUDA_)
 #include "cuda_utils.hpp"
 #include "cuda_stream_manager.hpp"
-#include <cstdint>
 extern "C" {
 #include "libavutil/buffer.h"
 #include "libavutil/pixfmt.h"
@@ -29,7 +29,6 @@ extern "C" {
 #include "libavcodec/codec.h"
 #include "libavutil/rational.h"
 }
-
 
 #if defined(_USE_EIGEN_)
 using namespace Eigen;
@@ -126,35 +125,9 @@ namespace video_utils
 	void embedWatermark(VideoProcessingContext& data, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe)
 	{
 		const bool embedWatermark = framesCount % data.watermarkInterval == 0;
-		//if there is row padding (for alignment), we must copy the data to a contiguous block!
-		if (frame->linesize[0] != data.width)
-		{
-			if (embedWatermark)
-			{
-				for (int y = 0; y < data.height; y++)
-					memcpy(data.hostFramePtr + y * data.width, frame->data[0] + y * frame->linesize[0], data.width);
-				//embed the watermark, receive the watermarked data back to host and write the watermarked image data to ffmpeg pipe
-				writeWatermarkeFrame(data, frame, ffmpegPipe);
-			}
-			else
-			{
-				//write from frame buffer row-by-row the the valid image data (and not the alignment bytes)
-				for (int y = 0; y < data.height; y++)
-					fwrite(frame->data[0] + y * frame->linesize[0], 1, data.width, ffmpegPipe);
-			}
-			//always write UV planes as-is
-			for (int y = 0; y < data.height / 2; y++)
-				fwrite(frame->data[1] + y * frame->linesize[1], 1, data.width / 2, ffmpegPipe);
-			for (int y = 0; y < data.height / 2; y++)
-				fwrite(frame->data[2] + y * frame->linesize[2], 1, data.width / 2, ffmpegPipe);
-		}
-		//no row padding, read and write data directly
-		else
-		{
-			writeConditionalWatermarkFrame(embedWatermark, data, frame, ffmpegPipe);
-			fwrite(frame->data[1], 1, data.width * data.height / 4, ffmpegPipe);
-			fwrite(frame->data[2], 1, data.width * data.height / 4, ffmpegPipe);
-		}
+		const bool rowPadding = frame->linesize[0] != data.width;
+		processAndWriteYPlane(embedWatermark, frame, data, ffmpegPipe);
+		writeChromaPlanes(rowPadding, frame, data, ffmpegPipe);
 		framesCount++;
 	}
 
@@ -224,40 +197,47 @@ namespace video_utils
 	}
 
 	//runs the watermark creation for a video frame and writes the watermarked frame to the ffmpeg pipe
-	void writeWatermarkeFrame(VideoProcessingContext& data, const AVFrame* frame, FILE* ffmpegPipe)
+	void processAndWriteYPlane(const bool embedWatermark, const AVFrame* frame, VideoProcessingContext& data, FILE* ffmpegPipe)
 	{
-		float watermarkStrength;
-#if defined(_USE_GPU_)
-		data.inputFrame = BufferType(data.width, data.height, data.hostFramePtr, afHost).T().as(f32);
-		data.watermarkObj->makeWatermark(data.inputFrame, data.inputFrame, data.watermarkedFrame, watermarkStrength, ME);
-		data.watermarkedFrame.as(u8).T().host(data.hostFramePtr);
-		fwrite(data.hostFramePtr, 1, data.width * data.height, ffmpegPipe);
-#elif defined(_USE_EIGEN_)
-		data.inputFrame = Map<GrayBuffer>(data.hostFramePtr, data.width, data.height).transpose().cast<float>();
-		data.watermarkObj->makeWatermark(data.inputFrame, data.inputFrame, data.watermarkedFrame, watermarkStrength, ME);
-		data.grayFrame = data.watermarkedFrame.getGray().transpose().cast<uint8_t>();
-		fwrite(data.grayFrame.data(), 1, data.width * data.height, ffmpegPipe);
-#endif
-	}
-
-	//runs the watermark creation for a video frame and writes the watermarked frame to the ffmpeg pipe, if the watermark is embedded, or writes the original frame data otherwise
-	void writeConditionalWatermarkFrame(const bool embedWatermark, VideoProcessingContext& data, const AVFrame* frame, FILE* ffmpegPipe)
-	{
-		if (embedWatermark)
+		uint8_t* srcY = frame->data[0];
+		//if there is row padding (for alignment), we must copy the data to a contiguous block!
+		if (frame->linesize[0] != data.width)
+		{
+			for (int y = 0; y < data.height; y++)
+				memcpy(data.hostFramePtr + y * data.width, srcY + y * frame->linesize[0], data.width);
+			srcY = data.hostFramePtr;
+		}
+		if (embedWatermark) 
 		{
 			float watermarkStrength;
 #if defined(_USE_GPU_)
-			data.inputFrame = BufferType(data.width, data.height, frame->data[0], afHost).T().as(f32);
+			data.inputFrame = BufferType(data.width, data.height, srcY, afHost).T().as(f32);
 			data.watermarkObj->makeWatermark(data.inputFrame, data.inputFrame, data.watermarkedFrame, watermarkStrength, ME);
 			data.watermarkedFrame.as(u8).T().host(data.hostFramePtr);
-		}
-		fwrite(embedWatermark ? data.hostFramePtr : frame->data[0], 1, data.width * data.height, ffmpegPipe);
+			fwrite(data.hostFramePtr, 1, data.width * data.height, ffmpegPipe);
 #elif defined(_USE_EIGEN_)
-			data.inputFrame = BufferType(Map<GrayBuffer>(frame->data[0], data.width, data.height).transpose().cast<float>());
+			data.inputFrame = Map<GrayBuffer>(srcY, data.width, data.height).transpose().cast<float>();
 			data.watermarkObj->makeWatermark(data.inputFrame, data.inputFrame, data.watermarkedFrame, watermarkStrength, ME);
 			data.grayFrame = data.watermarkedFrame.getGray().transpose().cast<uint8_t>();
-	}
-		fwrite(embedWatermark ? data.grayFrame.data() : frame->data[0], 1, data.width * data.height, ffmpegPipe);
+			fwrite(data.grayFrame.data(), 1, data.width * data.height, ffmpegPipe);
 #endif
+		}
+		else
+		    fwrite(srcY, 1, data.width * data.height, ffmpegPipe);
+	}
+
+	//writes the chroma planes (U and V) to the ffmpeg pipe, either assuming aligned pointers or not
+	void writeChromaPlanes(const bool rowPadding, const AVFrame* frame, VideoProcessingContext& data, FILE* ffmpegPipe)
+	{
+		if (rowPadding) 
+		{
+			for (int y = 0; y < data.height / 2; y++)
+				fwrite(frame->data[1] + y * frame->linesize[1], 1, data.width / 2, ffmpegPipe);
+			for (int y = 0; y < data.height / 2; y++)
+				fwrite(frame->data[2] + y * frame->linesize[2], 1, data.width / 2, ffmpegPipe);
+			return;
+		}
+		fwrite(frame->data[1], 1, data.width * data.height / 4, ffmpegPipe);
+		fwrite(frame->data[2], 1, data.width * data.height / 4, ffmpegPipe);
 	}
 }

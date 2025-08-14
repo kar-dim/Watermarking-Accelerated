@@ -48,8 +48,8 @@ namespace video_utils
 	void embedWatermark(VideoProcessingContext& data, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe);
 	int findVideoStream(const AVFormatContext* inputFormatCtx);
 	void detectWatermark(VideoProcessingContext& data, int& framesCount, const AVFrame* frame);
-	void writeWatermarkeFrame(VideoProcessingContext& data, const AVFrame* frame, FILE* ffmpegPipe);
-	void writeConditionalWatermarkFrame(const bool embedWatermark, VideoProcessingContext& data, const AVFrame* frame, FILE* ffmpegPipe);
+	void processAndWriteYPlane(const bool embedWatermark, const AVFrame* frame, VideoProcessingContext& data, FILE* ffmpegPipe);
+	void writeChromaPlanes(const bool rowPadding, const AVFrame* frame, VideoProcessingContext& data, FILE* ffmpegPipe);
 
 	//main frames loop logic for video watermark embedding and detection
 	template<bool HW_ACCEL = false, typename Func>
