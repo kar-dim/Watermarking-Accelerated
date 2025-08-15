@@ -4,6 +4,7 @@
 #include "videoprocessingcontext.hpp"
 #include <algorithm>
 #include <cerrno>
+#include <cstdint>
 #include <cstdio>
 #include <functional>
 #include <memory>
@@ -50,6 +51,7 @@ namespace video_utils
 	void detectWatermark(VideoProcessingContext& data, int& framesCount, const AVFrame* frame);
 	void processAndWriteYPlane(const bool embedWatermark, const AVFrame* frame, VideoProcessingContext& data, FILE* ffmpegPipe);
 	void writeChromaPlanes(const bool rowPadding, const AVFrame* frame, VideoProcessingContext& data, FILE* ffmpegPipe);
+	void loadInputFrame(VideoProcessingContext& data, uint8_t* hostPtr);
 
 	//main frames loop logic for video watermark embedding and detection
 	template<bool HW_ACCEL = false, typename Func>
@@ -80,7 +82,7 @@ namespace video_utils
 			}
 			while (true)
 			{
-				int ret = avcodec_receive_frame(data.inputDecoderCtx, frame.get());
+				const int ret = avcodec_receive_frame(data.inputDecoderCtx, frame.get());
 				if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
 					break;
 				if (ret < 0)

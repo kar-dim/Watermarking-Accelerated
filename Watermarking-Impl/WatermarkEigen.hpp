@@ -74,7 +74,8 @@ public:
 #pragma omp section
 			d_eu = filteredEstimation.matrix().norm();
 		}
-		return dot_ez_eu / (d_ez * d_eu);
+		float correlation = dot_ez_eu / (d_ez * d_eu);
+		return std::isfinite(correlation) ? correlation : 0.0f;
 	}
 
 private:

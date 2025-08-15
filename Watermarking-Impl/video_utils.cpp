@@ -134,6 +134,7 @@ namespace video_utils
 	//detect the watermark for a video frame
 	void detectWatermark(VideoProcessingContext& data, int& framesCount, const AVFrame* frame)
 	{
+		uint8_t* srcY = frame->data[0];
 		//detect watermark after X frames
 		if (framesCount % data.watermarkInterval == 0)
 		{
@@ -143,13 +144,10 @@ namespace video_utils
 			{
 				for (int y = 0; y < data.height; y++)
 					memcpy(data.hostFramePtr + y * data.width, frame->data[0] + y * frame->linesize[0], data.width);
+				srcY = data.hostFramePtr;
 			}
 			//supply the input frame to the GPU and run the detection of the watermark
-#if defined(_USE_GPU_)
-			data.inputFrame = GrayBuffer(data.width, data.height, rowPadding ? data.hostFramePtr : frame->data[0], afHost).T().as(f32);
-#else
-			data.inputFrame = Map<GrayBuffer>(rowPadding ? data.hostFramePtr : frame->data[0], data.width, data.height).transpose().cast<float>();
-#endif
+			loadInputFrame(data, srcY);
 			float correlation = data.watermarkObj->detectWatermark(data.inputFrame, ME);
 			std::cout << "Correlation for frame: " << (framesCount + 1) << ": " << correlation << "\n";
 		}
@@ -210,14 +208,12 @@ namespace video_utils
 		if (embedWatermark) 
 		{
 			float watermarkStrength;
-#if defined(_USE_GPU_)
-			data.inputFrame = BufferType(data.width, data.height, srcY, afHost).T().as(f32);
+			loadInputFrame(data, srcY);
 			data.watermarkObj->makeWatermark(data.inputFrame, data.inputFrame, data.watermarkedFrame, watermarkStrength, ME);
+#if defined(_USE_GPU_)
 			data.watermarkedFrame.as(u8).T().host(data.hostFramePtr);
 			fwrite(data.hostFramePtr, 1, data.width * data.height, ffmpegPipe);
 #elif defined(_USE_EIGEN_)
-			data.inputFrame = Map<GrayBuffer>(srcY, data.width, data.height).transpose().cast<float>();
-			data.watermarkObj->makeWatermark(data.inputFrame, data.inputFrame, data.watermarkedFrame, watermarkStrength, ME);
 			data.grayFrame = data.watermarkedFrame.getGray().transpose().cast<uint8_t>();
 			fwrite(data.grayFrame.data(), 1, data.width * data.height, ffmpegPipe);
 #endif
@@ -239,5 +235,14 @@ namespace video_utils
 		}
 		fwrite(frame->data[1], 1, data.width * data.height / 4, ffmpegPipe);
 		fwrite(frame->data[2], 1, data.width * data.height / 4, ffmpegPipe);
+	}
+
+	void loadInputFrame(VideoProcessingContext& data, uint8_t* hostPtr)
+	{
+#if defined(_USE_GPU_)
+		data.inputFrame = GrayBuffer(data.width, data.height, hostPtr, afHost).T().as(f32);
+#else
+		data.inputFrame = Map<GrayBuffer>(hostPtr, data.width, data.height).transpose().cast<float>();
+#endif
 	}
 }
