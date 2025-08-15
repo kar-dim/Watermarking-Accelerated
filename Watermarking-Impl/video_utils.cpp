@@ -41,7 +41,7 @@ namespace video_utils
 {
 #if defined(_USE_CUDA_)
 	//try to open a CUDA hardware accelerated decoder, if the user specified one, if it fails , fallback to a software decoder
-	AVCodecContext* openDecoderHWAccel(const AVCodecParameters* inputCodecParams, const std::string& userHwDecoder, bool& useHwDecoder)
+	AVCodecContextPtr openDecoderHWAccel(const AVCodecParameters* inputCodecParams, const std::string& userHwDecoder, bool& useHwDecoder)
 	{
 		if (userHwDecoder.empty())
 			return openDecoder(inputCodecParams);
@@ -64,7 +64,7 @@ namespace video_utils
 		if (avcodec_open2(ctx.get(), inputDecoder, nullptr) < 0)
 			return openDecoder(inputCodecParams);
 		useHwDecoder = true;
-		return ctx.release();
+		return ctx;
 	}
 
 	//embed watermark in a video frame by using CUDA hardware acceleration
@@ -166,7 +166,7 @@ namespace video_utils
 	}
 
 	//open decoder context for video
-	AVCodecContext* openDecoder(const AVCodecParameters* inputCodecParams)
+	AVCodecContextPtr openDecoder(const AVCodecParameters* inputCodecParams)
 	{
 		const AVCodec* inputDecoder = avcodec_find_decoder(inputCodecParams->codec_id);
 		if (!inputDecoder)
@@ -186,7 +186,7 @@ namespace video_utils
 			ctx->thread_count = 1; //don't use multithreading
 		if (avcodec_open2(ctx.get(), inputDecoder, nullptr) < 0)
 			return nullptr;
-		return ctx.release();
+		return ctx;
 	}
 
 	//get the input video FPS (average)

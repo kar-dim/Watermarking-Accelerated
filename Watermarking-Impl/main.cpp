@@ -221,11 +221,11 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 	bool useHwDecoder = false;
 #if defined(_USE_CUDA_)
 	const string hwCodec = inir.Get("parameters_video", "cuda_hw_decoder", "");
-	const AVCodecContextPtr inputDecoderCtx(video_utils::openDecoderHWAccel(inputFormatCtx->streams[videoStreamIndex]->codecpar, hwCodec, useHwDecoder), [](AVCodecContext* ctx) { avcodec_free_context(&ctx); });
+	const AVCodecContextPtr inputDecoderCtx = video_utils::openDecoderHWAccel(inputFormatCtx->streams[videoStreamIndex]->codecpar, hwCodec, useHwDecoder);
 	if (!hwCodec.empty() && !useHwDecoder)
 		cout << info("WARNING: Hardware decoder '" + hwCodec + "' was requested, but not available. Using software decoder instead.\n");
 #else
-	const AVCodecContextPtr inputDecoderCtx(video_utils::openDecoder(inputFormatCtx->streams[videoStreamIndex]->codecpar), [](AVCodecContext* ctx) { avcodec_free_context(&ctx); });
+	const AVCodecContextPtr inputDecoderCtx = video_utils::openDecoder(inputFormatCtx->streams[videoStreamIndex]->codecpar);
 #endif
 	Utils::checkError(!inputDecoderCtx.get(), "ERROR: Could not open video decoder");
 
