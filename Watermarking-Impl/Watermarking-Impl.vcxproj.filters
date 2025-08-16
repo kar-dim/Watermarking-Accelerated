@@ -10,8 +10,7 @@
     <CudaCompile Include="cuda_utils.cu">
       <Filter>Source Files\cuda</Filter>
     </CudaCompile>
-    <CudaCompile Include="video_utils.cpp" />
-	<ClInclude Include="cuda_stream_manager.hpp">
+    <ClInclude Include="cuda_stream_manager.hpp">
       <Filter>Header Files\cuda</Filter>
     </ClInclude>
     <CudaCompile Include="cuda_stream_manager.cu">
@@ -76,6 +75,9 @@
     </ClCompile>
     <ClCompile Include="WatermarkGpu.cpp">
       <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="video_utils.cpp">
+      <Filter>Source Files\util</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
