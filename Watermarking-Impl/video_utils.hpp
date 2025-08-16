@@ -44,7 +44,8 @@ namespace video_utils
 	void embedWatermarkHWAccel(VideoProcessingContext& data, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe);
 	void detectWatermarkHWAccel(VideoProcessingContext& data, int& framesCount, const AVFrame* frame);
 #endif
-	AVCodecContextPtr openDecoder(const AVCodecParameters* inputCodecParams);
+	AVCodecContextPtr openDecoder(const AVCodecParameters* inputCodecParams, const std::string& userHwDecoder, bool& useHwDecoder);
+	AVCodecContextPtr openSoftwareDecoder(const AVCodecParameters* inputCodecParams);
 	std::string getFrameRate(const AVFormatContext* inputFormatCtx, const int videoStreamIndex);
 	void embedWatermark(VideoProcessingContext& data, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe);
 	int findVideoStream(const AVFormatContext* inputFormatCtx);
@@ -52,6 +53,8 @@ namespace video_utils
 	void processAndWriteYPlane(const bool embedWatermark, const AVFrame* frame, VideoProcessingContext& data, FILE* ffmpegPipe);
 	void writeChromaPlanes(const bool rowPadding, const AVFrame* frame, VideoProcessingContext& data, FILE* ffmpegPipe);
 	void loadInputFrame(VideoProcessingContext& data, uint8_t* hostPtr);
+	void embedDispatcher(VideoProcessingContext& data, const bool useHwDecoder, FILE* ffmpegPipe);
+	int detectDispatcher(VideoProcessingContext& data, const bool useHwDecoder);
 
 	//main frames loop logic for video watermark embedding and detection
 	template<bool HW_ACCEL = false, typename Func>

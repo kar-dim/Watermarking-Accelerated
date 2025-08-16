@@ -41,28 +41,28 @@ namespace video_utils
 {
 #if defined(_USE_CUDA_)
 	//try to open a CUDA hardware accelerated decoder, if the user specified one, if it fails , fallback to a software decoder
-	AVCodecContextPtr openDecoderHWAccel(const AVCodecParameters* inputCodecParams, const std::string& userHwDecoder, bool& useHwDecoder)
+	AVCodecContextPtr openDecoderHWAccel(const AVCodecParameters* inputCodecParams, const string& userHwDecoder, bool& useHwDecoder)
 	{
 		if (userHwDecoder.empty())
-			return openDecoder(inputCodecParams);
+			return openSoftwareDecoder(inputCodecParams);
 		const AVCodec* inputDecoder = avcodec_find_decoder_by_name(userHwDecoder.c_str());
 		if (!inputDecoder)
-			return openDecoder(inputCodecParams);
+			return openSoftwareDecoder(inputCodecParams);
 		AVCodecContextPtr ctx(avcodec_alloc_context3(inputDecoder), [](AVCodecContext* c) { avcodec_free_context(&c); });
 		if (!ctx)
-			return openDecoder(inputCodecParams);
+			return openSoftwareDecoder(inputCodecParams);
 		if (avcodec_parameters_to_context(ctx.get(), inputCodecParams) < 0)
-			return openDecoder(inputCodecParams);
+			return openSoftwareDecoder(inputCodecParams);
 		AVBufferRef* raw_hw_device_ctx = nullptr;
 		if (av_hwdevice_ctx_create(&raw_hw_device_ctx, AV_HWDEVICE_TYPE_CUDA, NULL, NULL, AV_CUDA_USE_CURRENT_CONTEXT) < 0)
-			return openDecoder(inputCodecParams);
+			return openSoftwareDecoder(inputCodecParams);
 		AVBufferRefPtr hw_device_ctx(raw_hw_device_ctx, [](AVBufferRef* ref) { av_buffer_unref(&ref); });
 		if (av_hwdevice_ctx_init(hw_device_ctx.get()) < 0)
-			return openDecoder(inputCodecParams);
+			return openSoftwareDecoder(inputCodecParams);
 		ctx->hw_device_ctx = av_buffer_ref(hw_device_ctx.get());
 		ctx->get_format = [](AVCodecContext* ctx, const enum AVPixelFormat* pix_fmts) { return AV_PIX_FMT_CUDA; };
 		if (avcodec_open2(ctx.get(), inputDecoder, nullptr) < 0)
-			return openDecoder(inputCodecParams);
+			return openSoftwareDecoder(inputCodecParams);
 		useHwDecoder = true;
 		return ctx;
 	}
@@ -121,6 +121,41 @@ namespace video_utils
 	}
 #endif
 
+	//helper methods to dispatch the correct watermarking or detection method
+	void embedDispatcher(VideoProcessingContext& data, const bool useHwDecoder, FILE* ffmpegPipe)
+	{
+#if defined(_USE_CUDA_)
+		if (useHwDecoder) 
+		{
+			processFrames<true>(data, [&](const AVFrame* frame, int& framesCount) {
+				embedWatermarkHWAccel(data, framesCount, frame, ffmpegPipe);
+			});
+			return;
+		}
+#endif
+		processFrames(data, [&](const AVFrame* frame, int& framesCount) {
+			embedWatermark(data, framesCount, frame, ffmpegPipe);
+		});
+	}
+
+	int detectDispatcher(VideoProcessingContext& data, const bool useHwDecoder)
+	{
+		int framesCount = 1;
+#if defined(_USE_CUDA_)
+		if (useHwDecoder) 
+		{
+			framesCount = processFrames<true>(data, [&](const AVFrame* frame, int& framesCount) {
+				detectWatermarkHWAccel(data, framesCount, frame);
+			});
+			return framesCount;
+		}
+#endif
+		framesCount = processFrames(data, [&](const AVFrame* frame, int& framesCount) {
+			detectWatermark(data, framesCount, frame);
+		});
+		return framesCount;
+	}
+
 	//embed watermark in a video frame
 	void embedWatermark(VideoProcessingContext& data, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe)
 	{
@@ -163,8 +198,17 @@ namespace video_utils
 		return -1;
 	}
 
+	AVCodecContextPtr openDecoder(const AVCodecParameters* inputCodecParams, const string& userHwDecoder, bool& useHwDecoder)
+	{
+#if defined(_USE_CUDA_)
+		return openDecoderHWAccel(inputCodecParams, userHwDecoder, useHwDecoder);
+#else
+		return openSoftwareDecoder(inputCodecParams);
+#endif
+	}
+
 	//open decoder context for video
-	AVCodecContextPtr openDecoder(const AVCodecParameters* inputCodecParams)
+	AVCodecContextPtr openSoftwareDecoder(const AVCodecParameters* inputCodecParams)
 	{
 		const AVCodec* inputDecoder = avcodec_find_decoder(inputCodecParams->codec_id);
 		if (!inputDecoder)
