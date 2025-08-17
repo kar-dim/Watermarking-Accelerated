@@ -36,7 +36,7 @@ using namespace Eigen;
 
 using std::string;
 using std::cout;
-#include "WatermarkGpu.hpp"
+
 namespace video_utils
 {
 #if defined(_USE_CUDA_)
