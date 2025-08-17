@@ -90,8 +90,9 @@ ffmpeg -y -f rawvideo -pix_fmt yuv420p -s <width>x<height>
 - `-max_interleave_delta 0`: Reduces potential interleaving delay issues.
 - `<output_file>`: **USER SUPPLIED**: Output file path for the final video.
 
-**NOTE:** Only Constant Frame Rate (CFR) works as expected for an input video. If the input video is Variable Frame Rate (VFR) there may be issues with audio/subtitles sync on the output file.
-
+**NOTES:** 
+- Only Constant Frame Rate (CFR) works as expected for an input video. If the input video is Variable Frame Rate (VFR) there may be issues with audio/subtitles sync on the output file.
+- 10-bit video support is experimental. Currently only Hardware accelerated (NVDEC) decoding is supported. Tested with ```AV_PIX_FMT_P016LE``` Pixel format, but ```AV_PIX_FMT_P010LE``` **SHOULD** work too. Encoding is always 8-bit. 
 
 # How to Build
 
