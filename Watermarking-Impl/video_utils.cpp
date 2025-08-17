@@ -74,7 +74,7 @@ namespace video_utils
 		const auto videoStream = CudaStreamManager::getInstance().getCustomStream();
 		const int bitDepth = ((AVHWFramesContext*)(frame->hw_frames_ctx->data))->sw_format == AV_PIX_FMT_NV12 ? 8 : 10;
 		const BufferType lumaBuffer(data.height, data.width, f32);
-		const BufferType lumaBufferPacked(data.height, data.width, u8); //used only when we don't embed
+		const BufferType lumaBufferPacked(data.width, data.height, u8); //used only when we don't embed
 		const BufferType chromaBuffer(data.width, data.height / 2, u8);
 		//launch NV12 to YUV420 kernel (for UV planes)
 		cuda_utils::launchNV12ToYUV420pKernel(frame->data[1], frame->linesize[1], chromaBuffer.device<uint8_t>(), data.width / 2, data.height / 2, bitDepth, afStream);
@@ -82,7 +82,7 @@ namespace video_utils
 
 		if (framesCount % data.watermarkInterval == 0)
 		{
-			//try to overlap kernel and host copy
+			//overlap kernel and host copy
 			cuda_utils::launchPitchedToFloatKernel(frame->data[0], lumaBuffer.device<float>(), data.width, data.height, frame->linesize[0], bitDepth, videoStream);
 			chromaBuffer.host(data.hostFramePtr + (data.width * data.height));
 			cudaStreamSynchronize(videoStream);
@@ -97,16 +97,15 @@ namespace video_utils
 		{
 			if (bitDepth == 10)
 			{
-				//try to overlap kernel and host copy
+				//overlap kernel and host copy
 				cuda_utils::launchPitched10BitTo8BitKernel(reinterpret_cast<const uint16_t*>(frame->data[0]), lumaBufferPacked.device<uint8_t>(), data.width, data.height, frame->linesize[0], videoStream);
 				chromaBuffer.host(data.hostFramePtr + (data.width * data.height));
 				cudaStreamSynchronize(videoStream);
 				lumaBufferPacked.unlock();
-				//if (framesCount > 40)
-					//WatermarkGPU::displayArray(lumaBufferPacked);
-				lumaBufferPacked.T().host(data.hostFramePtr);
+				lumaBufferPacked.host(data.hostFramePtr);
 			}
-			else {
+			else 
+			{
 				//try to overlap the two D2H copies
 				cudaMemcpy2DAsync(data.hostFramePtr, data.width, frame->data[0], frame->linesize[0], data.width, data.height, cudaMemcpyDeviceToHost, videoStream);
 				chromaBuffer.host(data.hostFramePtr + (data.width * data.height));
@@ -123,7 +122,7 @@ namespace video_utils
 	void detectWatermarkHWAccel(VideoProcessingContext& data, int& framesCount, const AVFrame* frame)
 	{
 		const auto afStream = CudaStreamManager::getInstance().getAfStream();
-		const int bitDepth = frame->format == AV_PIX_FMT_NV12 ? 8 : 10;
+		const int bitDepth = ((AVHWFramesContext*)(frame->hw_frames_ctx->data))->sw_format == AV_PIX_FMT_NV12 ? 8 : 10;
 		const BufferType lumaBuffer(data.height, data.width, f32);
 		if (framesCount % data.watermarkInterval == 0)
 		{

@@ -287,7 +287,6 @@ __global__ void calculate_final_correlation(const float* __restrict__ partialDot
     }
 }
 
-#include "stdio.h"
 __global__ void nV12ToYUV420p(const void* __restrict__ uvSrc, const int uvPitch, uint8_t* __restrict__ uvDst, const int uvWidth, const int uvHeight, const int bitDepth)
 {
     const int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -344,18 +343,8 @@ __global__ void pitchedToFloat(const void* __restrict__ input, float* __restrict
 
 __global__ void pitched10To8Bit(const uint16_t* __restrict__ input, uint8_t* __restrict__ output, const int width, const int height, const int pitch)
 {
-    __shared__ uint8_t block[16][16 + 1]; //+1 to avoid bank conflicts
     const int x = blockIdx.x * blockDim.x + threadIdx.x;
     const int y = blockIdx.y * blockDim.y + threadIdx.y;
     if (x < width && y < height)
-        block[threadIdx.y][threadIdx.x] = static_cast<uint8_t>(scale10To8(input[y * (pitch / 2) + x]));
-    else
-        block[threadIdx.y][threadIdx.x] = 0;
-    __syncthreads();
-
-    //write transposed data (coalesced writes to column-major output)
-    const int dstX = blockIdx.y * blockDim.y + threadIdx.x;
-    const int dstY = blockIdx.x * blockDim.x + threadIdx.y;
-    if (dstX < height && dstY < width)
-        output[dstY * height + dstX] = block[threadIdx.x][threadIdx.y];
+        output[y * width + x] = static_cast<uint8_t>(scale10To8(input[y * (pitch / 2) + x]));
 }
