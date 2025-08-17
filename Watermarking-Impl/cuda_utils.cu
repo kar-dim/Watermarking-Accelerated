@@ -34,4 +34,11 @@ namespace cuda_utils
         const dim3 gridSize = cuda_utils::gridSizeCalculate(blockSize, height, width);
         pitchedToFloat<< <gridSize, blockSize, 0, stream >> > (ySrc, yDst, width, height, pitch, bitDepth);
     }
+
+    void launchPitched10BitTo8BitKernel(const uint16_t* ySrc, uint8_t* yDst, const int width, const int height, const int pitch, const cudaStream_t stream)
+    {
+        constexpr dim3 blockSize(16, 16);
+        const dim3 gridSize = cuda_utils::gridSizeCalculate(blockSize, height, width);
+        pitched10To8Bit << <gridSize, blockSize, 0, stream >> > (ySrc, yDst, width, height, pitch);
+	}
 }
