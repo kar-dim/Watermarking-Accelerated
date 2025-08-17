@@ -72,17 +72,17 @@ namespace video_utils
 	{
 		const auto afStream = CudaStreamManager::getInstance().getAfStream();
 		const auto videoStream = CudaStreamManager::getInstance().getCustomStream();
+		const int bitDepth = ((AVHWFramesContext*)(frame->hw_frames_ctx->data))->sw_format == AV_PIX_FMT_NV12 ? 8 : 10;
 		const BufferType lumaBuffer(data.height, data.width, f32);
 		const BufferType chromaBuffer(data.width, data.height / 2, u8);
-
 		//launch NV12 to YUV420 kernel
-		cuda_utils::launchNV12ToYUV420pKernel(frame->data[1], frame->linesize[1], chromaBuffer.device<uint8_t>(), data.width / 2, data.height / 2, afStream);
+		cuda_utils::launchNV12ToYUV420pKernel(frame->data[1], frame->linesize[1], chromaBuffer.device<uint8_t>(), data.width / 2, data.height / 2, bitDepth, afStream);
 		chromaBuffer.unlock();
 
 		if (framesCount % data.watermarkInterval == 0)
 		{
 			//try to overlap kernel and host copy
-			cuda_utils::launchU8PitchedToFloatKernel(frame->data[0], lumaBuffer.device<float>(), data.width, data.height, frame->linesize[0], videoStream);
+			cuda_utils::launchPitchedToFloatKernel(frame->data[0], lumaBuffer.device<float>(), data.width, data.height, frame->linesize[0], bitDepth, videoStream);
 			chromaBuffer.host(data.hostFramePtr + (data.width * data.height));
 			cudaStreamSynchronize(videoStream);
 			float watermarkStrength;
@@ -109,10 +109,11 @@ namespace video_utils
 	void detectWatermarkHWAccel(VideoProcessingContext& data, int& framesCount, const AVFrame* frame)
 	{
 		const auto afStream = CudaStreamManager::getInstance().getAfStream();
+		const int bitDepth = frame->format == AV_PIX_FMT_NV12 ? 8 : 10;
 		const BufferType lumaBuffer(data.height, data.width, f32);
 		if (framesCount % data.watermarkInterval == 0)
 		{
-			cuda_utils::launchU8PitchedToFloatKernel(frame->data[0], lumaBuffer.device<float>(), data.width, data.height, frame->linesize[0], afStream);
+			cuda_utils::launchPitchedToFloatKernel(frame->data[0], lumaBuffer.device<float>(), data.width, data.height, frame->linesize[0], bitDepth, afStream);
 			lumaBuffer.unlock();
 			float correlation = data.watermarkObj->detectWatermark(lumaBuffer, ME);
 			std::cout << "Correlation for frame: " << (framesCount + 1) << ": " << correlation << "\n";

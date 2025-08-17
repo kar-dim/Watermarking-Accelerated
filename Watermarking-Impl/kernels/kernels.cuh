@@ -17,6 +17,9 @@ __device__ half8 make_half8(const half& a, const half& b, const half& c, const h
 template<typename T>
 __device__ __host__ inline T clamp(const T& val, const T& lo, const T& hi) { return (val < lo) ? lo : (val > hi) ? hi : val; }
 
+//helper method to scale 16-bit (10-bit of actual data) to 8-bit range
+__device__ inline uint16_t scale10To8(const uint16_t value) { return (value >> 6) * 255 / 1023; }
+
 //helper method to fill block-wide shared memory cooperatively for error sequence and NVF kernels
 template<int p, int pad = p / 2, int sharedSize = 16 + (2 * pad)>
 __device__ void fillBlock(const float* __restrict__ input, float* __restrict__ sharedMem, const int width, const int height)
@@ -83,7 +86,7 @@ __global__ void calculate_partial_correlation(const float* __restrict__ e_u, con
 __global__ void calculate_final_correlation(const float* __restrict__ partialDots, const float* __restrict__ partialNormU, const float* __restrict__ partialNormZ, float* __restrict__ result, const unsigned int numBlocks);
 
 //used for converting NV12 to YUV420p format, in HW accelerated video decoding
-__global__ void nV12ToYUV420p(const uint8_t* __restrict__ uvSrc, const int uvPitch, uint8_t* __restrict__ uvDst, const int uvWidth, const int uvHeight);
+__global__ void nV12ToYUV420p(const void* __restrict__ uvSrc, const int uvPitch, uint8_t* __restrict__ uvDst, const int uvWidth, const int uvHeight, const int bitDepth);
 
-//used for converting 8-bit pitched memory to float, in HW accelerated video decoding
-__global__ void u8PitchedToFloat(const uint8_t* __restrict__ input, float* __restrict__ output, const int width, const int height, const int pitch);
+//used for converting 8/16-bit pitched memory to float, in HW accelerated video decoding
+__global__ void pitchedToFloat(const void* __restrict__ input, float* __restrict__ output, const int width, const int height, const int pitch, const int bitDepth);

@@ -39,6 +39,8 @@ using FILEPtr = std::unique_ptr<FILE, decltype(&_pclose)>;
  */
 namespace video_utils
 {
+	static constexpr AVPixelFormat supportedFormats[] = { AV_PIX_FMT_YUV420P, AV_PIX_FMT_YUVJ420P, AV_PIX_FMT_CUDA };
+	static constexpr AVPixelFormat supportedHwFormats[] = { AV_PIX_FMT_NV12, AV_PIX_FMT_P010LE, AV_PIX_FMT_P016LE };
 #if defined(_USE_CUDA_)
 	AVCodecContextPtr openDecoderHWAccel(const AVCodecParameters* inputCodecParams, const std::string& userHwDecoder, bool& useHwDecoder);
 	void embedWatermarkHWAccel(VideoProcessingContext& data, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe);
@@ -65,12 +67,13 @@ namespace video_utils
 		int framesCount = 0;
 		auto processValidFrame = [&]()
 		{
-			static constexpr AVPixelFormat supportedFormats[] = { AV_PIX_FMT_YUV420P, AV_PIX_FMT_YUVJ420P, AV_PIX_FMT_CUDA };
-			auto frameFormat = static_cast<AVPixelFormat>(frame->format);
-			bool isValidFormat = std::ranges::any_of(supportedFormats, [frameFormat](auto f) { return f == frameFormat; });
+			bool isValidFormat = std::ranges::any_of(supportedFormats, [&frame](auto f) { return f == frame->format; });
 #if defined(_USE_CUDA_)
-			if constexpr (HW_ACCEL)
-				isValidFormat = isValidFormat && ((AVHWFramesContext*)(frame->hw_frames_ctx->data))->sw_format == AV_PIX_FMT_NV12;
+			if constexpr (HW_ACCEL) 
+			{
+				const auto hwFormat = ((AVHWFramesContext*)(frame->hw_frames_ctx->data))->sw_format;
+				isValidFormat &= std::ranges::any_of(supportedHwFormats, [&hwFormat](auto f) { return f == hwFormat; });
+			}
 #endif
 			Utils::checkError(!isValidFormat, "Error: Video frame format not supported, aborting");
 			std::forward<Func>(processFrame)(frame.get(), framesCount);
