@@ -3,6 +3,7 @@
 #include <arrayfire.h>
 using BufferType = af::array;
 using GrayBuffer = af::array;
+using GrayExtBuffer = af::array;
 using BufferAlphaType = af::array;
 #elif defined(_USE_EIGEN_)
 #include <cstdint>
@@ -10,5 +11,6 @@ using BufferAlphaType = af::array;
 #include "EigenImage.hpp"
 using BufferType = EigenImage;
 using GrayBuffer = Eigen::Array<uint8_t, Eigen::Dynamic, Eigen::Dynamic>;
+using GrayExtBuffer = Eigen::Array<uint16_t, Eigen::Dynamic, Eigen::Dynamic>;
 using BufferAlphaType = cimg_library::CImg<float>;
 #endif

@@ -39,13 +39,14 @@ using FILEPtr = std::unique_ptr<FILE, decltype(&_pclose)>;
  */
 namespace video_utils
 {
-	static constexpr AVPixelFormat supportedFormats[] = { AV_PIX_FMT_YUV420P, AV_PIX_FMT_YUVJ420P, AV_PIX_FMT_CUDA };
-	static constexpr AVPixelFormat supportedHwFormats[] = { AV_PIX_FMT_NV12, AV_PIX_FMT_P010LE, AV_PIX_FMT_P016LE };
+	static constexpr AVPixelFormat supportedFormats[] = { AV_PIX_FMT_YUV420P, AV_PIX_FMT_YUVJ420P, AV_PIX_FMT_YUV420P10LE, AV_PIX_FMT_CUDA };
 #if defined(_USE_CUDA_)
+	static constexpr AVPixelFormat supportedHwFormats[] = { AV_PIX_FMT_NV12, AV_PIX_FMT_P010LE, AV_PIX_FMT_P016LE };
 	AVCodecContextPtr openDecoderHWAccel(const AVCodecParameters* inputCodecParams, const std::string& userHwDecoder, bool& useHwDecoder);
 	void embedWatermarkHWAccel(VideoProcessingContext& data, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe);
 	void detectWatermarkHWAccel(VideoProcessingContext& data, int& framesCount, const AVFrame* frame);
 #endif
+	inline uint8_t scale10to8(uint16_t value) { return static_cast<uint8_t>(value * 255 / 1023); }
 	AVCodecContextPtr openDecoder(const AVCodecParameters* inputCodecParams, const std::string& userHwDecoder, bool& useHwDecoder);
 	AVCodecContextPtr openSoftwareDecoder(const AVCodecParameters* inputCodecParams);
 	std::string getFrameRate(const AVFormatContext* inputFormatCtx, const int videoStreamIndex);
@@ -53,8 +54,7 @@ namespace video_utils
 	int findVideoStream(const AVFormatContext* inputFormatCtx);
 	void detectWatermark(VideoProcessingContext& data, int& framesCount, const AVFrame* frame);
 	void processAndWriteYPlane(const bool embedWatermark, const AVFrame* frame, VideoProcessingContext& data, FILE* ffmpegPipe);
-	void writeChromaPlanes(const bool rowPadding, const AVFrame* frame, VideoProcessingContext& data, FILE* ffmpegPipe);
-	void loadInputFrame(VideoProcessingContext& data, uint8_t* hostPtr);
+	void writeChromaPlanes(const AVFrame* frame, VideoProcessingContext& data, FILE* ffmpegPipe);
 	void embedDispatcher(VideoProcessingContext& data, const bool useHwDecoder, FILE* ffmpegPipe);
 	int detectDispatcher(VideoProcessingContext& data, const bool useHwDecoder);
 
@@ -107,5 +107,15 @@ namespace video_utils
 		while (avcodec_receive_frame(data.inputDecoderCtx, frame.get()) == 0)
 			processValidFrame();
 		return framesCount;
+	}
+
+	template<typename BufferType, typename T>
+	void loadInputFrame(VideoProcessingContext& data, T* hostPtr)
+	{
+#if defined(_USE_GPU_)
+		data.inputFrame = BufferType(data.width, data.height, hostPtr, afHost).T().as(f32);
+#else
+		data.inputFrame = Eigen::Map<BufferType>(hostPtr, data.width, data.height).transpose().template cast<float>();
+#endif
 	}
 }
