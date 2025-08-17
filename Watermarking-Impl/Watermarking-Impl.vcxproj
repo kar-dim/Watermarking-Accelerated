@@ -228,7 +228,7 @@ xcopy "$(ProjectDir)libs\ffmpeg\bin\ffmpeg.exe" "$(OutDir)" /y /D</Command>
     <ClCompile>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
       <AdditionalIncludeDirectories>$(ProjectDir)libs\Eigen;$(ProjectDir)libs\CImg;$(ProjectDir)libs\zlib\include;$(ProjectDir)libs\inih;$(ProjectDir)libs\libpng\include;$(ProjectDir)libs\libjpeg\include;$(LLVMInstallDir)\lib\clang\17\include;$(ProjectDir)libs\ffmpeg\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>WIN32;WIN64;NOMINMAX;NDEBUG;_CONSOLE;_CRT_SECURE_NO_WARNINGS;_USE_EIGEN_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;WIN64;NOMINMAX;_DEBUG;_CONSOLE;_CRT_SECURE_NO_WARNINGS;_USE_EIGEN_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
       <IntrinsicFunctions>false</IntrinsicFunctions>
