@@ -53,6 +53,7 @@ namespace video_utils
 	void embedWatermark(VideoProcessingContext& data, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe);
 	int findVideoStream(const AVFormatContext* inputFormatCtx);
 	void detectWatermark(VideoProcessingContext& data, int& framesCount, const AVFrame* frame);
+	void embedAndWriteFrame(VideoProcessingContext& data, const BufferType& buffer, const int elements, FILE* ffmpegPipe);
 	void processAndWriteYPlane(const bool embedWatermark, const AVFrame* frame, VideoProcessingContext& data, FILE* ffmpegPipe);
 	void writeChromaPlanes(const AVFrame* frame, VideoProcessingContext& data, FILE* ffmpegPipe);
 	void embedDispatcher(VideoProcessingContext& data, const bool useHwDecoder, FILE* ffmpegPipe);

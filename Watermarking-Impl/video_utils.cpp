@@ -86,12 +86,8 @@ namespace video_utils
 			cuda_utils::launchPitchedToFloatKernel(frame->data[0], lumaBuffer.device<float>(), data.width, data.height, frame->linesize[0], bitDepth, videoStream);
 			chromaBuffer.host(data.hostFramePtr + (data.width * data.height));
 			cudaStreamSynchronize(videoStream);
-			float watermarkStrength;
-			data.watermarkObj->makeWatermark(lumaBuffer, lumaBuffer, data.watermarkedFrame, watermarkStrength, ME);
-			data.watermarkedFrame.as(u8).T().host(data.hostFramePtr);
 			//write Y + UV packed
-			cudaStreamSynchronize(afStream);
-			fwrite(data.hostFramePtr, 1, data.width * data.height * 3 / 2, ffmpegPipe);
+			embedAndWriteFrame(data, lumaBuffer, data.width * data.height * 3 / 2, ffmpegPipe);
 		}
 		else
 		{
@@ -136,6 +132,20 @@ namespace video_utils
 		framesCount++;
 	}
 #endif
+
+	//helper method to embed the watermark in the video frame and write it to the ffmpeg pipe
+	void embedAndWriteFrame(VideoProcessingContext& data, const BufferType& buffer, const int elements, FILE* ffmpegPipe)
+	{
+		float watermarkStrength;
+		data.watermarkObj->makeWatermark(buffer, buffer, data.watermarkedFrame, watermarkStrength, ME);
+#if defined(_USE_GPU_)
+		data.watermarkedFrame.as(u8).T().host(data.hostFramePtr);
+		fwrite(data.hostFramePtr, 1, elements, ffmpegPipe);
+#elif defined(_USE_EIGEN_)
+		data.grayFrame = data.watermarkedFrame.getGray().transpose().cast<uint8_t>();
+		fwrite(data.grayFrame.data(), 1, elements, ffmpegPipe);
+#endif
+	}
 
 	//helper methods to dispatch the correct watermarking or detection method
 	void embedDispatcher(VideoProcessingContext& data, const bool useHwDecoder, FILE* ffmpegPipe)
@@ -295,16 +305,8 @@ namespace video_utils
 		}
 		if (embedWatermark)
 		{
-			float watermarkStrength;
 			loadInputFrame<GrayBuffer>(data, srcY);
-			data.watermarkObj->makeWatermark(data.inputFrame, data.inputFrame, data.watermarkedFrame, watermarkStrength, ME);
-#if defined(_USE_GPU_)
-			data.watermarkedFrame.as(u8).T().host(data.hostFramePtr);
-			fwrite(data.hostFramePtr, 1, data.width * data.height, ffmpegPipe);
-#elif defined(_USE_EIGEN_)
-			data.grayFrame = data.watermarkedFrame.getGray().transpose().cast<uint8_t>();
-			fwrite(data.grayFrame.data(), 1, data.width * data.height, ffmpegPipe);
-#endif
+			embedAndWriteFrame(data, data.inputFrame, data.width * data.height, ffmpegPipe);
 		}
 		else
 			fwrite(srcY, 1, data.width * data.height, ffmpegPipe);
