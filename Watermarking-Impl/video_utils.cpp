@@ -120,7 +120,6 @@ namespace video_utils
 	//detect a watermark in a video frame using hardware acceleration
 	//directly use the GPU memory from the cuda decoder, no need to copy the data to host and back to GPU
 	//NOTE: supports 10-bit decoding. Experimental because we don't encode 10-bit yet
-	void detectWatermark(VideoProcessingContext& data, int& framesCount, const AVFrame* frame)
 	void detectWatermarkHWAccel(VideoProcessingContext& data, int& framesCount, const AVFrame* frame)
 	{
 		const auto afStream = CudaStreamManager::getInstance().getAfStream();
