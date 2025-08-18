@@ -125,6 +125,7 @@ namespace video_utils
 		const auto afStream = CudaStreamManager::getInstance().getAfStream();
 		const int bitDepth = ((AVHWFramesContext*)(frame->hw_frames_ctx->data))->sw_format == AV_PIX_FMT_NV12 ? 8 : 10;
 		const BufferType lumaBuffer(data.height, data.width, f32);
+		//detect watermark after watermarkInterval frames
 		if (framesCount % data.watermarkInterval == 0)
 		{
 			cuda_utils::launchPitchedToFloatKernel(frame->data[0], lumaBuffer.device<float>(), data.width, data.height, frame->linesize[0], bitDepth, afStream);
@@ -185,7 +186,7 @@ namespace video_utils
 	void detectWatermark(VideoProcessingContext& data, int& framesCount, const AVFrame* frame)
 	{
 		const int bitDepth = frame->format == AV_PIX_FMT_YUV420P10LE ? 10 : 8;
-		//detect watermark after X frames
+		//detect watermark after watermarkInterval frames
 		if (framesCount % data.watermarkInterval == 0)
 		{
 			if (bitDepth == 8)
@@ -272,9 +273,9 @@ namespace video_utils
 	void processAndWriteYPlane(const bool embedWatermark, const AVFrame* frame, VideoProcessingContext& data, FILE* ffmpegPipe)
 	{
 		const int bitDepth = frame->format == AV_PIX_FMT_YUV420P10LE ? 10 : 8;
+		uint8_t* srcY = frame->data[0];
 		if (bitDepth == 8)
 		{
-			uint8_t* srcY = frame->data[0];
 			//if there is row padding (for alignment), we must copy the data to a contiguous block!
 			if (frame->linesize[0] != data.width)
 			{
@@ -282,45 +283,31 @@ namespace video_utils
 					memcpy(data.hostFramePtr + y * data.width, srcY + y * frame->linesize[0], data.width);
 				srcY = data.hostFramePtr;
 			}
-			if (embedWatermark)
-			{
-				float watermarkStrength;
-				loadInputFrame<GrayBuffer>(data, srcY);
-				data.watermarkObj->makeWatermark(data.inputFrame, data.inputFrame, data.watermarkedFrame, watermarkStrength, ME);
-#if defined(_USE_GPU_)
-				data.watermarkedFrame.as(u8).T().host(data.hostFramePtr);
-				fwrite(data.hostFramePtr, 1, data.width * data.height, ffmpegPipe);
-#elif defined(_USE_EIGEN_)
-				data.grayFrame = data.watermarkedFrame.getGray().transpose().cast<uint8_t>();
-				fwrite(data.grayFrame.data(), 1, data.width * data.height, ffmpegPipe);
-#endif
-			}
-			else
-				fwrite(srcY, 1, data.width * data.height, ffmpegPipe);
 		}
 		else
 		{
 			//convert (optionally aligned) 16-bit to packed 8-bit
-			uint16_t* srcY = reinterpret_cast<uint16_t*>(frame->data[0]);
+			uint16_t* srcYu16 = reinterpret_cast<uint16_t*>(frame->data[0]);
 			for (int y = 0; y < data.height; y++)
 				for (int x = 0; x < data.width; x++)
-					data.hostFramePtr[y * data.width + x] = scale10to8(srcY[y * (frame->linesize[0] / 2) + x]);
-			if (embedWatermark)
-			{
-				float watermarkStrength;
-				loadInputFrame<GrayBuffer>(data, data.hostFramePtr);
-				data.watermarkObj->makeWatermark(data.inputFrame, data.inputFrame, data.watermarkedFrame, watermarkStrength, ME);
-#if defined(_USE_GPU_)
-				data.watermarkedFrame.as(u8).T().host(data.hostFramePtr);
-				fwrite(data.hostFramePtr, 1, data.width * data.height, ffmpegPipe);
-#elif defined(_USE_EIGEN_)
-				data.grayFrame = data.watermarkedFrame.getGray().transpose().cast<uint8_t>();
-				fwrite(data.grayFrame.data(), 1, data.width * data.height, ffmpegPipe);
-#endif
-			}
-			else
-				fwrite(data.hostFramePtr, 1, data.width * data.height, ffmpegPipe);
+					data.hostFramePtr[y * data.width + x] = scale10to8(srcYu16[y * (frame->linesize[0] / 2) + x]);
+			srcY = data.hostFramePtr;
 		}
+		if (embedWatermark)
+		{
+			float watermarkStrength;
+			loadInputFrame<GrayBuffer>(data, srcY);
+			data.watermarkObj->makeWatermark(data.inputFrame, data.inputFrame, data.watermarkedFrame, watermarkStrength, ME);
+#if defined(_USE_GPU_)
+			data.watermarkedFrame.as(u8).T().host(data.hostFramePtr);
+			fwrite(data.hostFramePtr, 1, data.width * data.height, ffmpegPipe);
+#elif defined(_USE_EIGEN_)
+			data.grayFrame = data.watermarkedFrame.getGray().transpose().cast<uint8_t>();
+			fwrite(data.grayFrame.data(), 1, data.width * data.height, ffmpegPipe);
+#endif
+		}
+		else
+			fwrite(srcY, 1, data.width * data.height, ffmpegPipe);
 	}
 
 	//writes the chroma planes (U and V) to the ffmpeg pipe, either assuming aligned pointers or not
