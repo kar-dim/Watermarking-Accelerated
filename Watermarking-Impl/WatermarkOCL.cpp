@@ -58,7 +58,7 @@ void WatermarkOCL::computePredictionErrorData(const af::array& image, af::array&
 	const std::unique_ptr<cl_mem> rxPartialMem(rxPartial.device<cl_mem>());
 	executeKernel([&]() {
 		queue.enqueueNDRangeKernel(
-			cl_utils::KernelBuilder(programs, "me").args(wrap(imageMem.get()), wrap(RxPartialMem.get()), wrap(rxPartialMem.get()), RxMappingsBuff, baseCols, static_cast<unsigned int>(meKernelDims.cols), baseRows).build(),
+			cl_utils::KernelBuilder(programs, "me").args(wrap(imageMem.get()), wrap(RxPartialMem.get()), wrap(rxPartialMem.get()), RxMappingsBuff, baseCols, baseRows).build(),
 			cl::NDRange(), cl::NDRange(meKernelDims.cols, meKernelDims.rows), cl::NDRange(64, 1));
 		//finish and return memory to arrayfire
 		queue.finish();

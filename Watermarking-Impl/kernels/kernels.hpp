@@ -111,12 +111,12 @@ __kernel void me(__global const float* __restrict__ input,
     __global float* __restrict__ rx,
     __constant int* __restrict__ RxMappings,
     const unsigned int width,
-    const unsigned int paddedWidth,
     const unsigned int height)
 
 {
     const int x = get_global_id(0);
     const int y = get_global_id(1);
+    const int paddedWidth = get_global_size(0);
     const int outputIndex = (y * paddedWidth) + x;
     const int localId = get_local_id(0);
     const int widthLimit = paddedWidth == width ? 64 :get_group_id(0) == get_num_groups(0) - 1 ? 64 - (paddedWidth - width) : 64;
