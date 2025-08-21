@@ -41,11 +41,11 @@ __device__ void me_p3_rxCalculate(half8* RxLocalVec8, const half8& vec, const ha
     *RxLocalVec8 = tmp;
 }
 
-__global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int paddedWidth, const unsigned int height)
+__global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height)
 {
     const int x = blockIdx.x * blockDim.x + threadIdx.x;
     const int y = blockIdx.y * blockDim.y + threadIdx.y;
-	const int outputIndex = (y * paddedWidth) + x;
+	const int outputIndex = (y * gridDim.x * blockDim.x) + x;
 
 	//Shared memory for Rx and rx, helper accumulator for Rx WMMA plus block-wide window pixels 
     __shared__ alignas(16) half RxLocal[64][16];
@@ -102,7 +102,8 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
     __syncthreads();
 
 	//optimized summation for Rx with WMMA (Tensor Cores)
-    *RxLocalVec8 = localBlock;
+    if (x < width)
+        *RxLocalVec8 = localBlock;
     __syncthreads();
 
     //compute C = X^T * X with Tensor Cores

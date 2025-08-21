@@ -46,7 +46,7 @@ void WatermarkCuda::computePredictionErrorData(const af::array& image, af::array
 	//call prediction error mask kernel
 	const af::array RxPartial(baseRows, meKernelDims.x);
 	const af::array rxPartial(baseRows, meKernelDims.x / 8);
-	me_p3 <<<gridSize, meBlockSize, 0, afStream>>> (image.device<float>(), RxPartial.device<float>(), rxPartial.device<float>(), baseCols, meKernelDims.x, baseRows);
+	me_p3 <<<gridSize, meBlockSize, 0, afStream>>> (image.device<float>(), RxPartial.device<float>(), rxPartial.device<float>(), baseCols, baseRows);
 	unlockArrays(image, RxPartial, rxPartial);
 	//calculation of coefficients and error sequence
 	const auto correlationArrays = transformCorrelationArrays(RxPartial, rxPartial);
