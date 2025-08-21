@@ -35,9 +35,8 @@ __device__ void fillBlock(const float* __restrict__ input, float* __restrict__ s
     }
 }
 
-//helper methods of ME kernel, to calculate block-wide Rx/rx values in shared memory
-__device__ void me_p3_rxCalculate(half8* RxLocalVec, const half& x_0, const half& x_1, const half& x_2, const half& x_3, const half& x_4, const half& x_5, const half& x_6, const half& x_7, const half& x_8);
-__device__ void me_p3_RxCalculate(half8* RxLocalVec, const half& x_0, const half& x_1, const half& x_2, const half& x_3, const half& x_5, const half& x_6, const half& x_7, const half& x_8);
+//helper methods of ME kernel, to calculate block-wide rx values in shared memory
+__device__ inline void me_p3_rxCalculate(half8* RxLocalVec8, const half8& vec, const half& x4);
 
 // NVF kernel, calculates NVF values for each pixel in the image
 // works for all p values (3,5,7 and 9)

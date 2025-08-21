@@ -3,6 +3,8 @@
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
+#include <mma.h>
+using namespace nvcuda;
 
 __device__ inline half HALF(float x) { return __float2half(x); }
 __device__ inline float FLOAT(half x) { return __half2float(x); }
@@ -14,20 +16,6 @@ __host__ void setCoeffs(const float* c)
 	cudaMemcpyToSymbol(coeffs, c, 8 * sizeof(float), 0, cudaMemcpyDeviceToDevice);
 }
 
-//constant array used for optimizing share memory accesses for Rx
-//Helps with reducing the local memory required for each block for Rx arrays from 4096 to 2304
-__constant__ int RxMappings[64] =
-{
-    0,  1,  2,  3,  4,  5,  6,  7,
-    1,  8,  9,  10, 11, 12, 13, 14,
-    2,  9,  15, 16, 17, 18, 19, 20,
-    3,  10, 16, 21, 22, 23, 24, 25,
-    4,  11, 17, 22, 26, 27, 28, 29,
-    5,  12, 18, 23, 27, 30, 31, 32,
-    6,  13, 19, 24, 28, 31, 33, 34,
-    7,  14, 20, 25, 29, 32, 34, 35
-};
-
 __device__ half8 make_half8(const float& a, const float& b, const float& c, const float& d, const float& e, const float& f, const float& g, const float& h)
 {
     return half8 { HALF(a), HALF(b), HALF(c), HALF(d), HALF(e), HALF(f), HALF(g), HALF(h) };
@@ -38,19 +26,19 @@ __device__ half8 make_half8(const half& a, const half& b, const half& c, const h
     return half8 { a, b, c, d, e, f, g, h };
 }
 
-__device__ void me_p3_rxCalculate(half8* RxLocalVec8, const half& x_0, const half& x_1, const half& x_2, const half& x_3, const half& x_4, const half& x_5, const half& x_6, const half& x_7, const half& x_8)
+//STS.128
+__device__ void me_p3_rxCalculate(half8* RxLocalVec8, const half8& vec, const half& x4)
 {
-    *RxLocalVec8 = make_half8(x_0 * x_4, x_1 * x_4, x_2 * x_4, x_3 * x_4, x_5 * x_4, x_6 * x_4, x_7 * x_4, x_8 * x_4);
-}
-
-__device__ void me_p3_RxCalculate(half8* RxLocalVec8, const half& x_0, const half& x_1, const half& x_2, const half& x_3, const half& x_5, const half& x_6, const half& x_7, const half& x_8)
-{
-    const half zero = HALF(0.0f);
-    RxLocalVec8[0] = make_half8(x_0 * x_0, x_0 * x_1, x_0 * x_2, x_0 * x_3, x_0 * x_5, x_0 * x_6, x_0 * x_7, x_0 * x_8);
-    RxLocalVec8[1] = make_half8(x_1 * x_1, x_1 * x_2, x_1 * x_3, x_1 * x_5, x_1 * x_6, x_1 * x_7, x_1 * x_8, x_2 * x_2);
-    RxLocalVec8[2] = make_half8(x_2 * x_3, x_2 * x_5, x_2 * x_6, x_2 * x_7, x_2 * x_8, x_3 * x_3, x_3 * x_5, x_3 * x_6);
-    RxLocalVec8[3] = make_half8(x_3 * x_7, x_3 * x_8, x_5 * x_5, x_5 * x_6, x_5 * x_7, x_5 * x_8, x_6 * x_6, x_6 * x_7);
-    RxLocalVec8[4] = make_half8(x_6 * x_8, x_7 * x_7, x_7 * x_8, x_8 * x_8, zero, zero, zero, zero);
+    half8 tmp;
+    tmp.a = vec.a * x4;
+    tmp.b = vec.b * x4;
+    tmp.c = vec.c * x4;
+    tmp.d = vec.d * x4;
+    tmp.e = vec.e * x4;
+    tmp.f = vec.f * x4;
+    tmp.g = vec.g * x4;
+    tmp.h = vec.h * x4;
+    *RxLocalVec8 = tmp;
 }
 
 __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int paddedWidth, const unsigned int height)
@@ -58,17 +46,17 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
     const int x = blockIdx.x * blockDim.x + threadIdx.x;
     const int y = blockIdx.y * blockDim.y + threadIdx.y;
 	const int outputIndex = (y * paddedWidth) + x;
-    const int widthLimit = paddedWidth == width ? 64 : blockIdx.x == gridDim.x - 1 ? 64 - (paddedWidth - width) : 64;
 
-    //re-use shared memory for Rx and rx calculation, helps with occupancy
-    __shared__ half RxLocal[64][40]; //36 + 4 for 16-byte alignment (in order to use vectorized 128-bit load/store)
+	//Shared memory for Rx and rx, helper accumulator for Rx WMMA plus block-wide window pixels 
+    __shared__ alignas(16) half RxLocal[64][16];
+    __shared__ float RxWmmaAccum[16][16];
+    __shared__ half blockValues[3][66];
     half8* RxLocalVec8 = reinterpret_cast<half8*>(RxLocal[threadIdx.x]);
 
-    //shared memory for 3x3 windows
-    __shared__ half blockValues[3][66];
-
-    //initialize shared memory for rx only (needed because of warp shuffling summation), don't waste time initializing the whole memory
-    *RxLocalVec8 = make_half8(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+    //initialize Rx shared memory
+#pragma unroll
+    for (int i = 0; i < 2; i++)
+        RxLocalVec8[i] = make_half8(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
 
     if (y >= height)
         return;
@@ -86,22 +74,17 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
     __syncthreads();
 
     //read the 3x3 window from shared memory
-    half x_0, x_1, x_2, x_3, x_4, x_5, x_6, x_7, x_8;
+    const int localX = threadIdx.x + 1; // center
+	const half x_4 = blockValues[1][threadIdx.x + 1]; // center pixel
+    const half8 localBlock = make_half8(
+        blockValues[0][localX - 1], blockValues[0][localX], blockValues[0][localX + 1], 
+        blockValues[1][localX - 1], blockValues[1][localX + 1], 
+        blockValues[2][localX - 1], blockValues[2][localX], blockValues[2][localX + 1]   
+    );
     if (x < width)
     {
-        // local coordinate of this thread's central pixel in smem
-        const int localX = threadIdx.x + 1; // center
-        x_0 = blockValues[0][localX - 1];
-        x_1 = blockValues[0][localX];
-        x_2 = blockValues[0][localX + 1];
-        x_3 = blockValues[1][localX - 1];
-        x_4 = blockValues[1][localX];
-        x_5 = blockValues[1][localX + 1];
-        x_6 = blockValues[2][localX - 1];
-        x_7 = blockValues[2][localX];
-        x_8 = blockValues[2][localX + 1];
         //calculate this thread's 8 rx values
-        me_p3_rxCalculate(RxLocalVec8, x_0, x_1, x_2, x_3, x_4, x_5, x_6, x_7, x_8);
+        me_p3_rxCalculate(RxLocalVec8, localBlock, x_4);
     }
     __syncthreads();
 
@@ -118,20 +101,35 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
         rx[(outputIndex + rxRow) / 8] = sum;
     __syncthreads();
 
-    //calculate 36 Rx values
-    if (x < width)
-        me_p3_RxCalculate(RxLocalVec8, x_0, x_1, x_2, x_3, x_5, x_6, x_7, x_8);
+	//optimized summation for Rx with WMMA (Tensor Cores)
+    *RxLocalVec8 = localBlock;
     __syncthreads();
 
-    //simplified summation for Rx
-    //we cannot use warp shuffling because it introduces too much stalling for Rx
-    sum = 0.0f;
-    const int mappingIdx = RxMappings[threadIdx.x];
+    //compute C = X^T * X with Tensor Cores
+    //using the first warp than using both warps is faster (lower shared memory contention)
+    if (threadIdx.x < 32)
+    {
+        wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::col_major> A;
+        wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::row_major> B;
+        wmma::fragment<wmma::accumulator, 16, 16, 16, float> C;
+        wmma::fill_fragment(C, 0.0f);
 #pragma unroll
-    for (int i = 0; i < 64; i++) 
-        if (i < widthLimit)
-            sum += FLOAT(RxLocal[i][mappingIdx]);
-    Rx[outputIndex] = sum;
+        for (int k0 = 0; k0 < 64; k0 += 16)
+        {
+            const half* tile = &RxLocal[k0][0];
+            wmma::load_matrix_sync(A, tile, 16);
+            wmma::load_matrix_sync(B, tile, 16);
+            wmma::mma_sync(C, A, B, C);
+        }
+        //store full 16x16 accumulator to shared, row-major
+        wmma::store_matrix_sync(&RxWmmaAccum[0][0], C, 16, wmma::mem_row_major);
+    }
+    __syncthreads();
+
+    //write only the top-left 8x8 (64 values) per block
+    const int r = threadIdx.x / 8;
+    const int c = threadIdx.x % 8;
+    Rx[outputIndex] = RxWmmaAccum[r][c];
 }
 
 __global__ void calculate_error_sequence_p3(const float* __restrict__ input, float* __restrict__ x_, const unsigned int width, const unsigned int height, const bool calculateAbs)
