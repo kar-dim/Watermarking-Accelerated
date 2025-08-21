@@ -38,11 +38,12 @@ The sample application:
    - Detects the watermark using the proposed Prediction-Error based detector for a video or image.
    - Prints FPS/execution time for both operations, and both masks.
 **NOTE**: For video operations, only the proposed mask is used, which is more optimal.
-Needs to be parameterized from the corresponding ```settings.ini``` file. Here is a detailed explanation for each parameter:
+
+The application should be parameterized from the corresponding ```settings.ini``` file. Here is a detailed explanation for each parameter:
 
 | Parameter                         | Description                                                                                                                 |
 |-----------------------------------|-----------------------------------------------------------------------------------------------------------------------------               |
-| image                             | Path to the input image to embed and detect watermark. This will set the sample application to ```image mode```. |
+| image                             | Path to the input image to embed and detect watermark. This will set the sample application to ```image mode``` |
 | watermark                         | Path to the Random Matrix (watermark). This is produced by the ```Watermarking-Generate``` project. Watermark and Image sizes should match exactly. |
 | save_watermarked_files_to_disk    | ```[true/false]```: Set to true to save the watermarked NVF and Prediction-Error files to disk.                                                |
 | execution_time_in_fps             | ```[true/false]```: Set to true to display execution times in FPS. Else, it will display execution time in seconds.                            |
