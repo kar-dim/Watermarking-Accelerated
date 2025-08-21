@@ -182,13 +182,8 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 	if (inir.GetBoolean("options", "save_watermarked_files_to_disk", false)) 
 	{
 		cout << "\nSaving watermarked files to disk...\n";
-#pragma omp parallel sections
-		{
-#pragma omp section
-			Utils::saveImage(imageFile, "W_NVF", watermarkNVF, alphaChannel);
-#pragma omp section
-			Utils::saveImage(imageFile, "W_ME", watermarkME, alphaChannel);
-		}
+		Utils::saveImage(imageFile, "W_NVF", watermarkNVF, alphaChannel);
+		Utils::saveImage(imageFile, "W_ME", watermarkME, alphaChannel);
 		cout << success("Successully saved to disk\n");
 	}
 	return EXIT_SUCCESS;
