@@ -15,8 +15,8 @@ inline void fillBlock(
 {
     for (int i = get_local_id(1) * get_local_size(0) + get_local_id(0); i < SHAREDSIZE * SHAREDSIZE; i += get_local_size(0) * get_local_size(1))
     {
-        const int tileRow = i / SHAREDSIZE;
-        const int tileCol = i % SHAREDSIZE;
+        const int tileRow = i % SHAREDSIZE;
+        const int tileCol = i / SHAREDSIZE;
         const int globalX = clamp((int)(get_group_id(1) * get_local_size(1) + tileCol - PAD), 0, width - 1);
         const int globalY = clamp((int)(get_group_id(0) * get_local_size(0) + tileRow - PAD), 0, height - 1);
         sharedMem[tileRow * SHAREDSIZE + tileCol] = input[globalX * height + globalY];
