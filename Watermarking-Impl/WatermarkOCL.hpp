@@ -31,11 +31,14 @@ private:
 		6,  13, 19, 24, 28, 31, 33, 34,
 		7,  14, 20, 25, 29, 32, 34, 35
 	};
+	static constexpr unsigned int corrPartialBlockSize = 256;
+
 	cl::Context context{ afcl::getContext(true) };
 	cl::CommandQueue queue{ afcl::getQueue(true) };
 	cl::Device device{ afcl::getDeviceId(), true };
 	cl::Buffer RxMappingsBuff{ context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(int) * 64, (void*)RxMappings, NULL };
-	dim2 texKernelDims, meKernelDims, corrFinalLocalSize{ 1, std::min(1024, static_cast<int>(device.getInfo<CL_DEVICE_MAX_WORK_GROUP_SIZE>())) };
+	dim2 texKernelDims, meKernelDims;
+	unsigned int corrFinalLocalSize = std::min(1024, static_cast<int>(device.getInfo<CL_DEVICE_MAX_WORK_GROUP_SIZE>()));
 	cl::Program programs;
 
 	inline cl::Buffer wrap(const cl_mem* mem) const { return cl::Buffer(*mem, true); }

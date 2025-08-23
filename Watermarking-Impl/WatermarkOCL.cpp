@@ -80,8 +80,8 @@ void WatermarkOCL::computePredictionErrorData(const af::array& image, af::array&
 float WatermarkOCL::computeCorrelation(const af::array& e_u, const af::array& e_z) const
 {
 	const int N = static_cast<int>(e_u.elements());
-	const int globalSizePartials = align<256>(N);
-	const int blocks = globalSizePartials / 256;
+	const int globalSizePartials = align<corrPartialBlockSize>(N);
+	const int blocks = globalSizePartials / corrPartialBlockSize;
 	const af::array dotPartial(blocks);
 	const af::array uNormPartial(blocks);
 	const af::array zNormPartial(blocks);
@@ -98,13 +98,13 @@ float WatermarkOCL::computeCorrelation(const af::array& e_u, const af::array& e_
 		queue.enqueueNDRangeKernel(
 			cl_utils::KernelBuilder(programs, "calculate_partial_correlation").args(
 				wrap(euMem.get()), wrap(ezMem.get()), wrap(dotPartialMem.get()), wrap(uNormPartialMem.get()), wrap(zNormPartialMem.get()), N).build(),
-			cl::NDRange(), cl::NDRange(globalSizePartials), cl::NDRange(256));
+			cl::NDRange(), cl::NDRange(globalSizePartials), cl::NDRange(corrPartialBlockSize));
 		queue.finish();
 		//reduce partials and compute correlation
 		queue.enqueueNDRangeKernel(
 			cl_utils::KernelBuilder(programs, "calculate_final_correlation").args(
 				wrap(dotPartialMem.get()), wrap(uNormPartialMem.get()), wrap(zNormPartialMem.get()), wrap(correlationResultMem.get()), blocks).build(),
-			cl::NDRange(), cl::NDRange(corrFinalLocalSize.cols), cl::NDRange(corrFinalLocalSize.cols));
+			cl::NDRange(), cl::NDRange(corrFinalLocalSize), cl::NDRange(corrFinalLocalSize));
 		queue.finish();
 		//retrieve the correlation result
 		unlockArrays(e_u, e_z, dotPartial, uNormPartial, zNormPartial, correlationResult);
