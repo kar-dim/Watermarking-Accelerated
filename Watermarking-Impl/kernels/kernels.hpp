@@ -92,18 +92,18 @@ __kernel void error_sequence_p3(
     }
 }
 
-inline void me_p3_rxCalculate(__local half RxLocal[64][36], const int localId, const half x_0, const half x_1, const half x_2, const half x_3, const half x_4, const half x_5, const half x_6, const half x_7, const half x_8)
+inline void me_p3_rxCalculate(__local half RxLocal[64][40], const int localId, const half x_0, const half x_1, const half x_2, const half x_3, const half x_4, const half x_5, const half x_6, const half x_7, const half x_8)
 {
     vstore_half8((float8)(x_0 * x_4, x_1 * x_4, x_2 * x_4, x_3 * x_4, x_5 * x_4, x_6 * x_4, x_7 * x_4, x_8 * x_4), 0, &RxLocal[localId][0]);
 }
 
-inline void me_p3_RxCalculate(__local half RxLocal[64][36], const int localId, const half x_0, const half x_1, const half x_2, const half x_3, const half x_5, const half x_6, const half x_7, const half x_8)
+inline void me_p3_RxCalculate(__local half RxLocal[64][40], const int localId, const half x_0, const half x_1, const half x_2, const half x_3, const half x_5, const half x_6, const half x_7, const half x_8)
 {
     vstore_half8((float8)(x_0 * x_0, x_0 * x_1, x_0 * x_2, x_0 * x_3, x_0 * x_5, x_0 * x_6, x_0 * x_7, x_0 * x_8), 0, &RxLocal[localId][0]);
     vstore_half8((float8)(x_1 * x_1, x_1 * x_2, x_1 * x_3, x_1 * x_5, x_1 * x_6, x_1 * x_7, x_1 * x_8, x_2 * x_2), 0, &RxLocal[localId][8]);
     vstore_half8((float8)(x_2 * x_3, x_2 * x_5, x_2 * x_6, x_2 * x_7, x_2 * x_8, x_3 * x_3, x_3 * x_5, x_3 * x_6), 0, &RxLocal[localId][16]);
     vstore_half8((float8)(x_3 * x_7, x_3 * x_8, x_5 * x_5, x_5 * x_6, x_5 * x_7, x_5 * x_8, x_6 * x_6, x_6 * x_7), 0, &RxLocal[localId][24]);
-    vstore_half4((float4)(x_6 * x_8, x_7 * x_7, x_7 * x_8, x_8 * x_8), 0, &RxLocal[localId][32]);
+    vstore_half8((float8)(x_6 * x_8, x_7 * x_7, x_7 * x_8, x_8 * x_8, 0.0f, 0.0f, 0.0f, 0.0f), 0, &RxLocal[localId][32]);
 }
 
 __kernel void me(__global const float* __restrict__ input,
@@ -121,7 +121,7 @@ __kernel void me(__global const float* __restrict__ input,
     const int localId = get_local_id(0);
     const int widthLimit = paddedWidth == width ? 64 :get_group_id(0) == get_num_groups(0) - 1 ? 64 - (paddedWidth - width) : 64;
 
-    __local half RxLocal[64][36];
+    __local __attribute__((aligned(16))) half RxLocal[64][40];
     __local float rxPartial[8][8];
     __local half blockValues[3][66];
 
