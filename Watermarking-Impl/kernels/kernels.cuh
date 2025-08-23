@@ -26,8 +26,8 @@ __device__ void fillBlock(const float* __restrict__ input, float* __restrict__ s
 {
     for (int i = threadIdx.y * blockDim.x + threadIdx.x; i < sharedSize * sharedSize; i += blockDim.x * blockDim.y)
     {
-        const int tileRow = i / sharedSize;
-        const int tileCol = i % sharedSize;
+        const int tileRow = i % sharedSize;
+        const int tileCol = i / sharedSize;
         // clamp (mimic cudaAddressModeClamp)
         const int globalX = clamp<int>((int)(blockIdx.y * blockDim.y) + tileCol - pad, 0, width - 1);
         const int globalY = clamp<int>((int)(blockIdx.x * blockDim.x) + tileRow - pad, 0, height - 1);
