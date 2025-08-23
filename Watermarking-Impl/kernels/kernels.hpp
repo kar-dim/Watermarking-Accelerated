@@ -8,8 +8,8 @@ inline const std::string kernels = R"CLC(
 #pragma OPENCL EXTENSION cl_khr_fp16 : enable
 
 inline void fillBlock(
-    __global const float* __restrict__ input,
-    __local float* __restrict__ sharedMem,
+    __global const float* restrict input,
+    __local float* restrict sharedMem,
     const int width,
     const int height)
 {
@@ -23,8 +23,8 @@ inline void fillBlock(
     }
 }
 
-__kernel void nvf(__global const float* __restrict__ input, 
-	__global float* __restrict__ nvf,
+__kernel void nvf(__global const float* restrict input, 
+	__global float* restrict nvf,
 	const unsigned int width,
     const unsigned int height)
 {	
@@ -59,9 +59,9 @@ __kernel void nvf(__global const float* __restrict__ input,
 }
 
 __kernel void error_sequence_p3(
-    __global const float* __restrict__ input, 
-    __global float* __restrict__ x_,
-    __constant float* __restrict__ coeffs,
+    __global const float* restrict input, 
+    __global float* restrict x_,
+    __constant float* restrict coeffs,
     const unsigned int width,
     const unsigned int height,
     const int calculateAbs)
@@ -106,10 +106,10 @@ inline void me_p3_RxCalculate(__local half RxLocal[64][40], const int localId, c
     vstore_half8((float8)(x_6 * x_8, x_7 * x_7, x_7 * x_8, x_8 * x_8, 0.0f, 0.0f, 0.0f, 0.0f), 0, &RxLocal[localId][32]);
 }
 
-__kernel void me(__global const float* __restrict__ input,
-    __global float* __restrict__ Rx,
-    __global float* __restrict__ rx,
-    __constant int* __restrict__ RxMappings,
+__kernel void me(__global const float* restrict input,
+    __global float* restrict Rx,
+    __global float* restrict rx,
+    __constant int* restrict RxMappings,
     const unsigned int width,
     const unsigned int height)
 
