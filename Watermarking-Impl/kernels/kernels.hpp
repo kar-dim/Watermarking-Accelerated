@@ -122,6 +122,7 @@ __kernel void me(__global const float* __restrict__ input,
     const int widthLimit = paddedWidth == width ? 64 :get_group_id(0) == get_num_groups(0) - 1 ? 64 - (paddedWidth - width) : 64;
 
     __local half RxLocal[64][36];
+    __local float rxPartial[8][8];
     __local half blockValues[3][66];
 
     if (y >= height)
@@ -154,13 +155,26 @@ __kernel void me(__global const float* __restrict__ input,
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    //TODO can be optimized
-    if (localId < 8)
+    //OpenCL optimized rx summation
+    const int col = localId % 8;
+    const int rowStart = localId / 8 * 8;
+    float psum = 0.0f;
+    #pragma unroll
+    for (int r = 0; r < 8; r++)
+    {
+        const int row = rowStart + r; 
+        if (row < widthLimit)
+            psum += RxLocal[row][col];
+    }
+    rxPartial[localId / 8][col] = psum;
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    if(localId < 8) 
     {
         float sum = 0.0f;
 #pragma unroll
-        for (int i = 0; i < widthLimit; i++)
-            sum += RxLocal[i][localId];
+        for(int i = 0; i < 8; i++)
+            sum += rxPartial[i][localId];
         rx[(outputIndex / 8) + localId] = sum;
     }
     barrier(CLK_LOCAL_MEM_FENCE);
