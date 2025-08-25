@@ -9,11 +9,12 @@ extern "C" {
 }
 
 /*!
- *  \brief  Struct to hold common data for video watermarking and detection. Hholds pointers and references, does not own any resources.
+ *  \brief  Struct to hold common data for video watermarking and detection
  *  \author Dimitris Karatzas
  */
 struct VideoProcessingContext 
 {
+    //common libav contexts and constants
     AVFormatContext* inputFormatCtx;
     AVCodecContext* inputDecoderCtx;
     const int videoStreamIndex;
@@ -21,6 +22,7 @@ struct VideoProcessingContext
     const int height;
     const int width;
     const int watermarkInterval;
+    //data host pointer and device/host buffers which are overwritten per frame
     uint8_t* hostFramePtr;
     BufferType inputFrame;
     BufferType watermarkedFrame;
