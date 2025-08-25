@@ -22,8 +22,6 @@ private:
 	static constexpr int pSquared = p * p;
 	static constexpr int pad = p / 2;
 	static constexpr int localSize = pSquared - 1;
-	static constexpr int blockRadius = p / 2;
-	static constexpr int halfNeighborsSize = localSize / 2;
 	static constexpr int tileSize = 64;
 	using LocalVector = Eigen::Matrix<float, localSize, 1>;
 	using TileMatrix = Eigen::Matrix<float, localSize, tileSize>;
