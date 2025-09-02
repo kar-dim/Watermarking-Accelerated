@@ -12,6 +12,7 @@
 #if defined(_USE_CUDA_)
 #include "cuda_utils.hpp"
 #include "cuda_stream_manager.hpp"
+#include <cuda_runtime.h>
 extern "C" {
 #include "libavutil/buffer.h"
 #include "libavutil/hwcontext.h"
@@ -148,38 +149,22 @@ namespace video_utils
 	}
 
 	//helper methods to dispatch the correct watermarking or detection method
-	void embedDispatcher(VideoProcessingContext& data, const bool useHwDecoder, FILE* ffmpegPipe)
+	int embedDispatcher(VideoProcessingContext& data, const bool useHwDecoder, FILE* ffmpegPipe)
 	{
 #if defined(_USE_CUDA_)
 		if (useHwDecoder) 
-		{
-			processFrames<true>(data, [&](const AVFrame* frame, int& framesCount) {
-				embedWatermarkHWAccel(data, framesCount, frame, ffmpegPipe);
-			});
-			return;
-		}
+			return processFrames<true>(data, [&](const AVFrame* frame, int& framesCount) { embedWatermarkHWAccel(data, framesCount, frame, ffmpegPipe);});
 #endif
-		processFrames(data, [&](const AVFrame* frame, int& framesCount) {
-			embedWatermark(data, framesCount, frame, ffmpegPipe);
-		});
+		return processFrames(data, [&](const AVFrame* frame, int& framesCount) { embedWatermark(data, framesCount, frame, ffmpegPipe); });
 	}
 
 	int detectDispatcher(VideoProcessingContext& data, const bool useHwDecoder)
 	{
-		int framesCount = 1;
 #if defined(_USE_CUDA_)
 		if (useHwDecoder) 
-		{
-			framesCount = processFrames<true>(data, [&](const AVFrame* frame, int& framesCount) {
-				detectWatermarkHWAccel(data, framesCount, frame);
-			});
-			return framesCount;
-		}
+			return processFrames<true>(data, [&](const AVFrame* frame, int& framesCount) { detectWatermarkHWAccel(data, framesCount, frame); });
 #endif
-		framesCount = processFrames(data, [&](const AVFrame* frame, int& framesCount) {
-			detectWatermark(data, framesCount, frame);
-		});
-		return framesCount;
+		return processFrames(data, [&](const AVFrame* frame, int& framesCount) { detectWatermark(data, framesCount, frame); });
 	}
 
 	//embed watermark in a video frame
@@ -239,6 +224,8 @@ namespace video_utils
 		return -1;
 	}
 
+	//if CUDA, try to open hw decoder (if requested), else fallback to open software decoder context for video
+	//otherwise, just open software decoder
 	AVCodecContextPtr openDecoder(const AVCodecParameters* inputCodecParams, const string& userHwDecoder, bool& useHwDecoder)
 	{
 #if defined(_USE_CUDA_)
@@ -248,7 +235,7 @@ namespace video_utils
 #endif
 	}
 
-	//open decoder context for video
+	//open software decoder context for video
 	AVCodecContextPtr openSoftwareDecoder(const AVCodecParameters* inputCodecParams)
 	{
 		const AVCodec* inputDecoder = avcodec_find_decoder(inputCodecParams->codec_id);

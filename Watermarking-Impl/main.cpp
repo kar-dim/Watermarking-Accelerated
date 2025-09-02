@@ -203,7 +203,6 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 	Utils::checkError(avformat_open_input(&rawInputCtx, videoFile.c_str(), nullptr, nullptr) < 0, "ERROR: Failed to open input video file");
 	AVFormatContextPtr inputFormatCtx(rawInputCtx, [](AVFormatContext* ctx) { if (ctx) { avformat_close_input(&ctx); } });
 	avformat_find_stream_info(inputFormatCtx.get(), nullptr);
-	//av_dump_format(inputFormatCtx.get(), 0, videoFile.c_str(), 0);
 
 	//find video stream and open video decoder
 	const int videoStreamIndex = video_utils::findVideoStream(inputFormatCtx.get());
