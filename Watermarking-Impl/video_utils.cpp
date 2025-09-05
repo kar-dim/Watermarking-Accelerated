@@ -307,15 +307,23 @@ namespace video_utils
 		uint8_t* hostPtr = data.hostFramePtr;
 
 		//lambda to write a single chroma plane
-		auto writePlane = [&](const uint8_t* src, const int linesize) 
+		auto writePlane = [&](const uint8_t* src, const int linesize)
 		{
-			if (linesize != expectedChromaPitch)
+			if (bitDepth == 8)
 			{
-				for (int y = 0; y < data.height / 2; y++) 
+				if (linesize != expectedChromaPitch)
 				{
-					if (bitDepth == 8)
+					for (int y = 0; y < data.height / 2; y++)
 						fwrite(src + y * linesize, 1, data.width / 2, ffmpegPipe);
-					else 
+				}
+				else
+					fwrite(src, 1, data.width * data.height / 4, ffmpegPipe);
+			}
+			else
+			{
+				if (linesize != expectedChromaPitch)
+				{
+					for (int y = 0; y < data.height / 2; y++)
 					{
 						const uint16_t* row = reinterpret_cast<const uint16_t*>(src + y * linesize);
 						for (int x = 0; x < data.width / 2; x++)
@@ -323,12 +331,7 @@ namespace video_utils
 						fwrite(hostPtr, 1, data.width / 2, ffmpegPipe);
 					}
 				}
-			}
-			else 
-			{
-				if (bitDepth == 8)
-					fwrite(src, 1, data.width * data.height / 4, ffmpegPipe);
-				else 
+				else
 				{
 					const uint16_t* row = reinterpret_cast<const uint16_t*>(src);
 					for (int i = 0; i < data.width * data.height / 4; i++)
