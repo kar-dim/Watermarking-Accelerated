@@ -1,19 +1,14 @@
 #include "gtest/gtest.h"
 
 #include "buffer.hpp"
-#include "constants.h"
 #include "FileDeleter.h"
 #include "MaskDiskConfig.h"
 #include "utils.hpp"
 #include "WatermarkBase.hpp"
-#include <iostream>
 #include <memory>
 #include <optional>
 #include <string>
 #include <vector>
-
-using std::cout;
-using std::string;
 
 class CommonFixture : public ::testing::Test
 {

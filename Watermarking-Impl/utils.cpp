@@ -79,7 +79,7 @@ string Utils::formatExecutionTime(const bool showFps, const double seconds)
 	return showFps ? std::format("FPS: {:.2f} FPS", 1.0 / seconds) : std::format("{:.6f} seconds", seconds);
 }
 
-void Utils::loadImage(BufferType& rgbImage, BufferType& image, const std::string& imageFile, std::optional<BufferAlphaType>& alphaChannel)
+void Utils::loadImage(BufferType& rgbImage, BufferType& image, const string& imageFile, std::optional<BufferAlphaType>& alphaChannel)
 {
 #if defined(_USE_GPU_)
 	rgbImage = af::loadImage(imageFile.c_str(), true);
