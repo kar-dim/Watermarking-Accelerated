@@ -13,6 +13,7 @@
 #include "videoprocessingcontext.hpp"
 #include "video_utils.hpp"
 #include "WatermarkBase.hpp"
+#include <algorithm>
 #include <cstdio>
 #include <cstdint>
 #include <cstdlib>
@@ -193,7 +194,7 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 int testForVideo(const INIReader& inir, const string& videoFile, const int p, const float psnr)
 {
 	const bool showFps = inir.GetBoolean("options", "execution_time_in_fps", false);
-	const int watermarkInterval = inir.GetInteger("parameters_video", "watermark_interval", 30);
+	const int watermarkInterval = std::max(1, static_cast<int>(inir.GetInteger("parameters_video", "watermark_interval", 1)));
 
 	//set ffmpeg log level
 	av_log_set_level(AV_LOG_INFO);
