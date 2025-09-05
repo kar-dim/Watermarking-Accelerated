@@ -128,7 +128,7 @@ namespace video_utils
 			cuda_utils::launchPitchedToFloatKernel(frame->data[0], lumaBuffer.device<float>(), data.width, data.height, frame->linesize[0], bitDepth, afStream);
 			lumaBuffer.unlock();
 			float correlation = data.watermarkObj->detectWatermark(lumaBuffer, ME);
-			std::cout << "Correlation for frame: " << (framesCount + 1) << ": " << correlation << "\n";
+			cout << "Correlation for frame: " << (framesCount + 1) << ": " << correlation << "\n";
 		}
 		framesCount++;
 	}
@@ -210,7 +210,7 @@ namespace video_utils
 			}
 			
 			float correlation = data.watermarkObj->detectWatermark(data.inputFrame, ME);
-			std::cout << "Correlation for frame: " << (framesCount + 1) << ": " << correlation << "\n";
+			cout << "Correlation for frame: " << (framesCount + 1) << ": " << correlation << "\n";
 		}
 		framesCount++;
 	}
