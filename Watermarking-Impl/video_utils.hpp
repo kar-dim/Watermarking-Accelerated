@@ -1,18 +1,13 @@
 #pragma once
 
-#include "utils.hpp"
 #include "videoprocessingcontext.hpp"
-#include <algorithm>
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
 #include <memory>
+#include <span>
 #include <stdexcept>
 #include <string>
-
-#if defined(_USE_CUDA_)
-#include "libavutil/hwcontext.h"
-#endif
 
 extern "C" {
 #include <libavcodec/avcodec.h>
@@ -57,6 +52,7 @@ namespace video_utils
 	inline uint8_t scale10to8(uint16_t value) { return static_cast<uint8_t>(value * 255 / 1023); }
 	AVCodecContextPtr openDecoder(const AVCodecParameters* inputCodecParams, const std::string& userHwDecoder, bool& useHwDecoder);
 	AVCodecContextPtr openSoftwareDecoder(const AVCodecParameters* inputCodecParams);
+	bool checkPixelFormatSupport(const std::span<const AVPixelFormat> supportedFormats, const AVPixelFormat format);
 	std::string getFrameRate(const AVFormatContext* inputFormatCtx, const int videoStreamIndex);
 	void embedWatermark(VideoProcessingContext& data, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe);
 	int findVideoStream(const AVFormatContext* inputFormatCtx);
@@ -74,19 +70,7 @@ namespace video_utils
 		const AVPacketPtr packet(av_packet_alloc());
 		const AVFramePtr frame(av_frame_alloc());
 		int framesCount = 0;
-		auto processValidFrame = [&]()
-		{
-			bool isValidFormat = std::ranges::any_of(supportedFormats, [&frame](auto f) { return f == frame->format; });
-#if defined(_USE_CUDA_)
-			if constexpr (HW_ACCEL) 
-			{
-				const auto hwFormat = ((AVHWFramesContext*)(frame->hw_frames_ctx->data))->sw_format;
-				isValidFormat &= std::ranges::any_of(supportedHwFormats, [&hwFormat](auto f) { return f == hwFormat; });
-			}
-#endif
-			Utils::checkError(!isValidFormat, "Error: Video frame format not supported, aborting");
-			std::forward<Func>(processFrame)(frame.get(), framesCount);
-		};
+
 		//read video frames loop
 		while (av_read_frame(data.inputFormatCtx, packet.get()) >= 0)
 		{
@@ -107,14 +91,14 @@ namespace video_utils
 					av_packet_unref(packet.get());
 					throw std::runtime_error(std::string("FFmpeg decoding error: ") + errbuf);
 				}
-				processValidFrame();
+				std::forward<Func>(processFrame)(frame.get(), framesCount);
 			}
 			av_packet_unref(packet.get());
 		}
 		//ensure all remaining frames are flushed
 		avcodec_send_packet(data.inputDecoderCtx, nullptr);
 		while (avcodec_receive_frame(data.inputDecoderCtx, frame.get()) == 0)
-			processValidFrame();
+			std::forward<Func>(processFrame)(frame.get(), framesCount);
 		return framesCount;
 	}
 

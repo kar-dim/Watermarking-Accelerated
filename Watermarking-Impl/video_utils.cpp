@@ -1,12 +1,15 @@
 #include "buffer.hpp"
+#include "utils.hpp"
 #include "video_utils.hpp"
 #include "videoprocessingcontext.hpp"
 #include "WatermarkBase.hpp"
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <format>
 #include <iostream>
+#include <span>
 #include <string>
 
 #if defined(_USE_CUDA_)
@@ -65,6 +68,7 @@ namespace video_utils
 		if (avcodec_open2(ctx.get(), inputDecoder, nullptr) < 0)
 			return openSoftwareDecoder(inputCodecParams);
 		useHwDecoder = true;
+		checkPixelFormatSupport(supportedHwFormats, ctx->sw_pix_fmt);
 		return ctx;
 	}
 
@@ -256,7 +260,15 @@ namespace video_utils
 			ctx->thread_count = 1; //don't use multithreading
 		if (avcodec_open2(ctx.get(), inputDecoder, nullptr) < 0)
 			return nullptr;
+		checkPixelFormatSupport(supportedFormats, ctx->pix_fmt);
 		return ctx;
+	}
+
+	bool checkPixelFormatSupport(const std::span<const AVPixelFormat> supportedFormats, const AVPixelFormat format)
+	{
+		const bool isValidFormat = std::ranges::any_of(supportedFormats, [&](auto f) { return f == format; });
+		Utils::checkError(!isValidFormat, "Error: Video frame format not supported, aborting");
+		return isValidFormat;
 	}
 
 	//get the input video FPS (average)
