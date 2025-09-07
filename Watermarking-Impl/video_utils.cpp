@@ -49,7 +49,7 @@ namespace video_utils
 		const AVCodec* inputDecoder = avcodec_find_decoder_by_name(userHwDecoder.c_str());
 		if (!inputDecoder)
 			return openSoftwareDecoder(inputCodecParams);
-		AVCodecContextPtr ctx(avcodec_alloc_context3(inputDecoder), [](AVCodecContext* c) { avcodec_free_context(&c); });
+		AVCodecContextPtr ctx(avcodec_alloc_context3(inputDecoder));
 		if (!ctx)
 			return openSoftwareDecoder(inputCodecParams);
 		if (avcodec_parameters_to_context(ctx.get(), inputCodecParams) < 0)
@@ -57,7 +57,7 @@ namespace video_utils
 		AVBufferRef* raw_hw_device_ctx = nullptr;
 		if (av_hwdevice_ctx_create(&raw_hw_device_ctx, AV_HWDEVICE_TYPE_CUDA, NULL, NULL, AV_CUDA_USE_CURRENT_CONTEXT) < 0)
 			return openSoftwareDecoder(inputCodecParams);
-		AVBufferRefPtr hw_device_ctx(raw_hw_device_ctx, [](AVBufferRef* ref) { av_buffer_unref(&ref); });
+		AVBufferRefPtr hw_device_ctx(raw_hw_device_ctx);
 		if (av_hwdevice_ctx_init(hw_device_ctx.get()) < 0)
 			return openSoftwareDecoder(inputCodecParams);
 		ctx->hw_device_ctx = av_buffer_ref(hw_device_ctx.get());
@@ -241,7 +241,7 @@ namespace video_utils
 		const AVCodec* inputDecoder = avcodec_find_decoder(inputCodecParams->codec_id);
 		if (!inputDecoder)
 			return nullptr;
-		AVCodecContextPtr ctx(avcodec_alloc_context3(inputDecoder), [](AVCodecContext* ctx) { avcodec_free_context(&ctx); });
+		AVCodecContextPtr ctx(avcodec_alloc_context3(inputDecoder));
 		if (!ctx)
 			return nullptr;
 		if (avcodec_parameters_to_context(ctx.get(), inputCodecParams) < 0)

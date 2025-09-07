@@ -6,7 +6,6 @@
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>
-#include <functional>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -26,12 +25,15 @@ extern "C" {
 #include "libavutil/buffer.h"
 }
 
-using AVPacketPtr = std::unique_ptr<AVPacket, std::function<void(AVPacket*)>>;
-using AVFramePtr = std::unique_ptr<AVFrame, std::function<void(AVFrame*)>>;
-using AVBufferRefPtr = std::unique_ptr<AVBufferRef, std::function<void(AVBufferRef*)>>;
-using AVFormatContextPtr = std::unique_ptr<AVFormatContext, std::function<void(AVFormatContext*)>>;
-using AVCodecContextPtr = std::unique_ptr<AVCodecContext, std::function<void(AVCodecContext*)>>;
-using FILEPtr = std::unique_ptr<FILE, decltype(&_pclose)>;
+namespace video_utils::detail 
+{
+	template <auto FreeFunc>
+	struct AVDeleter
+	{
+		template <typename T>
+		void operator()(T* p) const noexcept { if (p) FreeFunc(&p); }
+	};
+}
 
 /*!
  *  \brief  Utility functions for video, including decoding, frames processing and writing.
@@ -39,6 +41,12 @@ using FILEPtr = std::unique_ptr<FILE, decltype(&_pclose)>;
  */
 namespace video_utils
 {
+	using AVPacketPtr = std::unique_ptr<AVPacket, detail::AVDeleter<av_packet_free>>;
+	using AVFramePtr = std::unique_ptr<AVFrame, detail::AVDeleter<av_frame_free>>;
+	using AVBufferRefPtr = std::unique_ptr<AVBufferRef, detail::AVDeleter<av_buffer_unref>>;
+	using AVFormatContextPtr = std::unique_ptr<AVFormatContext, detail::AVDeleter<avformat_close_input>>;
+	using AVCodecContextPtr = std::unique_ptr<AVCodecContext, detail::AVDeleter<avcodec_free_context>>;
+
 	static constexpr AVPixelFormat supportedFormats[] = { AV_PIX_FMT_YUV420P, AV_PIX_FMT_YUVJ420P, AV_PIX_FMT_YUV420P10LE, AV_PIX_FMT_CUDA };
 #if defined(_USE_CUDA_)
 	static constexpr AVPixelFormat supportedHwFormats[] = { AV_PIX_FMT_NV12, AV_PIX_FMT_P010LE, AV_PIX_FMT_P016LE };
@@ -63,8 +71,8 @@ namespace video_utils
 	template<bool HW_ACCEL = false, typename Func>
 	int processFrames(const VideoProcessingContext& data, Func&& processFrame)
 	{
-		const AVPacketPtr packet(av_packet_alloc(), [](AVPacket* pkt) { av_packet_free(&pkt); });
-		const AVFramePtr frame(av_frame_alloc(), [](AVFrame* frame) { av_frame_free(&frame); });
+		const AVPacketPtr packet(av_packet_alloc());
+		const AVFramePtr frame(av_frame_alloc());
 		int framesCount = 0;
 		auto processValidFrame = [&]()
 		{

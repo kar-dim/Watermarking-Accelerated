@@ -40,6 +40,9 @@ using namespace Eigen;
 
 using std::cout;
 using std::string;
+using video_utils::AVFormatContextPtr;
+using video_utils::AVCodecContextPtr;
+using FILEPtr = std::unique_ptr<FILE, decltype(&_pclose)>;
 
 /*!
  *  \brief  Helper functions for testing the watermark algorithms
@@ -202,7 +205,7 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 	//load input video
 	AVFormatContext* rawInputCtx = nullptr;
 	Utils::checkError(avformat_open_input(&rawInputCtx, videoFile.c_str(), nullptr, nullptr) < 0, "ERROR: Failed to open input video file");
-	AVFormatContextPtr inputFormatCtx(rawInputCtx, [](AVFormatContext* ctx) { if (ctx) { avformat_close_input(&ctx); } });
+	AVFormatContextPtr inputFormatCtx(rawInputCtx);
 	avformat_find_stream_info(inputFormatCtx.get(), nullptr);
 
 	//find video stream and open video decoder
