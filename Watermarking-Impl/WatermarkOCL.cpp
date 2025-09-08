@@ -9,6 +9,7 @@
 #include <utility>
 
 using std::string;
+using clMemPtr = clMemPtr;
 
 //initialize data and memory
 WatermarkOCL::WatermarkOCL(const unsigned int rows, const unsigned int cols, const string& randomMatrixPath, const int p, const float psnr)
@@ -19,8 +20,8 @@ WatermarkOCL::WatermarkOCL(const unsigned int rows, const unsigned int cols, con
 af::array WatermarkOCL::computeCustomMask(const af::array& image) const
 {
 	const af::array customMask(baseRows, baseCols);
-	const std::unique_ptr<cl_mem> imageMem(image.device<cl_mem>());
-	const std::unique_ptr<cl_mem> outputMem(customMask.device<cl_mem>());
+	const clMemPtr imageMem(image.device<cl_mem>());
+	const clMemPtr outputMem(customMask.device<cl_mem>());
 	//transposed global dimensions because of column-major order in arrayfire
 	executeKernel([&]() {
 		queue.enqueueNDRangeKernel(
@@ -35,9 +36,9 @@ af::array WatermarkOCL::computeCustomMask(const af::array& image) const
 af::array WatermarkOCL::computeErrorSequence(const af::array& image, const af::array& coefficients, const bool calculateAbs) const
 {
 	const af::array errorSequence(baseRows, baseCols);
-	const std::unique_ptr<cl_mem> imageMem(image.device<cl_mem>());
-	const std::unique_ptr<cl_mem> coeffsMem(coefficients.device<cl_mem>());
-	const std::unique_ptr<cl_mem> errorSequenceMem(errorSequence.device<cl_mem>());
+	const clMemPtr imageMem(image.device<cl_mem>());
+	const clMemPtr coeffsMem(coefficients.device<cl_mem>());
+	const clMemPtr errorSequenceMem(errorSequence.device<cl_mem>());
 	//transposed global dimensions because of column-major order in arrayfire
 	executeKernel([&]() {
 		queue.enqueueNDRangeKernel(
@@ -53,9 +54,9 @@ void WatermarkOCL::computePredictionErrorData(const af::array& image, af::array&
 {
 	const af::array RxPartial(baseRows, meKernelDims.cols);
 	const af::array rxPartial(baseRows, meKernelDims.cols / 8);
-	const std::unique_ptr<cl_mem> imageMem(image.device<cl_mem>());
-	const std::unique_ptr<cl_mem> RxPartialMem(RxPartial.device<cl_mem>());
-	const std::unique_ptr<cl_mem> rxPartialMem(rxPartial.device<cl_mem>());
+	const clMemPtr imageMem(image.device<cl_mem>());
+	const clMemPtr RxPartialMem(RxPartial.device<cl_mem>());
+	const clMemPtr rxPartialMem(rxPartial.device<cl_mem>());
 	executeKernel([&]() {
 		queue.enqueueNDRangeKernel(
 			cl_utils::KernelBuilder(programs, "me").args(wrap(imageMem.get()), wrap(RxPartialMem.get()), wrap(rxPartialMem.get()), RxMappingsBuff, baseCols, baseRows).build(),
@@ -86,12 +87,12 @@ float WatermarkOCL::computeCorrelation(const af::array& e_u, const af::array& e_
 	const af::array uNormPartial(blocks);
 	const af::array zNormPartial(blocks);
 	const af::array correlationResult(1);
-	const std::unique_ptr<cl_mem> euMem(e_u.device<cl_mem>());
-	const std::unique_ptr<cl_mem> ezMem(e_z.device<cl_mem>());
-	const std::unique_ptr<cl_mem> dotPartialMem(dotPartial.device<cl_mem>());
-	const std::unique_ptr<cl_mem> uNormPartialMem(uNormPartial.device<cl_mem>());
-	const std::unique_ptr<cl_mem> zNormPartialMem(zNormPartial.device<cl_mem>());
-	const std::unique_ptr<cl_mem> correlationResultMem(correlationResult.device<cl_mem>());
+	const clMemPtr euMem(e_u.device<cl_mem>());
+	const clMemPtr ezMem(e_z.device<cl_mem>());
+	const clMemPtr dotPartialMem(dotPartial.device<cl_mem>());
+	const clMemPtr uNormPartialMem(uNormPartial.device<cl_mem>());
+	const clMemPtr zNormPartialMem(zNormPartial.device<cl_mem>());
+	const clMemPtr correlationResultMem(correlationResult.device<cl_mem>());
 	float correlation = 0.0f;
 	executeKernel([&]() {
 		//calculate partial dot products and norms
