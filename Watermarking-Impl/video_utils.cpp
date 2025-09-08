@@ -152,23 +152,18 @@ namespace video_utils
 #endif
 	}
 
-	//helper methods to dispatch the correct watermarking or detection method
-	int embedDispatcher(VideoProcessingContext& data, const bool useHwDecoder, FILE* ffmpegPipe)
+	//helper method to dispatch the correct watermarking or detection method
+	int videoDispatcher(VideoProcessingContext& data, const bool useHwDecoder, const VideoOp op, FILE* ffmpegPipe)
 	{
 #if defined(_USE_CUDA_)
 		if (useHwDecoder) 
-			return processFrames<true>(data, [&](const AVFrame* frame, int& framesCount) { embedWatermarkHWAccel(data, framesCount, frame, ffmpegPipe);});
+			return processFrames<true>(data, [&](const AVFrame* frame, int& framesCount) { 
+				op == EMBED ? embedWatermarkHWAccel(data, framesCount, frame, ffmpegPipe) : detectWatermarkHWAccel(data, framesCount, frame);
+			});
 #endif
-		return processFrames(data, [&](const AVFrame* frame, int& framesCount) { embedWatermark(data, framesCount, frame, ffmpegPipe); });
-	}
-
-	int detectDispatcher(VideoProcessingContext& data, const bool useHwDecoder)
-	{
-#if defined(_USE_CUDA_)
-		if (useHwDecoder) 
-			return processFrames<true>(data, [&](const AVFrame* frame, int& framesCount) { detectWatermarkHWAccel(data, framesCount, frame); });
-#endif
-		return processFrames(data, [&](const AVFrame* frame, int& framesCount) { detectWatermark(data, framesCount, frame); });
+		return processFrames(data, [&](const AVFrame* frame, int& framesCount) { 
+			op == EMBED ? embedWatermark(data, framesCount, frame, ffmpegPipe) : detectWatermark(data, framesCount, frame);
+		});
 	}
 
 	//embed watermark in a video frame
@@ -264,6 +259,7 @@ namespace video_utils
 		return ctx;
 	}
 
+	//check if the pixel format provided is in the list of provided supported formats
 	bool checkPixelFormatSupport(const std::span<const AVPixelFormat> supportedFormats, const AVPixelFormat format)
 	{
 		const bool isValidFormat = std::ranges::any_of(supportedFormats, [&](auto f) { return f == format; });

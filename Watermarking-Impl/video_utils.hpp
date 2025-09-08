@@ -36,6 +36,8 @@ namespace video_utils::detail
  */
 namespace video_utils
 {
+	enum VideoOp { EMBED, DETECT };
+
 	using AVPacketPtr = std::unique_ptr<AVPacket, detail::AVDeleter<av_packet_free>>;
 	using AVFramePtr = std::unique_ptr<AVFrame, detail::AVDeleter<av_frame_free>>;
 	using AVBufferRefPtr = std::unique_ptr<AVBufferRef, detail::AVDeleter<av_buffer_unref>>;
@@ -60,8 +62,7 @@ namespace video_utils
 	void embedAndWriteFrame(VideoProcessingContext& data, const BufferType& buffer, const int elements, FILE* ffmpegPipe);
 	void processAndWriteYPlane(const bool embedWatermark, const AVFrame* frame, VideoProcessingContext& data, FILE* ffmpegPipe);
 	void writeChromaPlanes(const AVFrame* frame, VideoProcessingContext& data, FILE* ffmpegPipe);
-	int embedDispatcher(VideoProcessingContext& data, const bool useHwDecoder, FILE* ffmpegPipe);
-	int detectDispatcher(VideoProcessingContext& data, const bool useHwDecoder);
+	int videoDispatcher(VideoProcessingContext& data, const bool useHwDecoder, const VideoOp op, FILE* ffmpegPipe = nullptr);
 
 	//main frames loop logic for video watermark embedding and detection
 	template<bool HW_ACCEL = false, typename Func>

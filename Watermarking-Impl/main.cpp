@@ -33,6 +33,7 @@ extern "C" {
 #include <libavutil/log.h>
 }
 
+using namespace video_utils;
 #if defined(_USE_EIGEN_)
 using namespace cimg_library;
 using namespace Eigen;
@@ -40,8 +41,7 @@ using namespace Eigen;
 
 using std::cout;
 using std::string;
-using video_utils::AVFormatContextPtr;
-using video_utils::AVCodecContextPtr;
+
 using FILEPtr = std::unique_ptr<FILE, decltype(&_pclose)>;
 
 /*!
@@ -209,12 +209,12 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 	avformat_find_stream_info(inputFormatCtx.get(), nullptr);
 
 	//find video stream and open video decoder
-	const int videoStreamIndex = video_utils::findVideoStream(inputFormatCtx.get());
+	const int videoStreamIndex = findVideoStream(inputFormatCtx.get());
 	Utils::checkError(videoStreamIndex == -1, "ERROR: No video stream found");
 
 	bool useHwDecoder = false;
 	const string hwCodec = inir.Get("parameters_video", "cuda_hw_decoder", "");
-	const AVCodecContextPtr inputDecoderCtx = video_utils::openDecoder(inputFormatCtx->streams[videoStreamIndex]->codecpar, hwCodec, useHwDecoder);
+	const AVCodecContextPtr inputDecoderCtx = openDecoder(inputFormatCtx->streams[videoStreamIndex]->codecpar, hwCodec, useHwDecoder);
 	if (!hwCodec.empty() && !useHwDecoder && !inputDecoderCtx->hw_device_ctx)
 		cout << info("WARNING: Hardware decoder '" + hwCodec + "' was requested, but not available. Using software decoder instead.\n");
 	Utils::checkError(!inputDecoderCtx.get(), "ERROR: Could not open video decoder");
@@ -241,7 +241,7 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 		//build the FFmpeg command
 		std::ostringstream ffmpegCmd;
 		ffmpegCmd << "ffmpeg -y -f rawvideo -pix_fmt yuv420p " << "-s " << width << "x" << height
-			<< " -r " << video_utils::getFrameRate(inputFormatCtx.get(), videoStreamIndex) << " -i - -i \"" << videoFile << "\" " << ffmpegOptions
+			<< " -r " << getFrameRate(inputFormatCtx.get(), videoStreamIndex) << " -i - -i \"" << videoFile << "\" " << ffmpegOptions
 			<< " -c:s copy -c:a copy -map 1:s? -map 0:v -map 1:a? -max_interleave_delta 0 \"" << makeWatermarkVideoPath << "\"";
 		cout << info("\nFFmpeg encode command: " + ffmpegCmd.str() + "\n\n");
 
@@ -249,7 +249,7 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 		FILEPtr ffmpegPipe(_popen(ffmpegCmd.str().c_str(), "wb"), _pclose);
 		Utils::checkError(!ffmpegPipe.get(), "Error: Could not open FFmpeg pipe");
 		//embed watermark on the video frames
-		double secs = Utils::executionTime([&] { video_utils::embedDispatcher(videoData, useHwDecoder, ffmpegPipe.get()); });
+		double secs = Utils::executionTime([&] { videoDispatcher(videoData, useHwDecoder, VideoOp::EMBED, ffmpegPipe.get()); });
 		cout << info("\n\nWatermark embedding total execution time: " + Utils::formatExecutionTime(false, secs) + "\n\n");
 	}
 
@@ -261,7 +261,7 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 #endif
 		//detect watermark on the video frames
 		int framesCount = 1;
-		double secs = Utils::executionTime([&] { framesCount = video_utils::detectDispatcher(videoData, useHwDecoder); });
+		double secs = Utils::executionTime([&] { framesCount = videoDispatcher(videoData, useHwDecoder, VideoOp::DETECT); });
 		cout << info("\nWatermark detection total execution time: " + Utils::formatExecutionTime(false, secs) + "\n");
 		cout << info("\nWatermark detection average execution time per frame: " + Utils::formatExecutionTime(showFps, secs / framesCount) + "\n");
 	}
