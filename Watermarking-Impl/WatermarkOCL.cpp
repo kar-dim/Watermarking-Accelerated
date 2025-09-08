@@ -9,7 +9,7 @@
 #include <utility>
 
 using std::string;
-using clMemPtr = clMemPtr;
+using clMemPtr = std::unique_ptr<cl_mem>;
 
 //initialize data and memory
 WatermarkOCL::WatermarkOCL(const unsigned int rows, const unsigned int cols, const string& randomMatrixPath, const int p, const float psnr)
