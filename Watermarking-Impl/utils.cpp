@@ -100,10 +100,12 @@ void Utils::loadImage(BufferType& rgbImage, BufferType& image, const string& ima
 	if (channels == 4)
 	{
 		alphaChannel.emplace(cimgRgb.get_channel(3));
-		cimgRgb = cimgRgb.get_channels(0, 2);
-		eigen_utils::cimgAlphaZero(cimgRgb, *alphaChannel);
+		auto rgbView = cimgRgb.get_shared_channels(0, 2);
+		eigen_utils::cimgAlphaZero(rgbView, *alphaChannel);
+		rgbImage = eigen_utils::cimgToEigenRgb(rgbView);
 	}
-	rgbImage = eigen_utils::cimgToEigenRgb(cimgRgb);
+	else
+		rgbImage = eigen_utils::cimgToEigenRgb(cimgRgb);
 	image = eigen_utils::eigenRgbToGray(rgbImage.getRGB(), Constants::rPercent, Constants::gPercent, Constants::bPercent);
 #endif
 }
