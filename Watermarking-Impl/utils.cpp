@@ -50,9 +50,19 @@ void Utils::saveImage(const string& imagePath, const string& suffix, const Buffe
 std::unique_ptr<WatermarkBase> Utils::createWatermarkObject(const unsigned int height, const unsigned int width, const string& randomMatrixPath, const int p, const float psnr)
 {
 #if defined(_USE_OPENCL_)
-	return std::make_unique<WatermarkOCL>(height, width, randomMatrixPath, p, psnr);
+	switch (p)
+	{
+	case 3: return std::make_unique<WatermarkOCL<3>>(height, width, randomMatrixPath, psnr); break;
+	case 5: return std::make_unique<WatermarkOCL<5>>(height, width, randomMatrixPath, psnr); break;
+	case 7: return std::make_unique<WatermarkOCL<7>>(height, width, randomMatrixPath, psnr); break;
+	case 9: return std::make_unique<WatermarkOCL<9>>(height, width, randomMatrixPath, psnr); break;
 #elif defined(_USE_CUDA_)
-	return std::make_unique<WatermarkCuda>(height, width, randomMatrixPath, p, psnr);
+	switch (p)
+	{
+	case 3: return std::make_unique<WatermarkCuda<3>>(height, width, randomMatrixPath, psnr); break;
+	case 5: return std::make_unique<WatermarkCuda<5>>(height, width, randomMatrixPath, psnr); break;
+	case 7: return std::make_unique<WatermarkCuda<7>>(height, width, randomMatrixPath, psnr); break;
+	case 9: return std::make_unique<WatermarkCuda<9>>(height, width, randomMatrixPath, psnr); break;
 #elif defined(_USE_EIGEN_)
 	switch (p)
 	{
@@ -60,9 +70,9 @@ std::unique_ptr<WatermarkBase> Utils::createWatermarkObject(const unsigned int h
 	case 5: return std::make_unique<WatermarkEigen<5>>(height, width, randomMatrixPath, psnr); break;
 	case 7: return std::make_unique<WatermarkEigen<7>>(height, width, randomMatrixPath, psnr); break;
 	case 9: return std::make_unique<WatermarkEigen<9>>(height, width, randomMatrixPath, psnr); break;
+#endif
 	default: throw std::invalid_argument("Unsupported value for p. Allowed values: 3, 5, 7, 9.");
 	}
-#endif
 }
 
 void Utils::checkError(const bool isError, const string& errorMsg) 

@@ -1,9 +1,6 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
-    <CudaCompile Include="WatermarkCuda.cu">
-      <Filter>Source Files\cuda</Filter>
-    </CudaCompile>
     <CudaCompile Include="kernels\kernels.cu">
       <Filter>Source Files\cuda</Filter>
     </CudaCompile>
@@ -16,17 +13,23 @@
     <CudaCompile Include="cuda_stream_manager.cu">
       <Filter>Source Files\cuda</Filter>
     </CudaCompile>
+    <CudaCompile Include="video_utils.cpp" />
+	<CudaCompile Include="utils.cpp" />
   </ItemGroup>
-  
   <ItemGroup>
-  <CudaCompile Include="video_utils.cpp" Condition="'$(Configuration)|$(Platform)'=='CUDA_Debug|x64' Or '$(Configuration)|$(Platform)'=='CUDA_Release|x64'">
-    <Filter>Source Files\util</Filter>
-  </CudaCompile>
-  <ClCompile Include="video_utils.cpp" Condition="'$(Configuration)|$(Platform)'=='OPENCL_Release|x64' Or '$(Configuration)|$(Platform)'=='EIGEN_Debug|x64' Or '$(Configuration)|$(Platform)'=='EIGEN_Release|x64'">
-    <Filter>Source Files\util</Filter>
-  </ClCompile>
-</ItemGroup>
-  
+    <CudaCompile Include="video_utils.cpp" Condition="'$(Configuration)|$(Platform)'=='CUDA_Debug|x64' Or '$(Configuration)|$(Platform)'=='CUDA_Release|x64'">
+      <Filter>Source Files\util</Filter>
+    </CudaCompile>
+    <ClCompile Include="video_utils.cpp" Condition="'$(Configuration)|$(Platform)'=='OPENCL_Release|x64' Or '$(Configuration)|$(Platform)'=='EIGEN_Debug|x64' Or '$(Configuration)|$(Platform)'=='EIGEN_Release|x64'">
+      <Filter>Source Files\util</Filter>
+    </ClCompile>
+	<CudaCompile Include="utils.cpp" Condition="'$(Configuration)|$(Platform)'=='CUDA_Debug|x64' Or '$(Configuration)|$(Platform)'=='CUDA_Release|x64'">
+      <Filter>Source Files\util</Filter>
+    </CudaCompile>
+    <ClCompile Include="utils.cpp" Condition="'$(Configuration)|$(Platform)'=='OPENCL_Release|x64' Or '$(Configuration)|$(Platform)'=='EIGEN_Debug|x64' Or '$(Configuration)|$(Platform)'=='EIGEN_Release|x64'">
+      <Filter>Source Files\util</Filter>
+    </ClCompile>
+  </ItemGroup>
   <ItemGroup>
     <Filter Include="Header Files">
       <UniqueIdentifier>{07235656-1379-4c4c-ae06-c286738600a3}</UniqueIdentifier>
@@ -68,23 +71,14 @@
     </ResourceCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="utils.cpp">
-      <Filter>Source Files\util</Filter>
-    </ClCompile>
     <ClCompile Include="main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="opencl_utils.cpp">
       <Filter>Source Files\opencl</Filter>
     </ClCompile>
-    <ClCompile Include="WatermarkOCL.cpp">
-      <Filter>Source Files\opencl</Filter>
-    </ClCompile>
     <ClCompile Include="eigen_utils.cpp">
       <Filter>Source Files\eigen</Filter>
-    </ClCompile>
-    <ClCompile Include="WatermarkGpu.cpp">
-      <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
