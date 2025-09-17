@@ -1,10 +1,11 @@
 ﻿#pragma once
 #include "opencl_init.h"
 #include "opencl_utils.hpp"
+#include "WatermarkBase.hpp"
 #include "WatermarkGpu.hpp"
+#include <af/opencl.h>
 #include <algorithm>
 #include <arrayfire.h>
-#include <af/opencl.h>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -22,9 +23,12 @@ struct dim2
 template<int p>
 class WatermarkOCL final : public WatermarkGPU<p>
 {
+private:
+	using WatermarkBase::align;
+
 public:
 	WatermarkOCL<p>(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr)
-		: WatermarkGPU<p>(rows, cols, randomMatrixPath, psnr), texKernelDims({ this->align<16>(rows), this->align<16>(cols) }), meKernelDims({ rows, this->align<64>(cols) }),
+		: WatermarkGPU<p>(rows, cols, randomMatrixPath, psnr), texKernelDims({ WatermarkBase::align<16>(rows), WatermarkBase::align<16>(cols) }), meKernelDims({ rows, WatermarkBase::align<64>(cols) }),
 		programs(cl_utils::buildKernels(p))
 	{ }
 
@@ -113,7 +117,7 @@ private:
 	float computeCorrelation(const af::array& e_u, const af::array& e_z) const
 	{
 		const int N = static_cast<int>(e_u.elements());
-		const int globalSizePartials = this->align<corrPartialBlockSize>(N);
+		const int globalSizePartials = align<corrPartialBlockSize>(N);
 		const int blocks = globalSizePartials / corrPartialBlockSize;
 		const af::array dotPartial(blocks);
 		const af::array uNormPartial(blocks);
