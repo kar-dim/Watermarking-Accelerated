@@ -25,7 +25,7 @@ class WatermarkOCL final : public WatermarkGPU<p>
 {
 private:
 	using WatermarkBase::align;
-
+	using clMemPtr = std::unique_ptr<cl_mem>;
 public:
 	WatermarkOCL<p>(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr)
 		: WatermarkGPU<p>(rows, cols, randomMatrixPath, psnr), texKernelDims({ WatermarkBase::align<16>(rows), WatermarkBase::align<16>(cols) }), meKernelDims({ rows, WatermarkBase::align<64>(cols) }),
@@ -33,7 +33,6 @@ public:
 	{ }
 
 private:
-	using clMemPtr = std::unique_ptr<cl_mem>;
 	static constexpr int RxMappings[64]
 	{
 		0,  1,  2,  3,  4,  5,  6,  7,
