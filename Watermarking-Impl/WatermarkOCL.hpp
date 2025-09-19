@@ -23,10 +23,6 @@ struct dim2
 template<int p>
 class WatermarkOCL final : public WatermarkGPU<p>
 {
-private:
-	using WatermarkBase::align;
-	using clMemPtr = std::unique_ptr<cl_mem>;
-
 public:
 	WatermarkOCL<p>(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr)
 		: WatermarkGPU<p>(rows, cols, randomMatrixPath, psnr), texKernelDims({ WatermarkBase::align<16>(rows), WatermarkBase::align<16>(cols) }), meKernelDims({ rows, WatermarkBase::align<64>(cols) }),
@@ -34,6 +30,9 @@ public:
 	{ }
 
 private:
+	using WatermarkBase::align;
+	using clMemPtr = std::unique_ptr<cl_mem>;
+
 	static constexpr int RxMappings[64]
 	{
 		0,  1,  2,  3,  4,  5,  6,  7,
@@ -56,6 +55,7 @@ private:
 	cl::Program programs;
 
 	inline cl::Buffer wrap(const cl_mem* mem) const { return cl::Buffer(*mem, true); }
+
 	af::array computeCustomMask(const af::array& image) const
 	{
 		const af::array customMask(this->baseRows, this->baseCols);
@@ -71,6 +71,7 @@ private:
 		}, "nvf");
 		return customMask;
 	}
+
 	af::array computeErrorSequence(const af::array& image, const af::array& coefficients, const bool calculateAbs) const
 	{
 		const af::array errorSequence(this->baseRows, this->baseCols);
@@ -87,6 +88,7 @@ private:
 		}, "error_sequence_p3");
 		return errorSequence;
 	}
+
 	void computePredictionErrorData(const af::array& image, af::array& errorSequence, af::array& coefficients, const bool calculateAbs) const
 	{
 		const af::array RxPartial(this->baseRows, meKernelDims.cols);
@@ -114,6 +116,7 @@ private:
 			errorSequence = computeErrorSequence(image, coefficients, calculateAbs);
 		}, "me");
 	}
+
 	float computeCorrelation(const af::array& e_u, const af::array& e_z) const
 	{
 		const int N = static_cast<int>(e_u.elements());
