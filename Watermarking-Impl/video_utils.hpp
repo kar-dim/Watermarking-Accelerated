@@ -56,9 +56,15 @@ namespace video_utils
 	AVCodecContextPtr openSoftwareDecoder(const AVCodecParameters* inputCodecParams);
 	bool checkPixelFormatSupport(const std::span<const AVPixelFormat> supportedFormats, const AVPixelFormat format);
 	std::string getFrameRate(const AVStream *st);
-	std::string getPixFmt(const AVStream* st);
+	inline std::string getPixFmt(const AVStream* st)
+	{
+		return st->codecpar->color_range == AVCOL_RANGE_JPEG ? "-pix_fmt yuvj420p " : "-pix_fmt yuv420p ";
+	}
+	inline std::string getColorRange(const AVStream* st)
+	{
+		return st->codecpar->color_range == AVCOL_RANGE_JPEG ? "-color_range:v:0 pc " : "-color_range:v:0 tv ";
+	}
 	std::string getStreamRotation(const AVStream* st);
-	std::string getColorRange(const AVStream* st);
 	int findVideoStream(const AVFormatContext* inputFormatCtx);
 	void embedWatermark(VideoProcessingContext& data, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe);
 	void detectWatermark(VideoProcessingContext& data, int& framesCount, const AVFrame* frame);

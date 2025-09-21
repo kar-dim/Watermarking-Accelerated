@@ -250,32 +250,6 @@ namespace video_utils
 		return "";
 	}
 
-	//gets the pixel format of the video stream to apply as a flag in the encoder
-	string getPixFmt(const AVStream* st)
-	{
-		if (!st || !st->codecpar)
-			return "";
-		switch (st->codecpar->color_range)
-		{
-			case AVCOL_RANGE_JPEG: return "-pix_fmt yuvj420p ";
-			default: return "-pix_fmt yuv420p ";
-		}
-	}
-
-	//gets the color range of the video stream to apply as a flag in the encoder
-	string getColorRange(const AVStream* st)
-	{
-		if (!st || !st->codecpar)
-			return "";
-		switch (st->codecpar->color_range) 
-		{
-			case AVCOL_RANGE_MPEG: return "-color_range:v:0 tv ";
-			case AVCOL_RANGE_JPEG: return "-color_range:v:0 pc ";
-			case AVCOL_RANGE_UNSPECIFIED:
-			default: return "";
-		}
-	}
-
 	//if CUDA, try to open hw decoder (if requested), else fallback to open software decoder context for video
 	//otherwise, just open software decoder
 	AVCodecContextPtr openDecoder(const AVCodecParameters* inputCodecParams, const string& userHwDecoder, bool& useHwDecoder)
