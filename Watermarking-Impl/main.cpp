@@ -211,17 +211,18 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 	//find video stream and open video decoder
 	const int videoStreamIndex = findVideoStream(inputFormatCtx.get());
 	Utils::checkError(videoStreamIndex == -1, "ERROR: No video stream found");
+	const AVStream* videoStream = inputFormatCtx->streams[videoStreamIndex];
 
 	bool useHwDecoder = false;
 	const string hwCodec = inir.Get("parameters_video", "cuda_hw_decoder", "");
-	const AVCodecContextPtr inputDecoderCtx = openDecoder(inputFormatCtx->streams[videoStreamIndex]->codecpar, hwCodec, useHwDecoder);
+	const AVCodecContextPtr inputDecoderCtx = openDecoder(videoStream->codecpar, hwCodec, useHwDecoder);
 	if (!hwCodec.empty() && !useHwDecoder && !inputDecoderCtx->hw_device_ctx)
 		cout << info("WARNING: Hardware decoder '" + hwCodec + "' was requested, but not available. Using software decoder instead.\n");
 	Utils::checkError(!inputDecoderCtx.get(), "ERROR: Could not open video decoder");
 
 	//initialize watermark functions class and host pinned memory for fast GPU<->CPU transfers, or simple Eigen memory for CPU implementation
-	const int height = inputFormatCtx->streams[videoStreamIndex]->codecpar->height;
-	const int width = inputFormatCtx->streams[videoStreamIndex]->codecpar->width;
+	const int height = videoStream->codecpar->height;
+	const int width = videoStream->codecpar->width;
 	const auto watermarkObj = Utils::createWatermarkObject(height, width, inir.Get("paths", "watermark", ""), p, psnr);
 	//if CUDA HW decoder is used, allocate more pinned memory for YUV420 frames (3 planes: Y, U, V)
 	HostMemory<uint8_t> framePinned(useHwDecoder ? width * height * 3 / 2 : width * height);
@@ -241,8 +242,8 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 		//build the FFmpeg command
 		std::ostringstream ffmpegCmd;
 		ffmpegCmd << "ffmpeg -y -f rawvideo -pix_fmt yuv420p " << "-s " << width << "x" << height
-			<< " -r " << getFrameRate(inputFormatCtx.get(), videoStreamIndex) << " -i - -i \"" << videoFile << "\" " << ffmpegOptions
-			<< " -c:s copy -c:a copy -map 1:s? -map 0:v -map 1:a? -max_interleave_delta 0 \"" << makeWatermarkVideoPath << "\"";
+			<< " -r " << getFrameRate(videoStream) << " -i - -i \"" << videoFile << "\" " << ffmpegOptions
+			<< " -c:s copy -c:a copy -map 1:s? -map 0:v -map 1:a? -max_interleave_delta 0 " << getStreamRotation(videoStream) << "\"" << makeWatermarkVideoPath << "\"";
 		cout << info("\nFFmpeg encode command: " + ffmpegCmd.str() + "\n\n");
 
 		//open FFmpeg process (with pipe) for writing

@@ -55,8 +55,9 @@ namespace video_utils
 	AVCodecContextPtr openDecoder(const AVCodecParameters* inputCodecParams, const std::string& userHwDecoder, bool& useHwDecoder);
 	AVCodecContextPtr openSoftwareDecoder(const AVCodecParameters* inputCodecParams);
 	bool checkPixelFormatSupport(const std::span<const AVPixelFormat> supportedFormats, const AVPixelFormat format);
-	std::string getFrameRate(const AVFormatContext* inputFormatCtx, const int videoStreamIndex);
+	std::string getFrameRate(const AVStream *st);
 	void embedWatermark(VideoProcessingContext& data, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe);
+	std::string getStreamRotation(const AVStream* st);
 	int findVideoStream(const AVFormatContext* inputFormatCtx);
 	void detectWatermark(VideoProcessingContext& data, int& framesCount, const AVFrame* frame);
 	void embedAndWriteFrame(VideoProcessingContext& data, const BufferType& buffer, const int elements, FILE* ffmpegPipe);

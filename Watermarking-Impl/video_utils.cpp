@@ -4,6 +4,7 @@
 #include "videoprocessingcontext.hpp"
 #include "WatermarkBase.hpp"
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -27,9 +28,11 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include "libavcodec/codec_par.h"
+#include "libavcodec/packet.h"
 #include "libavutil/frame.h"
 #include "libavutil/avutil.h"
 #include "libavcodec/codec.h"
+#include "libavutil/display.h"
 #include "libavutil/rational.h"
 #include "libavutil/pixfmt.h"
 }
@@ -223,6 +226,30 @@ namespace video_utils
 		return -1;
 	}
 
+	//get the rotation angle of the video stream (if any) to apply as a filter in the encoder
+	string getStreamRotation(const AVStream* st)
+	{
+		if (!st || !st->codecpar)
+			return "";
+		for (int i = 0; i < st->codecpar->nb_coded_side_data; i++)
+		{
+			const AVPacketSideData& sd = st->codecpar->coded_side_data[i];
+			if (sd.type == AV_PKT_DATA_DISPLAYMATRIX && sd.data && sd.size >= 9 * sizeof(int32_t)) 
+			{
+				double rot = -av_display_rotation_get(reinterpret_cast<const int32_t*>(sd.data));
+				const int angle = (static_cast<int>(std::lrint(rot)) + 360) % 360; //normalize to [0, 360)
+				switch (angle)
+				{
+					case 90:  return "-vf \"transpose=1\" ";
+					case 180: return "-vf \"hflip,vflip\" ";
+					case 270: return "-vf \"transpose=2\" ";
+					default:  return "";
+				}
+			}
+		}
+		return "";
+	}
+
 	//if CUDA, try to open hw decoder (if requested), else fallback to open software decoder context for video
 	//otherwise, just open software decoder
 	AVCodecContextPtr openDecoder(const AVCodecParameters* inputCodecParams, const string& userHwDecoder, bool& useHwDecoder)
@@ -268,9 +295,9 @@ namespace video_utils
 	}
 
 	//get the input video FPS (average)
-	string getFrameRate(const AVFormatContext* inputFormatCtx, const int videoStreamIndex)
+	string getFrameRate(const AVStream* st)
 	{
-		const AVRational frameRate = inputFormatCtx->streams[videoStreamIndex]->avg_frame_rate;
+		const AVRational frameRate = st->avg_frame_rate;
 		return std::format("{:.3f}", static_cast<float>(frameRate.num) / frameRate.den);
 	}
 
