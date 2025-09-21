@@ -56,9 +56,11 @@ namespace video_utils
 	AVCodecContextPtr openSoftwareDecoder(const AVCodecParameters* inputCodecParams);
 	bool checkPixelFormatSupport(const std::span<const AVPixelFormat> supportedFormats, const AVPixelFormat format);
 	std::string getFrameRate(const AVStream *st);
-	void embedWatermark(VideoProcessingContext& data, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe);
+	std::string getPixFmt(const AVStream* st);
 	std::string getStreamRotation(const AVStream* st);
+	std::string getColorRange(const AVStream* st);
 	int findVideoStream(const AVFormatContext* inputFormatCtx);
+	void embedWatermark(VideoProcessingContext& data, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe);
 	void detectWatermark(VideoProcessingContext& data, int& framesCount, const AVFrame* frame);
 	void embedAndWriteFrame(VideoProcessingContext& data, const BufferType& buffer, const int elements, FILE* ffmpegPipe);
 	void processAndWriteYPlane(const bool embedWatermark, const AVFrame* frame, VideoProcessingContext& data, FILE* ffmpegPipe);
@@ -66,7 +68,7 @@ namespace video_utils
 	int videoDispatcher(VideoProcessingContext& data, const bool useHwDecoder, const VideoOp op, FILE* ffmpegPipe = nullptr);
 
 	//main frames loop logic for video watermark embedding and detection
-	template<bool HW_ACCEL = false, typename Func>
+	template<typename Func>
 	int processFrames(const VideoProcessingContext& data, Func&& processFrame)
 	{
 		const AVPacketPtr packet(av_packet_alloc());

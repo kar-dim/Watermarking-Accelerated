@@ -241,9 +241,10 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 		const string ffmpegOptions = inir.Get("parameters_video", "encode_options", "-c:v libx265 -preset fast -crf 23");
 		//build the FFmpeg command
 		std::ostringstream ffmpegCmd;
-		ffmpegCmd << "ffmpeg -y -f rawvideo -pix_fmt yuv420p " << "-s " << width << "x" << height
+		ffmpegCmd << "ffmpeg -y -f rawvideo "<< getPixFmt(videoStream) << "-s " << width << "x" << height
 			<< " -r " << getFrameRate(videoStream) << " -i - -i \"" << videoFile << "\" " << ffmpegOptions
-			<< " -c:s copy -c:a copy -map 1:s? -map 0:v -map 1:a? -max_interleave_delta 0 " << getStreamRotation(videoStream) << "\"" << makeWatermarkVideoPath << "\"";
+			<< " -c:s copy -c:a copy -map 1:s? -map 0:v -map 1:a? -max_interleave_delta 0 " 
+			<< getStreamRotation(videoStream) << getColorRange(videoStream) << "\"" << makeWatermarkVideoPath << "\"";
 		cout << info("\nFFmpeg encode command: " + ffmpegCmd.str() + "\n\n");
 
 		//open FFmpeg process (with pipe) for writing
