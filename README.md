@@ -68,7 +68,9 @@ The application should be parameterized from the corresponding ```settings.ini``
 
 The following FFmpeg command is used to encode a new video while preserving the original input's metadata, subtitles, and audio tracks. It decodes the input video, embeds the watermark, and passes the resulting frames into standard input (stdin) for encoding, while copying audio/subtitles from the original input file as is. You can customize **video codec** encoding settings (codec, CRF, presets, etc) via the ```encode_options``` option as described above.
 ```
-ffmpeg -y -f rawvideo -pix_fmt yuv420p -s <width>x<height>
+ffmpeg -y -f rawvideo
+  -pix_fmt <fmt>
+  -s <width>x<height>
   -r <frame_rate>
   -i -
   -i <input_video_file>
@@ -76,11 +78,13 @@ ffmpeg -y -f rawvideo -pix_fmt yuv420p -s <width>x<height>
   -c:s copy -c:a copy
   -map 1:s? -map 0:v -map 1:a?
   -max_interleave_delta 0
+  -vf "<rotation>" (OPTIONAL)
+  -color_range:v:0 <range>
   <output_file>
 ```
 
 ### Explanation:
-- `-f rawvideo -pix_fmt yuv420p`: Specifies raw pixel format for input.
+- `-f rawvideo -pix_fmt <fmt>`: Specifies raw pixel format, either ```yuv420p``` or ```yuvj420p``` (limited or full range, extracted from the input).
 - `-s <width>x<height>`: Specifies frame size (extracted from the input).
 - `-r <frame_rate>`: Frame rate of the video (extracted from the input).
 - `-i -`: Accepts raw video from stdin.
@@ -89,6 +93,8 @@ ffmpeg -y -f rawvideo -pix_fmt yuv420p -s <width>x<height>
 - `-c:s copy -c:a copy`: Copies subtitle and audio streams without re-encoding.
 - `-map 1:s? -map 0:v -map 1:a?`: Maps subtitles/audio from the original input, and video from stdin.
 - `-max_interleave_delta 0`: Reduces potential interleaving delay issues.
+- `vf "<rotation>"`: Filter to be applied for rotating the output video (optional, may not be set, extracted from the input).
+- `-color_range:v:0 <range>`: Sets the output color range metadata to help video players (value of "tv" or "pc" is supplied, extracted from the input).
 - `<output_file>`: **USER SUPPLIED**: Output file path for the final video.
 
 **NOTES:** 
