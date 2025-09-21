@@ -236,8 +236,8 @@ namespace video_utils
 			const AVPacketSideData& sd = st->codecpar->coded_side_data[i];
 			if (sd.type == AV_PKT_DATA_DISPLAYMATRIX && sd.data && sd.size >= 9 * sizeof(int32_t)) 
 			{
-				double rot = -av_display_rotation_get(reinterpret_cast<const int32_t*>(sd.data));
-				const int angle = (static_cast<int>(std::lrint(rot)) + 360) % 360; //normalize to [0, 360)
+				const double rotation = -av_display_rotation_get(reinterpret_cast<const int32_t*>(sd.data));
+				const int angle = (static_cast<int>(std::lrint(rotation)) + 360) % 360; //normalize to [0, 360)
 				switch (angle)
 				{
 					case 90:  return "-vf \"transpose=1\" ";
