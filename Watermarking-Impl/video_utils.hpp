@@ -1,5 +1,6 @@
 #pragma once
 
+#include "buffer.hpp"
 #include "videoprocessingcontext.hpp"
 #include <cerrno>
 #include <cstdint>
