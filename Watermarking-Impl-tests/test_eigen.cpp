@@ -2,7 +2,6 @@
 
 #include "buffer.hpp"
 #include "cimg_init.h"
-#include "Constants.hpp"
 #include "eigen_utils.hpp"
 #include "FileDeleter.h"
 #include "MaskDiskConfig.h"
@@ -21,18 +20,18 @@ using namespace Eigen;
 
 using std::cout;
 using std::string;
+
 /*!
  *  \brief  Main Test class used for testing watermarking algorithms
  *  \author Dimitris Karatzas
  */
-
 class EigenFixture : public CommonFixture
 {
 protected:
 
     void SetUp() override 
     {
-		CommonFixture::SetUp();
+        CommonFixture::SetUp();
         watermarkObj = Utils::createWatermarkObject(static_cast<unsigned int>(image.getGray().rows()), static_cast<unsigned int>(image.getGray().cols()), watermarkPath, p, psnr);
     }
 
@@ -46,7 +45,7 @@ protected:
         float strength = 0.0f;
         BufferType watermarkedImage(eigen_utils::makeEigenRGB(image.getGray().rows(), image.getGray().cols()));
         embedWatermark(watermarkedImage, strength, maskType);
-        return eigen_utils::eigenRgbToGray(watermarkedImage.getRGB(), Constants::rPercent, Constants::gPercent, Constants::bPercent);
+        return Utils::rgb2gray(watermarkedImage);
     }
 
     void calculateMSE(const BufferType& diskRgb, const BufferType& watermark) override

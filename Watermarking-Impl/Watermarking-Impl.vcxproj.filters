@@ -75,12 +75,12 @@
     <ClCompile Include="eigen_utils.cpp">
       <Filter>Source Files\eigen</Filter>
     </ClCompile>
-    <ClCompile Include="utils.cpp">
-      <Filter>Source Files\util</Filter>
-    </ClCompile>
-    <ClCompile Include="video_utils.cpp">
-      <Filter>Source Files\util</Filter>
-    </ClCompile>
+	<ClCompile Include="utils.cpp">
+		<Filter>Source Files\util</Filter>
+	</ClCompile>
+	<ClCompile Include="video_utils.cpp">
+		<Filter>Source Files\util</Filter>
+	</ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="utils.hpp">
@@ -139,9 +139,6 @@
     </ClInclude>
     <ClInclude Include="kernels\kernels.hpp">
       <Filter>Header Files\opencl</Filter>
-    </ClInclude>
-    <ClInclude Include="Constants.hpp">
-      <Filter>Header Files\util</Filter>
     </ClInclude>
     <ClInclude Include="HostMemory.hpp">
       <Filter>Header Files\util</Filter>

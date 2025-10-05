@@ -64,11 +64,6 @@ namespace eigen_utils
 		return output;
 	}
 
-	ArrayXXf eigenRgbToGray(const EigenArrayRGB& arrayRgb, const float rWeight, const float gWeight, const float bWeight)
-	{
-		return (arrayRgb[0] * rWeight) + (arrayRgb[1] * gWeight) + (arrayRgb[2] * bWeight);
-	}
-
 	//sets the number of OpenMP (watermarking) threads based on physical cores
 	//it is used only for video embedding, to improve performance by reducing
 	//context switching between openmp and ffmpeg's threads

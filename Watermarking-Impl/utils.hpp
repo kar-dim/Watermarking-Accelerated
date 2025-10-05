@@ -31,6 +31,7 @@ public:
 	//helper method to calculate execution time in FPS or in seconds
 	static std::string formatExecutionTime(const bool showFps, const double seconds);
 	static void loadImage(BufferType& rgbImage, BufferType& image, const std::string& imageFile, std::optional<BufferAlphaType>& alphaChannel);
+	static BufferType rgb2gray(const BufferType& rgbImage);
 
 	template <typename Func>
 	static double executionTime(Func&& func, const int loops = 1)

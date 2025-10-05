@@ -1,5 +1,4 @@
 #include "buffer.hpp"
-#include "Constants.hpp"
 #include "utils.hpp"
 #include "WatermarkBase.hpp"
 #include <format>
@@ -99,7 +98,7 @@ void Utils::loadImage(BufferType& rgbImage, BufferType& image, const string& ima
 		alphaChannel.emplace(rgbImage(af::span, af::span, 3));
 		rgbImage = rgbImage(af::span, af::span, af::seq(0, 2)) * (af::tile(*alphaChannel, 1, 1, 3) != 0);
 	}
-	image = af::rgb2gray(rgbImage, Constants::rPercent, Constants::gPercent, Constants::bPercent);
+	image = rgb2gray(rgbImage);
 	af::sync();
 		
 #elif defined(_USE_EIGEN_)
@@ -116,6 +115,16 @@ void Utils::loadImage(BufferType& rgbImage, BufferType& image, const string& ima
 	}
 	else
 		rgbImage = eigen_utils::cimgToEigenRgb(cimgRgb);
-	image = eigen_utils::eigenRgbToGray(rgbImage.getRGB(), Constants::rPercent, Constants::gPercent, Constants::bPercent);
+	image = rgb2gray(rgbImage);
+#endif
+}
+
+BufferType Utils::rgb2gray(const BufferType& rgbImage)
+{
+#if defined(_USE_GPU_)
+	return af::rgb2gray(rgbImage, rPercent, gPercent, bPercent);
+#elif defined(_USE_EIGEN_)
+	const auto& rgb = rgbImage.getRGB();
+	return ((rgb[0] * rPercent) + (rgb[1] * gPercent) + (rgb[2] * bPercent)).eval();
 #endif
 }

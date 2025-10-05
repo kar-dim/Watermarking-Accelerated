@@ -1,7 +1,6 @@
 ﻿#include "gtest/gtest.h"
 
 #include "buffer.hpp"
-#include "Constants.hpp"
 #include "MaskDiskConfig.h"
 #include "test_common.hpp"
 #include "utils.hpp"
@@ -52,7 +51,7 @@ protected:
     {
         float strength = 0.0f;
         BufferType watermarkedImage;
-        return af::rgb2gray(embedWatermark(watermarkedImage, strength, maskType), Constants::rPercent, Constants::gPercent, Constants::bPercent);
+        return Utils::rgb2gray(embedWatermark(watermarkedImage, strength, maskType));
     }
 
     void calculateMSE(const BufferType& diskRgb, const BufferType& watermark) override

@@ -7,7 +7,6 @@
 #include <omp.h>
 #endif
 #include "buffer.hpp"
-#include "Constants.hpp"
 #include "HostMemory.hpp"
 #include "utils.hpp"
 #include "VideoProcessingContext.hpp"
@@ -163,14 +162,14 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 	cout << std::format("Watermark strength (parameter a): {}\nCalculation of ME mask with {} rows and {} columns and parameters:\np = {}  PSNR(dB) = {}\n{}\n\n", watermarkStrength, rows, cols, p, psnr, Utils::formatExecutionTime(showFps, secs / loops));
 
 #if defined(_USE_GPU_)
-	const BufferType watermarkedNVFgray = af::rgb2gray(watermarkNVF, Constants::rPercent, Constants::gPercent, Constants::bPercent);
-	const BufferType watermarkedMEgray = af::rgb2gray(watermarkME, Constants::rPercent, Constants::gPercent, Constants::bPercent);
+	const BufferType watermarkedNVFgray = Utils::rgb2gray(watermarkNVF);
+	const BufferType watermarkedMEgray = Utils::rgb2gray(watermarkME);
 	//warmup for arrayfire
 	watermarkObj->detectWatermark(watermarkedNVFgray, NVF);
 	watermarkObj->detectWatermark(watermarkedMEgray, ME);
 #elif defined(_USE_EIGEN_)
-	const BufferType watermarkedNVFgray(eigen_utils::eigenRgbToGray(watermarkNVF.getRGB(), Constants::rPercent, Constants::gPercent, Constants::bPercent));
-	const BufferType watermarkedMEgray(eigen_utils::eigenRgbToGray(watermarkME.getRGB(), Constants::rPercent, Constants::gPercent, Constants::bPercent));
+	const BufferType watermarkedNVFgray(Utils::rgb2gray(watermarkNVF));
+	const BufferType watermarkedMEgray(Utils::rgb2gray(watermarkME));
 #endif
 
 	float correlationNvf, correlationMe;
