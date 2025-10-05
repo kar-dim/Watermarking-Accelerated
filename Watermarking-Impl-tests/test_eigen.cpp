@@ -2,7 +2,7 @@
 
 #include "buffer.hpp"
 #include "cimg_init.h"
-#include "constants.h"
+#include "Constants.hpp"
 #include "eigen_utils.hpp"
 #include "FileDeleter.h"
 #include "MaskDiskConfig.h"

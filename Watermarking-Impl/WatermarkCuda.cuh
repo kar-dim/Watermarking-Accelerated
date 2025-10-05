@@ -1,6 +1,6 @@
 #pragma once
-#include "cuda_stream_manager.hpp"
 #include "cuda_utils.hpp"
+#include "CudaStreamManager.hpp"
 #include "kernels/kernels.cuh"
 #include "WatermarkBase.hpp"
 #include "WatermarkGpu.hpp"

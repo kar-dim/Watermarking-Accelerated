@@ -1,7 +1,7 @@
 #include "buffer.hpp"
 #include "utils.hpp"
 #include "video_utils.hpp"
-#include "videoprocessingcontext.hpp"
+#include "VideoProcessingContext.hpp"
 #include "WatermarkBase.hpp"
 #include <algorithm>
 #include <cmath>
@@ -15,8 +15,7 @@
 
 #if defined(_USE_CUDA_)
 #include "cuda_utils.hpp"
-#include "cuda_stream_manager.hpp"
-#include <cuda_runtime.h>
+#include "CudaStreamManager.hpp"
 extern "C" {
 #include "libavutil/buffer.h"
 #include "libavutil/hwcontext.h"

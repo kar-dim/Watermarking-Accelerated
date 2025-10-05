@@ -263,11 +263,6 @@ xcopy "$(ProjectDir)libs\ffmpeg\bin\ffmpeg.exe" "$(OutDir)" /y /D</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <CudaCompile Include="cuda_stream_manager.cu">
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='OPENCL_Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='EIGEN_Release|x64'">true</ExcludedFromBuild>
-      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='EIGEN_Debug|x64'">true</ExcludedFromBuild>
-    </CudaCompile>
     <CudaCompile Include="kernels\kernels.cu">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='OPENCL_Release|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='EIGEN_Release|x64'">true</ExcludedFromBuild>
@@ -313,8 +308,8 @@ xcopy "$(ProjectDir)libs\ffmpeg\bin\ffmpeg.exe" "$(OutDir)" /y /D</Command>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='CUDA_Debug|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='CUDA_Release|x64'">true</ExcludedFromBuild>
     </ClInclude>
-    <ClInclude Include="constants.h" />
-    <ClInclude Include="cuda_stream_manager.hpp">
+    <ClInclude Include="Constants.hpp" />
+    <ClInclude Include="CudaStreamManager.hpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='EIGEN_Debug|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='EIGEN_Release|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='OPENCL_Release|x64'">true</ExcludedFromBuild>
@@ -339,7 +334,7 @@ xcopy "$(ProjectDir)libs\ffmpeg\bin\ffmpeg.exe" "$(OutDir)" /y /D</Command>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='CUDA_Release|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='CUDA_Debug|x64'">true</ExcludedFromBuild>
     </ClInclude>
-    <ClInclude Include="host_memory.h" />
+    <ClInclude Include="HostMemory.hpp" />
     <ClInclude Include="kernels\kernels.cuh">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='OPENCL_Release|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='EIGEN_Debug|x64'">true</ExcludedFromBuild>
@@ -369,7 +364,7 @@ xcopy "$(ProjectDir)libs\ffmpeg\bin\ffmpeg.exe" "$(OutDir)" /y /D</Command>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='OPENCL_Release|x64'">true</ExcludedFromBuild>
     </ClInclude>
     <ClInclude Include="utils.hpp" />
-    <ClInclude Include="videoprocessingcontext.hpp" />
+    <ClInclude Include="VideoProcessingContext.hpp" />
     <ClInclude Include="video_utils.hpp" />
     <ClInclude Include="WatermarkCuda.cuh">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='OPENCL_Release|x64'">true</ExcludedFromBuild>

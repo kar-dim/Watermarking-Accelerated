@@ -7,14 +7,9 @@
     <CudaCompile Include="cuda_utils.cu">
       <Filter>Source Files\cuda</Filter>
     </CudaCompile>
-    <ClInclude Include="cuda_stream_manager.hpp">
+    <ClInclude Include="CudaStreamManager.hpp">
       <Filter>Header Files\cuda</Filter>
     </ClInclude>
-    <CudaCompile Include="cuda_stream_manager.cu">
-      <Filter>Source Files\cuda</Filter>
-    </CudaCompile>
-    <CudaCompile Include="video_utils.cpp" />
-	<CudaCompile Include="utils.cpp" />
   </ItemGroup>
   <ItemGroup>
     <CudaCompile Include="video_utils.cpp" Condition="'$(Configuration)|$(Platform)'=='CUDA_Debug|x64' Or '$(Configuration)|$(Platform)'=='CUDA_Release|x64'">
@@ -23,7 +18,7 @@
     <ClCompile Include="video_utils.cpp" Condition="'$(Configuration)|$(Platform)'=='OPENCL_Release|x64' Or '$(Configuration)|$(Platform)'=='EIGEN_Debug|x64' Or '$(Configuration)|$(Platform)'=='EIGEN_Release|x64'">
       <Filter>Source Files\util</Filter>
     </ClCompile>
-	<CudaCompile Include="utils.cpp" Condition="'$(Configuration)|$(Platform)'=='CUDA_Debug|x64' Or '$(Configuration)|$(Platform)'=='CUDA_Release|x64'">
+    <CudaCompile Include="utils.cpp" Condition="'$(Configuration)|$(Platform)'=='CUDA_Debug|x64' Or '$(Configuration)|$(Platform)'=='CUDA_Release|x64'">
       <Filter>Source Files\util</Filter>
     </CudaCompile>
     <ClCompile Include="utils.cpp" Condition="'$(Configuration)|$(Platform)'=='OPENCL_Release|x64' Or '$(Configuration)|$(Platform)'=='EIGEN_Debug|x64' Or '$(Configuration)|$(Platform)'=='EIGEN_Release|x64'">
@@ -80,6 +75,8 @@
     <ClCompile Include="eigen_utils.cpp">
       <Filter>Source Files\eigen</Filter>
     </ClCompile>
+    <ClCompile Include="utils.cpp" />
+    <ClCompile Include="video_utils.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="utils.hpp">
@@ -91,7 +88,7 @@
     <ClInclude Include="WatermarkCuda.cuh">
       <Filter>Header Files\cuda</Filter>
     </ClInclude>
-    <ClInclude Include="videoprocessingcontext.hpp">
+    <ClInclude Include="VideoProcessingContext.hpp">
       <Filter>Header Files\util</Filter>
     </ClInclude>
     <ClInclude Include="opencl_init.h">
@@ -139,10 +136,10 @@
     <ClInclude Include="kernels\kernels.hpp">
       <Filter>Header Files\opencl</Filter>
     </ClInclude>
-    <ClInclude Include="constants.h">
+    <ClInclude Include="Constants.hpp">
       <Filter>Header Files\util</Filter>
     </ClInclude>
-    <ClInclude Include="host_memory.h">
+    <ClInclude Include="HostMemory.hpp">
       <Filter>Header Files\util</Filter>
     </ClInclude>
   </ItemGroup>

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "buffer.hpp"
-#include "videoprocessingcontext.hpp"
+#include "VideoProcessingContext.hpp"
 #include <cerrno>
 #include <cstdint>
 #include <cstdio>

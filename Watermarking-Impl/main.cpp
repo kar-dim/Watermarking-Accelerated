@@ -7,10 +7,10 @@
 #include <omp.h>
 #endif
 #include "buffer.hpp"
-#include "constants.h"
-#include "host_memory.h"
+#include "Constants.hpp"
+#include "HostMemory.hpp"
 #include "utils.hpp"
-#include "videoprocessingcontext.hpp"
+#include "VideoProcessingContext.hpp"
 #include "video_utils.hpp"
 #include "WatermarkBase.hpp"
 #include <algorithm>
