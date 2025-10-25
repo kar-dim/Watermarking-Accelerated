@@ -38,6 +38,7 @@ void Utils::saveImage(const string& imagePath, const string& suffix, const Buffe
 	if (extension == "png")  rgbCimg.save_png(watermarkedFile.c_str());
 	else if (extension == "bmp")  rgbCimg.save_bmp(watermarkedFile.c_str());
 	else if (extension == "jpg" || extension == "jpeg") rgbCimg.save_jpeg(watermarkedFile.c_str());
+	else if (extension == "webp") rgbCimg.save_webp(watermarkedFile.c_str());
 	else
 		throw std::runtime_error("Unsupported image format: " + extension);
 #elif defined(_USE_GPU_)
