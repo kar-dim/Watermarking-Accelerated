@@ -26,9 +26,7 @@ namespace eigen_utils
 			for (int x = 0; x < cols; ++x)
 			{
 				for (int channel = 0; channel < 3; channel++)
-				{
 					output(x, y, 0, channel) = arrayRgb[channel](y, x);
-				}
 				if (channels == 4)
 					output(x, y, 0, 3) = (*alphaChannel)(x, y);
 			}
@@ -58,8 +56,8 @@ namespace eigen_utils
 		const int cols = rgbImage.width();
 		EigenArrayRGB output = { ArrayXXf(rows,cols), ArrayXXf(rows,cols), ArrayXXf(rows, cols) };
 	#pragma omp parallel for
-		for (int x = 0; x < rgbImage.width(); x++)
-			for (int y = 0; y < rgbImage.height(); y++)
+		for (int x = 0; x < cols; x++)
+			for (int y = 0; y < rows; y++)
 				for (int channel = 0; channel < 3; channel++)
 					output[channel](y, x) = rgbImage(x, y, 0, channel);
 		return output;
