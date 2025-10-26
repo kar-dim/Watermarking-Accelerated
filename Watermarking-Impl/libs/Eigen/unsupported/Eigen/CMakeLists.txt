@@ -1,31 +1,3 @@
-set(Eigen_HEADERS
-  AdolcForward
-  AlignedVector3
-  ArpackSupport
-  AutoDiff
-  BVH
-  EulerAngles
-  FFT
-  IterativeSolvers
-  KroneckerProduct
-  LevenbergMarquardt
-  MatrixFunctions
-  MPRealSupport
-  NNLS
-  NonLinearOptimization
-  NumericalDiff
-  OpenGLSupport
-  Polynomials
-  SparseExtra
-  SpecialFunctions
-  Splines
-  )
-
-install(FILES
-  ${Eigen_HEADERS}
-  DESTINATION ${INCLUDE_INSTALL_DIR}/unsupported/Eigen COMPONENT Devel
-  )
-
-install(DIRECTORY src DESTINATION ${INCLUDE_INSTALL_DIR}/unsupported/Eigen COMPONENT Devel FILES_MATCHING PATTERN "*.h")
-
-add_subdirectory(CXX11)
+version https://git-lfs.github.com/spec/v1
+oid sha256:d809454e8e70a5c8cbd7e979c6a1897f273f2a87069a95cdcf7ae95365978cc9
+size 576

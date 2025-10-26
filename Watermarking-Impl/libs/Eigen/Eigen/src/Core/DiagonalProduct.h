@@ -1,30 +1,3 @@
-// This file is part of Eigen, a lightweight C++ template library
-// for linear algebra.
-//
-// Copyright (C) 2008 Gael Guennebaud <gael.guennebaud@inria.fr>
-// Copyright (C) 2007-2009 Benoit Jacob <jacob.benoit.1@gmail.com>
-//
-// This Source Code Form is subject to the terms of the Mozilla
-// Public License v. 2.0. If a copy of the MPL was not distributed
-// with this file, You can obtain one at http://mozilla.org/MPL/2.0/.
-
-#ifndef EIGEN_DIAGONALPRODUCT_H
-#define EIGEN_DIAGONALPRODUCT_H
-
-// IWYU pragma: private
-#include "./InternalHeaderCheck.h"
-
-namespace Eigen {
-
-/** \returns the diagonal matrix product of \c *this by the diagonal matrix \a diagonal.
- */
-template <typename Derived>
-template <typename DiagonalDerived>
-EIGEN_DEVICE_FUNC inline const Product<Derived, DiagonalDerived, LazyProduct> MatrixBase<Derived>::operator*(
-    const DiagonalBase<DiagonalDerived> &a_diagonal) const {
-  return Product<Derived, DiagonalDerived, LazyProduct>(derived(), a_diagonal.derived());
-}
-
-}  // end namespace Eigen
-
-#endif  // EIGEN_DIAGONALPRODUCT_H
+version https://git-lfs.github.com/spec/v1
+oid sha256:f5a6596cb5f29e9238a052412210b4ac6ca1d107469ac7f5df6f13edfa1a3eff
+size 1056

@@ -1,11 +1,3 @@
-add_subdirectory(Eigen)
-if(EIGEN_BUILD_DOC)
-  add_subdirectory(doc EXCLUDE_FROM_ALL)
-endif()
-if(EIGEN_BUILD_TESTING)
-  if(EIGEN_LEAVE_TEST_IN_ALL_TARGET)
-    add_subdirectory(test) # CTest automatic test building relies on the "all" target.
-  else()
-    add_subdirectory(test EXCLUDE_FROM_ALL)
-  endif()
-endif()
+version https://git-lfs.github.com/spec/v1
+oid sha256:e83664d3ac7f70fd82c4250fa5cb6c83f4530a8d7931528e06b70d6a61df3686
+size 312

@@ -1,18 +1,3 @@
-// This file is part of Eigen, a lightweight C++ template library
-// for linear algebra.
-//
-// Copyright (C) 2009-2014 Gael Guennebaud <gael.guennebaud@inria.fr>
-//
-// This Source Code Form is subject to the terms of the Mozilla
-// Public License v. 2.0. If a copy of the MPL was not distributed
-// with this file, You can obtain one at http://mozilla.org/MPL/2.0/.
-
-#define SCALAR double
-#define SCALAR_SUFFIX d
-#define SCALAR_SUFFIX_UP "D"
-#define ISCOMPLEX 0
-
-#include "cholesky.inc"
-#include "lu.inc"
-#include "eigenvalues.inc"
-#include "svd.inc"
+version https://git-lfs.github.com/spec/v1
+oid sha256:e8b85fa8002dc72a215f7ebf6538e0b9ebde873e2a3a055002b8f80a5f842a0e
+size 551

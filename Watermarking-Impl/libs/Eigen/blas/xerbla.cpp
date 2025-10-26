@@ -1,18 +1,3 @@
-
-#include <stdio.h>
-
-#if (defined __GNUC__) && (!defined __MINGW32__) && (!defined __CYGWIN__)
-#define EIGEN_WEAK_LINKING __attribute__((weak))
-#else
-#define EIGEN_WEAK_LINKING
-#endif
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-EIGEN_WEAK_LINKING void xerbla_(const char *msg, int *info) { printf("Eigen BLAS ERROR #%i: %s\n", *info, msg); }
-
-#ifdef __cplusplus
-}
-#endif
+version https://git-lfs.github.com/spec/v1
+oid sha256:8e2a21802d1d0901baf0472ec01529f11b2cb56fe6edcbc8789f731cad106c51
+size 368

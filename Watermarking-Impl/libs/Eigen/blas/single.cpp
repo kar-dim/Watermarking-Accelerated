@@ -1,23 +1,3 @@
-// This file is part of Eigen, a lightweight C++ template library
-// for linear algebra.
-//
-// Copyright (C) 2009 Gael Guennebaud <gael.guennebaud@inria.fr>
-//
-// This Source Code Form is subject to the terms of the Mozilla
-// Public License v. 2.0. If a copy of the MPL was not distributed
-// with this file, You can obtain one at http://mozilla.org/MPL/2.0/.
-
-#define SCALAR float
-#define SCALAR_SUFFIX s
-#define SCALAR_SUFFIX_UP "S"
-#define ISCOMPLEX 0
-
-#include "level1_impl.h"
-#include "level1_real_impl.h"
-#include "level2_impl.h"
-#include "level2_real_impl.h"
-#include "level3_impl.h"
-
-float EIGEN_BLAS_FUNC_NAME(dsdot)(int* n, float* alpha, float* x, int* incx, float* y, int* incy) {
-  return double(*alpha) + BLASFUNC(dsdot)(n, x, incx, y, incy);
-}
+version https://git-lfs.github.com/spec/v1
+oid sha256:e8b55270e137341d54bbd048eae3ae626af0e6e32bccb52b73cc37a78a117d19
+size 759

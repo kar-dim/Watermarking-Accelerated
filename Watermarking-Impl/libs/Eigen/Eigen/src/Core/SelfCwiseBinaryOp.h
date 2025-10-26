@@ -1,36 +1,3 @@
-// This file is part of Eigen, a lightweight C++ template library
-// for linear algebra.
-//
-// Copyright (C) 2009-2010 Gael Guennebaud <gael.guennebaud@inria.fr>
-//
-// This Source Code Form is subject to the terms of the Mozilla
-// Public License v. 2.0. If a copy of the MPL was not distributed
-// with this file, You can obtain one at http://mozilla.org/MPL/2.0/.
-
-#ifndef EIGEN_SELFCWISEBINARYOP_H
-#define EIGEN_SELFCWISEBINARYOP_H
-
-// IWYU pragma: private
-#include "./InternalHeaderCheck.h"
-
-namespace Eigen {
-
-// TODO generalize the scalar type of 'other'
-
-template <typename Derived>
-EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE Derived& DenseBase<Derived>::operator*=(const Scalar& other) {
-  internal::call_assignment(this->derived(), PlainObject::Constant(rows(), cols(), other),
-                            internal::mul_assign_op<Scalar, Scalar>());
-  return derived();
-}
-
-template <typename Derived>
-EIGEN_DEVICE_FUNC EIGEN_STRONG_INLINE Derived& DenseBase<Derived>::operator/=(const Scalar& other) {
-  internal::call_assignment(this->derived(), PlainObject::Constant(rows(), cols(), other),
-                            internal::div_assign_op<Scalar, Scalar>());
-  return derived();
-}
-
-}  // end namespace Eigen
-
-#endif  // EIGEN_SELFCWISEBINARYOP_H
+version https://git-lfs.github.com/spec/v1
+oid sha256:719f6d8108b7725de0d3f4509ce36534b214131faba6ab92efcb097d348437e5
+size 1256

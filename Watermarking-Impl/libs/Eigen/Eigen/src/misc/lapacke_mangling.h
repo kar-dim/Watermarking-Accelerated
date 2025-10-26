@@ -1,16 +1,3 @@
-#ifndef LAPACK_HEADER_INCLUDED
-#define LAPACK_HEADER_INCLUDED
-
-#ifndef LAPACK_GLOBAL
-#if defined(LAPACK_GLOBAL_PATTERN_LC) || defined(ADD_)
-#define LAPACK_GLOBAL(lcname, UCNAME) lcname##_
-#elif defined(LAPACK_GLOBAL_PATTERN_UC) || defined(UPPER)
-#define LAPACK_GLOBAL(lcname, UCNAME) UCNAME
-#elif defined(LAPACK_GLOBAL_PATTERN_MC) || defined(NOCHANGE)
-#define LAPACK_GLOBAL(lcname, UCNAME) lcname
-#else
-#define LAPACK_GLOBAL(lcname, UCNAME) lcname##_
-#endif
-#endif
-
-#endif
+version https://git-lfs.github.com/spec/v1
+oid sha256:345062b779b6d1fe5c017e6973be459b3e9e4617cad5612d8adf2a584f3bb04b
+size 473

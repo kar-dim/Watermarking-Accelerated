@@ -1,6 +1,3 @@
-Eigen is primarily MPL2 licensed. See COPYING.MPL2 and these links:
-  http://www.mozilla.org/MPL/2.0/
-  http://www.mozilla.org/MPL/2.0/FAQ.html
-
-Some files contain third-party code under BSD or other MPL2-compatible licenses,
-whence the other COPYING.* files here.
+version https://git-lfs.github.com/spec/v1
+oid sha256:db640ff2bd90c6abd6a4d3fbb351e0ee4d555417cf840492054d1cbb2ea85644
+size 264

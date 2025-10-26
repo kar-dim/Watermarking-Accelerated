@@ -1,23 +1,3 @@
-// IWYU pragma: private
-#include "../../InternalHeaderCheck.h"
-
-namespace Eigen {
-namespace internal {
-
-#ifndef EIGEN_LSX_GEBP_NR
-#define EIGEN_LSX_GEBP_NR 8
-#endif
-
-template <>
-struct gebp_traits<float, float, false, false, Architecture::LSX, GEBPPacketFull>
-    : gebp_traits<float, float, false, false, Architecture::Generic, GEBPPacketFull> {
-  enum { nr = EIGEN_LSX_GEBP_NR };
-};
-
-template <>
-struct gebp_traits<double, double, false, false, Architecture::LSX, GEBPPacketFull>
-    : gebp_traits<double, double, false, false, Architecture::Generic, GEBPPacketFull> {
-  enum { nr = EIGEN_LSX_GEBP_NR };
-};
-}  // namespace internal
-}  // namespace Eigen
+version https://git-lfs.github.com/spec/v1
+oid sha256:e77adbf2e57fb8ba2d2ab276ae263eb1a5f20dd665d13bb3c6e55f9abecab6cb
+size 656

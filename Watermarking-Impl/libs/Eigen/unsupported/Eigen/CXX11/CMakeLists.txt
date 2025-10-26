@@ -1,8 +1,3 @@
-set(Eigen_CXX11_HEADERS Tensor TensorSymmetry ThreadPool)
-
-install(FILES
-  ${Eigen_CXX11_HEADERS}
-  DESTINATION ${INCLUDE_INSTALL_DIR}/unsupported/Eigen/CXX11 COMPONENT Devel
-  )
-
-install(DIRECTORY src DESTINATION ${INCLUDE_INSTALL_DIR}/unsupported/Eigen/CXX11 COMPONENT Devel FILES_MATCHING PATTERN "*.h")
+version https://git-lfs.github.com/spec/v1
+oid sha256:5d347202d0ecdb7152a5e89c8830568af2137b9c6066159c5f65ac7c0207955a
+size 307

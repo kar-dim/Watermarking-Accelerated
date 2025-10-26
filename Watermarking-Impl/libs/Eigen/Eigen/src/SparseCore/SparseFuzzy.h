@@ -1,31 +1,3 @@
-// This file is part of Eigen, a lightweight C++ template library
-// for linear algebra.
-//
-// Copyright (C) 2008-2014 Gael Guennebaud <gael.guennebaud@inria.fr>
-//
-// This Source Code Form is subject to the terms of the Mozilla
-// Public License v. 2.0. If a copy of the MPL was not distributed
-// with this file, You can obtain one at http://mozilla.org/MPL/2.0/.
-
-#ifndef EIGEN_SPARSE_FUZZY_H
-#define EIGEN_SPARSE_FUZZY_H
-
-// IWYU pragma: private
-#include "./InternalHeaderCheck.h"
-
-namespace Eigen {
-
-template <typename Derived>
-template <typename OtherDerived>
-bool SparseMatrixBase<Derived>::isApprox(const SparseMatrixBase<OtherDerived>& other, const RealScalar& prec) const {
-  const typename internal::nested_eval<Derived, 2, PlainObject>::type actualA(derived());
-  std::conditional_t<bool(IsRowMajor) == bool(OtherDerived::IsRowMajor),
-                     const typename internal::nested_eval<OtherDerived, 2, PlainObject>::type, const PlainObject>
-      actualB(other.derived());
-
-  return (actualA - actualB).squaredNorm() <= prec * prec * numext::mini(actualA.squaredNorm(), actualB.squaredNorm());
-}
-
-}  // end namespace Eigen
-
-#endif  // EIGEN_SPARSE_FUZZY_H
+version https://git-lfs.github.com/spec/v1
+oid sha256:0d0572e7369c0ea5f4f97454df01d95cd07a89d8b7d9c7aa481508858e453ebb
+size 1176
