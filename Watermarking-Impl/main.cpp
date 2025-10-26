@@ -124,8 +124,8 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 #endif
 	cout << "Each test will be executed " << loops << " times. Average time will be shown below\n";
 	
-	BufferType rgbImage, image;
-	std::optional<BufferAlphaType> alphaChannel;
+	ImageBuffer rgbImage, image;
+	std::optional<AlphaBuffer> alphaChannel;
 	
 	//load image from disk into arrayfire (GPU), or CImg and copy from CImg object to Eigen arrays (CPU)
 	double secs = Utils::executionTime([&] { Utils::loadImage(rgbImage, image, imageFile, alphaChannel); });
@@ -145,13 +145,13 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 	const auto watermarkObj = Utils::createWatermarkObject(rows, cols, inir.Get("paths", "watermark", ""), p, psnr);
 
 #if defined(_USE_GPU_)
-	BufferType watermarkNVF, watermarkME;
+	ImageBuffer watermarkNVF, watermarkME;
 	//warmup for arrayfire
 	watermarkObj->makeWatermark(image, rgbImage, watermarkNVF, watermarkStrength, NVF);
 	watermarkObj->makeWatermark(image, rgbImage, watermarkME, watermarkStrength, ME);
 #elif defined(_USE_EIGEN_)
-	BufferType watermarkNVF(eigen_utils::makeEigenRGB(rows, cols));
-	BufferType watermarkME(eigen_utils::makeEigenRGB(rows, cols));
+	ImageBuffer watermarkNVF(eigen_utils::makeEigenRGB(rows, cols));
+	ImageBuffer watermarkME(eigen_utils::makeEigenRGB(rows, cols));
 #endif
 
 	//make NVF watermark
@@ -162,14 +162,14 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 	cout << std::format("Watermark strength (parameter a): {}\nCalculation of ME mask with {} rows and {} columns and parameters:\np = {}  PSNR(dB) = {}\n{}\n\n", watermarkStrength, rows, cols, p, psnr, Utils::formatExecutionTime(showFps, secs / loops));
 
 #if defined(_USE_GPU_)
-	const BufferType watermarkedNVFgray = Utils::rgb2gray(watermarkNVF);
-	const BufferType watermarkedMEgray = Utils::rgb2gray(watermarkME);
+	const ImageBuffer watermarkedNVFgray = Utils::rgb2gray(watermarkNVF);
+	const ImageBuffer watermarkedMEgray = Utils::rgb2gray(watermarkME);
 	//warmup for arrayfire
 	watermarkObj->detectWatermark(watermarkedNVFgray, NVF);
 	watermarkObj->detectWatermark(watermarkedMEgray, ME);
 #elif defined(_USE_EIGEN_)
-	const BufferType watermarkedNVFgray(Utils::rgb2gray(watermarkNVF));
-	const BufferType watermarkedMEgray(Utils::rgb2gray(watermarkME));
+	const ImageBuffer watermarkedNVFgray(Utils::rgb2gray(watermarkNVF));
+	const ImageBuffer watermarkedMEgray(Utils::rgb2gray(watermarkME));
 #endif
 
 	float correlationNvf, correlationMe;

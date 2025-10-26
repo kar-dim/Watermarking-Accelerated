@@ -28,7 +28,7 @@ string Utils::addSuffixBeforeExtension(const string& file, const string& suffix)
 	return file.substr(0, dot) + suffix + file.substr(dot);
 }
 
-void Utils::saveImage(const string& imagePath, const string& suffix, const BufferType& watermark, const std::optional<BufferAlphaType>& alphaChannel)
+void Utils::saveImage(const string& imagePath, const string& suffix, const ImageBuffer& watermark, const std::optional<AlphaBuffer>& alphaChannel)
 {
 #if defined(_USE_EIGEN_)
 	const string watermarkedFile = Utils::addSuffixBeforeExtension(imagePath, suffix);
@@ -45,7 +45,7 @@ void Utils::saveImage(const string& imagePath, const string& suffix, const Buffe
 	else
 		throw std::runtime_error("Unsupported image format: " + extension);
 #elif defined(_USE_GPU_)
-	const af::array& arrayToSave = alphaChannel.has_value() ? af::join(2, watermark, *alphaChannel).as(u8) : watermark.as(u8);
+	const ImageBuffer& arrayToSave = alphaChannel.has_value() ? af::join(2, watermark, *alphaChannel).as(u8) : watermark.as(u8);
 	af::saveImageNative(addSuffixBeforeExtension(imagePath, suffix).c_str(), arrayToSave);
 #endif
 }
@@ -90,7 +90,7 @@ string Utils::formatExecutionTime(const bool showFps, const double seconds)
 	return showFps ? std::format("FPS: {:.2f} FPS", 1.0 / seconds) : std::format("{:.6f} seconds", seconds);
 }
 
-void Utils::loadImage(BufferType& rgbImage, BufferType& image, const string& imageFile, std::optional<BufferAlphaType>& alphaChannel)
+void Utils::loadImage(ImageBuffer& rgbImage, ImageBuffer& image, const string& imageFile, std::optional<AlphaBuffer>& alphaChannel)
 {
 #if defined(_USE_GPU_)
 	rgbImage = af::loadImage(imageFile.c_str(), true);
@@ -123,7 +123,7 @@ void Utils::loadImage(BufferType& rgbImage, BufferType& image, const string& ima
 #endif
 }
 
-BufferType Utils::rgb2gray(const BufferType& rgbImage)
+ImageBuffer Utils::rgb2gray(const ImageBuffer& rgbImage)
 {
 #if defined(_USE_GPU_)
 	return af::rgb2gray(rgbImage, rPercent, gPercent, bPercent);

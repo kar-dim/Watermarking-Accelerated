@@ -76,10 +76,10 @@
       <Filter>Source Files\eigen</Filter>
     </ClCompile>
 	<ClCompile Include="utils.cpp">
-		<Filter>Source Files\util</Filter>
+	  <Filter>Source Files\util</Filter>
 	</ClCompile>
 	<ClCompile Include="video_utils.cpp">
-		<Filter>Source Files\util</Filter>
+	  <Filter>Source Files\util</Filter>
 	</ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -119,7 +119,7 @@
     <ClInclude Include="buffer.hpp">
       <Filter>Header Files\util</Filter>
     </ClInclude>
-    <ClInclude Include="EigenImage.hpp">
+    <ClInclude Include="ImageEigenBuffer.hpp">
       <Filter>Header Files\eigen</Filter>
     </ClInclude>
     <ClInclude Include="WatermarkGpu.hpp">

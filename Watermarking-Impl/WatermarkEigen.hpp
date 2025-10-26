@@ -33,7 +33,7 @@ public:
 	{ }
 
 	//main watermark embedding method
-	void makeWatermark(const BufferType& inputGrayImage, const BufferType& inputImage, BufferType& output, float& watermarkStrength, const MASK_TYPE maskType) override
+	void makeWatermark(const ImageBuffer& inputGrayImage, const ImageBuffer& inputImage, ImageBuffer& output, float& watermarkStrength, const MASK_TYPE maskType) override
 	{
 		computeStrengthenedWatermark(inputGrayImage.getGray(), watermarkStrength, maskType);
 		if (inputImage.isRGB())
@@ -47,7 +47,7 @@ public:
 	}
 
 	//main watermark detection method
-	float detectWatermark(const BufferType& inputImage, MASK_TYPE maskType) override
+	float detectWatermark(const ImageBuffer& inputImage, MASK_TYPE maskType) override
 	{
 		const auto& watermarkedBuffer = inputImage.getGray();
 		if (maskType == NVF)

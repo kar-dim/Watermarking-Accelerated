@@ -24,9 +24,9 @@ struct VideoProcessingContext
     const int watermarkInterval;
     //data host pointer and device/host buffers which are overwritten per frame
     uint8_t* hostFramePtr;
-    BufferType inputFrame;
-    BufferType watermarkedFrame;
-    GrayBuffer grayFrame;
+    ImageBuffer inputFrame;
+    ImageBuffer watermarkedFrame;
+    Gray8Buffer grayFrame;
 
     VideoProcessingContext(AVFormatContext* inputCtx, AVCodecContext* decoderCtx, const int streamIdx,
         WatermarkBase* watermark, const int h, const int w, const int interval, uint8_t* inputFrame)

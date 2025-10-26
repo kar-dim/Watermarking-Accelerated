@@ -8,66 +8,66 @@
  *  \brief  Holds either an Eigen array or Eigen RGB array by using std::variant. CPU implementation.
  *  \author Dimitris Karatzas
  */
-class EigenImage 
+class ImageEigenBuffer 
 {
 private:
     std::variant<std::monostate, Eigen::ArrayXXf, EigenArrayRGB> data;
 
 public:
-    EigenImage() = default;
+    ImageEigenBuffer() = default;
 
 	//move constructors
-    EigenImage(EigenImage&&) noexcept = default;
-    EigenImage(Eigen::ArrayXXf&& gray) noexcept
+    ImageEigenBuffer(ImageEigenBuffer&&) noexcept = default;
+    ImageEigenBuffer(Eigen::ArrayXXf&& gray) noexcept
         : data(std::move(gray))
     { }
 
-    EigenImage(EigenArrayRGB&& rgb) noexcept
+    ImageEigenBuffer(EigenArrayRGB&& rgb) noexcept
         : data(std::move(rgb))
     { }
 
 	//move assignment operators
-    EigenImage& operator=(EigenImage&& other) noexcept 
+    ImageEigenBuffer& operator=(ImageEigenBuffer&& other) noexcept 
     {
         data = std::move(other.data);
         return *this;
     };
 
-    EigenImage& operator=(Eigen::ArrayXXf&& gray) noexcept 
+    ImageEigenBuffer& operator=(Eigen::ArrayXXf&& gray) noexcept 
     {
         data = std::move(gray);
         return *this;
     };
 
-    EigenImage& operator=(EigenArrayRGB&& rgb) noexcept 
+    ImageEigenBuffer& operator=(EigenArrayRGB&& rgb) noexcept 
     {
         data = std::move(rgb);
         return *this;
     };
 
     //copy constructors
-    EigenImage(const EigenImage& other) : data(other.data)
+    ImageEigenBuffer(const ImageEigenBuffer& other) : data(other.data)
     { };
 
-    EigenImage(const Eigen::ArrayXXf& gray) : data(gray)
+    ImageEigenBuffer(const Eigen::ArrayXXf& gray) : data(gray)
     { };
 
-    EigenImage(const EigenArrayRGB& rgb) : data(rgb)
+    ImageEigenBuffer(const EigenArrayRGB& rgb) : data(rgb)
     { };
 
 	//copy assignment operators
-    EigenImage& operator=(const EigenImage& other) 
+    ImageEigenBuffer& operator=(const ImageEigenBuffer& other) 
     {
         data = other.data;
         return *this;
     }
-    EigenImage& operator=(const Eigen::ArrayXXf& gray) 
+    ImageEigenBuffer& operator=(const Eigen::ArrayXXf& gray) 
     {
         data = gray;
         return *this;
     };
 
-    EigenImage& operator=(const EigenArrayRGB& rgb) 
+    ImageEigenBuffer& operator=(const EigenArrayRGB& rgb) 
     {
         data = rgb;
         return *this;

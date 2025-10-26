@@ -19,13 +19,13 @@ public:
 		: WatermarkBase(rows, cols, randomMatrixPath, psnr)
 	{ }
 
-	WatermarkGPU<p>(const unsigned int rows, const unsigned int cols, const BufferType& randomMatrix, const float strengthFactor)
+	WatermarkGPU<p>(const unsigned int rows, const unsigned int cols, const ImageBuffer& randomMatrix, const float strengthFactor)
 		: WatermarkBase(rows, cols, randomMatrix, strengthFactor)
 	{ }
 
 	~WatermarkGPU<p>() override = default;
 
-	void makeWatermark(const BufferType& inputGrayImage, const BufferType& inputImage, BufferType& output, float& watermarkStrength, const MASK_TYPE maskType)
+	void makeWatermark(const ImageBuffer& inputGrayImage, const ImageBuffer& inputImage, ImageBuffer& output, float& watermarkStrength, const MASK_TYPE maskType)
 	{
 		af::array mask, inputErrorSequence, inputCoefficients;
 		if (maskType == ME)
@@ -47,7 +47,7 @@ public:
 		output = af::clamp(inputImage + (u * watermarkStrength), 0, 255);
 	}
 
-	float detectWatermark(const BufferType& inputImage, const MASK_TYPE maskType)
+	float detectWatermark(const ImageBuffer& inputImage, const MASK_TYPE maskType)
 	{
 		af::array mask, errorSequenceW, coefficients;
 		computePredictionErrorData(inputImage, errorSequenceW, coefficients, false);

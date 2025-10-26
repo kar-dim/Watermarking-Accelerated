@@ -18,8 +18,8 @@ protected:
     static constexpr int p = 3;
 
     std::unique_ptr<WatermarkBase> watermarkObj;
-    BufferType rgbImage, image;
-    std::optional<BufferAlphaType> alphaChannel;
+    ImageBuffer rgbImage, image;
+    std::optional<AlphaBuffer> alphaChannel;
     const std::string imageFile = "../../Watermarking-Impl/samples/images/4k.png";
     const std::string watermarkPath = "../../Watermarking-Impl/samples/w_4k.dat";
     inline static const std::vector<MaskDiskConfig> strategies =
@@ -48,12 +48,12 @@ protected:
             FileDeleter cleanup(strategy.outputFile);
     }
 
-    virtual BufferType embedAndConvertToGray(MASK_TYPE maskType) = 0;
+    virtual ImageBuffer embedAndConvertToGray(MASK_TYPE maskType) = 0;
 
-    virtual void calculateMSE(const BufferType& diskRgb, const BufferType& watermark) = 0;
+    virtual void calculateMSE(const ImageBuffer& diskRgb, const ImageBuffer& watermark) = 0;
 
     //helper method to embed watermark in the image (and check if it is successful based on watermark strength)
-    BufferType embedWatermark(BufferType& output, float& strength, MASK_TYPE maskType)
+    ImageBuffer embedWatermark(ImageBuffer& output, float& strength, MASK_TYPE maskType)
     {
         watermarkObj->makeWatermark(image, rgbImage, output, strength, maskType);
         EXPECT_GT(strength, 0.0f);
@@ -66,7 +66,7 @@ protected:
     }
 
 	//helper methhod to embed watermark for both mask types and check if the strength of ME is at least as strong as NVF
-    void testEmbedding(BufferType& output) 
+    void testEmbedding(ImageBuffer& output)
     {
         float strengthNvf = 0.0f, strengthMe = 0.0f;
         embedWatermark(output, strengthNvf, NVF);
@@ -77,13 +77,13 @@ protected:
     }
 
     //helper method to save the watermarked image to disk and check if it matches the expected MSE threshold
-    void testSaveToDisk(BufferType& watermark, MASK_TYPE mask, const std::string& label, const std::string& outputFileName)
+    void testSaveToDisk(ImageBuffer& watermark, MASK_TYPE mask, const std::string& label, const std::string& outputFileName)
     {
         float strength = 0.0f;
         embedWatermark(watermark, strength, mask);
         Utils::saveImage(imageFile, label, watermark, alphaChannel);
-        BufferType diskRgb, diskImage;
-        std::optional<BufferAlphaType> diskAlpha;
+        ImageBuffer diskRgb, diskImage;
+        std::optional<AlphaBuffer> diskAlpha;
         Utils::loadImage(diskRgb, diskImage, outputFileName, diskAlpha);
 		calculateMSE(diskRgb, watermark);
     }

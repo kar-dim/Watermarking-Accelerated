@@ -16,7 +16,7 @@ enum IMAGE_TYPE
  */
 namespace eigen_utils
 {
-	cimg_library::CImg<float> eigenRgbToCimg(const EigenArrayRGB& imageRgb, const std::optional<BufferAlphaType>& alphaChannel);
+	cimg_library::CImg<float> eigenRgbToCimg(const EigenArrayRGB& imageRgb, const std::optional<AlphaBuffer>& alphaChannel);
 	void cimgAlphaZero(cimg_library::CImg<float>& rgbImage, const cimg_library::CImg<float>& alphaChannel);
 	EigenArrayRGB cimgToEigenRgb(const cimg_library::CImg<float>& rgbImage);
 	void setThreadsToPhysicalCores();

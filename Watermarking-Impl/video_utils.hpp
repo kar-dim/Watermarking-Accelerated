@@ -69,7 +69,7 @@ namespace video_utils
 	int findVideoStream(const AVFormatContext* inputFormatCtx);
 	void embedWatermark(VideoProcessingContext& data, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe);
 	void detectWatermark(VideoProcessingContext& data, int& framesCount, const AVFrame* frame);
-	void embedAndWriteFrame(VideoProcessingContext& data, const BufferType& buffer, const int elements, FILE* ffmpegPipe);
+	void embedAndWriteFrame(VideoProcessingContext& data, const ImageBuffer& buffer, const int elements, FILE* ffmpegPipe);
 	void processAndWriteYPlane(const bool embedWatermark, const AVFrame* frame, VideoProcessingContext& data, FILE* ffmpegPipe);
 	void writeChromaPlanes(const AVFrame* frame, VideoProcessingContext& data, FILE* ffmpegPipe);
 	int videoDispatcher(VideoProcessingContext& data, const bool useHwDecoder, const VideoOp op, FILE* ffmpegPipe = nullptr);
@@ -113,13 +113,13 @@ namespace video_utils
 		return framesCount;
 	}
 
-	template<typename BufferType, typename T>
+	template<typename TYPE, typename T>
 	void loadInputFrame(VideoProcessingContext& data, T* hostPtr)
 	{
 #if defined(_USE_GPU_)
-		data.inputFrame = BufferType(data.width, data.height, hostPtr, afHost).T().as(f32);
+		data.inputFrame = TYPE(data.width, data.height, hostPtr, afHost).T().as(f32);
 #else
-		data.inputFrame = Eigen::Map<BufferType>(hostPtr, data.width, data.height).transpose().template cast<float>();
+		data.inputFrame = Eigen::Map<TYPE>(hostPtr, data.width, data.height).transpose().template cast<float>();
 #endif
 	}
 }

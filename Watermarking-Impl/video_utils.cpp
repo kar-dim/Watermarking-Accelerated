@@ -80,9 +80,9 @@ namespace video_utils
 		const auto afStream = CudaStreamManager::getInstance().getAfStream();
 		const auto videoStream = CudaStreamManager::getInstance().getCustomStream();
 		const int bitDepth = ((AVHWFramesContext*)(frame->hw_frames_ctx->data))->sw_format == AV_PIX_FMT_NV12 ? 8 : 10;
-		const BufferType lumaBuffer(data.height, data.width, f32);
-		const BufferType lumaBufferPacked(data.width, data.height, u8); //used only when we don't embed
-		const BufferType chromaBuffer(data.width, data.height / 2, u8);
+		const ImageBuffer lumaBuffer(data.height, data.width, f32);
+		const ImageBuffer lumaBufferPacked(data.width, data.height, u8); //used only when we don't embed
+		const ImageBuffer chromaBuffer(data.width, data.height / 2, u8);
 		//launch NV12 to YUV420 kernel (for UV planes)
 		cuda_utils::launchNV12ToYUV420pKernel(frame->data[1], frame->linesize[1], chromaBuffer.device<uint8_t>(), data.width / 2, data.height / 2, bitDepth, afStream);
 		chromaBuffer.unlock();
@@ -127,7 +127,7 @@ namespace video_utils
 	{
 		const auto afStream = CudaStreamManager::getInstance().getAfStream();
 		const int bitDepth = ((AVHWFramesContext*)(frame->hw_frames_ctx->data))->sw_format == AV_PIX_FMT_NV12 ? 8 : 10;
-		const BufferType lumaBuffer(data.height, data.width, f32);
+		const ImageBuffer lumaBuffer(data.height, data.width, f32);
 		//detect watermark after watermarkInterval frames
 		if (framesCount % data.watermarkInterval == 0)
 		{
@@ -141,7 +141,7 @@ namespace video_utils
 #endif
 
 	//helper method to embed the watermark in the video frame and write it to the ffmpeg pipe
-	void embedAndWriteFrame(VideoProcessingContext& data, const BufferType& buffer, const int elements, FILE* ffmpegPipe)
+	void embedAndWriteFrame(VideoProcessingContext& data, const ImageBuffer& buffer, const int elements, FILE* ffmpegPipe)
 	{
 		float watermarkStrength;
 		data.watermarkObj->makeWatermark(buffer, buffer, data.watermarkedFrame, watermarkStrength, ME);
@@ -194,7 +194,7 @@ namespace video_utils
 						memcpy(data.hostFramePtr + y * data.width, frame->data[0] + y * frame->linesize[0], data.width);
 					srcY = data.hostFramePtr;
 				}
-				loadInputFrame<GrayBuffer>(data, srcY);
+				loadInputFrame<Gray8Buffer>(data, srcY);
 			}
 			else
 			{
@@ -204,10 +204,10 @@ namespace video_utils
 					for (int y = 0; y < data.height; y++)
 						for (int x = 0; x < data.width; x++)
 							data.hostFramePtr[y * data.width + x] = scale10to8(srcY[y * (frame->linesize[0] / 2) + x]);
-					loadInputFrame<GrayBuffer>(data, data.hostFramePtr);
+					loadInputFrame<Gray8Buffer>(data, data.hostFramePtr);
 				}
 				else
-				    loadInputFrame<GrayExtBuffer>(data, srcY);
+				    loadInputFrame<Gray16Buffer>(data, srcY);
 			}
 			
 			float correlation = data.watermarkObj->detectWatermark(data.inputFrame, ME);
@@ -326,7 +326,7 @@ namespace video_utils
 		}
 		if (embedWatermark)
 		{
-			loadInputFrame<GrayBuffer>(data, srcY);
+			loadInputFrame<Gray8Buffer>(data, srcY);
 			embedAndWriteFrame(data, data.inputFrame, data.width * data.height, ffmpegPipe);
 		}
 		else

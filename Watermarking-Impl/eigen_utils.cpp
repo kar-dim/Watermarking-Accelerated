@@ -1,3 +1,4 @@
+#include "buffer.hpp"
 #include "cimg_init.h"
 #include "eigen_rgb_array.hpp"
 #include "eigen_utils.hpp"
@@ -13,7 +14,7 @@ using namespace Eigen;
 
 namespace eigen_utils 
 {
-	CImg<float> eigenRgbToCimg(const EigenArrayRGB& arrayRgb, const std::optional<CImg<float>>& alphaChannel)
+	CImg<float> eigenRgbToCimg(const EigenArrayRGB& arrayRgb, const std::optional<AlphaBuffer>& alphaChannel)
 	{
 		const auto rows = arrayRgb[0].rows();
 		const auto cols = arrayRgb[0].cols();
@@ -35,7 +36,7 @@ namespace eigen_utils
 		return output;
 	}
 
-	void cimgAlphaZero(CImg<float>& rgbImage, const CImg<float>& alphaChannel)
+	void cimgAlphaZero(CImg<float>& rgbImage, const AlphaBuffer& alphaChannel)
 	{
 #pragma omp parallel for
 		for (int y = 0; y < rgbImage.height(); y++)

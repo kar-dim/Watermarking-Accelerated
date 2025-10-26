@@ -29,7 +29,7 @@ public:
 		: baseRows(rows), baseCols(cols), randomMatrix(loadRandomMatrix(randomMatrixPath)), strengthFactor(computeStrengthFactor(psnr))
 	{ }
 
-	WatermarkBase(const unsigned int rows, const unsigned int cols, const BufferType& randomMatrix, const float strengthFactor)
+	WatermarkBase(const unsigned int rows, const unsigned int cols, const ImageBuffer& randomMatrix, const float strengthFactor)
 		: baseRows(rows), baseCols(cols), randomMatrix(randomMatrix), strengthFactor(strengthFactor)
 	{ }
 
@@ -38,10 +38,10 @@ public:
 	//main watermark embedding method
 	//it embeds the watermark computed from "inputGrayImage" (always grayscale, 2D)
 	//into a new array "output" based on "inputImage" (RGB or grayscale)
-	virtual void makeWatermark(const BufferType& inputGrayImage, const BufferType& inputImage, BufferType& output, float& watermarkStrength, const MASK_TYPE maskType) = 0;
+	virtual void makeWatermark(const ImageBuffer& inputGrayImage, const ImageBuffer& inputImage, ImageBuffer& output, float& watermarkStrength, const MASK_TYPE maskType) = 0;
 	
 	//the main mask detector function
-	virtual float detectWatermark(const BufferType& inputImage, const MASK_TYPE maskType) = 0;
+	virtual float detectWatermark(const ImageBuffer& inputImage, const MASK_TYPE maskType) = 0;
 
 protected:
 	template<unsigned int ALIGN>
@@ -49,11 +49,11 @@ protected:
 	static constexpr bool maskCalcRequired = true;
 	static constexpr bool maskCalcNotRequired = false;
 	unsigned int baseRows, baseCols;
-	BufferType randomMatrix;
+	ImageBuffer randomMatrix;
 	float strengthFactor;
 
 	//helper method to load the random noise matrix W from the file specified.
-	BufferType loadRandomMatrix(const std::string& randomMatrixPath) const
+	ImageBuffer loadRandomMatrix(const std::string& randomMatrixPath) const
 	{
 		std::ifstream randomMatrixStream(randomMatrixPath.c_str(), std::ios::binary);
 		if (!randomMatrixStream.is_open())
@@ -70,7 +70,7 @@ protected:
 #elif defined(_USE_EIGEN_)
 		Eigen::ArrayXXf watermark(baseCols, baseRows);
 		randomMatrixStream.read(reinterpret_cast<char*>(watermark.data()), totalBytes);
-		return BufferType(watermark.transpose());
+		return ImageBuffer(watermark.transpose());
 #endif
 	}
 };

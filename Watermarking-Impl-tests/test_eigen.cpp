@@ -40,15 +40,15 @@ protected:
         CommonFixture::SetUpTestSuite();
     }
 
-    BufferType embedAndConvertToGray(MASK_TYPE maskType) override
+    ImageBuffer embedAndConvertToGray(MASK_TYPE maskType) override
     {
         float strength = 0.0f;
-        BufferType watermarkedImage(eigen_utils::makeEigenRGB(image.getGray().rows(), image.getGray().cols()));
+        ImageBuffer watermarkedImage(eigen_utils::makeEigenRGB(image.getGray().rows(), image.getGray().cols()));
         embedWatermark(watermarkedImage, strength, maskType);
         return Utils::rgb2gray(watermarkedImage);
     }
 
-    void calculateMSE(const BufferType& diskRgb, const BufferType& watermark) override
+    void calculateMSE(const ImageBuffer& diskRgb, const ImageBuffer& watermark) override
     {
         EXPECT_EQ(diskRgb.getRGB()[0].size(), watermark.getRGB()[0].size()) << "Expected disk image elements to match original";
         float mse = 0.0f;
@@ -62,7 +62,7 @@ protected:
 
 TEST_F(EigenFixture, EmbedWatermark)
 {
-    BufferType output(eigen_utils::makeEigenRGB(image.getGray().rows(), image.getGray().cols()));
+    ImageBuffer output(eigen_utils::makeEigenRGB(image.getGray().rows(), image.getGray().cols()));
     testEmbedding(output);
 }
 
@@ -73,7 +73,7 @@ TEST_F(EigenFixture, DetectWatermark)
 
 TEST_F(EigenFixture, SaveToDisk)
 {
-	BufferType watermark(eigen_utils::makeEigenRGB(image.getGray().rows(), image.getGray().cols()));
+    ImageBuffer watermark(eigen_utils::makeEigenRGB(image.getGray().rows(), image.getGray().cols()));
     for (const auto& config : strategies)
         testSaveToDisk(watermark, config.strategy, config.label, config.outputFile);
 }
