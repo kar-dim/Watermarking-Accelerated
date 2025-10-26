@@ -126,15 +126,15 @@ The solution provides multiple build configurations, each targeting a specific b
 **Note:** Both CUDA and OpenCL backends depend on **ArrayFire**, which in turn requires its own set of runtime dependencies.
 If ArrayFire is properly installed, its `lib` directory (containing all required DLLs) is typically added to the system `PATH`, and everything should work out of the box.
 However, since not all systems have ArrayFire installed, we include the necessary DLLs in the prebuilt binaries. These files are copied directly from `$(AF_PATH)/lib` for convenience (Post-Build event).
-The same applies for CPU backend, where we copy the relevant libraries required by CImg (LibJPEG, LibPNG, zlib) and clang's OpenMP.
-All backends require FFmpeg which is also copied (most libav* DLLs).
+The same applies for CPU backend, where we copy the relevant libraries required by CImg (LibXXX, zlib etc) and clang's OpenMP.
+All backends require FFmpeg which is also copied (most libav* DLLs, not included in the table below).
 
 
 | Backend | Dependencies |
 |---------|--------------|
 | **CUDA**   | FreeImage.dll<br>afcuda.dll |
 | **OpenCL** | FreeImage.dll<br>afopencl.dll<br>forge.dll<br>glfw3.dll<br>libiomp5md.dll<br>mkl_core.2.dll<br>mkl_def.2.dll<br>mkl_intel_thread.2.dll<br>mkl_rt.2.dll<br>mkl_tbb_thread.2.dll |
-| **Eigen**  | zlib1.dll<br>libpng16.dll<br>jpeg62.dll<br>libomp.dll |
+| **Eigen**  | zlib1.dll<br>libpng16.dll<br>jpeg62.dll<br>tiff.dll<br>libomp.dll |
 
 
 # Libraries Used
