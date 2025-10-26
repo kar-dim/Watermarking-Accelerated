@@ -191,7 +191,7 @@ xcopy "$(AF_PATH)\lib\mkl_tbb_thread.2.dll" "$(OutDir)" /y /D</Command>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='EIGEN_Release|x64'">
     <ClCompile>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
-      <AdditionalIncludeDirectories>$(ProjectDir)libs\Eigen;$(ProjectDir)libs\CImg;$(ProjectDir)libs\zlib\include;$(ProjectDir)libs\inih;$(ProjectDir)libs\libpng\include;$(ProjectDir)libs\libjpeg\include;$(ProjectDir)libs\libwebp\include;$(LLVMInstallDir)\lib\clang\17\include;$(ProjectDir)libs\ffmpeg\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)libs\Eigen;$(ProjectDir)libs\CImg;$(ProjectDir)libs\zlib\include;$(ProjectDir)libs\inih;$(ProjectDir)libs\libpng\include;$(ProjectDir)libs\libjpeg\include;$(ProjectDir)libs\libwebp\include;$(ProjectDir)libs\libtiff\include;$(LLVMInstallDir)\lib\clang\17\include;$(ProjectDir)libs\ffmpeg\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;WIN64;NOMINMAX;NDEBUG;_CONSOLE;_CRT_SECURE_NO_WARNINGS;_USE_EIGEN_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
@@ -210,8 +210,8 @@ xcopy "$(AF_PATH)\lib\mkl_tbb_thread.2.dll" "$(OutDir)" /y /D</Command>
       </EnableVirtualArchInFatbin>
     </CudaCompile>
     <Link>
-      <AdditionalLibraryDirectories>$(ProjectDir)libs\zlib\lib;$(LLVMInstallDir)\lib;$(ProjectDir)libs\libpng\lib;$(ProjectDir)libs\libjpeg\lib;$(ProjectDir)libs\libwebp\lib;$(ProjectDir)libs\ffmpeg\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>zlib.lib;libomp.lib;libpng16.lib;jpeg.lib;libwebp.lib;avutil.lib;avformat.lib;swscale.lib;avcodec.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(ProjectDir)libs\zlib\lib;$(LLVMInstallDir)\lib;$(ProjectDir)libs\libpng\lib;$(ProjectDir)libs\libjpeg\lib;$(ProjectDir)libs\libwebp\lib;$(ProjectDir)libs\libtiff\lib;$(ProjectDir)libs\ffmpeg\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>zlib.lib;libomp.lib;libpng16.lib;jpeg.lib;libwebp.lib;tiff.lib;avutil.lib;avformat.lib;swscale.lib;avcodec.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Console</SubSystem>
     </Link>
@@ -220,6 +220,7 @@ xcopy "$(AF_PATH)\lib\mkl_tbb_thread.2.dll" "$(OutDir)" /y /D</Command>
 xcopy "$(ProjectDir)libs\libpng\bin\libpng16.dll" "$(SolutionDir)x64\EIGEN_Release\" /y /D
 xcopy "$(ProjectDir)libs\zlib\bin\zlib1.dll" "$(SolutionDir)x64\EIGEN_Release\" /y /D
 xcopy "$(ProjectDir)libs\libjpeg\bin\release\jpeg62.dll" "$(SolutionDir)x64\EIGEN_Release\" /y /D
+xcopy "$(ProjectDir)libs\libtiff\bin\tiff.dll" "$(SolutionDir)x64\EIGEN_Release\" /y /D
 xcopy "$(ProjectDir)libs\ffmpeg\bin\*.dll" "$(OutDir)" /y /D
 xcopy "$(ProjectDir)libs\ffmpeg\bin\ffmpeg.exe" "$(OutDir)" /y /D</Command>
     </PostBuildEvent>
@@ -227,7 +228,7 @@ xcopy "$(ProjectDir)libs\ffmpeg\bin\ffmpeg.exe" "$(OutDir)" /y /D</Command>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='EIGEN_Debug|x64'">
     <ClCompile>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
-      <AdditionalIncludeDirectories>$(ProjectDir)libs\Eigen;$(ProjectDir)libs\CImg;$(ProjectDir)libs\zlib\include;$(ProjectDir)libs\inih;$(ProjectDir)libs\libpng\include;$(ProjectDir)libs\libjpeg\include;$(ProjectDir)libs\libwebp\include;$(LLVMInstallDir)\lib\clang\17\include;$(ProjectDir)libs\ffmpeg\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)libs\Eigen;$(ProjectDir)libs\CImg;$(ProjectDir)libs\zlib\include;$(ProjectDir)libs\inih;$(ProjectDir)libs\libpng\include;$(ProjectDir)libs\libjpeg\include;$(ProjectDir)libs\libwebp\include;$(ProjectDir)libs\libtiff\include;$(LLVMInstallDir)\lib\clang\17\include;$(ProjectDir)libs\ffmpeg\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;WIN64;NOMINMAX;_DEBUG;_CONSOLE;_CRT_SECURE_NO_WARNINGS;_USE_EIGEN_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
@@ -248,8 +249,8 @@ xcopy "$(ProjectDir)libs\ffmpeg\bin\ffmpeg.exe" "$(OutDir)" /y /D</Command>
       </EnableVirtualArchInFatbin>
     </CudaCompile>
     <Link>
-      <AdditionalLibraryDirectories>$(ProjectDir)libs\zlib\lib;$(LLVMInstallDir)\lib;$(ProjectDir)libs\libpng\lib;$(ProjectDir)libs\libjpeg\lib;$(ProjectDir)libs\libwebp\lib;$(ProjectDir)libs\ffmpeg\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>zlibd.lib;libomp.lib;libpng16d.lib;jpeg.lib;libwebp.lib;avutil.lib;avformat.lib;swscale.lib;avcodec.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(ProjectDir)libs\zlib\lib;$(LLVMInstallDir)\lib;$(ProjectDir)libs\libpng\lib;$(ProjectDir)libs\libjpeg\lib;$(ProjectDir)libs\libwebp\lib;$(ProjectDir)libs\libtiff\lib;$(ProjectDir)libs\ffmpeg\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>zlibd.lib;libomp.lib;libpng16d.lib;jpeg.lib;libwebp.lib;tiff.lib;avutil.lib;avformat.lib;swscale.lib;avcodec.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Console</SubSystem>
     </Link>
@@ -258,6 +259,7 @@ xcopy "$(ProjectDir)libs\ffmpeg\bin\ffmpeg.exe" "$(OutDir)" /y /D</Command>
 xcopy "$(ProjectDir)libs\libpng\bin\libpng16d.dll" "$(SolutionDir)x64\EIGEN_Debug\" /y /D
 xcopy "$(ProjectDir)libs\zlib\bin\zlibd1.dll" "$(SolutionDir)x64\EIGEN_Debug\" /y /D
 xcopy "$(ProjectDir)libs\libjpeg\bin\debug\jpeg62.dll" "$(SolutionDir)x64\EIGEN_Debug\" /y /D
+xcopy "$(ProjectDir)libs\libtiff\bin\tiff.dll" "$(SolutionDir)x64\EIGEN_Debug\" /y /D
 xcopy "$(ProjectDir)libs\ffmpeg\bin\*.dll" "$(OutDir)" /y /D
 xcopy "$(ProjectDir)libs\ffmpeg\bin\ffmpeg.exe" "$(OutDir)" /y /D</Command>
     </PostBuildEvent>

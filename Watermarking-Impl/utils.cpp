@@ -39,6 +39,9 @@ void Utils::saveImage(const string& imagePath, const string& suffix, const Buffe
 	else if (extension == "bmp")  rgbCimg.save_bmp(watermarkedFile.c_str());
 	else if (extension == "jpg" || extension == "jpeg") rgbCimg.save_jpeg(watermarkedFile.c_str());
 	else if (extension == "webp") rgbCimg.save_webp(watermarkedFile.c_str());
+	//TIFF suppoorts 32bpp (floats) natively, we have to explicit cast to 8bpp before saving to reduce unecessary bytes
+	else if (extension == "tif" || extension == "tiff")
+		 cimg_library::CImg<unsigned char>(rgbCimg).save_tiff(watermarkedFile.c_str(), 4); //4 = LZW compression
 	else
 		throw std::runtime_error("Unsupported image format: " + extension);
 #elif defined(_USE_GPU_)

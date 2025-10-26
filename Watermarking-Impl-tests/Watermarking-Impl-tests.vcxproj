@@ -92,7 +92,7 @@ xcopy "$(AF_PATH)\lib\afcuda.dll" "$(OutDir)" /y /D</Command>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <WarningLevel>Level3</WarningLevel>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
-      <AdditionalIncludeDirectories>..\Watermarking-Impl;$(SolutionDir)Watermarking-Impl\libs\Eigen;$(SolutionDir)Watermarking-Impl\libs\CImg;$(SolutionDir)Watermarking-Impl\libs\zlib\include;$(SolutionDir)Watermarking-Impl\libs\inih;$(SolutionDir)Watermarking-Impl\libs\libpng\include;$(SolutionDir)Watermarking-Impl\libs\libjpeg\include;$(SolutionDir)Watermarking-Impl\libs\libwebp\include;$(LLVMInstallDir)\lib\clang\17\include;$(ProjectDir)libs\googletest-1.17.0\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\Watermarking-Impl;$(SolutionDir)Watermarking-Impl\libs\Eigen;$(SolutionDir)Watermarking-Impl\libs\CImg;$(SolutionDir)Watermarking-Impl\libs\zlib\include;$(SolutionDir)Watermarking-Impl\libs\inih;$(SolutionDir)Watermarking-Impl\libs\libpng\include;$(SolutionDir)Watermarking-Impl\libs\libjpeg\include;$(SolutionDir)Watermarking-Impl\libs\libwebp\include;$(SolutionDir)Watermarking-Impl\libs\libtiff\include;$(LLVMInstallDir)\lib\clang\17\include;$(ProjectDir)libs\googletest-1.17.0\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>-openmp -mavx2 -mfma /clang:-O3 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
@@ -102,14 +102,15 @@ xcopy "$(AF_PATH)\lib\afcuda.dll" "$(OutDir)" /y /D</Command>
       <SubSystem>Console</SubSystem>
       <OptimizeReferences>true</OptimizeReferences>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
-      <AdditionalLibraryDirectories>$(SolutionDir)Watermarking-Impl\x64\EIGEN_Release;$(SolutionDir)Watermarking-Impl\libs\libpng\lib;$(LLVMInstallDir)\lib;$(SolutionDir)Watermarking-Impl\libs\zlib\lib;$(SolutionDir)Watermarking-Impl\libs\libjpeg\lib;$(SolutionDir)Watermarking-Impl\libs\libwebp\lib;$(ProjectDir)libs\googletest-1.17.0\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>eigen_utils.obj;utils.obj;zlib.lib;libomp.lib;libpng16.lib;jpeg.lib;libwebp.lib;gtest.lib;gtest_main.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(SolutionDir)Watermarking-Impl\x64\EIGEN_Release;$(SolutionDir)Watermarking-Impl\libs\libpng\lib;$(LLVMInstallDir)\lib;$(SolutionDir)Watermarking-Impl\libs\zlib\lib;$(SolutionDir)Watermarking-Impl\libs\libjpeg\lib;$(SolutionDir)Watermarking-Impl\libs\libwebp\lib;$(SolutionDir)Watermarking-Impl\libs\libtiff\lib;$(ProjectDir)libs\googletest-1.17.0\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>eigen_utils.obj;utils.obj;zlib.lib;libomp.lib;libpng16.lib;jpeg.lib;tiff.lib;libwebp.lib;gtest.lib;gtest_main.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>xcopy "$(LLVMInstallDir)\bin\libomp.dll" "$(SolutionDir)x64\EIGEN_Release\" /y /D
 xcopy "$(SolutionDir)Watermarking-Impl\libs\libpng\bin\libpng16.dll" "$(SolutionDir)x64\EIGEN_Release\" /y /D
 xcopy "$(SolutionDir)Watermarking-Impl\libs\zlib\bin\zlib1.dll" "$(SolutionDir)x64\EIGEN_Release\" /y /D
-xcopy "$(SolutionDir)Watermarking-Impl\libs\libjpeg\bin\release\jpeg62.dll" "$(SolutionDir)x64\EIGEN_Release\" /y /D</Command>
+xcopy "$(SolutionDir)Watermarking-Impl\libs\libjpeg\bin\release\jpeg62.dll" "$(SolutionDir)x64\EIGEN_Release\" /y /D
+xcopy "$(SolutionDir)Watermarking-Impl\libs\libtiff\bin\tiff.dll" "$(SolutionDir)x64\EIGEN_Release\" /y /D</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='OPENCL_Release|x64'">
