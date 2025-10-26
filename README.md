@@ -117,11 +117,13 @@ The solution provides multiple build configurations, each targeting a specific b
 | `EIGEN_Release`  | Eigen       | Optimized CPU-based implementation (clang-cl toolset is used for maximum performance).         |
 | `EIGEN_Debug`    | Eigen       | Use for debugging CPU implementation (clang-cl)      |
 
-### Build Instructions
+## Build Instructions
 
-1. Open the `.sln` file in **Visual Studio 2022** (or a compatible version).
-2. In the **Solution Configurations** dropdown (top toolbar), select your configuration (e.g. `CUDA_Release`).
-3. Build the solution via **Build > Build Solution**.
+1. **Git** must be installed and **Git LFS** is required to download the large library binary dependencies. Install it with: `git lfs install`.
+2. Clone this repository: `git clone https://github.com/kar-dim/Watermarking-Accelerated`.
+3. Open the `.sln` file in **Visual Studio 2022** (or later).
+4. In the **Solution Configurations** dropdown (top toolbar), select your configuration (e.g. `CUDA_Release`) or select `Batch Build` and select what configurations you want to build.
+5. Build the solution via **Build > Build Solution**.
 
 **Note:** Both CUDA and OpenCL backends depend on **ArrayFire**, which in turn requires its own set of runtime dependencies.
 If ArrayFire is properly installed, its `lib` directory (containing all required DLLs) is typically added to the system `PATH`, and everything should work out of the box.
