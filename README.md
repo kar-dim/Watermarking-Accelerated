@@ -14,7 +14,7 @@ The deprecated original Thesis code is in the archived repository <a href="https
 The aim of this project is to implement and compare the performance (execution speed) of watermarking algorithms when implemented on CPU versus GPU. This repository includes all the relevant implementations.
 
 Implementations are optimized for maximum performance:
-- CPU Implementation: Uses the Eigen library for efficient linear algebra operations. The application utilizes all available logical CPU cores for maximum performance but smartly limits the thread count to the number of physical cores specifically during watermark video embedding to prevent oversubscription and reduce context switching, since other heavy CPU work comes from FFmpeg itself.
+- CPU Implementation: Uses the Eigen library for efficient linear algebra operations. The application utilizes all available logical (or physical, specifically on video embedding) CPU cores for maximum performance.
 - GPU Implementation: Provides both OpenCL and CUDA backends. The GPU kernels are highly optimized to maximize throughput and minimize latency. CUDA implementation uses Tensor Cores in some of its kernels to maximize performance.
 
 # Key Features
