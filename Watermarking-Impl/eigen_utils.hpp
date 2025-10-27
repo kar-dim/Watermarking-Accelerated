@@ -4,12 +4,6 @@
 #include "eigen_rgb_array.hpp"
 #include <optional>
 
-enum IMAGE_TYPE
-{
-	JPG,
-	PNG
-};
-
 /*!
  *  \brief  Helper utility functions related to Eigen.
  *  \author Dimitris Karatzas
