@@ -20,7 +20,7 @@ namespace eigen_utils
 		const auto cols = arrayRgb[0].cols();
 		const int channels = alphaChannel.has_value() ? 4 : 3;
 		CImg<float> output(static_cast<unsigned int>(cols), static_cast<unsigned int>(rows), 1, channels);
-	#pragma omp parallel for
+#pragma omp parallel for
 		for (int y = 0; y < rows; ++y)
 		{
 			for (int x = 0; x < cols; ++x)
@@ -55,7 +55,7 @@ namespace eigen_utils
 		const int rows = rgbImage.height();
 		const int cols = rgbImage.width();
 		EigenArrayRGB output = { ArrayXXf(rows,cols), ArrayXXf(rows,cols), ArrayXXf(rows, cols) };
-	#pragma omp parallel for
+#pragma omp parallel for
 		for (int x = 0; x < cols; x++)
 			for (int y = 0; y < rows; y++)
 				for (int channel = 0; channel < 3; channel++)
