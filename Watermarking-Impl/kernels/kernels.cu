@@ -313,10 +313,10 @@ __global__ void pitchedToFloat(const void* __restrict__ input, float* __restrict
     __shared__ float block[16][16 + 1]; //+1 to avoid bank conflicts
     const int x = blockIdx.x * blockDim.x + threadIdx.x;
     const int y = blockIdx.y * blockDim.y + threadIdx.y;
-    float convertedValue = 0.f;
+    float convertedValue = 0.0f;
     if (x < width && y < height) 
     {
-        if (bitDepth <= 8) 
+        if (bitDepth == 8) 
         {
             const uint8_t* in = reinterpret_cast<const uint8_t*>(input);
             convertedValue = static_cast<float>(in[y * pitch + x]);
