@@ -21,9 +21,9 @@ namespace eigen_utils
 		const int channels = alphaChannel.has_value() ? 4 : 3;
 		CImg<float> output(static_cast<unsigned int>(cols), static_cast<unsigned int>(rows), 1, channels);
 #pragma omp parallel for
-		for (int y = 0; y < rows; ++y)
+		for (int y = 0; y < rows; y++)
 		{
-			for (int x = 0; x < cols; ++x)
+			for (int x = 0; x < cols; x++)
 			{
 				for (int channel = 0; channel < 3; channel++)
 					output(x, y, 0, channel) = arrayRgb[channel](y, x);
