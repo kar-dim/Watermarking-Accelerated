@@ -128,7 +128,9 @@ The solution provides multiple build configurations, each targeting a specific b
 **Note:** Both CUDA and OpenCL backends depend on **ArrayFire**, which in turn requires its own set of runtime dependencies.
 If ArrayFire is properly installed, its `lib` directory (containing all required DLLs) is typically added to the system `PATH`, and everything should work out of the box.
 However, since not all systems have ArrayFire installed, we include the necessary DLLs in the prebuilt binaries. These files are copied directly from `$(AF_PATH)/lib` for convenience (Post-Build event).
-The same applies for CPU backend, where we copy the relevant libraries required by CImg (LibXXX, zlib etc) and clang's OpenMP.
+The same applies for CPU backend, where we copy the relevant libraries required by CImg (libjpeg, libpng, zlib, etc) and clang's OpenMP. 
+
+GPU implementations' image support relies on ArrayFire’s FreeImage dependency, while the CPU version manually integrates specific image libraries for use with CImg.
 All backends require FFmpeg which is also copied (most libav* DLLs, not included in the table below).
 
 
@@ -151,7 +153,7 @@ All backends require FFmpeg which is also copied (most libav* DLLs, not included
 
 - OpenCL implementation: The [OpenCL Headers](https://github.com/KhronosGroup/OpenCL-Headers), [OpenCL C++ Bindings](https://github.com/KhronosGroup/OpenCL-CLHPP) and [OpenCL Library file](https://github.com/KhronosGroup/OpenCL-SDK) are already included and configured for this project.
 - CUDA implementation: NVIDIA CUDA Toolkit is required for building.
-- CPU Implementation: LibPNG and LibJPEG and zlib are also included, and are used internally by CImg for loading and saving of images.
+- CPU Implementation: Image libraries (libjpeg, libpng, libtiff etc) are included and utilized internally by CImg for loading and saving of images.
 - ArrayFire should be installed globally, with default installation options. Environment Variable "AF_PATH" will be defined automatically.
 - FFmpeg must exist on system PATH (Pre-build binaries already include FFmpeg binaries and DLLs).
 
