@@ -26,7 +26,7 @@ Implementations are optimized for maximum performance:
 
 - Get the latest binaries [here](https://github.com/kar-dim/Watermarking-Accelerated/releases) for Eigen, OpenCL or CUDA platform. The binaries contain the sample application and the embedded CUDA/OpenCL/Eigen implementations of the watermarking algorithms.
 - The watermark generation is based on Normal-distributed random values with zero mean and standard deviation of one. 
-- The pre-built binaries come with a bundled archive named ```Watermarking-Generate_and_samples```, which includes:
+- The pre-built binaries come with a bundled archive named ```Watermarking-Generate_and_samples``` which includes:
     - Sample video and audio files.
     - Pre-generated watermark data (A bat file is included which generates the watermarks, with sizes exactly the same as the provided sample images.)
     - The ```Watermarking-Generate``` binary. This produces pseudo-random values. The archive already includes the sample watermarks, but one can generate a random watermark for any desired image size like this:  
@@ -37,7 +37,10 @@ The sample application:
    - Embeds the watermark using the NVF and the proposed Prediction-Error mask for a video or image.
    - Detects the watermark using the proposed Prediction-Error based detector for a video or image.
    - Prints FPS/execution time for both operations, and both masks.
-**NOTE**: For video operations, only the proposed mask is used, which is more optimal.
+
+**NOTE**:
+1. For video operations, only the proposed mask is used, which is more optimal.
+2. CPU implementation is built with AVX2 support: ```-mavx2 -mfma```. To enable AVX-512 replace the previous with: ```-march=native```. The performance gains are negligible, and for much broader compatibility we use AVX2 by default.
 
 The application should be parameterized from the corresponding ```settings.ini``` file. Here is a detailed explanation for each parameter:
 
