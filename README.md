@@ -13,14 +13,11 @@ The deprecated original Thesis code is in the archived repository <a href="https
 
 The aim of this project is to implement and compare the performance (execution speed) of watermarking algorithms when implemented on CPU versus GPU. This repository includes all the relevant implementations.
 
-Implementations are optimized for maximum performance:
-- CPU Implementation: Uses the Eigen library for efficient linear algebra operations. The application utilizes all available logical (or physical, specifically on video embedding) CPU cores for maximum performance.
-- GPU Implementation: Provides both OpenCL and CUDA backends. The GPU kernels are highly optimized to maximize throughput and minimize latency. CUDA implementation uses Tensor Cores in some of its kernels to maximize performance.
-
-# Key Features
-
-- Implementation of highly optimized watermark embedding and detection algorithms for images and video, using efficiently the ```Eigen``` and ```ArrayFire``` libraries.
 - Comparative performance analysis between CPU and GPU implementations (check [Releases](https://github.com/kar-dim/Watermarking-Accelerated/releases)).
+
+Implementations are optimized for maximum performance:
+- CPU implementation: Uses the ```Eigen``` library for efficient linear algebra operations. The application utilizes all available logical (or physical, specifically on video embedding) CPU cores for maximum performance.
+- GPU implementation: Provides both OpenCL and CUDA backends. The GPU kernels are highly optimized to maximize throughput and minimize latency. CUDA implementation uses Tensor Cores in some of its kernels to maximize performance. The efficient ```ArrayFire``` library is used.
 
 # Run the pre-built binaries
 
