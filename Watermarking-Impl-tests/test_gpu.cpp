@@ -46,6 +46,8 @@ protected:
 #endif
     }
 
+    static void TearDownTestSuite() { CommonFixture::TearDownTestSuite(); }
+
     ImageBuffer embedAndConvertToGray(MASK_TYPE maskType) override
     {
         float strength = 0.0f;
