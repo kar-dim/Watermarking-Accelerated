@@ -49,7 +49,7 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
 
 	//Shared memory for Rx and rx, helper accumulator for Rx WMMA plus block-wide window pixels 
     __shared__ alignas(16) half RxLocal[64][16];
-    __shared__ float RxWmmaAccum[16][16];
+    __shared__ half RxWmmaAccum[16][16];
     __shared__ half blockValues[3][66];
     half8* RxLocalVec8 = reinterpret_cast<half8*>(RxLocal[threadIdx.x]);
 
@@ -61,15 +61,16 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
     if (y >= height)
         return;
 
-	// cooperatively load the 3 x 66 block (window size 3x3, for all threads in the block)
+	//cooperatively load the 3 x 66 block (window size 3x3, for all threads in the block)
     for (int i = threadIdx.x; i < 3 * 66; i += blockDim.x)
     {
         const int tileCol = i / 3;
         const int tileRow = i % 3;
-        // clamp (mimic cudaAddressModeClamp)
+        //clamp (mimic cudaAddressModeClamp)
 		const int globalX = clamp<int>((int)(blockIdx.x * blockDim.x) + tileCol - 1, 0, width - 1);
 		const int globalY = clamp<int>((int)(blockIdx.y * blockDim.y) + tileRow - 1, 0, height - 1);
-        blockValues[tileRow][tileCol] = HALF(input[globalX * height + globalY]);
+		//normalize from [0,255] to [0,1] to support half precision and avoid overflow in multiplications
+        blockValues[tileRow][tileCol] = HALF(input[globalX * height + globalY] / 255.0f);
     }
     __syncthreads();
 
@@ -112,7 +113,7 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
     {
         wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::col_major> A;
         wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::row_major> B;
-        wmma::fragment<wmma::accumulator, 16, 16, 16, float> C;
+        wmma::fragment<wmma::accumulator, 16, 16, 16, half> C;
         wmma::fill_fragment(C, 0.0f);
 #pragma unroll
         for (int k0 = 0; k0 < 64; k0 += 16)
@@ -130,7 +131,7 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
     //write only the top-left 8x8 (64 values) per block
     const int r = threadIdx.x / 8;
     const int c = threadIdx.x % 8;
-    Rx[outputIndex] = RxWmmaAccum[r][c];
+    Rx[outputIndex] = FLOAT(RxWmmaAccum[r][c]);
 }
 
 __global__ void calculate_error_sequence_p3(const float* __restrict__ input, float* __restrict__ x_, const unsigned int width, const unsigned int height, const bool calculateAbs)
