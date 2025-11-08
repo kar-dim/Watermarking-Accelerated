@@ -34,7 +34,6 @@ protected:
 
     static void SetUpTestSuite() 
     {
-        CommonFixture::SetUpTestSuite();
 #if defined(_USE_OPENCL_)
         static constexpr int openclDevice = 1;
         try {

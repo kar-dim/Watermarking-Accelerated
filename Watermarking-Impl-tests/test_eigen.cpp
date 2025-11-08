@@ -35,9 +35,11 @@ protected:
         watermarkObj = Utils::createWatermarkObject(static_cast<unsigned int>(image.getGray().rows()), static_cast<unsigned int>(image.getGray().cols()), watermarkPath, p, psnr);
     }
 
+    //initialize OpenMP once per fixture
     static void SetUpTestSuite()
     {
-        CommonFixture::SetUpTestSuite();
+#pragma omp parallel
+        {}
     }
 
     ImageBuffer embedAndConvertToGray(MASK_TYPE maskType) override

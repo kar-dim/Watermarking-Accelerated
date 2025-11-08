@@ -34,13 +34,6 @@ protected:
         Utils::loadImage(rgbImage, image, imageFile, alphaChannel);
     }
 
-    //initialize OpenMP once per fixture
-    static void SetUpTestSuite()
-    {
-#pragma omp parallel
-        {}
-    }
-
     //delete the disk images (if exist)
     static void TearDownTestSuite()
     {
