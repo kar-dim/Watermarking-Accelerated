@@ -11,24 +11,23 @@ The deprecated original Thesis code is in the archived repository <a href="https
 
 # Overview
 
-The aim of this project is to implement and compare the performance (execution speed) of watermarking algorithms when implemented on CPU versus GPU. This repository includes all the relevant implementations.
+The aim of this project is to implement and compare the performance (execution speed) of watermarking algorithms when implemented on CPU versus GPU. This repository includes all the relevant implementations. The watermark generation is based on Normal-distributed random values with zero mean and standard deviation of one.
 
 - Comparative performance analysis between CPU and GPU implementations (check [Releases](https://github.com/kar-dim/Watermarking-Accelerated/releases)).
 
 Implementations are optimized for maximum performance:
 - CPU implementation: Uses the ```Eigen``` library for efficient linear algebra operations. The application utilizes all available logical (or physical, specifically on video embedding) CPU cores for maximum performance.
-- GPU implementation: Provides both OpenCL and CUDA backends. The GPU kernels are highly optimized to maximize throughput and minimize latency. CUDA implementation uses Tensor Cores in some of its kernels to maximize performance. The efficient ```ArrayFire``` library is used.
+- GPU implementation: Provides both OpenCL and CUDA backends. The GPU kernels are highly optimized to maximize throughput and minimize latency. CUDA implementation uses Tensor Cores in some of its kernels to maximize performance. The efficient ```ArrayFire``` library is used for most common work and specialized high performance kernels for custom work, or where ArrayFire is not fast enough.
 
 # Run the pre-built binaries
 
 - Get the latest binaries [here](https://github.com/kar-dim/Watermarking-Accelerated/releases) for Eigen, OpenCL or CUDA platform. The binaries contain the sample application and the embedded CUDA/OpenCL/Eigen implementations of the watermarking algorithms.
-- The watermark generation is based on Normal-distributed random values with zero mean and standard deviation of one. 
-- The pre-built binaries come with a bundled archive named ```Watermarking-Generate_and_samples``` which includes:
-    - Sample video and audio files.
+- From the same section, you can also download the archive ```Watermarking-Generate_and_samples``` which includes:
+    - Sample video and image files.
     - Pre-generated watermark data (A bat file is included which generates the watermarks, with sizes exactly the same as the provided sample images.)
-    - The ```Watermarking-Generate``` binary. This produces pseudo-random values. The archive already includes the sample watermarks, but one can generate a random watermark for any desired image size like this:  
-```Watermarking-Generate.exe [rows] [cols] [seed] [fileName]```  then pass the provided watermark file path in the sample project configuration.
-To use these samples, simply extract the archive (ideally) to the root directory of the binary you're using. By default, the binaries are configured to load video and image samples from the ```samples``` subdirectory relative to their location. If you'd like to change this behavior, you can do so by editing the ```settings.ini``` file (explained in a later section).
+    - The ```Watermarking-Generate``` binary. This produces pseudo-random values. The archive already includes the sample watermarks, but you can also generate a random watermark for any desired image size (if you want to embed/detect your own image) like this:  
+```Watermarking-Generate.exe [rows] [cols] [seed] [fileName]```  then pass the provided watermark file path in the sample project configuration (```settings.ini``` file).
+To use these samples, simply extract the archive (ideally) to the root directory of the binary you're using. By default, the binaries are configured to load video and image samples from the ```samples``` subdirectory relative to their location. If you'd like to change this behavior, you can do so by editing the ```settings.ini``` file.
 
 The sample application:
    - Embeds the watermark using the NVF and the proposed Prediction-Error mask for a video or image.
