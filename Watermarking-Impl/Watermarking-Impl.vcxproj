@@ -77,7 +77,6 @@
       <LanguageStandard>stdcpp20</LanguageStandard>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
       <AdditionalIncludeDirectories>$(AF_PATH)\include;$(CUDA_PATH)\include;$(ProjectDir)libs\inih;$(ProjectDir)libs\ffmpeg\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <OpenMPSupport>true</OpenMPSupport>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
@@ -110,7 +109,6 @@ xcopy "$(AF_PATH)\lib\afcuda.dll" "$(OutDir)" /y /D</Command>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
       <AdditionalIncludeDirectories>$(AF_PATH)\include;$(CUDA_PATH)\include;$(ProjectDir)libs\inih;$(ProjectDir)libs\ffmpeg\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <OpenMPSupport>true</OpenMPSupport>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
@@ -170,7 +168,7 @@ xcopy "$(AF_PATH)\lib\afcuda.dll" "$(OutDir)" /y /D</Command>
     </CudaCompile>
     <Link>
       <AdditionalLibraryDirectories>$(AF_PATH)\lib;$(ProjectDir)libs\opencl\lib;$(ProjectDir)libs\ffmpeg\lib;</AdditionalLibraryDirectories>
-      <AdditionalDependencies>afopencl.lib;OpenCL.lib;libiomp5md.lib;avutil.lib;avformat.lib;swscale.lib;avcodec.lib</AdditionalDependencies>
+      <AdditionalDependencies>afopencl.lib;OpenCL.lib;avutil.lib;avformat.lib;swscale.lib;avcodec.lib</AdditionalDependencies>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Console</SubSystem>
     </Link>
@@ -180,10 +178,8 @@ xcopy "$(AF_PATH)\lib\afopencl.dll" "$(OutDir)" /y /D
 xcopy "$(AF_PATH)\lib\FreeImage.dll" "$(OutDir)" /y /D
 xcopy "$(AF_PATH)\lib\forge.dll" "$(OutDir)" /y /D
 xcopy "$(AF_PATH)\lib\glfw3.dll" "$(OutDir)" /y /D
-xcopy "$(AF_PATH)\lib\libiomp5md.dll" "$(OutDir)" /y /D
 xcopy "$(AF_PATH)\lib\mkl_core.2.dll" "$(OutDir)" /y /D
 xcopy "$(AF_PATH)\lib\mkl_def.2.dll" "$(OutDir)" /y /D
-xcopy "$(AF_PATH)\lib\mkl_intel_thread.2.dll" "$(OutDir)" /y /D
 xcopy "$(AF_PATH)\lib\mkl_rt.2.dll" "$(OutDir)" /y /D
 xcopy "$(AF_PATH)\lib\mkl_tbb_thread.2.dll" "$(OutDir)" /y /D</Command>
     </PostBuildEvent>

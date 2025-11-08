@@ -133,17 +133,15 @@ xcopy "$(SolutionDir)Watermarking-Impl\libs\libtiff\bin\tiff.dll" "$(SolutionDir
       <OptimizeReferences>true</OptimizeReferences>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <AdditionalLibraryDirectories>$(AF_PATH)\lib;$(SolutionDir)Watermarking-Impl\x64\OPENCL_Release;$(SolutionDir)Watermarking-Impl\libs\opencl\lib;$(ProjectDir)libs\googletest-1.17.0\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>afopencl.lib;OpenCL.lib;libiomp5md.lib;opencl_utils.obj;utils.obj;gtest.lib;gtest_main.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>afopencl.lib;OpenCL.lib;opencl_utils.obj;utils.obj;gtest.lib;gtest_main.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>xcopy "$(AF_PATH)\lib\afopencl.dll" "$(OutDir)" /y /D
 xcopy "$(AF_PATH)\lib\FreeImage.dll" "$(OutDir)" /y /D
 xcopy "$(AF_PATH)\lib\forge.dll" "$(OutDir)" /y /D
 xcopy "$(AF_PATH)\lib\glfw3.dll" "$(OutDir)" /y /D
-xcopy "$(AF_PATH)\lib\libiomp5md.dll" "$(OutDir)" /y /D
 xcopy "$(AF_PATH)\lib\mkl_core.2.dll" "$(OutDir)" /y /D
 xcopy "$(AF_PATH)\lib\mkl_def.2.dll" "$(OutDir)" /y /D
-xcopy "$(AF_PATH)\lib\mkl_intel_thread.2.dll" "$(OutDir)" /y /D
 xcopy "$(AF_PATH)\lib\mkl_rt.2.dll" "$(OutDir)" /y /D
 xcopy "$(AF_PATH)\lib\mkl_tbb_thread.2.dll" "$(OutDir)" /y /D</Command>
     </PostBuildEvent>

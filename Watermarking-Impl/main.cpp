@@ -86,13 +86,13 @@ int main(void)
 #if defined(_USE_EIGEN_)
 		//check valid parameter values
 		Utils::checkError(p <= 1 || p % 2 != 1 || p > 9, "p parameter must be a positive odd number greater than or equal to 3 and less than or equal to 9");
+		//initialize openmp
+#pragma omp parallel
+		{}
 #else
 		//TODO GPU: for p>3 we have problems with ME masking buffers
 		Utils::checkError(p != 3, "For now, only p=3 is allowed");
 #endif
-		//initialize openmp
-#pragma omp parallel
-		{ }
 
 		Utils::checkError(psnr <= 0, "PSNR must be a positive number");
 
