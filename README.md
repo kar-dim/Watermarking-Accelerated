@@ -19,7 +19,7 @@ Implementations are optimized for maximum performance:
 
 # Key Features
 
-- Implementation of highly optimized watermark embedding and detection algorithms for images and video.
+- Implementation of highly optimized watermark embedding and detection algorithms for images and video, using efficiently the ```Eigen``` and ```ArrayFire``` libraries.
 - Comparative performance analysis between CPU and GPU implementations (check [Releases](https://github.com/kar-dim/Watermarking-Accelerated/releases)).
 
 # Run the pre-built binaries
