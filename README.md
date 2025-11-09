@@ -89,11 +89,11 @@ ffmpeg -y -f rawvideo
 - `-r <frame_rate>`: Frame rate of the video (extracted from the input).
 - `-i -`: Accepts raw video from stdin.
 - `-i <input_video_file>`: **USER SUPPLIED**: Original input file.
-- `<ffmpegOptions>`: **USER SUPPLIED**: Encoding options (e.g., ```-c:v libx265 -preset fast -crf 23```).
+- `<ffmpegOptions>`: **USER SUPPLIED**: Encoder options such as codec, preset, and quality options (e.g., ```-c:v libx265 -preset fast -crf 23```).
 - `-c:s copy -c:a copy`: Copies subtitle and audio streams without re-encoding.
 - `-map 1:s? -map 0:v -map 1:a?`: Maps subtitles/audio from the original input, and video from stdin.
 - `-max_interleave_delta 0`: Reduces potential interleaving delay issues.
-- `vf "<rotation>"`: Filter to be applied for rotating the output video (optional, may not be set, extracted from the input).
+- `-vf "<rotation>"`: Filter to be applied for rotating the output video (optional, may not be set, extracted from the input).
 - `-color_range:v:0 <range>`: Sets the output color range metadata to help video players (value of "tv" or "pc" is supplied, extracted from the input).
 - `<output_file>`: **USER SUPPLIED**: Output file path for the final video.
 
