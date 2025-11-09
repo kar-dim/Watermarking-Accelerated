@@ -32,6 +32,7 @@ To use these samples, simply extract the archive (ideally) to the root directory
 The sample application:
    - Embeds the watermark using the NVF and the proposed Prediction-Error mask for a video or image.
    - Detects the watermark using the proposed Prediction-Error based detector for a video or image.
+   - For image mode only: Saves the watermarked images on the disk, one file for each mask used.
    - Prints FPS/execution time for both operations, and both masks.
 
 **NOTE**:
@@ -56,7 +57,7 @@ The application should be parameterized from the corresponding ```settings.ini``
 
 | Parameter                         | Description                                                                                                                 |
 |-----------------------------------|-----------------------------------------------------------------------------------------------------------------------------                |
-| video                             | Path to the video file, if we want to embed or detect the watermark for a video. This will set the sample application to ```video mode``` and will read the video-only settings that are described in this section. |
+| video                             | Path to the video file, if we want to embed or detect the watermark for a video. This will set the sample application to ```video mode``` and will read the video-only settings that are described in this section plus the common settings (```watermark```, ```execution_time_in_fps```, ```p```, ```psnr``` and ```opencl_device```) |
 | watermark_interval                | ```[Number]```: Embed or try to detect the watermark every X frames. If set to 1 when embedding, the watermark will be embedded for all frames, which degrades video quality.|
 | cuda_hw_decoder                   | ```[CUDA only]```: Offload decoding to the GPU using **NVDEC**. This is **much** more effective on ```HEVC``` or ```AV1``` videos (especially 4K and above) and tasks like watermark detection, as software decoders are generally fast for lower resolutions and less complex algorithms such as ```H264```. Valid options are ```hevc_cuvid``` , ```h264_cuvid``` and ```av1_cuvid```. Other decoders may be available like ```vp9_cuvid```, ```vc1_cuvid``` or ```mjpeg_cuvid```. If HW decoders aren't available, the application will automatically fall back to CPU decoding.|
 | encode_watermark_file_path        | Set this value to a file path, in order to embed watermark and save the watermarked file to disk.                                           |
