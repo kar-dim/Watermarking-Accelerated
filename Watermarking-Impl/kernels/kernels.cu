@@ -75,8 +75,8 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
     __syncthreads();
 
     //read the 3x3 window from shared memory
-    const int localX = threadIdx.x + 1; // center
-	const half x_4 = blockValues[1][threadIdx.x + 1]; // center pixel
+    const int localX = threadIdx.x + 1; //center
+	const half x_4 = blockValues[1][threadIdx.x + 1]; //center pixel
     const half8 localBlock = make_half8(
         blockValues[0][localX - 1], blockValues[0][localX], blockValues[0][localX + 1], 
         blockValues[1][localX - 1], blockValues[1][localX + 1], 
@@ -95,7 +95,7 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
     #pragma unroll
     for (int i = 0; i < 64; i += 8)
         sum += FLOAT(RxLocal[(threadIdx.x + i) % 64][rxRow]);
-    // reduce 32 results to 4 per warp
+    //reduce 32 results to 4 per warp
     for (int i = 4; i > 0; i = i / 2)
         sum += __shfl_down_sync(0xFFFFFFFF, sum, i);
     if (threadIdx.x % 8 == 0)
@@ -303,7 +303,7 @@ __global__ void nV12ToYUV420p(const void* __restrict__ uvSrc, const int uvPitch,
     else 
     {
         //bitDepth == 10 (stored in 16-bit per pixel)
-        const uint16_t* src = reinterpret_cast<const uint16_t*>(uvSrc) + y * (uvPitch / 2) +  2 * x;
+        const uint16_t* src = reinterpret_cast<const uint16_t*>(uvSrc) + y * (uvPitch / 2) + 2 * x;
         uvDst[idx] = static_cast<uint8_t>(scale10To8(src[0]));
         uvDst[uvWidth * uvHeight + idx] = static_cast<uint8_t>(scale10To8(src[1]));
     }

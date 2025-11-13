@@ -28,7 +28,7 @@ __device__ void fillBlock(const float* __restrict__ input, float* __restrict__ s
     {
         const int tileRow = i % sharedSize;
         const int tileCol = i / sharedSize;
-        // clamp (mimic cudaAddressModeClamp)
+        //clamp (mimic cudaAddressModeClamp)
         const int globalX = clamp<int>((int)(blockIdx.y * blockDim.y) + tileCol - pad, 0, width - 1);
         const int globalY = clamp<int>((int)(blockIdx.x * blockDim.x) + tileRow - pad, 0, height - 1);
         sharedMem[tileRow * sharedSize + tileCol] = input[globalX * height + globalY];
@@ -38,8 +38,8 @@ __device__ void fillBlock(const float* __restrict__ input, float* __restrict__ s
 //helper methods of ME kernel, to calculate block-wide rx values in shared memory
 __device__ inline void me_p3_rxCalculate(half8* RxLocalVec8, const half8& vec, const half& x4);
 
-// NVF kernel, calculates NVF values for each pixel in the image
-// works for all p values (3,5,7 and 9)
+//NVF kernel, calculates NVF values for each pixel in the image
+//works for all p values (3,5,7 and 9)
 template<int p, int pSquared = p * p, int pad = p / 2>
 __global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, const unsigned int width, const unsigned int height)
 {
