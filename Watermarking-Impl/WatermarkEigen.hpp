@@ -201,7 +201,7 @@ private:
 
 	//helper method to load a tile block from the image into the tile matrix (either direct or clamped access for border pixels)
 	template<typename PixelAccessor>
-	void loadTileBlock(TileMatrix& tile, const ArrayXXf& image, const int i, const int j, const int tileRows, const PixelAccessor& pixelAccessor)
+	void loadTileBlock(TileMatrix& tile, const int i, const int j, const int tileRows, const PixelAccessor& pixelAccessor)
 	{
 		constexpr int center = pad;
 		int k;
@@ -222,13 +222,12 @@ private:
 
 	//helper lambda to load a single tile for a specific index (i,j) and apply a function to it
 	template <typename Accessor, typename Func>
-	inline void processTileRows(TileMatrix& tile, const ArrayXXf& image,
-		const int i, const int j, const int tileRowSize, const int threadId, Accessor&& accessor, Func&& func)
+	inline void processTileRows(TileMatrix& tile, const int i, const int j, const int tileRowSize, const int threadId, Accessor&& accessor, Func&& func)
 	{
-			const int tileRows = std::min(tileRowSize, tileSize);
-			loadTileBlock(tile, image, i, j, tileRows, accessor);
-			for (int tileRow = 0; tileRow < tileRows; tileRow++)
-				func(tile, i, j, tileRow, threadId);
+		const int tileRows = std::min(tileRowSize, tileSize);
+		loadTileBlock(tile, i, j, tileRows, accessor);
+		for (int tileRow = 0; tileRow < tileRows; tileRow++)
+			func(tile, i, j, tileRow, threadId);
 	}
 
 	//helper method to calculate a tile and apply a function to each
@@ -256,7 +255,7 @@ private:
 #pragma omp for
 				for (int j = startCol; j < endCol; j++)
 					for (int i = startRow; i < endRow; i += tileSize)
-						processTileRows(tile, image, i, j, endRow - i, threadId, directAccessor, func);
+						processTileRows(tile, i, j, endRow - i, threadId, directAccessor, func);
 			}
 
 			//helper lambda to process BORDER regions
@@ -265,7 +264,7 @@ private:
 #pragma omp for collapse(2) schedule(dynamic, 8)
 				for (int j = startCol; j < endCol; j++)
 					for (int i = startRow; i < endRow; i += tileSize)
-						processTileRows(tile, image, i, j, endRow - i, threadId, clampedAccessor, func);
+						processTileRows(tile, i, j, endRow - i, threadId, clampedAccessor, func);
 			};
 
 			//process BORDER regions
