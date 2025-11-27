@@ -294,8 +294,67 @@ private:
 	void computeErrorSequence(const ArrayXXf& image, ArrayXXf& outputErrorSequence)
 	{
 		const auto& coefficients = meMatrixData.getCoefficients();
-		applyToTilesParallel(image, [&](const TileMatrix& tile, const int i, const int j, const int tileRow, const int) {
-			outputErrorSequence(i + tileRow, j) = image(i + tileRow, j) - tile.col(tileRow).dot(coefficients);
-		});
+		const int rows = static_cast<int>(baseRows);
+		const int cols = static_cast<int>(baseCols);
+
+		const int startRow = pad;
+		const int endRow = rows - pad;
+		const int startCol = pad;
+		const int endCol = cols - pad;
+		const bool hasCenterRegion = (endRow > startRow) && (endCol > startCol);
+		constexpr int center = pad;
+
+		//process CENTER region
+		if (hasCenterRegion)
+		{
+			const float* imgData = image.data();
+			float* outData = outputErrorSequence.data();
+
+#pragma omp parallel for
+			for (int j = startCol; j < endCol; j++)
+			{
+				const int colOffset = j * rows;
+				for (int i = startRow; i < endRow; i += tileSize)
+				{
+					const int currentBlockSize = std::min(tileSize, endRow - i);
+					Eigen::Map<Eigen::VectorXf> errorBatch(outData + colOffset + i, currentBlockSize);
+					Eigen::Map<const Eigen::VectorXf> imgBatch(imgData + colOffset + i, currentBlockSize);
+					errorBatch = imgBatch;
+
+					int k = 0;
+					for (int dj = 0; dj < p; dj++)
+						for (int di = 0; di < p; di++)
+						{
+							if (di == center && dj == center)
+								continue;
+							int neighborOffset = (dj - center) * rows + (di - center);
+							const float* neighborPtr = imgData + colOffset + i + neighborOffset;
+							Eigen::Map<const Eigen::VectorXf> neighborBatch(neighborPtr, currentBlockSize);
+							errorBatch.noalias() -= neighborBatch * coefficients(k);
+							k++;
+						}
+				}
+			}
+		}
+
+		auto processSingleBorderPixel = [&](int i, int j) 
+		{
+			TileMatrix tile;
+			auto clampedAccessor = [&](int x, int y) { return clampedValue(image, x, y, rows, cols); };
+			loadTileBlock(tile, i, j, 1, clampedAccessor);
+			outputErrorSequence(i, j) = image(i, j) - tile.col(0).dot(coefficients);
+		};
+
+		//helper lambda to process BORDER regions
+		auto processBorder = [&](const int rStart, const int rEnd, const int cStart, const int cEnd)
+		{
+#pragma omp parallel for collapse(2)
+				for (int j = cStart; j < cEnd; j++)
+					for (int i = rStart; i < rEnd; i++)
+						processSingleBorderPixel(i, j);
+		};
+
+		//process BORDER regions
+		computeMaskBorders(startRow, endRow, startCol, endCol, hasCenterRegion, processBorder);
 	}
 };
