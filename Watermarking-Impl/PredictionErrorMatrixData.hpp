@@ -17,19 +17,32 @@ class PredictionErrorMatrixData
 {
 private:
 	static constexpr int localSize = (p * p) - 1;
+	static constexpr int center = p / 2;
 	using LocalVector = Eigen::Matrix<float, localSize, 1>;
 	using LocalVectorDiag = Eigen::Matrix<float, localSize * (localSize + 1) / 2, 1>;
 	using LocalMatrix = Eigen::Matrix<float, localSize, localSize>;
+public:
 	LocalVectorDiag RxVec;
 	LocalVector coefficients, rx;
 	LocalMatrix Rx;
 	std::vector<AlignedMatrix<LocalVectorDiag>> RxVec_all;
 	std::vector<AlignedMatrix<LocalVector>> rx_all;
+	std::vector<int> offsets;
 
 public:
 	//initialize prediction error matrix data (allocate memory) for a given number of threads
-	PredictionErrorMatrixData(const int numThreads) : RxVec_all(numThreads), rx_all(numThreads)
-	{ }
+	PredictionErrorMatrixData(const int numThreads, const int baseRows) : RxVec_all(numThreads), rx_all(numThreads)
+	{
+		offsets.reserve(localSize);
+		for (int dj = 0; dj < p; dj++)
+			for (int di = 0; di < p; di++)
+			{
+				if (di == center && dj == center)
+					continue;
+				//col-major offset
+				offsets.push_back((dj - center) * baseRows + (di - center));
+			}
+	}
 
 	//sets all Rx,rx matrices and vectors to zero
 	void setZero()
@@ -74,6 +87,4 @@ public:
 		//solve the linear system Rx * coefficients = rx for coefficients
 		coefficients = Rx.colPivHouseholderQr().solve(rx);
 	}
-
-	LocalVector getCoefficients() const { return coefficients; }
 };
