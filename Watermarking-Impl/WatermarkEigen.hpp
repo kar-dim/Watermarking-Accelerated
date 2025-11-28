@@ -176,29 +176,27 @@ private:
 	//by using a supplied function (used in prediction error correlation and error sequence calculation)
 	template<typename BorderFunc>
 	inline void processPredictionErrorBorder(const ArrayXXf& image, const int startRow, const int endRow, const int startCol, const int endCol, BorderFunc&& func)
-		{
+	{
 #pragma omp parallel 
-			{
-				const int threadId = omp_get_thread_num();
-				LocalVector neighbors;
+		{
+			const int threadId = omp_get_thread_num();
+			LocalVector neighbors;
 #pragma omp for collapse(2)
-				for (int j = startCol; j < endCol; j++)
+			for (int j = startCol; j < endCol; j++)
+				for (int i = startRow; i < endRow; i++)
 				{
-					for (int i = startRow; i < endRow; i++)
-					{
-						int k = 0;
-						for (int dj = 0; dj < p; dj++)
-							for (int di = 0; di < p; di++)
-							{
-								if (di == center && dj == center)
-									continue;
-								neighbors(k++) = clampedValue(image, i + di - center, j + dj - center, baseRows, baseCols);
-							}
-						func(i, j, neighbors, threadId);
-					}
+					int k = 0;
+					for (int dj = 0; dj < p; dj++)
+						for (int di = 0; di < p; di++)
+						{
+							if (di == center && dj == center)
+								continue;
+							neighbors(k++) = clampedValue(image, i + di - center, j + dj - center, baseRows, baseCols);
+						}
+					func(i, j, neighbors, threadId);
 				}
-			}
-		};
+		}
+	};
 
 	//compute the strengthened watermark, calculated by multiplying the mask with the strengthened watermark (random matrix)
 	void computeStrengthenedWatermark(const ArrayXXf& inputImage, float& watermarkStrength, MASK_TYPE maskType)
@@ -235,8 +233,8 @@ private:
 #pragma omp parallel
 			{
 				const int threadId = omp_get_thread_num();
-				auto& rxVec_mat = meMatrixData.RxVec_all[threadId].mat;
-				auto& rx_mat = meMatrixData.rx_all[threadId].mat;
+				auto& RxVec = meMatrixData.RxVec_all[threadId].mat;
+				auto& rx = meMatrixData.rx_all[threadId].mat;
 #pragma omp for
 				for (int j = startCol; j < endCol; j++)
 				{
@@ -244,26 +242,22 @@ private:
 					const int stripHeight = endRow - startRow;
 					const float* centerPtr = imgData + colOffset + startRow;
 					Map<const VectorXf> centerBatch(centerPtr, stripHeight);
+
+					int k = 0;
 					//rx(u) = sum(center * neighbor_u)
+					//Rx(u, v) = sum(neighbor_u * neighbor_v)
 					for (int u = 0; u < localSize; u++)
 					{
 						const float* neighborPtr = centerPtr + offsets[u];
 						Map<const VectorXf> neighborBatch(neighborPtr, stripHeight);
-						rx_mat(u) += neighborBatch.dot(centerBatch);
-					}
-					//Rx(u, v) = sum(neighbor_u * neighbor_v)
-					int k = 0;
-					for (int u = 0; u < localSize; u++)
-					{
-						const float* ptrU = centerPtr + offsets[u];
-						Map<const VectorXf> mapU(ptrU, stripHeight);
+						rx(u) += neighborBatch.dot(centerBatch);
 						for (int v = 0; v <= u; v++, k++)
 						{
 							const float* ptrV = centerPtr + offsets[v];
 							Map<const VectorXf> mapV(ptrV, stripHeight);
-							rxVec_mat(k) += mapU.dot(mapV);
+							RxVec(k) += neighborBatch.dot(mapV);
 						}
-					}
+					}	
 				}
 			}
 		}
