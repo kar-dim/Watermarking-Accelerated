@@ -32,12 +32,12 @@ To use these samples, simply extract the archive (ideally) to the root directory
 The sample application:
    - Embeds the watermark using the NVF and the proposed Prediction-Error mask for a video or image.
    - Detects the watermark using the proposed Prediction-Error based detector for a video or image.
-   - For image mode only: Saves the watermarked images on the disk, one file for each mask used.
+   - For image mode only: (Optionally) Saves the watermarked images on the disk, one file for each mask used.
    - Prints FPS/execution time for both operations, and both masks.
 
 **NOTE**:
 1. For video operations, only the proposed mask is used, which is more optimal.
-2. CPU implementation is built with AVX2 support: ```-mavx2 -mfma```. To enable AVX-512 replace the previous with: ```-march=native```. The performance gains are negligible, and for much broader compatibility we use AVX2 by default.
+2. CPU implementation is built with AVX2 support: ```-mavx2 -mfma```. To enable AVX-512 replace the previous with: <br/>```-march=native```. The performance gains are negligible, and for much broader compatibility we use AVX2 by default.
 
 The application should be parameterized from the corresponding ```settings.ini``` file. Here is a detailed explanation for each parameter:
 
