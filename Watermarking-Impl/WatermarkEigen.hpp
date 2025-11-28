@@ -283,7 +283,7 @@ private:
 	void computeErrorSequence(const ArrayXXf& image, ArrayXXf& outputErrorSequence)
 	{
 		const auto& coefficients = meMatrixData.coefficients;
-		constexpr int center = pad;
+		const auto& offsets = meMatrixData.offsets;
 		//process CENTER region
 		if (hasCenterRegion)
 		{
@@ -293,23 +293,17 @@ private:
 #pragma omp parallel for
 			for (int j = startCol; j < endCol; j++)
 			{
-				const int colOffset = j * baseRows;
-				Map<VectorXf> errorBatch(outData + colOffset + startRow, stripHeight);
-				Map<const VectorXf> imgBatch(imgData + colOffset + startRow, stripHeight);
-				errorBatch = imgBatch;
-
-				int k = 0;
-				for (int dj = 0; dj < p; dj++)
-					for (int di = 0; di < p; di++)
-					{
-						if (di == center && dj == center)
-							continue;
-						int neighborOffset = (dj - center) * baseRows + (di - center);
-						const float* neighborPtr = imgData + colOffset + startRow + neighborOffset;
-						Map<const VectorXf> neighborBatch(neighborPtr, stripHeight);
-						errorBatch.noalias() -= neighborBatch * coefficients(k);
-						k++;
-					}
+				const int colOffset = (j * baseRows) + startRow;
+				Map<VectorXf> errorBatch(outData + colOffset, stripHeight);
+				Map<const VectorXf> imgBatch(imgData + colOffset, stripHeight);
+				errorBatch = imgBatch; //initialize with image values
+				//compute prediction error
+				for (int k = 0; k < localSize; k++)
+				{
+					const float* neighborPtr = imgData + colOffset + offsets[k];
+					Map<const VectorXf> neighborBatch(neighborPtr, stripHeight);
+					errorBatch.noalias() -= neighborBatch * coefficients(k);
+				}
 			}
 		}
 		//process BORDER regions
