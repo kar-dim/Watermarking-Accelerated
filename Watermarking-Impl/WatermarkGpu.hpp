@@ -64,7 +64,7 @@ public:
 	static void unlockArrays(const Args&... arrays) { (arrays.unlock(), ...); }
 
 	//helper method to display an af::array in a window
-	static void displayArray(const af::array& array, const int width, const int height)
+	static void displayArray(const af::array& array, const int width = 1600, const int height = 900)
 	{
 		af::Window window(width, height);
 		while (!window.close())

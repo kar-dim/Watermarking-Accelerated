@@ -226,12 +226,14 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 	//if CUDA HW decoder is used, allocate more pinned memory for YUV420 frames (3 planes: Y, U, V)
 	HostMemory<uint8_t> framePinned(useHwDecoder ? width * height * 3 / 2 : width * height);
 	//group common video data for both embedding and detection
-	VideoProcessingContext videoData(inputFormatCtx.get(), inputDecoderCtx.get(), videoStreamIndex, watermarkObj.get(), height, width, watermarkInterval, framePinned.get());
+	VideoProcessingContext videoData(inputFormatCtx.get(), inputDecoderCtx.get(), videoStreamIndex, videoStream, watermarkObj.get(), watermarkInterval, framePinned.get());
 
 	//realtime watermarking of raw video
 	const string makeWatermarkVideoPath = inir.Get("parameters_video", "encode_watermark_file_path", "");
 	if (makeWatermarkVideoPath != "")
 	{
+		//for embedding we may need to apply a filter graph (for 10-bit or HDR content)
+		const bool needsFilter = initFilterGraph(inputDecoderCtx.get(), videoStream, useHwDecoder, videoData.filterGraphContext);
 #if defined(_USE_EIGEN_)
 		//for video embedding only, set the number of openmp/eigen threads to physical cores
 		eigen_utils::setThreadsToPhysicalCores();
@@ -250,7 +252,7 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 		FILEPtr ffmpegPipe(_popen(ffmpegCmd.str().c_str(), "wb"), _pclose);
 		Utils::checkError(!ffmpegPipe.get(), "Error: Could not open FFmpeg pipe");
 		//embed watermark on the video frames
-		double secs = Utils::executionTime([&] { videoDispatcher(videoData, useHwDecoder, VideoOp::EMBED, ffmpegPipe.get()); });
+		double secs = Utils::executionTime([&] { videoDispatcher(videoData, useHwDecoder, VideoOp::EMBED, needsFilter, ffmpegPipe.get()); });
 		cout << info("\n\nWatermark embedding total execution time: " + Utils::formatExecutionTime(false, secs) + "\n\n");
 	}
 

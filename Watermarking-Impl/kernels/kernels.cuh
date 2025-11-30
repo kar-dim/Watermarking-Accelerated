@@ -85,10 +85,7 @@ __global__ void calculate_partial_correlation(const float* __restrict__ e_u, con
 __global__ void calculate_final_correlation(const float* __restrict__ partialDots, const float* __restrict__ partialNormU, const float* __restrict__ partialNormZ, float* __restrict__ result, const unsigned int numBlocks);
 
 //used for converting NV12 to YUV420p format, in HW accelerated video decoding
-__global__ void nV12ToYUV420p(const void* __restrict__ uvSrc, const int uvPitch, uint8_t* __restrict__ uvDst, const int uvWidth, const int uvHeight, const int bitDepth);
+__global__ void nV12ToYUV420p(const uint8_t* __restrict__ uvSrc, const int uvPitch, uint8_t* __restrict__ uvDst, const int uvWidth, const int uvHeight);
 
-//used for converting 8/16-bit pitched memory to float, in HW accelerated video decoding
-__global__ void pitchedToFloat(const void* __restrict__ input, float* __restrict__ output, const int width, const int height, const int pitch, const int bitDepth);
-
-//used for converting 16-bit (10-bit of actual data) pitched memory to 8-bit, in HW accelerated video decoding
-__global__ void pitched10To8Bit(const uint16_t* __restrict__ input, uint8_t* __restrict__ output, const int width, const int height, const int pitch);
+//used for converting 8 pitched memory to float, in HW accelerated video decoding
+__global__ void pitchedToFloat(const uint8_t* __restrict__ input, float* __restrict__ output, const int width, const int height, const int pitch);

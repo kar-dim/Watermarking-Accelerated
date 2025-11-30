@@ -287,49 +287,26 @@ __global__ void calculate_final_correlation(const float* __restrict__ partialDot
     }
 }
 
-__global__ void nV12ToYUV420p(const void* __restrict__ uvSrc, const int uvPitch, uint8_t* __restrict__ uvDst, const int uvWidth, const int uvHeight, const int bitDepth)
+__global__ void nV12ToYUV420p(const uint8_t* __restrict__ uvSrc, const int uvPitch, uint8_t* __restrict__ uvDst, const int uvWidth, const int uvHeight)
 {
     const int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx >= uvWidth * uvHeight)
         return;
     const int y = idx / uvWidth;
     const int x = idx % uvWidth;
-    if (bitDepth == 8)
-    {
-        const uint8_t* src = reinterpret_cast<const uint8_t*>(uvSrc) + y * uvPitch + 2 * x;
-        uvDst[idx] = src[0];
-        uvDst[uvWidth * uvHeight + idx] = src[1];
-    }
-    else 
-    {
-        //bitDepth == 10 (stored in 16-bit per pixel)
-        const uint16_t* src = reinterpret_cast<const uint16_t*>(uvSrc) + y * (uvPitch / 2) + 2 * x;
-        uvDst[idx] = static_cast<uint8_t>(scale10To8(src[0]));
-        uvDst[uvWidth * uvHeight + idx] = static_cast<uint8_t>(scale10To8(src[1]));
-    }
+    const uint8_t* src = uvSrc + y * uvPitch + 2 * x;
+    uvDst[idx] = src[0];
+    uvDst[uvWidth * uvHeight + idx] = src[1];
 }
 
-__global__ void pitchedToFloat(const void* __restrict__ input, float* __restrict__ output, const int width, const int height, const int pitch, const int bitDepth)
+__global__ void pitchedToFloat(const uint8_t* __restrict__ input, float* __restrict__ output, const int width, const int height, const int pitch)
 {
     __shared__ float block[16][16 + 1]; //+1 to avoid bank conflicts
     const int x = blockIdx.x * blockDim.x + threadIdx.x;
     const int y = blockIdx.y * blockDim.y + threadIdx.y;
     float convertedValue = 0.0f;
     if (x < width && y < height) 
-    {
-        if (bitDepth == 8) 
-        {
-            const uint8_t* in = reinterpret_cast<const uint8_t*>(input);
-            convertedValue = static_cast<float>(in[y * pitch + x]);
-        }
-        else 
-        { 
-            //10-bit stored in 16-bit, convert to 8-bit range
-            const uint16_t* in = reinterpret_cast<const uint16_t*>(input);
-            const int pitchOffset = pitch / 2; //pitch in elements
-			convertedValue = static_cast<float>(scale10To8(in[y * pitchOffset + x]));
-        }
-    }
+        convertedValue = static_cast<float>(input[y * pitch + x]);
 
     block[threadIdx.y][threadIdx.x] = convertedValue;
     __syncthreads();
@@ -339,12 +316,4 @@ __global__ void pitchedToFloat(const void* __restrict__ input, float* __restrict
     const int dstY = blockIdx.x * blockDim.x + threadIdx.y;
     if (dstX < height && dstY < width)
         output[dstY * height + dstX] = block[threadIdx.x][threadIdx.y];
-}
-
-__global__ void pitched10To8Bit(const uint16_t* __restrict__ input, uint8_t* __restrict__ output, const int width, const int height, const int pitch)
-{
-    const int x = blockIdx.x * blockDim.x + threadIdx.x;
-    const int y = blockIdx.y * blockDim.y + threadIdx.y;
-    if (x < width && y < height)
-        output[y * width + x] = static_cast<uint8_t>(scale10To8(input[y * (pitch / 2) + x]));
 }
