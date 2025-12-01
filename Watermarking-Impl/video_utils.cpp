@@ -5,6 +5,7 @@
 #include "VideoProcessingContext.hpp"
 #include "WatermarkBase.hpp"
 #include <algorithm>
+#include <cerrno>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -38,6 +39,7 @@ extern "C" {
 #include "libavfilter/buffersrc.h"
 #include "libavfilter/buffersink.h"
 #include "libavutil/display.h"
+#include "libavutil/error.h"
 #include "libavutil/rational.h"
 #include <libavutil/pixdesc.h>
 #include "libavutil/pixfmt.h"
@@ -88,7 +90,6 @@ namespace video_utils
 		const auto afStream = CudaStreamManager::getInstance().getAfStream();
 		const auto videoStream = CudaStreamManager::getInstance().getCustomStream();
 		const ImageBuffer lumaBuffer(data.height, data.width, f32);
-		const ImageBuffer lumaBufferPacked(data.width, data.height, u8); //used only when we don't embed
 		const ImageBuffer chromaBuffer(data.width, data.height / 2, u8);
 		//launch NV12 to YUV420 kernel (for UV planes)
 		cuda_utils::launchNV12ToYUV420pKernel(frame->data[1], frame->linesize[1], chromaBuffer.device<uint8_t>(), data.width / 2, data.height / 2, afStream);
@@ -159,20 +160,19 @@ namespace video_utils
 	//filter a single frame
 	void filterFrame(AVFramePtr& frame, const FilterGraphContext& filterGraphContext)
 	{
-		AVFrame* filteredFrame = av_frame_alloc();
-		if (av_buffersrc_add_frame_flags(filterGraphContext.buffersrcCtx, frame.get(), AV_BUFFERSRC_FLAG_KEEP_REF) < 0)
-		{
-			av_frame_free(&filteredFrame);
-			throw std::runtime_error("Failed to add frame to filter graph");
-		}
-		int ret = av_buffersink_get_frame(filterGraphContext.buffersinkCtx, filteredFrame);
-		if (ret < 0)
-		{
-			av_frame_free(&filteredFrame);
-			throw std::runtime_error("Failed to get filtered frame");
-		}
-		frame.reset(filteredFrame);
+		AVFramePtr filteredFrame(av_frame_alloc());
+		Utils::checkError(!filteredFrame, "Failed to allocate filtered frame");
 
+		int ret = av_buffersrc_add_frame_flags(filterGraphContext.buffersrcCtx, frame.get(), AV_BUFFERSRC_FLAG_KEEP_REF);
+		Utils::checkError(ret < 0, "Failed to add frame to filter graph");
+		ret = av_buffersink_get_frame(filterGraphContext.buffersinkCtx, filteredFrame.get());
+		//don't exit if more frames (buffering is used) are needed to produce one output frame, just keep the original
+		if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
+			return;
+		else if (ret < 0)
+			throw std::runtime_error("Failed to get filtered frame: " + std::to_string(ret));
+		//replace original frame with filtered one
+		frame.reset(filteredFrame.release());
 	}
 
 	//initialize the filter graph for 10-bit to 8-bit conversion and HDR to SDR tonemapping
