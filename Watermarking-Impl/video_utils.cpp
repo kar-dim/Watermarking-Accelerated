@@ -1,5 +1,6 @@
 #include "buffer.hpp"
 #include "utils.hpp"
+#include "video_defines.hpp"
 #include "video_utils.hpp"
 #include "VideoProcessingContext.hpp"
 #include "WatermarkBase.hpp"
@@ -13,6 +14,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 #if defined(_USE_CUDA_)
 #include "cuda_utils.hpp"
@@ -176,54 +178,98 @@ namespace video_utils
 	//initialize the filter graph for 10-bit to 8-bit conversion and HDR to SDR tonemapping
 	bool initFilterGraph(const AVCodecContext* inputDecoderCtx, const AVStream* st, const bool useHwDecoder, FilterGraphContext& filterCtx)
 	{
+		const string exceptionMessage = "Failed to initialize filter graph in: ";
 		const string filterDesc = getFilterGraphString(inputDecoderCtx, st, useHwDecoder);
+
 		if (filterDesc.empty())
-			return false;
+			return false; //no need for filtering
 
-		char pixFmtName[32];
-		snprintf(pixFmtName, sizeof(pixFmtName), "%s", av_get_pix_fmt_name((AVPixelFormat)inputDecoderCtx->pix_fmt));
+		//parse the filter graph description in order to initialize the filter graph later
 		const AVRational timeBase = getTimeBase(st);
-		char args[512];
-		snprintf(args, sizeof(args), "video_size=%dx%d:pix_fmt=%s:time_base=%d/%d:pixel_aspect=%d/%d",
+		const char* pixFmtName = av_get_pix_fmt_name((AVPixelFormat)inputDecoderCtx->pix_fmt);
+		string args = std::format("video_size={}x{}:pix_fmt={}:time_base={}/{}:pixel_aspect={}/{}",
 			inputDecoderCtx->width, inputDecoderCtx->height, pixFmtName, timeBase.num, timeBase.den,
-			inputDecoderCtx->sample_aspect_ratio.num, inputDecoderCtx->sample_aspect_ratio.den);
+			inputDecoderCtx->sample_aspect_ratio.num,inputDecoderCtx->sample_aspect_ratio.den);
 
-		filterCtx.filterGraph = avfilter_graph_alloc();
-		if (!filterCtx.filterGraph)
-			return false;
+		//allocate filter graph and source/sink filters
+		AVFilterGraphPtr graphPtr(avfilter_graph_alloc());
+		Utils::checkError(!graphPtr, exceptionMessage + "avfilter_graph_alloc");
 
-		const AVFilter* buffersrc = avfilter_get_by_name("buffer");
-		const AVFilter* buffersink = avfilter_get_by_name("buffersink");
-		if (!buffersrc || !buffersink)
-			return false;
+		const AVFilter* bufferSrc = avfilter_get_by_name("buffer");
+		const AVFilter* bufferSink = avfilter_get_by_name("buffersink");
+		Utils::checkError(!bufferSrc || !bufferSink, exceptionMessage + "avfilter_get_by_name");
 
-		if (avfilter_graph_create_filter(&filterCtx.buffersrcCtx, buffersrc, "in", args, nullptr, filterCtx.filterGraph) < 0)
-			return false;
+		AVFilterContext* srcCtx = avfilter_graph_alloc_filter(graphPtr.get(), bufferSrc, "in");
+		Utils::checkError(!srcCtx, exceptionMessage + "avfilter_graph_alloc_filter");
 
-		if (avfilter_graph_create_filter(&filterCtx.buffersinkCtx, buffersink, "out", nullptr, nullptr, filterCtx.filterGraph) < 0)
-			return false;
+		//if using hardware decoder, need to pass hw_frames_ctx to the source filter
+		if (useHwDecoder)
+		{
+			AVBufferSrcParametersPtr par(av_buffersrc_parameters_alloc());
+			Utils::checkError(!par, exceptionMessage + "av_buffersrc_parameters_alloc");
+			par->format = inputDecoderCtx->pix_fmt;
+			par->time_base = timeBase;
 
-		AVFilterInOut* outputs = avfilter_inout_alloc();
-		AVFilterInOut* inputs = avfilter_inout_alloc();
+			AVBufferRefPtr hwFramesRef;
+			//decoder provides a Frames Context (Ideal)
+			if (inputDecoderCtx->hw_frames_ctx)
+				hwFramesRef.reset(av_buffer_ref(inputDecoderCtx->hw_frames_ctx));
+			//decoder only provides Device Context (must manually create hw_frames_ctx)
+			else if (inputDecoderCtx->hw_device_ctx)
+			{
+				AVBufferRef* rawFrames = av_hwframe_ctx_alloc(inputDecoderCtx->hw_device_ctx);
+				Utils::checkError(!rawFrames, exceptionMessage + "av_hwframe_ctx_alloc");
+				hwFramesRef.reset(rawFrames);
+				AVHWFramesContext* frames_ctx = (AVHWFramesContext*)hwFramesRef->data;
+				frames_ctx->format = inputDecoderCtx->pix_fmt; //AV_PIX_FMT_CUDA, etc
+				frames_ctx->sw_format = inputDecoderCtx->sw_pix_fmt; //AV_PIX_FMT_P010, etc
+				frames_ctx->width = inputDecoderCtx->width;
+				frames_ctx->height = inputDecoderCtx->height;
+				//fallback if sw_format is unknown
+				if (frames_ctx->sw_format == AV_PIX_FMT_NONE)
+					frames_ctx->sw_format = AV_PIX_FMT_NV12;
+				Utils::checkError(av_hwframe_ctx_init(hwFramesRef.get()) < 0, exceptionMessage + "av_hwframe_ctx_init");
+			}
+			if (hwFramesRef)
+				par->hw_frames_ctx = hwFramesRef.get();
+			Utils::checkError(av_buffersrc_parameters_set(srcCtx, par.get()) < 0, exceptionMessage + "av_buffersrc_parameters_set");
+		}
+		Utils::checkError(avfilter_init_str(srcCtx, args.c_str()) < 0, exceptionMessage + "avfilter_init_str");
+		AVFilterContext* sinkCtx = avfilter_graph_alloc_filter(graphPtr.get(), bufferSink, "out");
+		Utils::checkError(!sinkCtx, exceptionMessage + "avfilter_graph_alloc_filter");
+		Utils::checkError(avfilter_init_str(sinkCtx, nullptr) < 0, exceptionMessage + "avfilter_init_str");
 
+		//link and config in and out filters with the graph string
+		AVFilterInOutPtr outputs(avfilter_inout_alloc());
+		AVFilterInOutPtr inputs(avfilter_inout_alloc());
+		Utils::checkError(!outputs || !inputs, exceptionMessage + "avfilter_inout_alloc");
+
+		//maps to the Source (feeds into the graph)
 		outputs->name = av_strdup("in");
-		outputs->filter_ctx = filterCtx.buffersrcCtx;
-		outputs->pad_idx = 0;
-		outputs->next = nullptr;
-
+		outputs->filter_ctx = srcCtx;
+		outputs->pad_idx = 0; outputs->next = nullptr;
+		//maps to the Sink (feeds out of the graph)
 		inputs->name = av_strdup("out");
-		inputs->filter_ctx = filterCtx.buffersinkCtx;
-		inputs->pad_idx = 0;
-		inputs->next = nullptr;
+		inputs->filter_ctx = sinkCtx;
+		inputs->pad_idx = 0; inputs->next = nullptr;
 
-		if (avfilter_graph_parse_ptr(filterCtx.filterGraph, filterDesc.c_str(), &inputs, &outputs, nullptr) < 0)
-			return false;
+		AVFilterInOut* inputsRaw = inputs.release();
+		AVFilterInOut* outputsRaw = outputs.release();
+		if (avfilter_graph_parse_ptr(graphPtr.get(), filterDesc.c_str(), &inputsRaw, &outputsRaw, nullptr) < 0)
+		{
+			inputs.reset(inputsRaw);
+			outputs.reset(outputsRaw);
+			throw std::runtime_error(exceptionMessage + "avfilter_graph_parse_ptr");
+		}
+		inputs.reset(inputsRaw);
+		outputs.reset(outputsRaw);
 
-		if (avfilter_graph_config(filterCtx.filterGraph, nullptr) < 0)
-			return false;
-
-		avfilter_inout_free(&inputs);
-		avfilter_inout_free(&outputs);
+		//since we manually created source/sink, we just config
+		Utils::checkError(avfilter_graph_config(graphPtr.get(), nullptr) < 0, exceptionMessage + "avfilter_graph_config");
+		//store the filter graph pointers, give back control of graphPtr, we don't want to automatically delete it yet
+		filterCtx.filterGraph = std::move(graphPtr);
+		filterCtx.buffersrcCtx = srcCtx;
+		filterCtx.buffersinkCtx = sinkCtx;
 
 		return true;
 	}
@@ -371,11 +417,13 @@ namespace video_utils
 	//get the input video time base (should be 1/average(fps))
 	AVRational getTimeBase(const AVStream* st)
 	{
-		AVRational fps = st->avg_frame_rate;
-		AVRational tb;
-		tb.num = fps.den;
-		tb.den = fps.num; //time_base = 1/fps
-		return tb;
+		const AVRational fps = st->avg_frame_rate;
+		if (fps.num > 0 && fps.den > 0)
+			return av_inv_q(fps);
+		//fallback if avg_frame_rate is garbage
+		if (st->time_base.num > 0 && st->time_base.den > 0)
+			return st->time_base;
+		return AVRational{ 1, 30 };
 	}
 
 	//runs the watermark creation for a video frame and writes the watermarked frame to the ffmpeg pipe

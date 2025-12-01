@@ -1,10 +1,10 @@
 #pragma once
 
 #include "buffer.hpp"
+#include "video_defines.hpp"
 #include "VideoProcessingContext.hpp"
 #include <cerrno>
 #include <cstdio>
-#include <memory>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -13,23 +13,11 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 #include "libavcodec/packet.h"
 #include <libavformat/avformat.h>
-#include "libavfilter/avfilter.h"
 #include "libavcodec/codec_par.h"
 #include "libavutil/pixfmt.h"
 #include "libavutil/error.h"
 #include "libavutil/frame.h"
-#include "libavutil/buffer.h"
 #include "libavutil/rational.h"
-}
-
-namespace video_utils::detail 
-{
-	template <auto FreeFunc>
-	struct AVDeleter
-	{
-		template <typename T>
-		void operator()(T* p) const noexcept { if (p) FreeFunc(&p); }
-	};
 }
 
 /*!
@@ -38,17 +26,6 @@ namespace video_utils::detail
  */
 namespace video_utils
 {
-	enum VideoOp { EMBED, DETECT };
-
-	using AVPacketPtr = std::unique_ptr<AVPacket, detail::AVDeleter<av_packet_free>>;
-	using AVFramePtr = std::unique_ptr<AVFrame, detail::AVDeleter<av_frame_free>>;
-	using AVBufferRefPtr = std::unique_ptr<AVBufferRef, detail::AVDeleter<av_buffer_unref>>;
-	using AVFormatContextPtr = std::unique_ptr<AVFormatContext, detail::AVDeleter<avformat_close_input>>;
-	using AVCodecContextPtr = std::unique_ptr<AVCodecContext, detail::AVDeleter<avcodec_free_context>>;
-	using AVFilterInOutPtr = std::unique_ptr<AVFilterInOut, detail::AVDeleter<avfilter_inout_free>>;
-
-	static constexpr AVPixelFormat supportedFormats[] = { AV_PIX_FMT_YUV420P, AV_PIX_FMT_YUVJ420P, AV_PIX_FMT_YUV420P10LE, AV_PIX_FMT_CUDA };
-
 	//10-bit and HDR helpers
 	inline bool is10bit(const AVCodecContext* codecCtx, const AVStream* st)
 	{ 
@@ -56,11 +33,9 @@ namespace video_utils
 		return is10bitCtx || (st->codecpar->format == AV_PIX_FMT_YUV420P10LE || st->codecpar->format == AV_PIX_FMT_YUV420P16LE || st->codecpar->bits_per_raw_sample == 10);
 	}
 	//PQ HDR10 or HLG HDR
-	inline bool isHDR(const AVCodecContext* codecCtx) 
-	{ return codecCtx->color_trc == AVCOL_TRC_SMPTE2084 || codecCtx->color_trc == AVCOL_TRC_ARIB_STD_B67; }
+	inline bool isHDR(const AVCodecContext* codecCtx) { return codecCtx->color_trc == AVCOL_TRC_SMPTE2084 || codecCtx->color_trc == AVCOL_TRC_ARIB_STD_B67; }
 
 #if defined(_USE_CUDA_)
-	static constexpr AVPixelFormat supportedHwFormats[] = { AV_PIX_FMT_NV12, AV_PIX_FMT_P010LE, AV_PIX_FMT_P016LE };
 	AVCodecContextPtr openDecoderHWAccel(const AVCodecParameters* inputCodecParams, const std::string& userHwDecoder, bool& useHwDecoder);
 	void embedWatermarkHWAccel(VideoProcessingContext& data, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe);
 	void detectWatermarkHWAccel(VideoProcessingContext& data, int& framesCount, const AVFrame* frame);

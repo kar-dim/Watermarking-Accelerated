@@ -1,5 +1,6 @@
 #pragma once
 #include "buffer.hpp"
+#include "WatermarkBase.hpp"
 
 #if defined(_USE_GPU_)
 #include <arrayfire.h>
@@ -8,9 +9,8 @@
 
 #include <chrono>
 #include <memory>
-#include <string>
-#include "WatermarkBase.hpp"
 #include <optional>
+#include <string>
 
 /*!
  *  \brief  Helper utility methods.

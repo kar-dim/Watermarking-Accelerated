@@ -362,6 +362,7 @@ xcopy "$(ProjectDir)libs\ffmpeg\bin\ffmpeg.exe" "$(OutDir)" /y /D</Command>
     </ClInclude>
     <ClInclude Include="utils.hpp" />
     <ClInclude Include="VideoProcessingContext.hpp" />
+    <ClInclude Include="video_defines.hpp" />
     <ClInclude Include="video_utils.hpp" />
     <ClInclude Include="WatermarkCuda.cuh">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='OPENCL_Release|x64'">true</ExcludedFromBuild>

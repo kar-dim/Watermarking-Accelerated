@@ -10,6 +10,7 @@
 #include "HostMemory.hpp"
 #include "utils.hpp"
 #include "VideoProcessingContext.hpp"
+#include "video_defines.hpp"
 #include "video_utils.hpp"
 #include "WatermarkBase.hpp"
 #include <algorithm>

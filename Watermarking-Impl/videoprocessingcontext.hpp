@@ -1,5 +1,6 @@
 #pragma once
 #include "buffer.hpp"
+#include "video_defines.hpp"
 #include "WatermarkBase.hpp"
 #include <cstdint>
 
@@ -9,6 +10,8 @@ extern "C" {
 #include <libavfilter/avfilter.h>
 }
 
+using video_utils::AVFilterGraphPtr;
+
 /*!
  *  \brief  Struct to hold Input Filter Graph and its source and sink contexts
  *          used only when needed (10-bit or HDR video embedding only)
@@ -16,7 +19,7 @@ extern "C" {
  */
 struct FilterGraphContext
 {
-    AVFilterGraph* filterGraph;
+    AVFilterGraphPtr filterGraph;
     AVFilterContext* buffersrcCtx;
     AVFilterContext* buffersinkCtx;
 
