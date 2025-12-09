@@ -65,7 +65,7 @@ namespace video_utils
 	void processAndWriteYPlane(const bool embedWatermark, const AVFrame* frame, VideoProcessingContext& data, FILE* ffmpegPipe);
 	void writeChromaPlanes(const AVFrame* frame, VideoProcessingContext& data, FILE* ffmpegPipe);
 	int videoDispatcher(VideoProcessingContext& data, const bool useHwDecoder, const VideoOp op, const bool needsFiltert = false, FILE* ffmpegPipe = nullptr);
-	void filterFrame(AVFramePtr& frame, const FilterGraphContext& filterGraphContext);
+	void filterFrame(AVFramePtr& frame, AVFramePtr& filteredFrame, const FilterGraphContext& filterGraphContext);
 
 	//main frames loop logic for video watermark embedding and detection
 	template<bool needsFilter, typename Func>
@@ -73,6 +73,9 @@ namespace video_utils
 	{
 		const AVPacketPtr packet(av_packet_alloc());
 		AVFramePtr frame(av_frame_alloc());
+		AVFramePtr filteredFrame(nullptr);
+		if constexpr (needsFilter)
+			filteredFrame.reset(av_frame_alloc());
 		int framesCount = 0;
 
 		//read video frames loop
@@ -97,7 +100,7 @@ namespace video_utils
 				}
 				//optionally filter frame (10-bit to 8-bit conversion, HDR to SDR tonemapping)
 				if constexpr (needsFilter)
-					filterFrame(frame, data.filterGraphContext);
+					filterFrame(frame, filteredFrame, data.filterGraphContext);
 				std::forward<Func>(processFrame)(frame.get(), framesCount);
 			}
 			av_packet_unref(packet.get());
@@ -107,7 +110,7 @@ namespace video_utils
 		while (avcodec_receive_frame(data.inputDecoderCtx, frame.get()) == 0)
 		{
 			if constexpr (needsFilter)
-				filterFrame(frame, data.filterGraphContext);
+				filterFrame(frame, filteredFrame, data.filterGraphContext);
 			std::forward<Func>(processFrame)(frame.get(), framesCount);
 		}
 		return framesCount;

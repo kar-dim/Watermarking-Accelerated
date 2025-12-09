@@ -158,11 +158,9 @@ namespace video_utils
 	}
 
 	//filter a single frame
-	void filterFrame(AVFramePtr& frame, const FilterGraphContext& filterGraphContext)
+	void filterFrame(AVFramePtr& frame, AVFramePtr& filteredFrame, const FilterGraphContext& filterGraphContext)
 	{
-		AVFramePtr filteredFrame(av_frame_alloc());
-		Utils::checkError(!filteredFrame, "Failed to allocate filtered frame");
-
+		av_frame_unref(filteredFrame.get());
 		int ret = av_buffersrc_add_frame_flags(filterGraphContext.buffersrcCtx, frame.get(), AV_BUFFERSRC_FLAG_KEEP_REF);
 		Utils::checkError(ret < 0, "Failed to add frame to filter graph");
 		ret = av_buffersink_get_frame(filterGraphContext.buffersinkCtx, filteredFrame.get());
@@ -172,7 +170,8 @@ namespace video_utils
 		else if (ret < 0)
 			throw std::runtime_error("Failed to get filtered frame: " + std::to_string(ret));
 		//replace original frame with filtered one
-		frame.reset(filteredFrame.release());
+		av_frame_unref(frame.get());
+		av_frame_move_ref(frame.get(), filteredFrame.get());
 	}
 
 	//initialize the filter graph for 10-bit to 8-bit conversion and HDR to SDR tonemapping
