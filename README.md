@@ -99,7 +99,7 @@ ffmpeg -y -f rawvideo
 
 **NOTES:** 
 - Only Constant Frame Rate (CFR) works as expected for an input video. If the input video is Variable Frame Rate (VFR) there may be issues with audio/subtitles sync on the output file.
-- 10-bit video support is experimental. Currently only Hardware accelerated (NVDEC) decoding is supported. Tested with ```AV_PIX_FMT_P016LE``` Pixel format, but ```AV_PIX_FMT_P010LE``` **SHOULD** work too. Encoding is always 8-bit. 
+- 10-bit video support is experimental: 10-bit non HDR is fully supported. HDR 10-bit is tonemapped (mobius) to SDR by CPU, Hardware accelerated tonemapping is not yet supported by FFMPEG. Encoding is always 8-bit. 
 
 # How to Build
 
