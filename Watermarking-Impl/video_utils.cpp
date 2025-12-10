@@ -120,16 +120,19 @@ namespace video_utils
 	//directly use the GPU memory from the cuda decoder, no need to copy the data to host and back to GPU
 	void detectWatermarkHWAccel(VideoProcessingContext& data, int& framesCount, const AVFrame* frame)
 	{
+		//early exit, check if we should skip detection for this frame
+		if (framesCount % data.watermarkInterval != 0)
+		{
+			framesCount++;
+			return;
+		}
+		//detect watermark after watermarkInterval frames
 		const auto afStream = CudaStreamManager::getInstance().getAfStream();
 		const ImageBuffer lumaBuffer(data.height, data.width, f32);
-		//detect watermark after watermarkInterval frames
-		if (framesCount % data.watermarkInterval == 0)
-		{
-			cuda_utils::launchPitchedToFloatKernel(frame->data[0], lumaBuffer.device<float>(), data.width, data.height, frame->linesize[0], afStream);
-			lumaBuffer.unlock();
-			float correlation = data.watermarkObj->detectWatermark(lumaBuffer, ME);
-			cout << "Correlation for frame: " << (framesCount + 1) << ": " << correlation << "\n";
-		}
+		cuda_utils::launchPitchedToFloatKernel(frame->data[0], lumaBuffer.device<float>(), data.width, data.height, frame->linesize[0], afStream);
+		lumaBuffer.unlock();
+		float correlation = data.watermarkObj->detectWatermark(lumaBuffer, ME);
+		cout << "Correlation for frame: " << (framesCount + 1) << ": " << correlation << "\n";
 		framesCount++;
 	}
 #endif
@@ -309,23 +312,26 @@ namespace video_utils
 	}
 
 	//detect the watermark for a video frame
-	//NOTE: supports 10-bit decoding. Experimental because we don't encode 10-bit yet
 	void detectWatermark(VideoProcessingContext& data, int& framesCount, const AVFrame* frame)
 	{
-		//detect watermark after watermarkInterval frames
-		if (framesCount % data.watermarkInterval == 0)
+		//early exit, check if we should skip detection for this frame
+		if (framesCount % data.watermarkInterval != 0)
 		{
-			uint8_t* srcY = frame->data[0];
-			if (frame->linesize[0] != data.width)
-			{
-				for (int y = 0; y < data.height; y++)
-					memcpy(data.hostFramePtr + y * data.width, frame->data[0] + y * frame->linesize[0], data.width);
-				srcY = data.hostFramePtr;
-			}
-			loadInputFrame<Gray8Buffer>(data, srcY);
-			float correlation = data.watermarkObj->detectWatermark(data.inputFrame, ME);
-			cout << "Correlation for frame: " << (framesCount + 1) << ": " << correlation << "\n";
+			framesCount++;
+			return;
 		}
+		//detect watermark after watermarkInterval frames, else early return
+		uint8_t* srcY = frame->data[0];
+		//if there is row padding (for alignment), we must copy the data to a contiguous block!
+		if (frame->linesize[0] != data.width)
+		{
+			for (int y = 0; y < data.height; y++)
+				memcpy(data.hostFramePtr + y * data.width, frame->data[0] + y * frame->linesize[0], data.width);
+			srcY = data.hostFramePtr;
+		}
+		loadInputFrame<Gray8Buffer>(data, srcY);
+		float correlation = data.watermarkObj->detectWatermark(data.inputFrame, ME);
+		cout << "Correlation for frame: " << (framesCount + 1) << ": " << correlation << "\n";
 		framesCount++;
 	}
 
