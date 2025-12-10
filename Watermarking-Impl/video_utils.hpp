@@ -42,7 +42,6 @@ namespace video_utils
 #endif
 	std::string getFilterGraphString(const AVCodecContext* codecCtx, const AVStream* st, const bool useHwDecoder);
 	bool initFilterGraph(const AVCodecContext* inputDecoderCtx, const AVStream* st, const bool useHwDecoder, FilterGraphContext& filterCtx);
-	void filterFrame(AVFramePtr& frame, const FilterGraphContext& ctx);
 
 	AVCodecContextPtr openDecoder(const AVCodecParameters* inputCodecParams, const std::string& userHwDecoder, bool& useHwDecoder);
 	AVCodecContextPtr openSoftwareDecoder(const AVCodecParameters* inputCodecParams);
