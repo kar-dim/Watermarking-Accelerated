@@ -17,7 +17,7 @@ class WatermarkCuda final : public WatermarkGPU<p>
 {
 public:
 	WatermarkCuda<p>(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr)
-		: WatermarkGPU<p>(rows, cols, randomMatrixPath, psnr), meKernelDims({ WatermarkBase::align<64>(cols), rows }), afStream(CudaStreamManager::getInstance().getAfStream())
+		: WatermarkGPU<p>(rows, cols, randomMatrixPath, psnr), meKernelDims{ WatermarkBase::align<64>(cols), rows }, afStream(CudaStreamManager::getInstance().getAfStream())
 	{ }
 
 private:
