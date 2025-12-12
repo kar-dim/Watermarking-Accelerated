@@ -166,13 +166,13 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 
 #if defined(_USE_GPU_)
 	const ImageBuffer watermarkedNVFgray = isRGB ? Utils::rgb2gray(watermarkNVF) : watermarkNVF;
-	const ImageBuffer watermarkedMEgray = isRGB ? Utils::rgb2gray(watermarkME) : watermarkNVF;
+	const ImageBuffer watermarkedMEgray = isRGB ? Utils::rgb2gray(watermarkME) : watermarkME;
 	//warmup for arrayfire
 	watermarkObj->detectWatermark(watermarkedNVFgray, NVF);
 	watermarkObj->detectWatermark(watermarkedMEgray, ME);
 #elif defined(_USE_EIGEN_)
 	const ImageBuffer watermarkedNVFgray = isRgb ? ImageBuffer(Utils::rgb2gray(watermarkNVF)) : ImageBuffer(watermarkNVF);
-	const ImageBuffer watermarkedMEgray = isRgb ? ImageBuffer(Utils::rgb2gray(watermarkME)) : ImageBuffer(watermarkME);;
+	const ImageBuffer watermarkedMEgray = isRgb ? ImageBuffer(Utils::rgb2gray(watermarkME)) : ImageBuffer(watermarkME);
 #endif
 
 	float correlationNvf, correlationMe;
