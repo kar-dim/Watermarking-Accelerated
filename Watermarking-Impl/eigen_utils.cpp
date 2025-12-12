@@ -34,6 +34,19 @@ namespace eigen_utils
 		return output;
 	}
 
+	CImg<float> eigenGrayToCimg(const ArrayXXf& arrayGray)
+	{
+		const auto rows = arrayGray.rows();
+		const auto cols = arrayGray.cols();
+		CImg<float> output(static_cast<unsigned int>(cols), static_cast<unsigned int>(rows));
+#pragma omp parallel for
+		for (int y = 0; y < rows; y++)
+			for (int x = 0; x < cols; x++)
+				for (int channel = 0; channel < 3; channel++)
+					output(x, y) = arrayGray(y, x);
+		return output;
+	}
+
 	void cimgAlphaZero(CImg<float>& rgbImage, const AlphaBuffer& alphaChannel)
 	{
 #pragma omp parallel for
@@ -61,6 +74,18 @@ namespace eigen_utils
 				for (int channel = 0; channel < 3; channel++)
 					output[channel](y, x) = rgbImage(x, y, 0, channel);
 		return output;
+	}
+
+	ImageBuffer cimgToEigenGray(const CImg<float>& grayImage)
+	{
+		const int rows = grayImage.height();
+		const int cols = grayImage.width();
+		ArrayXXf output(rows, cols);
+#pragma omp parallel for
+		for (int x = 0; x < cols; x++)
+			for (int y = 0; y < rows; y++)
+				output(y, x) = grayImage(x, y);
+		return ImageBuffer(output);
 	}
 
 	//sets the number of OpenMP (watermarking) threads based on physical cores

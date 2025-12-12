@@ -34,14 +34,14 @@ void Utils::saveImage(const string& imagePath, const string& suffix, const Image
 	const string watermarkedFile = Utils::addSuffixBeforeExtension(imagePath, suffix);
 	string extension = watermarkedFile.substr(watermarkedFile.find_last_of('.') + 1);
 	std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
-	const auto rgbCimg = eigen_utils::eigenRgbToCimg(watermark.getRGB(), alphaChannel);
-	if (extension == "png")  rgbCimg.save_png(watermarkedFile.c_str());
-	else if (extension == "bmp")  rgbCimg.save_bmp(watermarkedFile.c_str());
-	else if (extension == "jpg" || extension == "jpeg") rgbCimg.save_jpeg(watermarkedFile.c_str());
-	else if (extension == "webp") rgbCimg.save_webp(watermarkedFile.c_str());
+	const auto cimgToSave = watermark.isRGB() ? eigen_utils::eigenRgbToCimg(watermark.getRGB(), alphaChannel) : eigen_utils::eigenGrayToCimg(watermark.getGray());
+	if (extension == "png")  cimgToSave.save_png(watermarkedFile.c_str());
+	else if (extension == "bmp")  cimgToSave.save_bmp(watermarkedFile.c_str());
+	else if (extension == "jpg" || extension == "jpeg") cimgToSave.save_jpeg(watermarkedFile.c_str());
+	else if (extension == "webp") cimgToSave.save_webp(watermarkedFile.c_str());
 	//TIFF suppoorts 32bpp (floats) natively, we have to explicit cast to 8bpp before saving to reduce unecessary bytes
 	else if (extension == "tif" || extension == "tiff")
-		 cimg_library::CImg<unsigned char>(rgbCimg).save_tiff(watermarkedFile.c_str(), 20); //20 = LZW compression
+		 cimg_library::CImg<unsigned char>(cimgToSave).save_tiff(watermarkedFile.c_str(), 20); //20 = LZW compression
 	else
 		throw std::runtime_error("Unsupported image format: " + extension);
 #elif defined(_USE_GPU_)
@@ -93,33 +93,47 @@ string Utils::formatExecutionTime(const bool showFps, const double seconds)
 void Utils::loadImage(ImageBuffer& rgbImage, ImageBuffer& image, const string& imageFile, std::optional<AlphaBuffer>& alphaChannel)
 {
 #if defined(_USE_GPU_)
-	rgbImage = af::loadImage(imageFile.c_str(), true);
-	const auto channels = rgbImage.dims(2);
-	if (channels != 3 && channels != 4)
-		throw std::runtime_error("Invalid image dimensions");
-	if (channels == 4)
+	rgbImage = af::loadImageNative(imageFile.c_str()).as(f32);
+	switch (rgbImage.dims(2))
 	{
+	case 1:
+		image = rgbImage; break;
+	case 3:
+		image = rgb2gray(rgbImage); break;
+	case 4:
 		alphaChannel.emplace(rgbImage(af::span, af::span, 3));
 		rgbImage = rgbImage(af::span, af::span, af::seq(0, 2)) * (af::tile(*alphaChannel, 1, 1, 3) != 0);
+		image = rgb2gray(rgbImage);
+		break;
+	default:
+		throw std::runtime_error("Invalid image dimensions");
 	}
-	image = rgb2gray(rgbImage);
 	af::sync();
 		
 #elif defined(_USE_EIGEN_)
 	auto cimgRgb = cimg_library::CImg<float>(imageFile.c_str());
-	const auto channels = cimgRgb.spectrum();
-	if (channels != 3 && channels != 4)
-		throw std::runtime_error("Invalid image dimensions");
-	if (channels == 4)
+	switch (cimgRgb.spectrum())
+	{
+	case 1:
+		rgbImage = eigen_utils::cimgToEigenGray(cimgRgb);
+		image = rgbImage;
+		break;
+	case 3:
+		rgbImage = eigen_utils::cimgToEigenRgb(cimgRgb);
+		image = rgb2gray(rgbImage);
+		break;
+	case 4:
 	{
 		alphaChannel.emplace(cimgRgb.get_channel(3));
 		auto rgbView = cimgRgb.get_shared_channels(0, 2);
 		eigen_utils::cimgAlphaZero(rgbView, *alphaChannel);
 		rgbImage = eigen_utils::cimgToEigenRgb(rgbView);
+		image = rgb2gray(rgbImage);
+		break;
 	}
-	else
-		rgbImage = eigen_utils::cimgToEigenRgb(cimgRgb);
-	image = rgb2gray(rgbImage);
+	default:
+		throw std::runtime_error("Invalid image dimensions");
+	}
 #endif
 }
 

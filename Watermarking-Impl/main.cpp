@@ -148,11 +148,13 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 #if defined(_USE_GPU_)
 	ImageBuffer watermarkNVF, watermarkME;
 	//warmup for arrayfire
+	const bool isRGB = rgbImage.dims(2) == 3;
 	watermarkObj->makeWatermark(image, rgbImage, watermarkNVF, watermarkStrength, NVF);
 	watermarkObj->makeWatermark(image, rgbImage, watermarkME, watermarkStrength, ME);
 #elif defined(_USE_EIGEN_)
-	ImageBuffer watermarkNVF(eigen_utils::makeEigenRGB(rows, cols));
-	ImageBuffer watermarkME(eigen_utils::makeEigenRGB(rows, cols));
+	const bool isRgb = rgbImage.isRGB();
+	ImageBuffer watermarkNVF = isRgb ? ImageBuffer(eigen_utils::makeEigenRGB(rows, cols)) : ImageBuffer(ArrayXXf(rows, cols));
+	ImageBuffer watermarkME = isRgb ? ImageBuffer(eigen_utils::makeEigenRGB(rows, cols)) : ImageBuffer(ArrayXXf(rows, cols));
 #endif
 
 	//make NVF watermark
@@ -163,14 +165,14 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 	cout << std::format("Watermark strength (parameter a): {}\nCalculation of ME mask with {} rows and {} columns and parameters:\np = {}  PSNR(dB) = {}\n{}\n\n", watermarkStrength, rows, cols, p, psnr, Utils::formatExecutionTime(showFps, secs / loops));
 
 #if defined(_USE_GPU_)
-	const ImageBuffer watermarkedNVFgray = Utils::rgb2gray(watermarkNVF);
-	const ImageBuffer watermarkedMEgray = Utils::rgb2gray(watermarkME);
+	const ImageBuffer watermarkedNVFgray = isRGB ? Utils::rgb2gray(watermarkNVF) : watermarkNVF;
+	const ImageBuffer watermarkedMEgray = isRGB ? Utils::rgb2gray(watermarkME) : watermarkNVF;
 	//warmup for arrayfire
 	watermarkObj->detectWatermark(watermarkedNVFgray, NVF);
 	watermarkObj->detectWatermark(watermarkedMEgray, ME);
 #elif defined(_USE_EIGEN_)
-	const ImageBuffer watermarkedNVFgray(Utils::rgb2gray(watermarkNVF));
-	const ImageBuffer watermarkedMEgray(Utils::rgb2gray(watermarkME));
+	const ImageBuffer watermarkedNVFgray = isRgb ? ImageBuffer(Utils::rgb2gray(watermarkNVF)) : ImageBuffer(watermarkNVF);
+	const ImageBuffer watermarkedMEgray = isRgb ? ImageBuffer(Utils::rgb2gray(watermarkME)) : ImageBuffer(watermarkME);;
 #endif
 
 	float correlationNvf, correlationMe;
