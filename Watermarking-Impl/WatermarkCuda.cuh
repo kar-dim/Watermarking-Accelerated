@@ -17,11 +17,11 @@ class WatermarkCuda final : public WatermarkGPU<p>
 {
 public:
 	WatermarkCuda<p>(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr)
-		: WatermarkGPU<p>(rows, cols, randomMatrixPath, psnr), meKernelDims{ WatermarkBase::align<64>(cols), rows }, afStream(CudaStreamManager::getInstance().getAfStream())
+		: WatermarkGPU<p>(rows, cols, randomMatrixPath, psnr), meKernelDims{ WatermarkBase::align<meBlockSize.x>(cols), rows }, afStream(CudaStreamManager::getInstance().getAfStream())
 	{ }
 
 private:
-	static constexpr dim3 windowBlockSize{ 16, 16 }, meBlockSize{ 64, 1 }, corrBlockSize{ 768, 1 };
+	static constexpr dim3 windowBlockSize{ 16, 16 }, meBlockSize{ 256, 1 };
 	static constexpr unsigned int corrPartialBlockSize = 256, corrFinalBlockSize = 1024;
 	dim3 meKernelDims;
 	cudaStream_t afStream;
@@ -55,8 +55,8 @@ private:
 	{
 		const dim3 gridSize = cuda_utils::gridSizeCalculate(meBlockSize, meKernelDims.y, meKernelDims.x);
 		//call prediction error mask kernel
-		const af::array RxPartial(this->baseRows, meKernelDims.x);
-		const af::array rxPartial(this->baseRows, meKernelDims.x / 8);
+		const af::array RxPartial(this->baseRows, meKernelDims.x / 4);
+		const af::array rxPartial(this->baseRows, meKernelDims.x / 32);
 		me_p3 << <gridSize, meBlockSize, 0, afStream >> > (image.device<float>(), RxPartial.device<float>(), rxPartial.device<float>(), this->baseCols, this->baseRows);
 		this->unlockArrays(image, RxPartial, rxPartial);
 		//calculation of coefficients and error sequence

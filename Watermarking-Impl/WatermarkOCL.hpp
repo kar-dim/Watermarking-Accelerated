@@ -25,7 +25,8 @@ class WatermarkOCL final : public WatermarkGPU<p>
 {
 public:
 	WatermarkOCL<p>(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr)
-		: WatermarkGPU<p>(rows, cols, randomMatrixPath, psnr), texKernelDims({ WatermarkBase::align<16>(rows), WatermarkBase::align<16>(cols) }), meKernelDims({ rows, WatermarkBase::align<64>(cols) }),
+		: WatermarkGPU<p>(rows, cols, randomMatrixPath, psnr),
+		texKernelDims{ WatermarkBase::align<windowBlockSize>(rows), WatermarkBase::align<windowBlockSize>(cols) }, meKernelDims{ rows, WatermarkBase::align<meBlockSize>(cols) },
 		programs(cl_utils::buildKernels(p))
 	{ }
 
@@ -45,6 +46,8 @@ private:
 		7,  14, 20, 25, 29, 32, 34, 35
 	};
 	static constexpr unsigned int corrPartialBlockSize = 256;
+	static constexpr unsigned int windowBlockSize = 16;
+	static constexpr unsigned int meBlockSize = 64;
 
 	cl::Context context{ afcl::getContext(true) };
 	cl::CommandQueue queue{ afcl::getQueue(true) };
@@ -65,7 +68,7 @@ private:
 		executeKernel([&]() {
 			queue.enqueueNDRangeKernel(
 				cl_utils::KernelBuilder(programs, "nvf").args(wrap(imageMem.get()), wrap(outputMem.get()), this->baseCols, this->baseRows).build(),
-				cl::NDRange(), cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(16, 16));
+				cl::NDRange(), cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(windowBlockSize, windowBlockSize));
 			queue.finish();
 			this->unlockArrays(image, customMask);
 		}, "nvf");
@@ -82,7 +85,7 @@ private:
 		executeKernel([&]() {
 			queue.enqueueNDRangeKernel(
 				cl_utils::KernelBuilder(programs, "error_sequence_p3").args(wrap(imageMem.get()), wrap(errorSequenceMem.get()), wrap(coeffsMem.get()), this->baseCols, this->baseRows, (int)calculateAbs).build(),
-				cl::NDRange(), cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(16, 16));
+				cl::NDRange(), cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(windowBlockSize, windowBlockSize));
 			queue.finish();
 			this->unlockArrays(image, coefficients, errorSequence);
 		}, "error_sequence_p3");
@@ -99,7 +102,7 @@ private:
 		executeKernel([&]() {
 			queue.enqueueNDRangeKernel(
 				cl_utils::KernelBuilder(programs, "me").args(wrap(imageMem.get()), wrap(RxPartialMem.get()), wrap(rxPartialMem.get()), RxMappingsBuff, this->baseCols, this->baseRows).build(),
-				cl::NDRange(), cl::NDRange(meKernelDims.cols, meKernelDims.rows), cl::NDRange(64, 1));
+				cl::NDRange(), cl::NDRange(meKernelDims.cols, meKernelDims.rows), cl::NDRange(meBlockSize, 1));
 			//finish and return memory to arrayfire
 			queue.finish();
 			this->unlockArrays(image, RxPartial, rxPartial);
