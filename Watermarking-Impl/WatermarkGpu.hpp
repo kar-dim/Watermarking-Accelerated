@@ -2,6 +2,7 @@
 #include "buffer.hpp"
 #include "WatermarkBase.hpp"
 #include <arrayfire.h>
+#include <cmath>
 #include <concepts>
 #include <string>
 #include <utility>

@@ -17,9 +17,6 @@ __device__ half8 make_half8(const half& a, const half& b, const half& c, const h
 template<typename T>
 __device__ __host__ inline T clamp(const T& val, const T& lo, const T& hi) { return (val < lo) ? lo : (val > hi) ? hi : val; }
 
-//helper method to scale 16-bit (10-bit of actual data) to 8-bit range
-__device__ inline uint16_t scale10To8(const uint16_t value) { return (value >> 6) * 255 / 1023; }
-
 //helper method to fill block-wide shared memory cooperatively for error sequence and NVF kernels
 template<int p, int pad = p / 2, int sharedSize = 16 + (2 * pad)>
 __device__ void fillBlock(const float* __restrict__ input, float* __restrict__ sharedMem, const int width, const int height)
