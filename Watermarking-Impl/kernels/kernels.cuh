@@ -66,8 +66,8 @@ __global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, co
             sumSq += val * val;
         }
     }
-    float mean = sum / pSquared;
-    float variance = (sumSq / pSquared) - (mean * mean);
+    const float mean = sum / pSquared;
+    const float variance = (sumSq / pSquared) - (mean * mean);
     nvf[x * height + y] = fmaxf(variance / (1.0f + variance), 0.0f);
 }
 
