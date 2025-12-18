@@ -115,8 +115,8 @@ The solution provides multiple build configurations, each targeting a specific b
 |------------------|-------------|---------------------------------------------|
 | `CUDA_Release`   | CUDA        | Recommended for systems with NVIDIA GPUs. Faster than OpenCL backend, adds support for CUDA HW accelerated video decoding    |
 | `CUDA_Debug`     | CUDA        | Use for debugging CUDA-specific code        |
-| `OPENCL_Release` | OpenCL      | Recommended for systems without NVIDIA GPUs. Provides GPU acceleration across a wide range of hardware (AMD, Intel, etc.) and delivers better performance than the CPU backend, though typically slower than the CUDA implementation |
-| `EIGEN_Release`  | Eigen       | Optimized CPU-based implementation (clang-cl toolset is used for maximum performance)         |
+| `OPENCL_Release` | OpenCL      | Recommended for systems without NVIDIA GPUs. Provides GPU acceleration across a wide range of hardware (NVIDIA, AMD, Intel, etc.) and delivers better performance than the CPU backend, though typically slower than the CUDA implementation |
+| `EIGEN_Release`  | Eigen       | Optimized CPU-based implementation (clang-cl toolset is used for maximum performance). Maximum compatibility        |
 | `EIGEN_Debug`    | Eigen       | Use for debugging CPU implementation (clang-cl)      |
 
 ## Build Instructions
@@ -151,10 +151,10 @@ All backends require FFmpeg which is also copied (most libav* DLLs, not included
 - [CImg](https://cimg.eu/): A C++ library for image processing.
 - [inih](https://github.com/jtilly/inih): A lightweight C++ library for parsing .ini configuration files.
 
-# Additional Dependencies For Building
+# Additional Dependencies/Requirements
 
 - OpenCL implementation: The [OpenCL Headers](https://github.com/KhronosGroup/OpenCL-Headers), [OpenCL C++ Bindings](https://github.com/KhronosGroup/OpenCL-CLHPP) and [OpenCL Library file](https://github.com/KhronosGroup/OpenCL-SDK) are already included and configured for this project.
-- CUDA implementation: NVIDIA CUDA Toolkit is required for building.
+- CUDA implementation: NVIDIA CUDA Toolkit is required for building. Minimum supported GPUs with Compute Capability 7.0 or newer, CUDA Toolkit 10.0 or newer.
 - CPU Implementation: Image libraries (libjpeg, libpng, libtiff etc) are included and utilized internally by CImg for loading and saving of images.
 - ArrayFire should be installed globally, with default installation options. Environment Variable "AF_PATH" will be defined automatically.
 - FFmpeg must exist on system PATH (Pre-build binaries already include FFmpeg binaries and DLLs).
