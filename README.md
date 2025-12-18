@@ -11,7 +11,9 @@ The deprecated original Thesis code is in the archived repository <a href="https
 
 # Overview
 
-The aim of this project is to implement and compare the performance (execution speed) of watermarking algorithms when implemented on CPU versus GPU. This repository includes all the relevant implementations. The watermark generation is based on Normal-distributed random values with zero mean and standard deviation of one.
+This project implements and evaluates the performance (execution speed) of image watermarking algorithms on CPU versus GPU. It provides multiple implementations to enable comparisons between compute backends. Watermarks are generated using normally distributed random values with zero mean and standard deviation of one. The system supports both embedding and detection of watermarks in disk images and video streams. Video processing is handled via FFmpeg, enabling broad codec and container support, along with advanced features such as GPU-accelerated video decoding (CUDA) and 10-bit/HDR (tonemapped) video support.
+
+The repository contains all required source code and dependencies needed to reproduce the benchmarks and experiments.
 
 - Comparative performance analysis between CPU and GPU implementations (check [Releases](https://github.com/kar-dim/Watermarking-Accelerated/releases)).
 
