@@ -28,9 +28,9 @@
 #include <utility>
 
 extern "C" {
-#include <libavcodec/avcodec.h>
-#include <libavformat/avformat.h>
-#include <libavutil/log.h>
+#include "libavcodec/avcodec.h"
+#include "libavformat/avformat.h"
+#include "libavutil/log.h"
 }
 
 using namespace video_utils;

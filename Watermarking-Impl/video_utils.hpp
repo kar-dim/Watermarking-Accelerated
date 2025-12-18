@@ -10,9 +10,9 @@
 #include <string>
 
 extern "C" {
-#include <libavcodec/avcodec.h>
+#include "libavcodec/avcodec.h"
 #include "libavcodec/packet.h"
-#include <libavformat/avformat.h>
+#include "libavformat/avformat.h"
 #include "libavcodec/codec_par.h"
 #include "libavutil/pixfmt.h"
 #include "libavutil/error.h"

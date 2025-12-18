@@ -1,9 +1,7 @@
 #include "gtest/gtest.h"
 
 #include "buffer.hpp"
-#include "cimg_init.h"
 #include "eigen_utils.hpp"
-#include "FileDeleter.h"
 #include "MaskDiskConfig.h"
 #include "test_common.hpp"
 #include "utils.hpp"
@@ -11,9 +9,7 @@
 #include <Eigen/Dense>
 #include <iostream>
 #include <memory>
-#include <optional>
 #include <string>
-#include <thread>
 
 using namespace cimg_library;
 using namespace Eigen;
