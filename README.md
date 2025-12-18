@@ -114,7 +114,7 @@ The solution provides multiple build configurations, each targeting a specific b
 | Configuration    | Backend     | Notes                                       |
 |------------------|-------------|---------------------------------------------|
 | `OPENCL_Release` | OpenCL      | Most recommended backend with very high performance. There is **no debug version** due to some known issues |
-| `CUDA_Release`   | CUDA        | Recommended for systems with NVIDIA GPUs. Slightly faster than OpenCL backend    |
+| `CUDA_Release`   | CUDA        | Recommended for systems with NVIDIA GPUs. Faster than OpenCL backend, adds support for CUDA HW accelerated video decoding    |
 | `CUDA_Debug`     | CUDA        | Use for debugging CUDA-specific code        |
 | `EIGEN_Release`  | Eigen       | Optimized CPU-based implementation (clang-cl toolset is used for maximum performance).         |
 | `EIGEN_Debug`    | Eigen       | Use for debugging CPU implementation (clang-cl)      |
