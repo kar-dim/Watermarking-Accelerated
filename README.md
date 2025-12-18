@@ -151,7 +151,7 @@ All backends require FFmpeg which is also copied (most libav* DLLs, not included
 - [CImg](https://cimg.eu/): A C++ library for image processing.
 - [inih](https://github.com/jtilly/inih): A lightweight C++ library for parsing .ini configuration files.
 
-# Additional Dependencies/Requirements
+# Additional Dependencies for Building/Requirements
 
 - OpenCL implementation: The [OpenCL Headers](https://github.com/KhronosGroup/OpenCL-Headers), [OpenCL C++ Bindings](https://github.com/KhronosGroup/OpenCL-CLHPP) and [OpenCL Library file](https://github.com/KhronosGroup/OpenCL-SDK) are already included and configured for this project.
 - CUDA implementation: NVIDIA CUDA Toolkit is required for building. Minimum supported GPUs with Compute Capability 7.0 or newer, CUDA Toolkit 10.0 or newer.
