@@ -140,7 +140,7 @@ All backends require FFmpeg which is also copied (most libav* DLLs, not included
 |---------|--------------|
 | **CUDA**   | FreeImage.dll<br>afcuda.dll |
 | **OpenCL** | FreeImage.dll<br>afopencl.dll<br>forge.dll<br>glfw3.dll<br>mkl_core.2.dll<br>mkl_def.2.dll<br>mkl_rt.2.dll<br>mkl_tbb_thread.2.dll |
-| **Eigen**  | zlib1.dll<br>libpng16.dll<br>jpeg62.dll<br>tiff.dll<br>libomp.dll |
+| **Eigen**  | zlib1.dll<br>libpng16.dll<br>jpeg62.dll<br>tiff.dll<br>libomp.dll<br>libwebp.lib (static lib) |
 
 
 # Libraries Used
