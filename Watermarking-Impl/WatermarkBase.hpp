@@ -59,9 +59,10 @@ protected:
 		if (!randomMatrixStream.is_open())
 			throw std::runtime_error(std::string("Error opening '" + randomMatrixPath + "' file for Random noise W array\n"));
 		randomMatrixStream.seekg(0, std::ios::end);
-		const auto totalBytes = randomMatrixStream.tellg();
+		const size_t totalBytes = static_cast<size_t>(randomMatrixStream.tellg());
 		randomMatrixStream.seekg(0, std::ios::beg);
-		if (baseRows * baseCols * sizeof(float) != totalBytes)
+		const size_t expectedBytes = static_cast<size_t>(baseRows) * baseCols * sizeof(float);
+		if (expectedBytes != totalBytes)
 			throw std::runtime_error(std::string("Error: W file total elements != image dimensions! W file total elements: " + std::to_string(totalBytes / (sizeof(float))) + ", Image width: " + std::to_string(baseCols) + ", Image height: " + std::to_string(baseRows) + "\n"));
 #if defined(_USE_GPU_)
 		std::vector<float> watermarkBuffer(baseRows * baseCols);

@@ -76,7 +76,7 @@ namespace video_utils
 		if (av_hwdevice_ctx_init(hw_device_ctx.get()) < 0)
 			return openSoftwareDecoder(inputCodecParams);
 		ctx->hw_device_ctx = av_buffer_ref(hw_device_ctx.get());
-		ctx->get_format = [](AVCodecContext* ctx, const enum AVPixelFormat* pix_fmts) { return AV_PIX_FMT_CUDA; };
+		ctx->get_format = [](AVCodecContext*, const enum AVPixelFormat*) { return AV_PIX_FMT_CUDA; };
 		if (avcodec_open2(ctx.get(), inputDecoder, nullptr) < 0)
 			return openSoftwareDecoder(inputCodecParams);
 		useHwDecoder = true;
@@ -405,9 +405,9 @@ namespace video_utils
 	}
 
 	//check if the pixel format provided is in the list of provided supported formats
-	bool checkPixelFormatSupport(const std::span<const AVPixelFormat> supportedFormats, const AVPixelFormat format)
+	bool checkPixelFormatSupport(const std::span<const AVPixelFormat> formats, const AVPixelFormat format)
 	{
-		const bool isValidFormat = std::ranges::any_of(supportedFormats, [&](auto f) { return f == format; });
+		const bool isValidFormat = std::ranges::any_of(formats, [&](auto f) { return f == format; });
 		Utils::checkError(!isValidFormat, "Error: Video frame format not supported, aborting");
 		return isValidFormat;
 	}

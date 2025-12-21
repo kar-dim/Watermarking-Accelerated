@@ -6,16 +6,6 @@
 
 namespace cuda_utils 
 {
-    //get a cudaDeviceProp handle to query for various device information
-    cudaDeviceProp getDeviceProperties()
-    {
-        int device;
-        cudaGetDevice(&device);
-        cudaDeviceProp properties;
-        cudaGetDeviceProperties(&properties, device);
-        return properties;
-    }
-
 	//convert NV12 UV plane to YUV420p format
     void launchNV12ToYUV420pKernel(const uint8_t* uvSrc, const int uvPitch, uint8_t* uvDst, const int uvWidth, const int uvHeight, const cudaStream_t stream)
     {
