@@ -110,8 +110,8 @@ private:
 			
 			//calculation of coefficients and error sequence
 			const auto correlationArrays = this->transformCorrelationArrays(RxPartial, rxPartial);
-			const af::array Rx = correlationArrays.first;
-			const af::array rx = correlationArrays.second;
+			const af::array& Rx = correlationArrays.first;
+			const af::array& rx = correlationArrays.second;
 			const clMemPtr RxMemPtr(Rx.device<cl_mem>());
 			const clMemPtr rxMemPtr(rx.device<cl_mem>());
 			const clMemPtr coeffsMem(this->coefficients.template device<cl_mem>());
