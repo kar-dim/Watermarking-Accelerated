@@ -75,24 +75,25 @@ private:
 		return customMask;
 	}
 
-	af::array computeErrorSequence(const af::array& image, const af::array& coefficients, const bool calculateAbs) const
+	af::array computeErrorSequence(const af::array& image, const bool calculateAbs) const
 	{
 		const af::array errorSequence(this->baseRows, this->baseCols);
 		const clMemPtr imageMem(image.device<cl_mem>());
-		const clMemPtr coeffsMem(coefficients.device<cl_mem>());
+		const clMemPtr coeffsMem(this->coefficients.template device<cl_mem>());
 		const clMemPtr errorSequenceMem(errorSequence.device<cl_mem>());
+		const clMemPtr stopFlagMem(this->stopFlag.template device<cl_mem>());
 		//transposed global dimensions because of column-major order in arrayfire
 		executeKernel([&]() {
 			queue.enqueueNDRangeKernel(
-				cl_utils::KernelBuilder(programs, "error_sequence_p3").args(wrap(imageMem.get()), wrap(errorSequenceMem.get()), wrap(coeffsMem.get()), this->baseCols, this->baseRows, (int)calculateAbs).build(),
+				cl_utils::KernelBuilder(programs, "error_sequence_p3").args(wrap(imageMem.get()), wrap(errorSequenceMem.get()), wrap(coeffsMem.get()), this->baseCols, this->baseRows, (int)calculateAbs, wrap(stopFlagMem.get())).build(),
 				cl::NDRange(), cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(windowBlockSize, windowBlockSize));
 			queue.finish();
-			this->unlockArrays(image, coefficients, errorSequence);
+			this->unlockArrays(image, errorSequence, this->coefficients, this->stopFlag);
 		}, "error_sequence_p3");
 		return errorSequence;
 	}
 
-	void computePredictionErrorData(const af::array& image, af::array& errorSequence, af::array& coefficients, const bool calculateAbs) const
+	void computePredictionErrorData(const af::array& image, af::array& errorSequence, const bool calculateAbs) const
 	{
 		const af::array RxPartial(this->baseRows, meKernelDims.cols);
 		const af::array rxPartial(this->baseRows, meKernelDims.cols / 8);
@@ -106,17 +107,22 @@ private:
 			//finish and return memory to arrayfire
 			queue.finish();
 			this->unlockArrays(image, RxPartial, rxPartial);
+			
 			//calculation of coefficients and error sequence
 			const auto correlationArrays = this->transformCorrelationArrays(RxPartial, rxPartial);
-			//solve() may crash in OpenCL ArrayFire implementation if the system is not solvable.
-			try {
-				coefficients = af::solve(correlationArrays.first, correlationArrays.second);
-			}
-			catch (const af::exception&) {
-				coefficients = af::array(0, f32);
-				return;
-			}
-			errorSequence = computeErrorSequence(image, coefficients, calculateAbs);
+			const af::array Rx = correlationArrays.first;
+			const af::array rx = correlationArrays.second;
+			const clMemPtr RxMemPtr(Rx.device<cl_mem>());
+			const clMemPtr rxMemPtr(rx.device<cl_mem>());
+			const clMemPtr coeffsMem(this->coefficients.template device<cl_mem>());
+			const clMemPtr stopFlagMem(this->stopFlag.template device<cl_mem>());
+			queue.enqueueNDRangeKernel(
+				cl_utils::KernelBuilder(programs, "cholesky_solver_p3").args(wrap(RxMemPtr.get()), wrap(rxMemPtr.get()), wrap(coeffsMem.get()), wrap(stopFlagMem.get())).build(),
+				cl::NDRange(), cl::NDRange(1), cl::NDRange(1));
+			//finish and return memory to arrayfire
+			queue.finish();
+			this->unlockArrays(Rx, rx, this->coefficients, this->stopFlag);
+			errorSequence = computeErrorSequence(image, calculateAbs);
 		}, "me");
 	}
 

@@ -64,7 +64,8 @@ __kernel void error_sequence_p3(
     __constant float* restrict coeffs,
     const unsigned int width,
     const unsigned int height,
-    const int calculateAbs)
+    const int calculateAbs,
+    __global int* restrict stopFlag)
 {
     const int x = get_global_id(1);
     const int y = get_global_id(0);
@@ -288,6 +289,92 @@ __kernel void calculate_final_correlation(
         float final_norm_z = sqrt(sumZ[0]);
         result[0] = (final_norm_u > 0.0f && final_norm_z > 0.0f) ? (final_dot / (final_norm_u * final_norm_z)) : 0.0f;
     }
+}
+
+__kernel void cholesky_solver_p3(__global const float* restrict A, 
+                                 __global const float* restrict B,
+                                 __global float* restrict X,
+                                 __global int* restrict stopFlag)
+{
+    const int N = 8; //p = 3 -> 8x8 system
+
+    if (get_local_id(0) > 0 || get_group_id(0) > 0)
+        return;
+
+    float localA[64], localB[8], localX[8];
+
+    //initialize Result to 0.0f (safe fallback for unsolvable systems)
+    for (int i = 0; i < N; i++)
+        localX[i] = 0.0f;
+
+    //initialize
+    for (int i = 0; i < N * N; i++)
+        localA[i] = A[i];
+    for (int i = 0; i < N; i++)
+        localB[i] = B[i];
+
+    //Cholesky Decomposition: A = L*L^T
+	//A is symmetric positive definite
+    float L[8][8];
+    // clear L
+#pragma unroll
+    for (int i = 0; i < N; i++)
+#pragma unroll
+        for (int j = 0; j < N; j++)
+            L[i][j] = 0.0f;
+
+#pragma unroll
+    for (int i = 0; i < N; i++)
+    {
+#pragma unroll
+        for (int j = 0; j <= i; j++)
+        {
+            float sum = 0.0f;
+            for (int k = 0; k < j; k++)
+                sum += L[i][k] * L[j][k];
+            if (i == j)
+            {
+                //diagonal element
+                const float val = localA[i * N + i] - sum;
+                //check if singular! if so, exit early with X = 0.0f
+                if (val <= 1e-12f) 
+                {
+                    *stopFlag = 1;
+                    goto exit;
+                }
+                L[i][j] = sqrt(val);
+            }
+            else //non diagonal
+                L[i][j] = (localA[i * N + j] - sum) * native_recip(L[j][j]); //fast reciprocal
+        }
+    }
+	//solve the system with forward and backward substitution
+	//we again use fast reciprocal for better performance (1 GPU thread is weak, needs as fast math as possible)
+    //forward substitution -> solve L*y = b
+    float y[8];
+#pragma unroll
+    for (int i = 0; i < N; i++)
+    {
+        float sum = 0.0f;
+        for (int k = 0; k < i; k++)
+            sum += L[i][k] * y[k];
+        y[i] = (localB[i] - sum) * native_recip(L[i][i]);
+    }
+
+    //backward substitution -> solve L^T * x = y
+#pragma unroll
+    for (int i = N - 1; i >= 0; i--)
+    {
+        float sum = 0.0f;
+        for (int k = i + 1; k < N; k++)
+            sum += L[k][i] * localX[k]; //transposed
+        localX[i] = (y[i] - sum) * native_recip(L[i][i]);
+    }
+    *stopFlag = 0;
+	//write
+exit:
+    for (int i = 0; i < 8; i++)
+        X[i] = localX[i];
 }
 
 )CLC";
