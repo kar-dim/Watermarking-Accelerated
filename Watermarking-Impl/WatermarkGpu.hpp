@@ -28,17 +28,10 @@ public:
 
 	void makeWatermark(const ImageBuffer& inputGrayImage, const ImageBuffer& inputImage, ImageBuffer& output, float& watermarkStrength, const MASK_TYPE maskType)
 	{
-		af::array mask, inputErrorSequence, inputCoefficients;
+		af::array mask, inputErrorSequence;
 		if (maskType == ME)
 		{
-			computePredictionErrorData(inputGrayImage, inputErrorSequence, inputCoefficients, true);
-			//if the system is not solvable, don't waste time embeding the watermark
-			//set the output to the input image and exit
-			if (inputCoefficients.elements() == 0)
-			{
-				output = inputImage;
-				return;
-			}
+			computePredictionErrorData(inputGrayImage, inputErrorSequence, true);
 			mask = computePredictionErrorMask<false>(inputErrorSequence);
 		}
 		else
@@ -50,14 +43,11 @@ public:
 
 	float detectWatermark(const ImageBuffer& inputImage, const MASK_TYPE maskType)
 	{
-		af::array mask, errorSequenceW, coefficients;
-		computePredictionErrorData(inputImage, errorSequenceW, coefficients, false);
-		//if the system is not solvable, don't waste time computing the correlation, there is no watermark
-		if (coefficients.elements() == 0)
-			return 0.0f;
+		af::array mask, errorSequenceW;
+		computePredictionErrorData(inputImage, errorSequenceW, false);
 		mask = maskType == NVF ? computeCustomMask(inputImage) : computePredictionErrorMask<true>(errorSequenceW);
 		const af::array u = mask * randomMatrix;
-		return computeCorrelation(computeErrorSequence(u, coefficients, false), errorSequenceW);
+		return computeCorrelation(computeErrorSequence(u, false), errorSequenceW);
 	}
 
 	//helper method to unlock multiple af::arrays (return memory to ArrayFire)
@@ -78,15 +68,17 @@ protected:
 	static constexpr int localSize = pSquared - 1;
 	static constexpr int localSizeSq = localSize * localSize;
 
+	af::array coefficients{ localSize };
+
 	//computes custom Mask
 	virtual af::array computeCustomMask(const af::array& image) const = 0;
 	
 	//computes error sequence, used in prediction error mask
-	virtual af::array computeErrorSequence(const af::array& image, const af::array& coefficients, const bool calculateAbs) const = 0;
+	virtual af::array computeErrorSequence(const af::array& image, const bool calculateAbs) const = 0;
 	
 	//Used in both creation and detection of the watermark.
 	//Calculates error sequence and prediction error filter (coefficients)
-	virtual void computePredictionErrorData(const af::array& image, af::array& errorSequence, af::array& coefficients, const bool calculateAbs) const = 0;
+	virtual void computePredictionErrorData(const af::array& image, af::array& errorSequence, const bool calculateAbs) const = 0;
 	
 	//helper method used in detectors
 	virtual float computeCorrelation(const af::array& e_u, const af::array& e_z) const = 0;

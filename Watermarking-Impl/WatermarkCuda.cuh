@@ -38,20 +38,19 @@ private:
 		return customMask;
 	}
 
-	af::array computeErrorSequence(const af::array& image, const af::array& coefficients, const bool calculateAbs) const
+	af::array computeErrorSequence(const af::array& image, const bool calculateAbs) const
 	{
 		//transposed grid dimensions because of column-major order in arrayfire
 		const dim3 gridSize = cuda_utils::gridSizeCalculate(windowBlockSize, this->baseCols, this->baseRows);
 		const af::array errorSequence(this->baseRows, this->baseCols);
-		//populate constant memory and call error sequence kernel
-		setCoeffs(coefficients.device<float>());
-		calculate_error_sequence_p3 << <gridSize, windowBlockSize, 0, afStream >> > (image.device<float>(), errorSequence.device<float>(), this->baseCols, this->baseRows, calculateAbs);
+		//call error sequence kernel
+		calculate_error_sequence_p3 << <gridSize, windowBlockSize, 0, afStream >> > (image.device<float>(), errorSequence.device<float>(), this->coefficients.template device<float>(), this->baseCols, this->baseRows, calculateAbs);
 		//transfer ownership to arrayfire and return output array
-		this->unlockArrays(image, errorSequence, coefficients);
+		this->unlockArrays(image, errorSequence, this->coefficients);
 		return errorSequence;
 	}
 
-	void computePredictionErrorData(const af::array& image, af::array& errorSequence, af::array& coefficients, const bool calculateAbs) const
+	void computePredictionErrorData(const af::array& image, af::array& errorSequence, const bool calculateAbs) const
 	{
 		const dim3 gridSize = cuda_utils::gridSizeCalculate(meBlockSize, meKernelDims.y, meKernelDims.x);
 		//call prediction error mask kernel
@@ -61,14 +60,11 @@ private:
 		this->unlockArrays(image, RxPartial, rxPartial);
 		//calculation of coefficients and error sequence
 		const auto correlationArrays = this->transformCorrelationArrays(RxPartial, rxPartial);
-		coefficients = af::solve(correlationArrays.first, correlationArrays.second);
-		//if system is not solvable, don't waste computing the error sequence, there is no watermark to embed
-		if (af::anyTrue<bool>(af::isNaN(coefficients)))
-		{
-			coefficients = af::array(0, f32);
-			return;
-		}
-		errorSequence = computeErrorSequence(image, coefficients, calculateAbs);
+		const af::array Rx = correlationArrays.first;
+		const af::array rx = correlationArrays.second;
+		tiny_solver_kernel << <1, 1, 0, afStream >> > (Rx.device<float>(), rx.device<float>(), this->coefficients.template device<float>(), 8);
+		this->unlockArrays(Rx, rx, this->coefficients);
+		errorSequence = computeErrorSequence(image, calculateAbs);
 	}
 
 	float computeCorrelation(const af::array& e_u, const af::array& e_z) const

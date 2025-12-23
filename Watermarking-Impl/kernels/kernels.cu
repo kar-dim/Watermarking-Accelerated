@@ -9,13 +9,6 @@ using namespace nvcuda;
 __device__ inline half HALF(float x) { return __float2half(x); }
 __device__ inline float FLOAT(half x) { return __half2float(x); }
 
-__constant__ float coeffs[8];
-
-__host__ void setCoeffs(const float* c)
-{
-	cudaMemcpyToSymbol(coeffs, c, 8 * sizeof(float), 0, cudaMemcpyDeviceToDevice);
-}
-
 __device__ half8 make_half8(const float& a, const float& b, const float& c, const float& d, const float& e, const float& f, const float& g, const float& h)
 {
     return half8 { HALF(a), HALF(b), HALF(c), HALF(d), HALF(e), HALF(f), HALF(g), HALF(h) };
@@ -156,7 +149,7 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
     }
 }
 
-__global__ void calculate_error_sequence_p3(const float* __restrict__ input, float* __restrict__ x_, const unsigned int width, const unsigned int height, const bool calculateAbs)
+__global__ void calculate_error_sequence_p3(const float* __restrict__ input, float* __restrict__ x_, const float* __restrict__ coeffs, const unsigned int width, const unsigned int height, const bool calculateAbs)
 {
     constexpr int sharedSize = 16 + 2;
     const int y = blockIdx.x * blockDim.x + threadIdx.x;
@@ -307,6 +300,31 @@ __global__ void calculate_final_correlation(const float* __restrict__ partialDot
             result[0] = (normU > 0.0f && normZ > 0.0f) ? (localDot / (normU * normZ)) : 0.0f;
         }
     }
+}
+
+__global__ void tiny_solver_kernel(const float* __restrict__ A_global, const float* __restrict__ b_global, float* __restrict__ x_global, int N)
+{
+    if (threadIdx.x > 0 || blockIdx.x > 0) return;
+
+    float localA[64];
+    float localB[8];
+    float localX[8];
+
+    // Initialize Result to 0.0f (Safe Fallback)
+    for (int i = 0; i < N; i++)
+        localX[i] = 0.0f;
+
+    // Load Data
+    for (int i = 0; i < N * N; i++)
+        localA[i] = A_global[i];
+    for (int i = 0; i < N; i++)
+        localB[i] = b_global[i];
+    
+    choleskyInverse<8>(localA, localB, localX);
+
+    // Write Output
+    // If failed, we write the 0.0f fallback we initialized earlier
+    for (int i = 0; i < N; i++) x_global[i] = localX[i];
 }
 
 __global__ void nV12ToYUV420p(const uint8_t* __restrict__ uvSrc, const int uvPitch, uint8_t* __restrict__ uvDst, const int uvWidth, const int uvHeight)
