@@ -44,9 +44,9 @@ private:
 		const dim3 gridSize = cuda_utils::gridSizeCalculate(windowBlockSize, this->baseCols, this->baseRows);
 		const af::array errorSequence(this->baseRows, this->baseCols);
 		//call error sequence kernel
-		calculate_error_sequence_p3 << <gridSize, windowBlockSize, 0, afStream >> > (image.device<float>(), errorSequence.device<float>(), this->coefficients.template device<float>(), this->baseCols, this->baseRows, calculateAbs);
+		calculate_error_sequence_p3 << <gridSize, windowBlockSize, 0, afStream >> > (image.device<float>(), errorSequence.device<float>(), this->coefficients.template device<float>(), this->baseCols, this->baseRows, calculateAbs, this->stopFlag.template device<int>());
 		//transfer ownership to arrayfire and return output array
-		this->unlockArrays(image, errorSequence, this->coefficients);
+		this->unlockArrays(image, errorSequence, this->coefficients, this->stopFlag);
 		return errorSequence;
 	}
 
@@ -62,8 +62,8 @@ private:
 		const auto correlationArrays = this->transformCorrelationArrays(RxPartial, rxPartial);
 		const af::array Rx = correlationArrays.first;
 		const af::array rx = correlationArrays.second;
-		tiny_solver_kernel << <1, 1, 0, afStream >> > (Rx.device<float>(), rx.device<float>(), this->coefficients.template device<float>(), 8);
-		this->unlockArrays(Rx, rx, this->coefficients);
+		cholesky_solver_p3 << <1, 1, 0, afStream >> > (Rx.device<float>(), rx.device<float>(), this->coefficients.template device<float>(), this->stopFlag.template device<int>());
+		this->unlockArrays(Rx, rx, this->coefficients, this->stopFlag);
 		errorSequence = computeErrorSequence(image, calculateAbs);
 	}
 

@@ -37,7 +37,15 @@ public:
 		else
 			mask = computeCustomMask(inputGrayImage);
 		const af::array u = mask * randomMatrix;
-		watermarkStrength = strengthFactor / static_cast<float>(af::norm(u) / std::sqrt(u.elements()));
+		//check if system is solvable here, because we pay the cost of norm calculation (host transfer) anyway
+		const double normU = af::norm(u);
+		if (!std::isfinite(normU)) 
+		{
+			watermarkStrength = 0.0f;
+			output = inputImage;
+			return;
+		}
+		watermarkStrength = strengthFactor / (static_cast<float>(normU / std::sqrt(u.elements())));
 		output = af::clamp(inputImage + (u * watermarkStrength), 0, 255);
 	}
 
@@ -68,7 +76,8 @@ protected:
 	static constexpr int localSize = pSquared - 1;
 	static constexpr int localSizeSq = localSize * localSize;
 
-	af::array coefficients{ localSize };
+	af::array coefficients = af::array(localSize, f32);
+	af::array stopFlag = af::constant(0, 1, s32);
 
 	//computes custom Mask
 	virtual af::array computeCustomMask(const af::array& image) const = 0;
