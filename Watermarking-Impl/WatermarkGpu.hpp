@@ -17,11 +17,11 @@ class WatermarkGPU : public WatermarkBase
 {
 public:
 	WatermarkGPU<p>(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr)
-		: WatermarkBase(rows, cols, randomMatrixPath, psnr)
+		: WatermarkBase(rows, cols, randomMatrixPath, psnr), coefficients(localSize, f32), stopFlag{ af::constant(0, 1, s32) }, reduceHeuristic{ rows * cols >= reduceHeuristicMinRes }
 	{ }
 
 	WatermarkGPU<p>(const unsigned int rows, const unsigned int cols, const ImageBuffer& randomMatrix, const float strengthFactor)
-		: WatermarkBase(rows, cols, randomMatrix, strengthFactor)
+		: WatermarkBase(rows, cols, randomMatrix, strengthFactor), coefficients(localSize, f32), stopFlag{ af::constant(0, 1, s32) }, reduceHeuristic{ rows * cols >= reduceHeuristicMinRes }
 	{ }
 
 	~WatermarkGPU<p>() override = default;
@@ -75,9 +75,11 @@ protected:
 	static constexpr int pad = p / 2;
 	static constexpr int localSize = pSquared - 1;
 	static constexpr int localSizeSq = localSize * localSize;
+	static constexpr int reduceHeuristicMinRes = 2560 * 1440;
 
-	af::array coefficients = af::array(localSize, f32);
-	af::array stopFlag = af::constant(0, 1, s32);
+	af::array coefficients, stopFlag;
+	//for 4K and up use host global reduce heuristic (faster kernel, copies to host but the throughput is greater than the extra latency)
+	bool reduceHeuristic;
 
 	//computes custom Mask
 	virtual af::array computeCustomMask(const af::array& image) const = 0;
@@ -93,11 +95,16 @@ protected:
 	virtual float computeCorrelation(const af::array& e_u, const af::array& e_z) const = 0;
 
 	//compute prediction error mask
+	//based on the reduceHeuristic flag, it either uses a global reduce to host (faster throughput, used for large images)
+	//or a flat on-device reduce (slower throughput, but without GPU-host latency, better for small images)
 	template<bool CALC_ABS>
 	af::array computePredictionErrorMask(const af::array& errorSequence) const
 	{
 		const af::array& input = CALC_ABS ? af::abs(errorSequence) : errorSequence;
-		return input / af::max<float>(input);
+		if (reduceHeuristic)
+			return input / af::max<float>(input);
+		else
+			return input / af::max(af::flat(input));
 	}
 
 	//helper method to sum the incomplete Rx_partial and rxPartial arrays which were produced from the custom kernel
