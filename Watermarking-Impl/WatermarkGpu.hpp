@@ -17,11 +17,11 @@ class WatermarkGPU : public WatermarkBase
 {
 public:
 	WatermarkGPU<p>(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr)
-		: WatermarkBase(rows, cols, randomMatrixPath, psnr), coefficients(localSize, f32), stopFlag{ af::constant(0, 1, s32) }, reduceHeuristic{ rows * cols >= reduceHeuristicMinRes }
+		: WatermarkBase(rows, cols, randomMatrixPath, psnr), reduceHeuristic{ rows * cols >= reduceHeuristicMinRes }
 	{ }
 
 	WatermarkGPU<p>(const unsigned int rows, const unsigned int cols, const ImageBuffer& randomMatrix, const float strengthFactor)
-		: WatermarkBase(rows, cols, randomMatrix, strengthFactor), coefficients(localSize, f32), stopFlag{ af::constant(0, 1, s32) }, reduceHeuristic{ rows * cols >= reduceHeuristicMinRes }
+		: WatermarkBase(rows, cols, randomMatrix, strengthFactor), reduceHeuristic{ rows * cols >= reduceHeuristicMinRes }
 	{ }
 
 	~WatermarkGPU<p>() override = default;
@@ -77,7 +77,8 @@ protected:
 	static constexpr int localSizeSq = localSize * localSize;
 	static constexpr int reduceHeuristicMinRes = 2560 * 1440;
 
-	af::array coefficients, stopFlag;
+	af::array coefficients = af::array(localSize, f32);
+	af::array stopFlag = af::constant(0, 1, s32);
 	//for 4K and up use host global reduce heuristic (faster kernel, copies to host but the throughput is greater than the extra latency)
 	bool reduceHeuristic;
 
