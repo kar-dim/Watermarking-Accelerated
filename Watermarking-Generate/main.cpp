@@ -33,6 +33,14 @@ int main(int argc, char* argv[])
     }
     const int numElements = rows * cols;
     omp_set_num_threads(static_cast<int>(std::thread::hardware_concurrency()));
+    const int maxThreads = omp_get_max_threads();
+   
+    std::mt19937 masterGenerator(seed);
+    std::vector<unsigned int> threadSeeds(maxThreads);
+
+    //generate a unique deterministic starting seed for each thread
+    for (int i = 0; i < maxThreads; i++)
+        threadSeeds[i] = masterGenerator();
 
     //generate random numbers in parallel
     std::vector<float> randomNums(numElements);
@@ -40,7 +48,7 @@ int main(int argc, char* argv[])
     {
         const int threadId = omp_get_thread_num();
         const int numThreads = omp_get_num_threads();
-        std::mt19937 generator(seed);
+        std::mt19937 localGenerator(threadSeeds[threadId]);
         //watermark is a Gaussian distribution with mean 0 and standard deviation 1
         std::normal_distribution<float> distribution(0.0f, 1.0f);
 
@@ -48,10 +56,10 @@ int main(int argc, char* argv[])
         const int threadElements = numElements / numThreads;
         const int start = threadId * threadElements;
         const int end = (threadId == numThreads - 1) ? numElements : start + threadElements;
-
+        
         //generate random numbers for this thread
         for (int i = start; i < end; i++)
-            randomNums[i] = distribution(generator);
+            randomNums[i] = distribution(localGenerator);
     }
 
     //write the random numbers to the output file
