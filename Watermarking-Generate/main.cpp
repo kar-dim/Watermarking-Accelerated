@@ -4,7 +4,6 @@
 #include <omp.h>
 #include <random>
 #include <string>
-#include <thread>
 #include <vector>
 
 /*!
@@ -32,7 +31,6 @@ int main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
     const int numElements = rows * cols;
-    omp_set_num_threads(static_cast<int>(std::thread::hardware_concurrency()));
     const int maxThreads = omp_get_max_threads();
    
     std::mt19937 masterGenerator(seed);
