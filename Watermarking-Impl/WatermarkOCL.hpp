@@ -68,7 +68,6 @@ private:
 			queue.enqueueNDRangeKernel(
 				KernelBuilder(programs, "nvf").args(wrap(imageMem.get()), wrap(outputMem.get()), this->baseCols, this->baseRows).build(),
 				cl::NDRange(), cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(windowBlockSize, windowBlockSize));
-			queue.finish();
 			this->unlockArrays(image, customMask);
 		}, "nvf");
 		return customMask;
@@ -86,7 +85,6 @@ private:
 			queue.enqueueNDRangeKernel(
 				KernelBuilder(programs, "error_sequence_p3").args(wrap(imageMem.get()), wrap(errorSequenceMem.get()), wrap(coeffsMem.get()), this->baseCols, this->baseRows, (int)calculateAbs, wrap(stopFlagMem.get())).build(),
 				cl::NDRange(), cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(windowBlockSize, windowBlockSize));
-			queue.finish();
 			this->unlockArrays(image, errorSequence, this->coefficients, this->stopFlag);
 		}, "error_sequence_p3");
 		return errorSequence;
@@ -103,8 +101,7 @@ private:
 			queue.enqueueNDRangeKernel(
 				KernelBuilder(programs, "me").args(wrap(imageMem.get()), wrap(RxPartialMem.get()), wrap(rxPartialMem.get()), RxMappingsBuff, this->baseCols, this->baseRows).build(),
 				cl::NDRange(), cl::NDRange(meKernelDims.cols, meKernelDims.rows), cl::NDRange(meBlockSize, 1));
-			//finish and return memory to arrayfire
-			queue.finish();
+			//return memory to arrayfire
 			this->unlockArrays(image, RxPartial, rxPartial);
 			
 			//calculation of coefficients and error sequence
@@ -118,8 +115,7 @@ private:
 			queue.enqueueNDRangeKernel(
 				KernelBuilder(programs, "cholesky_solver_p3").args(wrap(RxMemPtr.get()), wrap(rxMemPtr.get()), wrap(coeffsMem.get()), wrap(stopFlagMem.get())).build(),
 				cl::NDRange(), cl::NDRange(1), cl::NDRange(1));
-			//finish and return memory to arrayfire
-			queue.finish();
+			//return memory to arrayfire
 			this->unlockArrays(Rx, rx, this->coefficients, this->stopFlag);
 			errorSequence = computeErrorSequence(image, calculateAbs);
 		}, "me");
@@ -152,7 +148,6 @@ private:
 				KernelBuilder(programs, "calculate_final_correlation").args(
 					wrap(dotPartialMem.get()), wrap(uNormPartialMem.get()), wrap(zNormPartialMem.get()), wrap(correlationResultMem.get()), blocks).build(),
 				cl::NDRange(), cl::NDRange(corrFinalLocalSize), cl::NDRange(corrFinalLocalSize));
-			queue.finish();
 			//retrieve the correlation result
 			this->unlockArrays(e_u, e_z, dotPartial, uNormPartial, zNormPartial, correlationResult);
 			correlation = correlationResult.scalar<float>();
