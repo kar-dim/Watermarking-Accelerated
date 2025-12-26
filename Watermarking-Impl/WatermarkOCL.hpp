@@ -148,7 +148,6 @@ private:
 				cl_utils::KernelBuilder(programs, "calculate_partial_correlation").args(
 					wrap(euMem.get()), wrap(ezMem.get()), wrap(dotPartialMem.get()), wrap(uNormPartialMem.get()), wrap(zNormPartialMem.get()), N).build(),
 				cl::NDRange(), cl::NDRange(globalSizePartials), cl::NDRange(corrPartialBlockSize));
-			queue.finish();
 			//reduce partials and compute correlation
 			queue.enqueueNDRangeKernel(
 				cl_utils::KernelBuilder(programs, "calculate_final_correlation").args(
