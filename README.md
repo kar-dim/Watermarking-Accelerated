@@ -3,15 +3,19 @@
 ![512](https://github.com/user-attachments/assets/6544f178-4f99-43ff-850c-9f40db478f35)
 
 
-Code for my Diploma thesis at Information and Communication Systems Engineering (University of the Aegean, School of Engineering) with title "Efficient implementation of watermark and watermark detection algorithms for image and video using the graphics processing unit" [Link](https://hellanicus.lib.aegean.gr/handle/11610/19672). 
-The original watermarking algorithms are described in this paper: [Link](https://www.icsd.aegean.gr/publication_files/637538981.pdf)
+Code for my Diploma thesis at Information and Communication Systems Engineering (University of the Aegean, School of Engineering) with title "Efficient implementation of watermark and watermark detection algorithms for image and video using the graphics processing unit" [Link](https://hellanicus.lib.aegean.gr/handle/11610/19672).
 
-**NOTE**: This repository features a refactored and optimized version of the original implementation, with improved algorithms and execution times.
-The deprecated original Thesis code is in the archived repository <a href="https://github.com/kar-dim/Watermarking-GPU/tree/old">old</a> branch. The optimized code for all implementations (CUDA, OpenCL and CPU Eigen) is in this repository  <a href="https://github.com/kar-dim/Watermarking-Accelerated">master</a> branch. The original Thesis code included only OpenCL and Eigen code, while here we also include a CUDA implementation.
+# Credits and Theoretical Foundation
+
+This implementation is based on the watermarking algorithms proposed by Irene G. Karybali and Kostas Berberidis: [Efficient Spatial Image Watermarking via New Perceptual Masking and Blind Detection Schemes](https://www.icsd.aegean.gr/publication_files/637538981.pdf). The theoretical framework and the mathematical proofs of robustness against attacks are detailed in the original paper.
+This repository provides a high performance implementation designed for real-world environments, featuring GPU acceleration, disk images support, and native video container support via FFmpeg.
+
+**NOTE**: This repository features a highly refactored and optimized version of the original Thesis implementation, with improved algorithms, execution times and features.
+The deprecated original Thesis code is in the archived repository <a href="https://github.com/kar-dim/Watermarking-GPU/tree/old">old</a> branch. The original Thesis code supported OpenCL and Eigen, while this implementation adds CUDA support.
 
 # Overview
 
-This project implements and evaluates the performance (execution speed) of image watermarking algorithms on CPU versus GPU. It provides multiple implementations to enable comparisons between compute backends. Watermarks are generated using normally distributed random values with zero mean and standard deviation of one. The system supports both embedding and detection of watermarks in disk images and video streams. Video processing is handled via FFmpeg, enabling broad codec and container support, along with advanced features such as GPU-accelerated video decoding (CUDA) and 10-bit/HDR (tonemapped) video support.
+This project implements and evaluates the performance (execution speed) of image watermarking algorithms on CPU versus GPU. It provides multiple implementations to enable comparisons between compute backends. Watermarks are generated using normally distributed random values with zero mean and standard deviation of one. The system supports both embedding and detection of watermarks in disk images and video streams. Video processing is handled via FFmpeg, enabling broad codec and container support, along with advanced features such as GPU-accelerated video decoding (CUDA only) and 10-bit/HDR (tonemapped) video support.
 
 The repository contains all required source code and dependencies needed to reproduce the benchmarks and experiments.
 
