@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <arrayfire.h>
 #include <memory>
-#include <stdexcept>
 #include <string>
 
 struct dim2
@@ -15,6 +14,8 @@ struct dim2
 	dim_t rows;
 	dim_t cols;
 };
+
+using namespace cl_utils;
 
 /*!
  *  \brief  Functions for watermark computation and detection, OpenCL implementation.
@@ -26,8 +27,8 @@ class WatermarkOCL final : public WatermarkGPU<p>
 public:
 	WatermarkOCL<p>(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr)
 		: WatermarkGPU<p>(rows, cols, randomMatrixPath, psnr),
-		texKernelDims{ WatermarkBase::align<windowBlockSize>(rows), WatermarkBase::align<windowBlockSize>(cols) }, meKernelDims{ rows, WatermarkBase::align<meBlockSize>(cols) },
-		programs(cl_utils::buildKernels(p))
+		texKernelDims{ align<windowBlockSize>(rows), align<windowBlockSize>(cols) }, meKernelDims{ rows, align<meBlockSize>(cols) },
+		programs(buildKernels(p))
 	{ }
 
 private:
@@ -57,8 +58,6 @@ private:
 	unsigned int corrFinalLocalSize = std::min(1024, static_cast<int>(device.getInfo<CL_DEVICE_MAX_WORK_GROUP_SIZE>()));
 	cl::Program programs;
 
-	inline cl::Buffer wrap(const cl_mem* mem) const { return cl::Buffer(*mem, true); }
-
 	af::array computeCustomMask(const af::array& image) const
 	{
 		const af::array customMask(this->baseRows, this->baseCols);
@@ -67,7 +66,7 @@ private:
 		//transposed global dimensions because of column-major order in arrayfire
 		executeKernel([&]() {
 			queue.enqueueNDRangeKernel(
-				cl_utils::KernelBuilder(programs, "nvf").args(wrap(imageMem.get()), wrap(outputMem.get()), this->baseCols, this->baseRows).build(),
+				KernelBuilder(programs, "nvf").args(wrap(imageMem.get()), wrap(outputMem.get()), this->baseCols, this->baseRows).build(),
 				cl::NDRange(), cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(windowBlockSize, windowBlockSize));
 			queue.finish();
 			this->unlockArrays(image, customMask);
@@ -85,7 +84,7 @@ private:
 		//transposed global dimensions because of column-major order in arrayfire
 		executeKernel([&]() {
 			queue.enqueueNDRangeKernel(
-				cl_utils::KernelBuilder(programs, "error_sequence_p3").args(wrap(imageMem.get()), wrap(errorSequenceMem.get()), wrap(coeffsMem.get()), this->baseCols, this->baseRows, (int)calculateAbs, wrap(stopFlagMem.get())).build(),
+				KernelBuilder(programs, "error_sequence_p3").args(wrap(imageMem.get()), wrap(errorSequenceMem.get()), wrap(coeffsMem.get()), this->baseCols, this->baseRows, (int)calculateAbs, wrap(stopFlagMem.get())).build(),
 				cl::NDRange(), cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(windowBlockSize, windowBlockSize));
 			queue.finish();
 			this->unlockArrays(image, errorSequence, this->coefficients, this->stopFlag);
@@ -102,7 +101,7 @@ private:
 		const clMemPtr rxPartialMem(rxPartial.device<cl_mem>());
 		executeKernel([&]() {
 			queue.enqueueNDRangeKernel(
-				cl_utils::KernelBuilder(programs, "me").args(wrap(imageMem.get()), wrap(RxPartialMem.get()), wrap(rxPartialMem.get()), RxMappingsBuff, this->baseCols, this->baseRows).build(),
+				KernelBuilder(programs, "me").args(wrap(imageMem.get()), wrap(RxPartialMem.get()), wrap(rxPartialMem.get()), RxMappingsBuff, this->baseCols, this->baseRows).build(),
 				cl::NDRange(), cl::NDRange(meKernelDims.cols, meKernelDims.rows), cl::NDRange(meBlockSize, 1));
 			//finish and return memory to arrayfire
 			queue.finish();
@@ -117,7 +116,7 @@ private:
 			const clMemPtr coeffsMem(this->coefficients.template device<cl_mem>());
 			const clMemPtr stopFlagMem(this->stopFlag.template device<cl_mem>());
 			queue.enqueueNDRangeKernel(
-				cl_utils::KernelBuilder(programs, "cholesky_solver_p3").args(wrap(RxMemPtr.get()), wrap(rxMemPtr.get()), wrap(coeffsMem.get()), wrap(stopFlagMem.get())).build(),
+				KernelBuilder(programs, "cholesky_solver_p3").args(wrap(RxMemPtr.get()), wrap(rxMemPtr.get()), wrap(coeffsMem.get()), wrap(stopFlagMem.get())).build(),
 				cl::NDRange(), cl::NDRange(1), cl::NDRange(1));
 			//finish and return memory to arrayfire
 			queue.finish();
@@ -145,12 +144,12 @@ private:
 		executeKernel([&]() {
 			//calculate partial dot products and norms
 			queue.enqueueNDRangeKernel(
-				cl_utils::KernelBuilder(programs, "calculate_partial_correlation").args(
+				KernelBuilder(programs, "calculate_partial_correlation").args(
 					wrap(euMem.get()), wrap(ezMem.get()), wrap(dotPartialMem.get()), wrap(uNormPartialMem.get()), wrap(zNormPartialMem.get()), N).build(),
 				cl::NDRange(), cl::NDRange(globalSizePartials), cl::NDRange(corrPartialBlockSize));
 			//reduce partials and compute correlation
 			queue.enqueueNDRangeKernel(
-				cl_utils::KernelBuilder(programs, "calculate_final_correlation").args(
+				KernelBuilder(programs, "calculate_final_correlation").args(
 					wrap(dotPartialMem.get()), wrap(uNormPartialMem.get()), wrap(zNormPartialMem.get()), wrap(correlationResultMem.get()), blocks).build(),
 				cl::NDRange(), cl::NDRange(corrFinalLocalSize), cl::NDRange(corrFinalLocalSize));
 			queue.finish();
@@ -159,16 +158,5 @@ private:
 			correlation = correlationResult.scalar<float>();
 		}, "compute correlation kernels");
 		return correlation;
-	}
-
-	template<typename Func>
-	void executeKernel(const Func& kernelFunc, const std::string& context) const
-	{
-		try {
-			kernelFunc();
-		}
-		catch (const cl::Error& ex) {
-			throw std::runtime_error("OpenCL Error in " + context + ": " + std::string(ex.what()) + " Error code: " + std::to_string(ex.err()) + "\n");
-		}
 	}
 };

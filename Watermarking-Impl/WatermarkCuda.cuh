@@ -83,9 +83,8 @@ private:
 		calculate_partial_correlation << <blocks, corrPartialBlockSize, 0, afStream >> > (e_u.device<float>(), e_z.device<float>(), dotPartialPtr, uNormPartialPtr, zNormPartialPtr, N);
 		//reduce partials and compute correlation
 		calculate_final_correlation << <1, corrFinalBlockSize, 0, afStream >> > (dotPartialPtr, uNormPartialPtr, zNormPartialPtr, correlationResult.device<float>(), blocks);
-
+		//transfer ownership to arrayfire and return output correlation scalar to host
 		this->unlockArrays(e_u, e_z, dotPartial, uNormPartial, zNormPartial, correlationResult);
-		float correlation = correlationResult.scalar<float>();
-		return correlation;
+		return correlationResult.scalar<float>();
 	}
 };
