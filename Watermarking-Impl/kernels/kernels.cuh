@@ -70,7 +70,8 @@ __global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, co
     nvf[x * height + y] = fmaxf(variance / (1.0f + variance), 0.0f);
 }
 
-//main Cholesky solver kernel for p = 3 (8x8 system), faster than af::solve for small systems (no cuSOLVE overhead), no LU pivoting
+//main Cholesky solver kernel for p = 3 (8x8 system), faster than af::solve for small systems (no cuSOLVE overhead), no LU pivoting and most importantly:
+//we can stop early by passing a GPU flag if the system is not solvable, without returning to host (used in both ME and detection)
 __global__ void cholesky_solver_p3(const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ X, int* __restrict__ stopFlag);
 
 //main ME kernel, calculates ME values for each pixel in the image
