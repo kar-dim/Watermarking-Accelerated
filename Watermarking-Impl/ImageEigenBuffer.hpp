@@ -15,63 +15,14 @@ private:
 
 public:
     ImageEigenBuffer() = default;
-
-	//move constructors
-    ImageEigenBuffer(ImageEigenBuffer&&) noexcept = default;
-    ImageEigenBuffer(Eigen::ArrayXXf&& gray) noexcept
-        : data(std::move(gray))
-    { }
-
-    ImageEigenBuffer(EigenArrayRGB&& rgb) noexcept
-        : data(std::move(rgb))
-    { }
-
-	//move assignment operators
-    ImageEigenBuffer& operator=(ImageEigenBuffer&& other) noexcept 
-    {
-        data = std::move(other.data);
-        return *this;
-    };
-
-    ImageEigenBuffer& operator=(Eigen::ArrayXXf&& gray) noexcept 
-    {
-        data = std::move(gray);
-        return *this;
-    };
-
-    ImageEigenBuffer& operator=(EigenArrayRGB&& rgb) noexcept 
-    {
-        data = std::move(rgb);
-        return *this;
-    };
-
-    //copy constructors
-    ImageEigenBuffer(const ImageEigenBuffer& other) : data(other.data)
-    { };
-
-    ImageEigenBuffer(const Eigen::ArrayXXf& gray) : data(gray)
-    { };
-
-    ImageEigenBuffer(const EigenArrayRGB& rgb) : data(rgb)
-    { };
-
-	//copy assignment operators
-    ImageEigenBuffer& operator=(const ImageEigenBuffer& other) 
-    {
-        data = other.data;
-        return *this;
-    }
-    ImageEigenBuffer& operator=(const Eigen::ArrayXXf& gray) 
-    {
-        data = gray;
-        return *this;
-    };
-
-    ImageEigenBuffer& operator=(const EigenArrayRGB& rgb) 
-    {
-        data = rgb;
-        return *this;
-    };
+    ImageEigenBuffer(const Eigen::ArrayXXf& gray) : data(gray) {}
+    ImageEigenBuffer(const EigenArrayRGB& rgb) : data(rgb) {}
+    ImageEigenBuffer(Eigen::ArrayXXf&& gray) noexcept : data(std::move(gray)) {}
+    ImageEigenBuffer(EigenArrayRGB&& rgb)    noexcept : data(std::move(rgb)) {}
+    ImageEigenBuffer& operator=(const Eigen::ArrayXXf& gray) { data = gray; return *this; }
+    ImageEigenBuffer& operator=(const EigenArrayRGB& rgb) { data = rgb; return *this; }
+    ImageEigenBuffer& operator=(Eigen::ArrayXXf&& gray) { data = std::move(gray); return *this; }
+    ImageEigenBuffer& operator=(EigenArrayRGB&& rgb) { data = std::move(rgb); return *this; }
 
     //apply watermark
     void applyWatermark(const Eigen::ArrayXXf& uStrengthened, ImageEigenBuffer& output) const
@@ -83,7 +34,7 @@ public:
                 output.getRGB()[channel] = (getRGB()[channel] + uStrengthened).cwiseMax(0).cwiseMin(255);
         }
         else
-            output = (getGray() + uStrengthened).cwiseMax(0).cwiseMin(255);
+            output.getGray() = (getGray() + uStrengthened).cwiseMax(0).cwiseMin(255);
     }
 
     //helper methods to retrieve the actual data type
