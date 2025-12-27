@@ -67,13 +67,16 @@ public:
 	}
 
 	//calculates the coefficients by reducing (sum) the Rx/rx matrices calculated by each thread, and reconstructing the full Rx matrix
-	void computeCoefficients()
+	bool computeCoefficients()
 	{
 		//reduction sums of Rx,rx of each thread
 		for (const auto& RxVal : RxVec_all)
 			RxVec.noalias() += RxVal.mat;
 		for (const auto& rxVal : rx_all)
 			rx.noalias() += rxVal.mat;
+		if (!RxVec.allFinite())
+			return false;
+		
 		//Reconstruct full Rx matrix from the vector
 		for (int i = 0, k = 0; i < localSize; i++) 
 		{
@@ -85,6 +88,11 @@ public:
 			}
 		}
 		//solve the linear system Rx * coefficients = rx for coefficients
-		coefficients = Rx.colPivHouseholderQr().solve(rx);
+		Eigen::LLT<LocalMatrix> llt(Rx);
+		if (llt.info() != Eigen::Success)
+			return false;
+		
+		coefficients = llt.solve(rx);
+		return true;
 	}
 };

@@ -39,7 +39,7 @@ public:
 		const af::array u = mask * randomMatrix;
 		//check if system is solvable here, because we pay the cost of norm calculation (host transfer) anyway
 		const double normU = af::norm(u);
-		if (!std::isfinite(normU)) 
+		if (!std::isfinite(normU) || normU <= 1e-6f)
 		{
 			watermarkStrength = 0.0f;
 			output = inputImage;

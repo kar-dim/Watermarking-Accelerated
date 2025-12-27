@@ -40,7 +40,17 @@ public:
 	//main watermark embedding method
 	void makeWatermark(const ImageBuffer& inputGrayImage, const ImageBuffer& inputImage, ImageBuffer& output, float& watermarkStrength, const MASK_TYPE maskType) override
 	{
-		computeStrengthenedWatermark(inputGrayImage.getGray(), watermarkStrength, maskType);
+		//compute the strengthened watermark, if it fails assign input to output and return
+		if (!computeStrengthenedWatermark(inputGrayImage.getGray(), watermarkStrength, maskType))
+		{
+			watermarkStrength = 0.0f;
+			if (inputImage.isRGB())
+				output.getRGB() = inputImage.getRGB();
+			else
+				output = inputImage.getGray();
+			return;
+		}
+		//embed the watermark into the input image
 		if (inputImage.isRGB())
 		{
 #pragma omp parallel for
@@ -57,12 +67,15 @@ public:
 		const auto& watermarkedBuffer = inputImage.getGray();
 		if (maskType == NVF)
 		{
-			computePredictionErrorData<maskCalcNotRequired>(watermarkedBuffer);
+			if (!computePredictionErrorData<maskCalcNotRequired>(watermarkedBuffer))
+				return 0.0f;
 			computeCustomMask(watermarkedBuffer);
 		}
-		else
-			computePredictionErrorData<maskCalcRequired>(watermarkedBuffer);
-
+		else 
+		{
+			if (!computePredictionErrorData<maskCalcRequired>(watermarkedBuffer))
+				return 0.0f;
+		}
 		u = mask * randomMatrix.getGray();
 		computeErrorSequence(u, filteredEstimation);
 		float dot_ez_eu, d_ez, d_eu;
@@ -199,30 +212,37 @@ private:
 	};
 
 	//compute the strengthened watermark, calculated by multiplying the mask with the strengthened watermark (random matrix)
-	void computeStrengthenedWatermark(const ArrayXXf& inputImage, float& watermarkStrength, MASK_TYPE maskType)
+	bool computeStrengthenedWatermark(const ArrayXXf& inputImage, float& watermarkStrength, MASK_TYPE maskType)
 	{
 		if (maskType == NVF)
 			computeCustomMask(inputImage);
 		else 
-			computePredictionErrorData<maskCalcRequired>(inputImage);
-		const auto& gray = randomMatrix.getGray();
+		{
+			if (!computePredictionErrorData<maskCalcRequired>(inputImage))
+				return false;
+		}
+		const auto& w = randomMatrix.getGray();
 
 		//optimized calculation of the strengthened watermark
 		float sumSq = 0.0f;
 #pragma omp parallel for reduction(+:sumSq)
 		for (auto i = 0; i < mask.size(); i++) 
 		{
-			float u = mask(i) * gray(i);
+			float u = mask(i) * w(i);
 			uStrengthened(i) = u;
 			sumSq += u * u;
 		}
+		if (sumSq <= 1e-3f) //for flat images/frames
+			return false;
+		
 		watermarkStrength = strengthFactor / std::sqrt(sumSq / (baseRows * baseCols));
 		uStrengthened *= watermarkStrength;
+		return true;
 	}
 
 	//compute Prediction error data (coefficients, error sequence), and if needed, prediction error mask
 	template<bool maskNeeded>
-	void computePredictionErrorData(const ArrayXXf& image)
+	bool computePredictionErrorData(const ArrayXXf& image)
 	{
 		meMatrixData.setZero();
 		//process CENTER region
@@ -269,7 +289,10 @@ private:
 		};
 		computeMaskBorders(startRow, endRow, startCol, endCol, hasCenterRegion, processBorder);
 
-		meMatrixData.computeCoefficients();
+		//solve system and coefficients
+		if (!meMatrixData.computeCoefficients())
+			return false;
+
 		//calculate ex(i,j)
 		computeErrorSequence(image, errorSequence);
 		if constexpr (maskNeeded)
@@ -277,6 +300,7 @@ private:
 			auto errorSequenceAbs = errorSequence.abs();
 			mask = errorSequenceAbs / errorSequenceAbs.maxCoeff();
 		}
+		return true;
 	}
 
 	//computes the prediction error sequence of the input image
