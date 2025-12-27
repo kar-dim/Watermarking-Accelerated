@@ -35,6 +35,9 @@ namespace cl_utils
 	//wrap a cl_mem pointer into a cl::Buffer
     inline cl::Buffer wrap(const cl_mem* mem) { return cl::Buffer(*mem, true); }
 
+	//calculate the maximum power of two work group size for a device
+    unsigned int maxPow2WorkGroupSize(const cl::Device& device);
+
 	//helper method to execute an OpenCL kernel and throw detailed error on failure
     template<typename Func>
     auto executeKernel(const Func& kernelFunc, const std::string& context)

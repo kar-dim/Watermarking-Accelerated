@@ -55,7 +55,7 @@ private:
 	cl::Device device{ afcl::getDeviceId(), true };
 	cl::Buffer RxMappingsBuff{ context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(int) * 64, (void*)RxMappings, NULL };
 	dim2 texKernelDims, meKernelDims;
-	unsigned int corrFinalLocalSize = std::min(1024, static_cast<int>(device.getInfo<CL_DEVICE_MAX_WORK_GROUP_SIZE>()));
+	unsigned int corrFinalLocalSize = maxPow2WorkGroupSize(device);
 	cl::Program programs;
 
 	af::array computeCustomMask(const af::array& image) const

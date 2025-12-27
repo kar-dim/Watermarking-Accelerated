@@ -38,4 +38,13 @@ namespace cl_utils
 		}
 		throw std::runtime_error("Failed to build OpenCL kernels. Check the error messages above for details.");
     }
+
+	unsigned int maxPow2WorkGroupSize(const cl::Device& device) 
+	{
+		const unsigned int maxWorkGroup = static_cast<unsigned int>(device.getInfo<CL_DEVICE_MAX_WORK_GROUP_SIZE>());
+		unsigned int maxValidGroup = 1024;
+		while (maxValidGroup > maxWorkGroup)
+			maxValidGroup >>= 1;
+		return maxValidGroup;
+	}
 }
