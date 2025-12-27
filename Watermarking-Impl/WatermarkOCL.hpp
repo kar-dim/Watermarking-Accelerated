@@ -90,7 +90,7 @@ private:
 		return errorSequence;
 	}
 
-	void computePredictionErrorData(const af::array& image, af::array& errorSequence, const bool calculateAbs) const
+	af::array computePredictionErrorData(const af::array& image, const bool calculateAbs) const
 	{
 		const af::array RxPartial(this->baseRows, meKernelDims.cols);
 		const af::array rxPartial(this->baseRows, meKernelDims.cols / 8);
@@ -117,7 +117,7 @@ private:
 				cl::NDRange(), cl::NDRange(1), cl::NDRange(1));
 			//return memory to arrayfire
 			this->unlockArrays(Rx, rx, this->coefficients, this->stopFlag);
-			errorSequence = computeErrorSequence(image, calculateAbs);
+			return computeErrorSequence(image, calculateAbs);
 		}, "me");
 	}
 

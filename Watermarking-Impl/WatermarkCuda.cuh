@@ -50,7 +50,7 @@ private:
 		return errorSequence;
 	}
 
-	void computePredictionErrorData(const af::array& image, af::array& errorSequence, const bool calculateAbs) const
+	af::array computePredictionErrorData(const af::array& image, const bool calculateAbs) const
 	{
 		const dim3 gridSize = cuda_utils::gridSizeCalculate(meBlockSize, meKernelDims.y, meKernelDims.x);
 		//call prediction error mask kernel
@@ -64,7 +64,7 @@ private:
 		const af::array& rx = correlationArrays.second;
 		cholesky_solver_p3 << <1, 1, 0, afStream >> > (Rx.device<float>(), rx.device<float>(), this->coefficients.template device<float>(), this->stopFlag.template device<int>());
 		this->unlockArrays(Rx, rx, this->coefficients, this->stopFlag);
-		errorSequence = computeErrorSequence(image, calculateAbs);
+		return computeErrorSequence(image, calculateAbs);
 	}
 
 	float computeCorrelation(const af::array& e_u, const af::array& e_z) const

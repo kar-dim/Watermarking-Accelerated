@@ -28,14 +28,8 @@ public:
 
 	void makeWatermark(const ImageBuffer& inputGrayImage, const ImageBuffer& inputImage, ImageBuffer& output, float& watermarkStrength, const MASK_TYPE maskType)
 	{
-		af::array mask, inputErrorSequence;
-		if (maskType == ME)
-		{
-			computePredictionErrorData(inputGrayImage, inputErrorSequence, true);
-			mask = computePredictionErrorMask<false>(inputErrorSequence);
-		}
-		else
-			mask = computeCustomMask(inputGrayImage);
+		const af::array mask = maskType == ME ?
+			computePredictionErrorMask<false>(computePredictionErrorData(inputGrayImage, true)) : computeCustomMask(inputGrayImage);
 		const af::array u = mask * randomMatrix;
 		//check if system is solvable here, because we pay the cost of norm calculation (host transfer) anyway
 		const double normU = af::norm(u);
@@ -51,11 +45,11 @@ public:
 
 	float detectWatermark(const ImageBuffer& inputImage, const MASK_TYPE maskType)
 	{
-		af::array mask, errorSequenceW;
-		computePredictionErrorData(inputImage, errorSequenceW, false);
-		mask = maskType == NVF ? computeCustomMask(inputImage) : computePredictionErrorMask<true>(errorSequenceW);
+		const af::array errorSequenceW = computePredictionErrorData(inputImage, false);
+		const af::array mask = maskType == NVF ? computeCustomMask(inputImage) : computePredictionErrorMask<true>(errorSequenceW);
 		const af::array u = mask * randomMatrix;
-		return computeCorrelation(computeErrorSequence(u, false), errorSequenceW);
+		const float correlation = computeCorrelation(computeErrorSequence(u, false), errorSequenceW);
+		return std::isfinite(correlation) ? correlation : 0.0f;
 	}
 
 	//helper method to unlock multiple af::arrays (return memory to ArrayFire)
@@ -90,7 +84,7 @@ protected:
 	
 	//Used in both creation and detection of the watermark.
 	//Calculates error sequence and prediction error filter (coefficients)
-	virtual void computePredictionErrorData(const af::array& image, af::array& errorSequence, const bool calculateAbs) const = 0;
+	virtual af::array computePredictionErrorData(const af::array& image, const bool calculateAbs) const = 0;
 	
 	//helper method used in detectors
 	virtual float computeCorrelation(const af::array& e_u, const af::array& e_z) const = 0;
