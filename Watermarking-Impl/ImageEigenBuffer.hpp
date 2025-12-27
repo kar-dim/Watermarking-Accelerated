@@ -73,6 +73,19 @@ public:
         return *this;
     };
 
+    //apply watermark
+    void applyWatermark(const Eigen::ArrayXXf& uStrengthened, ImageEigenBuffer& output) const
+    {
+        if (isRGB()) 
+        {
+#pragma omp parallel for
+            for (int channel = 0; channel < 3; channel++)
+                output.getRGB()[channel] = (getRGB()[channel] + uStrengthened).cwiseMax(0).cwiseMin(255);
+        }
+        else
+            output = (getGray() + uStrengthened).cwiseMax(0).cwiseMin(255);
+    }
+
     //helper methods to retrieve the actual data type
     bool isRGB() const { return std::holds_alternative<EigenArrayRGB>(data); }
 

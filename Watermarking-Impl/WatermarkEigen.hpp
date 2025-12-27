@@ -45,21 +45,11 @@ public:
 		if (!computeStrengthenedWatermark(inputGrayImage.getGray(), watermarkStrength, maskType))
 		{
 			watermarkStrength = 0.0f;
-			if (inputImage.isRGB())
-				output.getRGB() = inputImage.getRGB();
-			else
-				output = inputImage.getGray();
+			output = inputImage;
 			return;
 		}
 		//embed the watermark into the input image
-		if (inputImage.isRGB())
-		{
-#pragma omp parallel for
-			for (int channel = 0; channel < 3; channel++)
-				output.getRGB()[channel] = (inputImage.getRGB()[channel] + uStrengthened).cwiseMax(0).cwiseMin(255);
-			return;
-		}
-		output = (inputImage.getGray() + uStrengthened).cwiseMax(0).cwiseMin(255);
+		inputImage.applyWatermark(uStrengthened, output);
 	}
 
 	//main watermark detection method
