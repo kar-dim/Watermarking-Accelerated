@@ -97,7 +97,7 @@ private:
 		const clMemPtr imageMem(image.device<cl_mem>());
 		const clMemPtr RxPartialMem(RxPartial.device<cl_mem>());
 		const clMemPtr rxPartialMem(rxPartial.device<cl_mem>());
-		executeKernel([&]() {
+		return executeKernel([&]() -> af::array {
 			queue.enqueueNDRangeKernel(
 				KernelBuilder(programs, "me").args(wrap(imageMem.get()), wrap(RxPartialMem.get()), wrap(rxPartialMem.get()), RxMappingsBuff, this->baseCols, this->baseRows).build(),
 				cl::NDRange(), cl::NDRange(meKernelDims.cols, meKernelDims.rows), cl::NDRange(meBlockSize, 1));

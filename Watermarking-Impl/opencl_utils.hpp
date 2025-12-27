@@ -37,10 +37,10 @@ namespace cl_utils
 
 	//helper method to execute an OpenCL kernel and throw detailed error on failure
     template<typename Func>
-    void executeKernel(const Func& kernelFunc, const std::string& context)
+    auto executeKernel(const Func& kernelFunc, const std::string& context)
     {
         try {
-            kernelFunc();
+            return kernelFunc();
         }
         catch (const cl::Error& ex) {
             throw std::runtime_error("OpenCL Error in " + context + ": " + std::string(ex.what()) + " Error code: " + std::to_string(ex.err()) + "\n");
