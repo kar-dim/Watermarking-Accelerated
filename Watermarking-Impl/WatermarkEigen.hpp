@@ -24,6 +24,7 @@ private:
 	static constexpr int startRow = pad, startCol = pad, center = pad;
 	const int endRow = baseRows - pad;
 	const int endCol = baseCols - pad;
+	const int stripHeight = endRow - startRow;
 	const bool hasCenterRegion = (endRow > startRow) && (endCol > startCol);
 	using LocalVector = Eigen::Matrix<float, localSize, 1>;
 	using ArrayXXf = Eigen::ArrayXXf;
@@ -259,9 +260,8 @@ private:
 				for (int j = startCol; j < endCol; j++)
 				{
 					const int colOffset = j * baseRows;
-					const int stripHeight = endRow - startRow;
 					const float* centerPtr = imgData + colOffset + startRow;
-					Map<const VectorXf> centerBatch(centerPtr, stripHeight);
+					const Map<const VectorXf> centerBatch(centerPtr, stripHeight);
 
 					int k = 0;
 					//rx(u) = sum(center * neighbor_u)
@@ -269,12 +269,12 @@ private:
 					for (int u = 0; u < localSize; u++)
 					{
 						const float* neighborPtr = centerPtr + offsets[u];
-						Map<const VectorXf> neighborBatch(neighborPtr, stripHeight);
+						const Map<const VectorXf> neighborBatch(neighborPtr, stripHeight);
 						rx(u) += neighborBatch.dot(centerBatch);
 						for (int v = 0; v <= u; v++, k++)
 						{
 							const float* ptrV = centerPtr + offsets[v];
-							Map<const VectorXf> mapV(ptrV, stripHeight);
+							const Map<const VectorXf> mapV(ptrV, stripHeight);
 							RxVec(k) += neighborBatch.dot(mapV);
 						}
 					}	
@@ -297,7 +297,7 @@ private:
 		computeErrorSequence(image, errorSequence);
 		if constexpr (maskNeeded)
 		{
-			auto errorSequenceAbs = errorSequence.abs();
+			const auto errorSequenceAbs = errorSequence.abs();
 			mask = errorSequenceAbs / errorSequenceAbs.maxCoeff();
 		}
 		return true;
@@ -313,19 +313,18 @@ private:
 		{
 			const float* imgData = image.data();
 			float* outData = outputErrorSequence.data();
-			const int stripHeight = endRow - startRow;
 #pragma omp parallel for
 			for (int j = startCol; j < endCol; j++)
 			{
 				const int colOffset = (j * baseRows) + startRow;
+				const Map<const VectorXf> imgBatch(imgData + colOffset, stripHeight);
 				Map<VectorXf> errorBatch(outData + colOffset, stripHeight);
-				Map<const VectorXf> imgBatch(imgData + colOffset, stripHeight);
 				errorBatch = imgBatch; //initialize with image values
 				//compute prediction error
 				for (int k = 0; k < localSize; k++)
 				{
 					const float* neighborPtr = imgData + colOffset + offsets[k];
-					Map<const VectorXf> neighborBatch(neighborPtr, stripHeight);
+					const Map<const VectorXf> neighborBatch(neighborPtr, stripHeight);
 					errorBatch.noalias() -= neighborBatch * coefficients(k);
 				}
 			}
