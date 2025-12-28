@@ -45,7 +45,7 @@ public:
 		if (!computeStrengthenedWatermark(inputGrayImage.getGray(), watermarkStrength, maskType))
 		{
 			watermarkStrength = 0.0f;
-			output = inputImage;
+			inputImage.assignTo(output);
 			return;
 		}
 		//embed the watermark into the input image

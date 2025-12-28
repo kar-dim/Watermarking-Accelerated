@@ -37,6 +37,15 @@ public:
             output.getGray() = (getGray() + uStrengthened).cwiseMax(0).cwiseMin(255);
     }
 
+    //assign input to output
+    void assignTo(ImageEigenBuffer& output) const
+    {
+        if (isRGB())
+            output.getRGB() = getRGB();
+        else
+            output.getGray() = getGray();
+	}
+
     //helper methods to retrieve the actual data type
     bool isRGB() const { return std::holds_alternative<EigenArrayRGB>(data); }
 
