@@ -79,8 +79,9 @@ private:
 
 	af::array computePredictionErrorData(const af::array& image, const bool calculateAbs) const
 	{
-		const af::array RxPartial(this->baseRows, (meKernelDims.cols / meBlockSize) * 36);
-		const af::array rxPartial(this->baseRows, (meKernelDims.cols / meBlockSize) * 8);
+		const auto meArraysBaseWidth = meKernelDims.cols / meBlockSize;
+		const af::array RxPartial(this->baseRows, meArraysBaseWidth * 36);
+		const af::array rxPartial(this->baseRows, meArraysBaseWidth * 8);
 		const clMemPtr imageMem(image.device<cl_mem>());
 		const clMemPtr RxPartialMem(RxPartial.device<cl_mem>());
 		const clMemPtr rxPartialMem(rxPartial.device<cl_mem>());
