@@ -77,6 +77,11 @@ __kernel void error_sequence_p3(
     //calculate the dot product of the coefficients and the neighborhood for this pixel
     if (x < width && y < height) 
     {
+        if (*stopFlag)
+        {
+            x_[(x * height + y)] = 0.0f;
+            return;
+        }
         const int centerCol = get_local_id(1) + 1;
         const int centerRow = get_local_id(0) + 1;
         float dot = 0.0f;
