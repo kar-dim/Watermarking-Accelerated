@@ -159,37 +159,20 @@ __kernel void me(__global const float* restrict input,
 
     //OpenCL optimized rx summation
     const int col = localId % 8;
-    // Each thread sums 8 rows. Thread 0->Rows 0-7. Thread 32->Rows 0-7 (next col).
-    // localId/8 gives us 0..31 "groups".
-    // rowStart jumps by 8. (Group 0 -> 0, Group 1 -> 8...)
     const int rowStart = (localId / 8) * 8; 
-        
     float psum = 0.0f;
-        
-    // Sum 8 rows
     #pragma unroll
     for (int r = 0; r < 8; r++)
-    {
         psum += (float)RxLocal[rowStart + r][col];
-    }
-        
-    // Write to partial buffer (32 rows x 8 cols)
     rxPartial[localId / 8][col] = psum;
     barrier(CLK_LOCAL_MEM_FENCE);
-
-    // Final Reduce (32 -> 1)
     if (localId < 8)
     {
         float sum = 0.0f;
-        // Thread 0 sums Column 0 from all 32 groups
         #pragma unroll
         for (int i = 0; i < 32; i++)
-        {
             sum += rxPartial[i][localId];
-        }
-        
-        const int blocksInX = get_num_groups(0);
-        const int blockOffset = (y * blocksInX * 8) + (get_group_id(0) * 8);
+        const int blockOffset = (y * get_num_groups(0) * 8) + (get_group_id(0) * 8);
         rx[blockOffset + localId] = sum;
     }
     barrier(CLK_LOCAL_MEM_FENCE);
@@ -208,7 +191,7 @@ __kernel void me(__global const float* restrict input,
     if (localId < 36)
     {
         float sum = 0.0f;
-        #pragma unroll 32
+        #pragma unroll
         for (int i = 0; i < 256; i++) 
             sum += (float)RxLocal[i][localId];
         const int blocksInX = get_num_groups(0);
