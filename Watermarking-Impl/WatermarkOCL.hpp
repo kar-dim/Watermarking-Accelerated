@@ -4,7 +4,6 @@
 #include "WatermarkBase.hpp"
 #include "WatermarkGpu.hpp"
 #include <af/opencl.h>
-#include <algorithm>
 #include <arrayfire.h>
 #include <memory>
 #include <string>
@@ -35,17 +34,6 @@ private:
 	using WatermarkBase::align;
 	using clMemPtr = std::unique_ptr<cl_mem>;
 
-	static constexpr int RxMappings[64]
-	{
-		0,  1,  2,  3,  4,  5,  6,  7,
-		1,  8,  9,  10, 11, 12, 13, 14,
-		2,  9,  15, 16, 17, 18, 19, 20,
-		3,  10, 16, 21, 22, 23, 24, 25,
-		4,  11, 17, 22, 26, 27, 28, 29,
-		5,  12, 18, 23, 27, 30, 31, 32,
-		6,  13, 19, 24, 28, 31, 33, 34,
-		7,  14, 20, 25, 29, 32, 34, 35
-	};
 	static constexpr unsigned int corrPartialBlockSize = 256;
 	static constexpr unsigned int windowBlockSize = 16;
 	static constexpr unsigned int meBlockSize = 64;
@@ -53,7 +41,6 @@ private:
 	cl::Context context{ afcl::getContext(true) };
 	cl::CommandQueue queue{ afcl::getQueue(true) };
 	cl::Device device{ afcl::getDeviceId(), true };
-	cl::Buffer RxMappingsBuff{ context, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, sizeof(int) * 64, (void*)RxMappings, NULL };
 	dim2 texKernelDims, meKernelDims;
 	unsigned int corrFinalLocalSize = maxPow2WorkGroupSize(device);
 	cl::Program programs;
@@ -92,14 +79,14 @@ private:
 
 	af::array computePredictionErrorData(const af::array& image, const bool calculateAbs) const
 	{
-		const af::array RxPartial(this->baseRows, meKernelDims.cols);
+		const af::array RxPartial(this->baseRows, (meKernelDims.cols / 64) * 36);
 		const af::array rxPartial(this->baseRows, meKernelDims.cols / 8);
 		const clMemPtr imageMem(image.device<cl_mem>());
 		const clMemPtr RxPartialMem(RxPartial.device<cl_mem>());
 		const clMemPtr rxPartialMem(rxPartial.device<cl_mem>());
 		return executeKernel([&]() -> af::array {
 			queue.enqueueNDRangeKernel(
-				KernelBuilder(programs, "me").args(wrap(imageMem.get()), wrap(RxPartialMem.get()), wrap(rxPartialMem.get()), RxMappingsBuff, this->baseCols, this->baseRows).build(),
+				KernelBuilder(programs, "me").args(wrap(imageMem.get()), wrap(RxPartialMem.get()), wrap(rxPartialMem.get()), this->baseCols, this->baseRows).build(),
 				cl::NDRange(), cl::NDRange(meKernelDims.cols, meKernelDims.rows), cl::NDRange(meBlockSize, 1));
 			//return memory to arrayfire
 			this->unlockArrays(image, RxPartial, rxPartial);

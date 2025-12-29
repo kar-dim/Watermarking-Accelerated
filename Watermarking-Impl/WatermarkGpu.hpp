@@ -102,16 +102,17 @@ protected:
 			return input / af::max(af::flat(input));
 	}
 
-	//helper method to sum the incomplete Rx_partial and rxPartial arrays which were produced from the custom kernel
+	//helper method to sum the incomplete RxPartial and rxPartial arrays which were produced from the custom "me" kernel
 	//and to transform them to the correct size, so that they can be used by the system solver
 	std::pair<af::array, af::array> transformCorrelationArrays(const af::array& RxPartial, const af::array& rxPartial) const
 	{
-		const auto paddedElems = RxPartial.dims(0) * RxPartial.dims(1);
 		//reduction sum of blocks
 		//all [p^2-1,1] blocks will be summed in rx
-		//all [p^2-1, p^2-1] blocks will be summed in Rx
-		const af::array Rx = af::moddims(af::sum(af::moddims(RxPartial, localSizeSq, paddedElems / localSizeSq), 1), localSize, localSize);
-		const af::array rx = af::sum(af::moddims(rxPartial, localSize, paddedElems / localSizeSq), 1);
+		//all [p^2-1, p^2-1] blocks will be summed in Rx (CUDA) or all [((p^2-1)(p^2))/2] vector blocks (OpenCL)
+		const auto totalBlocks = rxPartial.elements() / localSize;
+		const auto RxStride = RxPartial.elements() / totalBlocks;
+		const af::array rx = af::sum(af::moddims(rxPartial, localSize, totalBlocks), 1);
+		const af::array Rx = af::sum(af::moddims(RxPartial, RxStride, totalBlocks), 1);
 		return std::make_pair(Rx, rx);
 	}
 };

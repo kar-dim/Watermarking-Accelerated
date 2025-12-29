@@ -110,17 +110,14 @@ inline void me_p3_RxCalculate(__local half RxLocal[64][40], const int localId, c
 __kernel void me(__global const float* restrict input,
     __global float* restrict Rx,
     __global float* restrict rx,
-    __constant int* restrict RxMappings,
     const unsigned int width,
     const unsigned int height)
 
 {
     const int x = get_global_id(0);
     const int y = get_global_id(1);
-    const int paddedWidth = get_global_size(0);
-    const int outputIndex = (y * paddedWidth) + x;
+    const int outputIndex = (y *  get_global_size(0)) + x;
     const int localId = get_local_id(0);
-    const int widthLimit = paddedWidth == width ? 64 :get_group_id(0) == get_num_groups(0) - 1 ? 64 - (paddedWidth - width) : 64;
 
     __local __attribute__((aligned(16))) half RxLocal[64][40];
     __local float rxPartial[8][8];
@@ -140,7 +137,8 @@ __kernel void me(__global const float* restrict input,
     barrier(CLK_LOCAL_MEM_FENCE);
 
     half x_0, x_1, x_2, x_3, x_4, x_5, x_6, x_7, x_8;
-    if (x < width)
+    const bool isValid = (x < width);
+    if (isValid)
     {
         const int localX = localId + 1;
         x_0 = blockValues[0][localX - 1];
@@ -154,6 +152,8 @@ __kernel void me(__global const float* restrict input,
         x_8 = blockValues[2][localX + 1];
         me_p3_rxCalculate(RxLocal, localId, x_0, x_1, x_2, x_3, x_4, x_5, x_6, x_7, x_8);
     }
+    else
+        vstore_half8((float8)(0.0f), 0, (__local half*)&RxLocal[localId][0]);
     barrier(CLK_LOCAL_MEM_FENCE);
 
     //OpenCL optimized rx summation
@@ -162,11 +162,7 @@ __kernel void me(__global const float* restrict input,
     float psum = 0.0f;
     #pragma unroll
     for (int r = 0; r < 8; r++)
-    {
-        const int row = rowStart + r; 
-        if (row < widthLimit)
-            psum += RxLocal[row][col];
-    }
+        psum += RxLocal[rowStart + r][col];
     rxPartial[localId / 8][col] = psum;
     barrier(CLK_LOCAL_MEM_FENCE);
 
@@ -180,18 +176,26 @@ __kernel void me(__global const float* restrict input,
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    if (x < width)
+    if (isValid)
         me_p3_RxCalculate(RxLocal, localId, x_0, x_1, x_2, x_3, x_5, x_6, x_7, x_8);
+    else 
+    {
+        #pragma unroll
+        for(int v=0; v<5; v++)
+            vstore_half8((float8)(0.0f), 0, (__local half*)&RxLocal[localId][v*8]);
+    }
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    //TODO can be optimized
-    float sum = 0.0f;
-    const int mappingIdx = RxMappings[localId];
-#pragma unroll
-    for (int i = 0; i < 64; i++) 
-        if (i < widthLimit)
-            sum += RxLocal[i][mappingIdx];
-    Rx[outputIndex] = sum;
+     //OpenCL optimized Rx summation
+    if (localId < 36)
+    {
+        float sum = 0.0f;
+        #pragma unroll
+        for (int i = 0; i < 64; i++) 
+            sum += (float)RxLocal[i][localId];
+        const int blockOffset = (y *  get_num_groups(0) * 36) + (get_group_id(0) * 36);
+        Rx[blockOffset + localId] = sum;
+    }
 }
 
 __kernel void calculate_partial_correlation(
@@ -312,6 +316,21 @@ __kernel void cholesky_solver_p3(__global const float* restrict A,
         localA[i] = A[i];
     for (int i = 0; i < N; i++)
         localB[i] = B[i];
+
+    //OpenCL only: expand 36 elements of lower triangular matrix to full symmetric matrix
+    int k = 0;
+    #pragma unroll
+    for (int i = 0; i < N; i++)
+    {
+        #pragma unroll
+        for (int j = i; j < N; j++)
+        {
+            float val = A[k++];
+            // Write to (Row, Col) and (Col, Row)
+            localA[i * N + j] = val;
+            localA[j * N + i] = val;
+        }
+    }
 
     //Cholesky Decomposition: A = L*L^T
 	//A is symmetric positive definite

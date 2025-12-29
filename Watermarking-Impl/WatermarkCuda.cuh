@@ -60,7 +60,7 @@ private:
 		this->unlockArrays(image, RxPartial, rxPartial);
 		//calculation of coefficients and error sequence
 		const auto correlationArrays = this->transformCorrelationArrays(RxPartial, rxPartial);
-		const af::array& Rx = correlationArrays.first;
+		const af::array Rx = af::moddims(correlationArrays.first, this->localSize, this->localSize);
 		const af::array& rx = correlationArrays.second;
 		cholesky_solver_p3 << <1, 1, 0, afStream >> > (Rx.device<float>(), rx.device<float>(), this->coefficients.template device<float>(), this->stopFlag.template device<int>());
 		this->unlockArrays(Rx, rx, this->coefficients, this->stopFlag);
