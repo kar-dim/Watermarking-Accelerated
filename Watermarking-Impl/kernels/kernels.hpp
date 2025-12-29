@@ -93,12 +93,12 @@ __kernel void error_sequence_p3(
     }
 }
 
-inline void me_p3_rxCalculate(__local half RxLocal[64][40], const int localId, const half x_0, const half x_1, const half x_2, const half x_3, const half x_4, const half x_5, const half x_6, const half x_7, const half x_8)
+inline void me_p3_rxCalculate(__local half RxLocal[256][40], const int localId, const half x_0, const half x_1, const half x_2, const half x_3, const half x_4, const half x_5, const half x_6, const half x_7, const half x_8)
 {
     vstore_half8((float8)(x_0 * x_4, x_1 * x_4, x_2 * x_4, x_3 * x_4, x_5 * x_4, x_6 * x_4, x_7 * x_4, x_8 * x_4), 0, &RxLocal[localId][0]);
 }
 
-inline void me_p3_RxCalculate(__local half RxLocal[64][40], const int localId, const half x_0, const half x_1, const half x_2, const half x_3, const half x_5, const half x_6, const half x_7, const half x_8)
+inline void me_p3_RxCalculate(__local half RxLocal[256][40], const int localId, const half x_0, const half x_1, const half x_2, const half x_3, const half x_5, const half x_6, const half x_7, const half x_8)
 {
     vstore_half8((float8)(x_0 * x_0, x_0 * x_1, x_0 * x_2, x_0 * x_3, x_0 * x_5, x_0 * x_6, x_0 * x_7, x_0 * x_8), 0, &RxLocal[localId][0]);
     vstore_half8((float8)(x_1 * x_1, x_1 * x_2, x_1 * x_3, x_1 * x_5, x_1 * x_6, x_1 * x_7, x_1 * x_8, x_2 * x_2), 0, &RxLocal[localId][8]);
@@ -118,21 +118,22 @@ __kernel void me(__global const float* restrict input,
     const int y = get_global_id(1);
     const int outputIndex = (y *  get_global_size(0)) + x;
     const int localId = get_local_id(0);
+    const float halfScaleFactor = 0.00392156862f;
 
-    __local __attribute__((aligned(16))) half RxLocal[64][40];
-    __local float rxPartial[8][8];
-    __local half blockValues[3][66];
+    __local __attribute__((aligned(16))) half RxLocal[256][40];
+    __local half blockValues[3][258];
+    __local float rxPartial[32][8];
 
     if (y >= height)
         return;
 
-    for (int i = localId; i < 3 * 66; i += get_local_size(0))
+    for (int i = localId; i < 3 * 258; i += get_local_size(0))
     {
         const int tileCol = i / 3;
         const int tileRow = i % 3;
         const int globalX = clamp((int)(get_group_id(0) * get_local_size(0)) + tileCol - 1, 0, (int) width - 1);
         const int globalY = clamp((int)(get_group_id(1) * get_local_size(1)) + tileRow - 1, 0, (int) height - 1);
-        vstore_half(input[globalX * height + globalY], 0, &blockValues[tileRow][tileCol]);
+        vstore_half(input[globalX * height + globalY] * halfScaleFactor, 0, &blockValues[tileRow][tileCol]);
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
@@ -158,21 +159,38 @@ __kernel void me(__global const float* restrict input,
 
     //OpenCL optimized rx summation
     const int col = localId % 8;
-    const int rowStart = localId / 8 * 8;
+    // Each thread sums 8 rows. Thread 0->Rows 0-7. Thread 32->Rows 0-7 (next col).
+    // localId/8 gives us 0..31 "groups".
+    // rowStart jumps by 8. (Group 0 -> 0, Group 1 -> 8...)
+    const int rowStart = (localId / 8) * 8; 
+        
     float psum = 0.0f;
+        
+    // Sum 8 rows
     #pragma unroll
     for (int r = 0; r < 8; r++)
-        psum += RxLocal[rowStart + r][col];
+    {
+        psum += (float)RxLocal[rowStart + r][col];
+    }
+        
+    // Write to partial buffer (32 rows x 8 cols)
     rxPartial[localId / 8][col] = psum;
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    if(localId < 8) 
+    // Final Reduce (32 -> 1)
+    if (localId < 8)
     {
         float sum = 0.0f;
-#pragma unroll
-        for(int i = 0; i < 8; i++)
+        // Thread 0 sums Column 0 from all 32 groups
+        #pragma unroll
+        for (int i = 0; i < 32; i++)
+        {
             sum += rxPartial[i][localId];
-        rx[(outputIndex / 8) + localId] = sum;
+        }
+        
+        const int blocksInX = get_num_groups(0);
+        const int blockOffset = (y * blocksInX * 8) + (get_group_id(0) * 8);
+        rx[blockOffset + localId] = sum;
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
@@ -186,14 +204,15 @@ __kernel void me(__global const float* restrict input,
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
-     //OpenCL optimized Rx summation
+    //OpenCL optimized Rx summation
     if (localId < 36)
     {
         float sum = 0.0f;
-        #pragma unroll
-        for (int i = 0; i < 64; i++) 
+        #pragma unroll 32
+        for (int i = 0; i < 256; i++) 
             sum += (float)RxLocal[i][localId];
-        const int blockOffset = (y *  get_num_groups(0) * 36) + (get_group_id(0) * 36);
+        const int blocksInX = get_num_groups(0);
+        const int blockOffset = (y * blocksInX * 36) + (get_group_id(0) * 36);
         Rx[blockOffset + localId] = sum;
     }
 }
