@@ -102,17 +102,8 @@ __kernel void error_sequence_p3(
 
 inline void me_p3_rxCalculate(__local half RxLocal[256][40], const int localId, const half x_0, const half x_1, const half x_2, const half x_3, const half x_4, const half x_5, const half x_6, const half x_7, const half x_8)
 {
-    half8 vec;
-    vec.s0 = x_0 * x_4;
-    vec.s1 = x_1 * x_4;
-    vec.s2 = x_2 * x_4;
-    vec.s3 = x_3 * x_4;
-    vec.s4 = x_5 * x_4;
-    vec.s5 = x_6 * x_4;
-    vec.s6 = x_7 * x_4;
-    vec.s7 = x_8 * x_4;
-    __local half8* ptr = (__local half8*) &RxLocal[localId][0];
-    *ptr = vec;
+    __local half8* rowPtr = (__local half8*) &RxLocal[localId][0];
+    *rowPtr = (half8)(x_0 * x_4, x_1 * x_4, x_2 * x_4, x_3 * x_4, x_5 * x_4, x_6 * x_4, x_7 * x_4, x_8 * x_4);
 }
 
 inline void me_p3_RxCalculate(__local half RxLocal[256][40], const int localId, const half x_0, const half x_1, const half x_2, const half x_3, const half x_5, const half x_6, const half x_7, const half x_8)
