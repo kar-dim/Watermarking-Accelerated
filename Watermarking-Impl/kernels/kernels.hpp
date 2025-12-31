@@ -118,28 +118,11 @@ inline void me_p3_rxCalculate(__local half RxLocal[256][40], const int localId, 
 inline void me_p3_RxCalculate(__local half RxLocal[256][40], const int localId, const half x_0, const half x_1, const half x_2, const half x_3, const half x_5, const half x_6, const half x_7, const half x_8)
 {
     __local half8* rowPtr = (__local half8*) &RxLocal[localId][0];
-    half8 v0, v1, v2, v3, v4;
-
-    v0.s0 = x_0 * x_0; v0.s1 = x_0 * x_1; v0.s2 = x_0 * x_2; v0.s3 = x_0 * x_3;
-    v0.s4 = x_0 * x_5; v0.s5 = x_0 * x_6; v0.s6 = x_0 * x_7; v0.s7 = x_0 * x_8;
-   
-    v1.s0 = x_1 * x_1; v1.s1 = x_1 * x_2; v1.s2 = x_1 * x_3; v1.s3 = x_1 * x_5;
-    v1.s4 = x_1 * x_6; v1.s5 = x_1 * x_7; v1.s6 = x_1 * x_8; v1.s7 = x_2 * x_2;
-
-    v2.s0 = x_2 * x_3; v2.s1 = x_2 * x_5; v2.s2 = x_2 * x_6; v2.s3 = x_2 * x_7;
-    v2.s4 = x_2 * x_8; v2.s5 = x_3 * x_3; v2.s6 = x_3 * x_5; v2.s7 = x_3 * x_6;
-
-    v3.s0 = x_3 * x_7; v3.s1 = x_3 * x_8; v3.s2 = x_5 * x_5; v3.s3 = x_5 * x_6;
-    v3.s4 = x_5 * x_7; v3.s5 = x_5 * x_8; v3.s6 = x_6 * x_6; v3.s7 = x_6 * x_7;
-
-    v4.s0 = x_6 * x_8; v4.s1 = x_7 * x_7; v4.s2 = x_7 * x_8; v4.s3 = x_8 * x_8;
-    v4.s4 = 0.0f;      v4.s5 = 0.0f;      v4.s6 = 0.0f;      v4.s7 = 0.0f;
-
-    rowPtr[0] = v0;
-    rowPtr[1] = v1;
-    rowPtr[2] = v2;
-    rowPtr[3] = v3;
-    rowPtr[4] = v4;
+    rowPtr[0] = (half8)(x_0 * x_0, x_0 * x_1, x_0 * x_2, x_0 * x_3, x_0 * x_5, x_0 * x_6, x_0 * x_7, x_0 * x_8);
+    rowPtr[1] = (half8)(x_1 * x_1, x_1 * x_2, x_1 * x_3, x_1 * x_5, x_1 * x_6, x_1 * x_7, x_1 * x_8, x_2 * x_2);
+    rowPtr[2] = (half8)(x_2 * x_3, x_2 * x_5, x_2 * x_6, x_2 * x_7, x_2 * x_8, x_3 * x_3, x_3 * x_5, x_3 * x_6);
+    rowPtr[3] = (half8)(x_3 * x_7, x_3 * x_8, x_5 * x_5, x_5 * x_6, x_5 * x_7, x_5 * x_8, x_6 * x_6, x_6 * x_7);
+    rowPtr[4] = (half8)(x_6 * x_8, x_7 * x_7, x_7 * x_8, x_8 * x_8, 0.0h, 0.0h, 0.0h, 0.0h);
 }
 
 __kernel void me(__global const float* restrict input,
