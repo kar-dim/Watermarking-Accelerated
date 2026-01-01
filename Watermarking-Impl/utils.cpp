@@ -1,5 +1,6 @@
 #include "buffer.hpp"
 #include "utils.hpp"
+#include "ImageFileBuffer.hpp"
 #include "WatermarkBase.hpp"
 #include <format>
 #include <memory>
@@ -90,8 +91,9 @@ string Utils::formatExecutionTime(const bool showFps, const double seconds)
 	return showFps ? std::format("FPS: {:.2f} FPS", 1.0 / seconds) : std::format("{:.6f} seconds", seconds);
 }
 
-void Utils::loadImage(ImageBuffer& rgbImage, ImageBuffer& image, const string& imageFile, std::optional<AlphaBuffer>& alphaChannel)
+void Utils::loadImage(ImageFileBuffer& buf, const string& imageFile)
 {
+	auto& [rgbImage, image, alphaChannel, rows, cols, isRGB] = buf;
 #if defined(_USE_GPU_)
 	rgbImage = af::loadImageNative(imageFile.c_str()).as(f32);
 	switch (rgbImage.dims(2))
@@ -108,8 +110,10 @@ void Utils::loadImage(ImageBuffer& rgbImage, ImageBuffer& image, const string& i
 	default:
 		throw std::runtime_error("Invalid image dimensions");
 	}
+	rows = static_cast<unsigned int>(image.dims(0));
+	cols = static_cast<unsigned int>(image.dims(1));
+	isRGB = rgbImage.dims(2) == 3;
 	af::sync();
-		
 #elif defined(_USE_EIGEN_)
 	auto cimgRgb = cimg_library::CImg<float>(imageFile.c_str());
 	switch (cimgRgb.spectrum())
@@ -134,6 +138,9 @@ void Utils::loadImage(ImageBuffer& rgbImage, ImageBuffer& image, const string& i
 	default:
 		throw std::runtime_error("Invalid image dimensions");
 	}
+	rows = image.getGray().rows();
+	cols = image.getGray().cols();
+	isRGB = rgbImage.isRGB();
 #endif
 }
 

@@ -2,11 +2,11 @@
 
 #include "buffer.hpp"
 #include "FileDeleter.h"
+#include "ImageFileBuffer.hpp"
 #include "MaskDiskConfig.h"
 #include "utils.hpp"
 #include "WatermarkBase.hpp"
 #include <memory>
-#include <optional>
 #include <string>
 #include <vector>
 
@@ -18,8 +18,8 @@ protected:
     static constexpr int p = 3;
 
     std::unique_ptr<WatermarkBase> watermarkObj;
-    ImageBuffer rgbImage, image;
-    std::optional<AlphaBuffer> alphaChannel;
+    ImageFileBuffer buf;
+    unsigned int rows, cols;
     const std::string imageFile = "../../Watermarking-Impl/samples/images/4k.png";
     const std::string watermarkPath = "../../Watermarking-Impl/samples/w_4k.dat";
     inline static const std::vector<MaskDiskConfig> strategies =
@@ -31,7 +31,9 @@ protected:
     //load the input image
     void SetUp() override
     {
-        Utils::loadImage(rgbImage, image, imageFile, alphaChannel);
+        Utils::loadImage(buf, imageFile);
+        rows = static_cast<unsigned int>(buf.rows);
+		cols = static_cast<unsigned int>(buf.cols);
     }
 
     //delete the disk images (if exist)
@@ -48,7 +50,7 @@ protected:
     //helper method to embed watermark in the image (and check if it is successful based on watermark strength)
     ImageBuffer embedWatermark(ImageBuffer& output, float& strength, MASK_TYPE maskType)
     {
-        watermarkObj->makeWatermark(image, rgbImage, output, strength, maskType);
+        watermarkObj->makeWatermark(buf.image, buf.rgbImage, output, strength, maskType);
         EXPECT_GT(strength, 0.0f);
         return output;
     }
@@ -74,10 +76,9 @@ protected:
     {
         float strength = 0.0f;
         embedWatermark(watermark, strength, mask);
-        Utils::saveImage(imageFile, label, watermark, alphaChannel);
-        ImageBuffer diskRgb, diskImage;
-        std::optional<AlphaBuffer> diskAlpha;
-        Utils::loadImage(diskRgb, diskImage, outputFileName, diskAlpha);
-		calculateMSE(diskRgb, watermark);
+        Utils::saveImage(imageFile, label, watermark, buf.alphaChannel);
+        ImageFileBuffer diskBuf;
+        Utils::loadImage(diskBuf, outputFileName);
+		calculateMSE(diskBuf.rgbImage, watermark);
     }
 };

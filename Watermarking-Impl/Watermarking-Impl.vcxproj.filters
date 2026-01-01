@@ -140,5 +140,8 @@
     <ClInclude Include="VideoProcessingContext.hpp">
       <Filter>Header Files\util</Filter>
     </ClInclude>
+    <ClInclude Include="ImageFileBuffer.hpp">
+      <Filter>Header Files\util</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

@@ -9,6 +9,7 @@
 #include "buffer.hpp"
 #include "HostMemory.hpp"
 #include "utils.hpp"
+#include "ImageFileBuffer.hpp"
 #include "VideoProcessingContext.hpp"
 #include "video_defines.hpp"
 #include "video_utils.hpp"
@@ -22,7 +23,6 @@
 #include <INIReader.h>
 #include <iostream>
 #include <memory>
-#include <optional>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -67,7 +67,7 @@ int main(void)
 		const INIReader inir("settings.ini");
 		Utils::checkError(inir.ParseError() < 0, "Could not load settings.ini file");
 
-//initialize GPU specific backend data (OpenCL and CUDA)
+		//initialize GPU specific backend data (OpenCL and CUDA)
 #if defined(_USE_OPENCL_)
 		try {
 			af::setDevice(inir.GetInteger("options", "opencl_device", 0));
@@ -94,7 +94,6 @@ int main(void)
 		//TODO GPU: for p>3 we have problems with ME masking buffers
 		Utils::checkError(p != 3, "For now, only p=3 is allowed");
 #endif
-
 		Utils::checkError(psnr <= 0, "PSNR must be a positive number");
 
 		//test algorithms
@@ -122,67 +121,51 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 	loops = loops <= 0 ? 5 : loops;
 #if defined(_USE_EIGEN_)
 	cout << info("\nUsing " + std::to_string(omp_get_max_threads()) + " parallel threads for Watermark calculations.\n");
+	const int warmupLoops = 0;
+#else
+	const int warmupLoops = 1; //warmup for GPU kernels initialization
 #endif
 	cout << "Each test will be executed " << loops << " times. Average time will be shown below\n";
-	
-	ImageBuffer rgbImage, image;
-	std::optional<AlphaBuffer> alphaChannel;
-	
+
+	ImageFileBuffer imgBuffer;
 	//load image from disk into arrayfire (GPU), or CImg and copy from CImg object to Eigen arrays (CPU)
-	double secs = Utils::executionTime([&] { Utils::loadImage(rgbImage, image, imageFile, alphaChannel); });
-#if defined(_USE_GPU_)
-	const auto rows = static_cast<unsigned int>(image.dims(0));
-	const auto cols = static_cast<unsigned int>(image.dims(1));
-	cout << "Time to load and transfer RGB image from disk to VRAM: " << secs << "\n\n";
-#elif defined(_USE_EIGEN_)
-	const auto rows = image.getGray().rows();
-	const auto cols = image.getGray().cols();
-	cout << "Time to load image from disk and initialize CImg and Eigen memory objects: " << secs << " seconds\n\n";
-#endif
+	double secs = Utils::executionTime([&] { Utils::loadImage(imgBuffer, imageFile); });
+	auto& [rgbImage, image, alphaChannel, rows, cols, isRGB] = imgBuffer;
+	cout << "Time to load image data from disk: " << secs << " seconds\n\n";
 	Utils::checkError(cols > maxImageDims.first || rows > maxImageDims.second, "Image dimensions too high");
 
 	float watermarkStrength;
 	//initialize watermark functions class, including parameters, ME and custom (NVF in this example) kernels
 	const auto watermarkObj = Utils::createWatermarkObject(rows, cols, inir.Get("paths", "watermark", ""), p, psnr);
-
 #if defined(_USE_GPU_)
 	ImageBuffer watermarkNVF, watermarkME;
-	//warmup for arrayfire
-	const bool isRGB = rgbImage.dims(2) == 3;
-	watermarkObj->makeWatermark(image, rgbImage, watermarkNVF, watermarkStrength, NVF);
-	watermarkObj->makeWatermark(image, rgbImage, watermarkME, watermarkStrength, ME);
 #elif defined(_USE_EIGEN_)
-	const bool isRgb = rgbImage.isRGB();
-	ImageBuffer watermarkNVF = isRgb ? ImageBuffer(eigen_utils::makeEigenRGB(rows, cols)) : ImageBuffer(ArrayXXf(rows, cols));
-	ImageBuffer watermarkME = isRgb ? ImageBuffer(eigen_utils::makeEigenRGB(rows, cols)) : ImageBuffer(ArrayXXf(rows, cols));
+	ImageBuffer watermarkNVF = isRGB ? ImageBuffer(eigen_utils::makeEigenRGB(rows, cols)) : ImageBuffer(ArrayXXf(rows, cols));
+	ImageBuffer watermarkME = isRGB ? ImageBuffer(eigen_utils::makeEigenRGB(rows, cols)) : ImageBuffer(ArrayXXf(rows, cols));
 #endif
 
-	//make NVF watermark
-	secs = Utils::executionTime([&]() { watermarkObj->makeWatermark(image, rgbImage, watermarkNVF, watermarkStrength, NVF); }, loops);
-	cout << std::format("Watermark strength (parameter a): {}\nCalculation of NVF mask with {} rows and {} columns and parameters:\np = {}  PSNR(dB) = {}\n{}\n\n", watermarkStrength, rows, cols, p, psnr, Utils::formatExecutionTime(showFps, secs / loops));
-	//make ME watermark
-	secs = Utils::executionTime([&]() { watermarkObj->makeWatermark(image, rgbImage, watermarkME, watermarkStrength, ME); }, loops);
-	cout << std::format("Watermark strength (parameter a): {}\nCalculation of ME mask with {} rows and {} columns and parameters:\np = {}  PSNR(dB) = {}\n{}\n\n", watermarkStrength, rows, cols, p, psnr, Utils::formatExecutionTime(showFps, secs / loops));
+	//helper lambdas to run watermark embedding and detection with time measurement and output
+	auto runMakeWatermark = [&](auto& outWatermark, auto method, const std::string& methodName) {
+		double s = Utils::executionTime([&]() { watermarkObj->makeWatermark(image, rgbImage, outWatermark, watermarkStrength, method); }, loops, warmupLoops);
+		cout << std::format("Watermark strength (parameter a): {}\nCalculation of {} mask with {} rows and {} columns and parameters:\np = {}  PSNR(dB) = {}\n{}\n\n", watermarkStrength, methodName, rows, cols, p, psnr, Utils::formatExecutionTime(showFps, s / loops));
+	};
+	auto runDetectWatermark = [&](const auto& watermark, auto method, const std::string& methodName, float& outCorr) {
+		const auto watermarkGray = isRGB ? ImageBuffer(Utils::rgb2gray(watermark)) : ImageBuffer(watermark);
+		double s = Utils::executionTime([&]() { outCorr = watermarkObj->detectWatermark(watermarkGray, method); }, loops, warmupLoops);
+		cout << std::format("Calculation of the watermark correlation ({}) of an image with {} rows and {} columns and parameters:\np = {}  PSNR(dB) = {}\n{}\n\n", methodName, rows, cols, p, psnr, Utils::formatExecutionTime(showFps, s / loops));
+	};
 
-#if defined(_USE_GPU_)
-	const ImageBuffer watermarkedNVFgray = isRGB ? Utils::rgb2gray(watermarkNVF) : watermarkNVF;
-	const ImageBuffer watermarkedMEgray = isRGB ? Utils::rgb2gray(watermarkME) : watermarkME;
-	//warmup for arrayfire
-	watermarkObj->detectWatermark(watermarkedNVFgray, NVF);
-	watermarkObj->detectWatermark(watermarkedMEgray, ME);
-#elif defined(_USE_EIGEN_)
-	const ImageBuffer watermarkedNVFgray = isRgb ? ImageBuffer(Utils::rgb2gray(watermarkNVF)) : ImageBuffer(watermarkNVF);
-	const ImageBuffer watermarkedMEgray = isRgb ? ImageBuffer(Utils::rgb2gray(watermarkME)) : ImageBuffer(watermarkME);
-#endif
-
+	//embed watermark
+	runMakeWatermark(watermarkNVF, NVF, "NVF");
+	runMakeWatermark(watermarkME, ME, "ME");
+	//detect watermark
 	float correlationNvf, correlationMe;
-	//NVF and ME mask detection
-	secs = Utils::executionTime([&]() { correlationNvf = watermarkObj->detectWatermark(watermarkedNVFgray, NVF); }, loops);
-	cout << std::format("Calculation of the watermark correlation (NVF) of an image with {} rows and {} columns and parameters:\np = {}  PSNR(dB) = {}\n{}\n\n", rows, cols, p, psnr, Utils::formatExecutionTime(showFps, secs / loops));
-	secs = Utils::executionTime([&]() { correlationMe = watermarkObj->detectWatermark(watermarkedMEgray, ME); }, loops);
-	cout << std::format("Calculation of the watermark correlation (ME) of an image with {} rows and {} columns and parameters:\np = {}  PSNR(dB) = {}\n{}\n\n", rows, cols, p, psnr, Utils::formatExecutionTime(showFps, secs / loops));
+	runDetectWatermark(watermarkNVF, NVF, "NVF", correlationNvf);
+	runDetectWatermark(watermarkME, ME, "ME", correlationMe);
+
 	//print the correlation values
-	cout << std::format("Correlation [NVF]: {:.16f}\nCorrelation [ME]: {:.16f}\n", correlationNvf, correlationMe);
+	cout << std::format("Correlation [NVF]: {:.16f}\n", correlationNvf);
+	cout << std::format("Correlation [ME]:  {:.16f}\n", correlationMe);
 
 	//save watermarked images to disk
 	if (inir.GetBoolean("options", "save_watermarked_files_to_disk", false)) 

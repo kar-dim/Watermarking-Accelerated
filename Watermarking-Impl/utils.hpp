@@ -1,12 +1,7 @@
 #pragma once
 #include "buffer.hpp"
+#include "ImageFileBuffer.hpp"
 #include "WatermarkBase.hpp"
-
-#if defined(_USE_GPU_)
-#include <arrayfire.h>
-#include <utility>
-#endif
-
 #include <chrono>
 #include <memory>
 #include <optional>
@@ -30,14 +25,17 @@ public:
 	static void checkError(const bool isError, const std::string& errorMsg);
 	//helper method to calculate execution time in FPS or in seconds
 	static std::string formatExecutionTime(const bool showFps, const double seconds);
-	static void loadImage(ImageBuffer& rgbImage, ImageBuffer& image, const std::string& imageFile, std::optional<AlphaBuffer>& alphaChannel);
+	static void loadImage(ImageFileBuffer& imgBuffer, const std::string& imageFile);
 	static ImageBuffer rgb2gray(const ImageBuffer& rgbImage);
 
 	template <typename Func>
-	static double executionTime(Func&& func, const int loops = 1)
+	static double executionTime(Func&& func, const int loops = 1, const int warmup = 0)
 	{
 		using clock = std::chrono::high_resolution_clock;
 		using seconds = std::chrono::duration<double>;
+
+		for (int i = 0; i < warmup; i++)
+			std::forward<Func>(func)();
 
 		double totalSecs = 0.0;
 		for (int i = 0; i < loops; i++)

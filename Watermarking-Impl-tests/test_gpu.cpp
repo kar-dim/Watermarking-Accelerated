@@ -29,7 +29,7 @@ protected:
     void SetUp() override 
     {
         CommonFixture::SetUp();
-        watermarkObj = Utils::createWatermarkObject(static_cast<unsigned int>(image.dims(0)), static_cast<unsigned int>(image.dims(1)), watermarkPath, p, psnr);
+        watermarkObj = Utils::createWatermarkObject(rows, cols, watermarkPath, p, psnr);
     }
 
     static void SetUpTestSuite() 

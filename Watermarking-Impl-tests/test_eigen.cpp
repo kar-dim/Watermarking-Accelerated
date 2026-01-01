@@ -28,7 +28,7 @@ protected:
     void SetUp() override 
     {
         CommonFixture::SetUp();
-        watermarkObj = Utils::createWatermarkObject(static_cast<unsigned int>(image.getGray().rows()), static_cast<unsigned int>(image.getGray().cols()), watermarkPath, p, psnr);
+        watermarkObj = Utils::createWatermarkObject(rows, cols, watermarkPath, p, psnr);
     }
 
     //initialize OpenMP once per fixture
@@ -43,7 +43,7 @@ protected:
     ImageBuffer embedAndConvertToGray(MASK_TYPE maskType) override
     {
         float strength = 0.0f;
-        ImageBuffer watermarkedImage(eigen_utils::makeEigenRGB(image.getGray().rows(), image.getGray().cols()));
+        ImageBuffer watermarkedImage(eigen_utils::makeEigenRGB(rows, cols));
         embedWatermark(watermarkedImage, strength, maskType);
         return Utils::rgb2gray(watermarkedImage);
     }
@@ -62,7 +62,7 @@ protected:
 
 TEST_F(EigenFixture, EmbedWatermark)
 {
-    ImageBuffer output(eigen_utils::makeEigenRGB(image.getGray().rows(), image.getGray().cols()));
+    ImageBuffer output(eigen_utils::makeEigenRGB(rows, cols));
     testEmbedding(output);
 }
 
@@ -73,7 +73,7 @@ TEST_F(EigenFixture, DetectWatermark)
 
 TEST_F(EigenFixture, SaveToDisk)
 {
-    ImageBuffer watermark(eigen_utils::makeEigenRGB(image.getGray().rows(), image.getGray().cols()));
+    ImageBuffer watermark(eigen_utils::makeEigenRGB(rows, cols));
     for (const auto& config : strategies)
         testSaveToDisk(watermark, config.strategy, config.label, config.outputFile);
 }
