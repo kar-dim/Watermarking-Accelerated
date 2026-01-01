@@ -375,11 +375,10 @@ __kernel void cholesky_solver_p3(__global const float* restrict A,
                 L[i][j] = sqrt(val);
             }
             else //non diagonal
-                L[i][j] = (localA[i * N + j] - sum) * native_recip(L[j][j]); //fast reciprocal
+                L[i][j] = (localA[i * N + j] - sum) / L[j][j];
         }
     }
 	//solve the system with forward and backward substitution
-	//we again use fast reciprocal for better performance (1 GPU thread is weak, needs as fast math as possible)
     //forward substitution -> solve L*y = b
     float y[8];
 #pragma unroll
@@ -388,7 +387,7 @@ __kernel void cholesky_solver_p3(__global const float* restrict A,
         float sum = 0.0f;
         for (int k = 0; k < i; k++)
             sum += L[i][k] * y[k];
-        y[i] = (localB[i] - sum) * native_recip(L[i][i]);
+        y[i] = (localB[i] - sum) / L[i][i];
     }
 
     //backward substitution -> solve L^T * x = y
@@ -398,7 +397,7 @@ __kernel void cholesky_solver_p3(__global const float* restrict A,
         float sum = 0.0f;
         for (int k = i + 1; k < N; k++)
             sum += L[k][i] * localX[k]; //transposed
-        localX[i] = (y[i] - sum) * native_recip(L[i][i]);
+        localX[i] = (y[i] - sum) / L[i][i];
     }
     *stopFlag = 0;
 	//write
