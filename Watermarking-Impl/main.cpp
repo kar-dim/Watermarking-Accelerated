@@ -172,7 +172,7 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 	runDetectWatermark(watermarkME, ME, "ME", correlationMe);
 
 	//print the correlation values
-	//cout << std::format("Correlation [NVF]: {:.16f}\n", correlationNvf);
+	cout << std::format("Correlation [NVF]: {:.16f}\n", correlationNvf);
 	cout << std::format("Correlation [ME]:  {:.16f}\n", correlationMe);
 
 	//save watermarked images to disk
