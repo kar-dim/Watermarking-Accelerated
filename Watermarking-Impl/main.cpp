@@ -164,11 +164,11 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 	};
 
 	//embed watermark
-	//runMakeWatermark(watermarkNVF, NVF, "NVF");
+	runMakeWatermark(watermarkNVF, NVF, "NVF");
 	runMakeWatermark(watermarkME, ME, "ME");
 	//detect watermark
 	float correlationNvf, correlationMe;
-	//runDetectWatermark(watermarkNVF, NVF, "NVF", correlationNvf);
+	runDetectWatermark(watermarkNVF, NVF, "NVF", correlationNvf);
 	runDetectWatermark(watermarkME, ME, "ME", correlationMe);
 
 	//print the correlation values
