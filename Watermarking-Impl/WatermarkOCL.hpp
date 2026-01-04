@@ -77,6 +77,24 @@ private:
 		return errorSequence;
 	}
 
+	af::array computeErrorSequence(const af::array& inputA, const af::array& inputB) const
+	{
+		const af::array errorSequence(this->baseRows, this->baseCols);
+		const clMemPtr inputAmem(inputA.device<cl_mem>());
+		const clMemPtr inputBmem(inputB.device<cl_mem>());
+		const clMemPtr coeffsMem(this->coefficients.template device<cl_mem>());
+		const clMemPtr errorSequenceMem(errorSequence.device<cl_mem>());
+		const clMemPtr stopFlagMem(this->stopFlag.template device<cl_mem>());
+		//transposed global dimensions because of column-major order in arrayfire
+		executeKernel([&]() {
+			queue.enqueueNDRangeKernel(
+				KernelBuilder(programs, "error_sequence_p3_fused").args(wrap(inputAmem.get()), wrap(inputBmem.get()), wrap(errorSequenceMem.get()), wrap(coeffsMem.get()), this->baseCols, this->baseRows, wrap(stopFlagMem.get())).build(),
+				cl::NDRange(), cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(windowBlockSize, windowBlockSize));
+			this->unlockArrays(inputA, inputB, errorSequence, this->coefficients, this->stopFlag);
+			}, "error_sequence_p3_fused");
+		return errorSequence;
+	}
+
 	af::array computePredictionErrorData(const af::array& image, const bool calculateAbs) const
 	{
 		const auto meArraysBaseWidth = meKernelDims.cols / meBlockSize;

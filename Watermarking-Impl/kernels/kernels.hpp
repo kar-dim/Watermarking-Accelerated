@@ -58,7 +58,22 @@ __kernel void nvf(__global const float* restrict input,
 	nvf[(x * height) + y] = fmax(variance / (1 + variance), 0.0f);
 }
 
-#define P(r, c) centerPtr[(r) * 18 + (c)]
+inline float error_sequence_coeffs_filter_p3(__local float* centerPtr, __constant float* coeffs)
+{
+    #define P(r, c) centerPtr[(r) * 18 + (c)] 
+    float dot = 0.0f;
+    dot += coeffs[0] * P(-1, -1);
+    dot += coeffs[1] * P(-1,  0);
+    dot += coeffs[2] * P(-1,  1);
+    dot += coeffs[3] * P( 0, -1);
+    dot += coeffs[4] * P( 0,  1);
+    dot += coeffs[5] * P( 1, -1);
+    dot += coeffs[6] * P( 1,  0);
+    dot += coeffs[7] * P( 1,  1);
+    return P(0, 0) - dot;
+    #undef P
+}
+
 __kernel void error_sequence_p3(
     __global const float* restrict input, 
     __global float* restrict x_,
@@ -68,35 +83,57 @@ __kernel void error_sequence_p3(
     const int calculateAbs,
     __global int* restrict stopFlag)
 {
-    const int x = get_global_id(1);
-    const int y = get_global_id(0);
-
-    __local float region[16 + 2][16 + 2];
-    //help compiler optimize access to center pixel and neighbors
+    __local float region[18][18];
     __local float* centerPtr = &region[get_local_id(0) + 1][get_local_id(1) + 1];
-
     fillBlock(input, &region[0][0], width, height);
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    //calculate the dot product of the coefficients and the neighborhood for this pixel
+    const int x = get_global_id(1);
+    const int y = get_global_id(0);
     if (x < width && y < height) 
     {
         if (*stopFlag)
         {
-            x_[(x * height + y)] = 0.0f;
+            x_[x * height + y] = 0.0f;
             return;
         }
-        float dot = 0.0f;
-        dot += coeffs[0] * P(-1, -1);
-        dot += coeffs[1] * P(-1,  0);
-        dot += coeffs[2] * P(-1,  1);
-        dot += coeffs[3] * P( 0, -1);
-        dot += coeffs[4] * P( 0,  1);
-        dot += coeffs[5] * P( 1, -1);
-        dot += coeffs[6] * P( 1,  0);
-        dot += coeffs[7] * P( 1,  1);
-	    const float output = P(0, 0) - dot;	
-        x_[(x * height + y)] = calculateAbs ? fabs(output) : output;
+        const float output = error_sequence_coeffs_filter_p3(centerPtr, coeffs);
+        x_[x * height + y] = calculateAbs ? fabs(output) : output;
+    }
+}
+
+__kernel void error_sequence_p3_fused(
+    __global const float* restrict inputA, 
+    __global const float* restrict inputB,
+    __global float* restrict x_,
+    __constant float* restrict coeffs,
+    const int width,
+    const int height,
+    __global int* restrict stopFlag)
+{
+    __local float region[18][18];
+    __local float* centerPtr = &region[get_local_id(0) + 1][get_local_id(1) + 1];
+    for (int i = get_local_id(1) * get_local_size(0) + get_local_id(0); i < SHAREDSIZE * SHAREDSIZE; i += get_local_size(0) * get_local_size(1))
+    {
+        const int tileRow = i % SHAREDSIZE;
+        const int tileCol = i / SHAREDSIZE;
+        const int globalX = clamp((int)(get_group_id(1) * get_local_size(1) + tileCol - PAD), 0, width - 1);
+        const int globalY = clamp((int)(get_group_id(0) * get_local_size(0) + tileRow - PAD), 0, height - 1);
+        const int idx = globalX * height + globalY;
+        region[tileRow][tileCol] = inputA[idx] * inputB[idx];
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    const int x = get_global_id(1);
+    const int y = get_global_id(0);
+    if (x < width && y < height) 
+    {
+        if (*stopFlag)
+        { 
+            x_[x * height + y] = 0.0f; 
+            return; 
+        }
+        x_[x * height + y] = error_sequence_coeffs_filter_p3(centerPtr, coeffs);
     }
 }
 

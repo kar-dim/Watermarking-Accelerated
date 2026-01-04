@@ -149,45 +149,6 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
     }
 }
 
-__global__ void calculate_error_sequence_p3(const float* __restrict__ input, float* __restrict__ x_, const float* __restrict__ coeffs, const unsigned int width, const unsigned int height, const bool calculateAbs, const int* __restrict__ stopFlag)
-{
-    constexpr int sharedSize = 16 + 2;
-    const int tid = threadIdx.y * blockDim.x + threadIdx.x;
-    const int y = blockIdx.x * blockDim.x + threadIdx.x;
-    const int x = blockIdx.y * blockDim.y + threadIdx.y;
-
-    __shared__ float region[sharedSize][sharedSize]; //hold the 18 x 18 region for this 16 x 16 block
-	__shared__ float sCoeffs[8]; //cache coefficients in shared memory
-
-    if (tid < 8)
-        sCoeffs[tid] = coeffs[tid];
-    fillBlock<3>(input, &region[0][0], width, height);
-    __syncthreads();
-
-    //calculate the dot product of the coefficients and the neighborhood for this pixel
-    if (x < width && y < height)
-    {
-        if (*stopFlag)
-        {
-            x_[(x * height + y)] = 0.0f;
-            return;
-        }
-        const int centerCol = threadIdx.y + 1;
-        const int centerRow = threadIdx.x + 1;
-        float dot = 0.0f;
-        dot += sCoeffs[0] * region[centerRow - 1][centerCol - 1];
-        dot += sCoeffs[1] * region[centerRow - 1][centerCol];
-        dot += sCoeffs[2] * region[centerRow - 1][centerCol + 1];
-        dot += sCoeffs[3] * region[centerRow][centerCol - 1];
-        dot += sCoeffs[4] * region[centerRow][centerCol + 1];
-        dot += sCoeffs[5] * region[centerRow + 1][centerCol - 1];
-        dot += sCoeffs[6] * region[centerRow + 1][centerCol];
-        dot += sCoeffs[7] * region[centerRow + 1][centerCol + 1];
-        const float output = region[centerRow][centerCol] - dot;
-        x_[(x * height + y)] = calculateAbs ? fabs(output) : output;
-    }
-}
-
 __global__ void calculate_partial_correlation(const float* __restrict__ e_u, const float* __restrict__ e_z, float* __restrict__ partialDots, float* __restrict__ partialNormU, float* __restrict__ partialNormZ, const unsigned int size)
 {
     const int tid = threadIdx.x;

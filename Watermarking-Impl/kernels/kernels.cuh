@@ -17,18 +17,36 @@ template<typename T>
 __device__ __host__ inline T clamp(const T& val, const T& lo, const T& hi) { return (val < lo) ? lo : (val > hi) ? hi : val; }
 
 //helper method to fill block-wide shared memory cooperatively for error sequence and NVF kernels
-template<int p, int pad = p / 2, int sharedSize = 16 + (2 * pad)>
-__device__ void fillBlock(const float* __restrict__ input, float* __restrict__ sharedMem, const int width, const int height)
+template<bool FUSED, int p, int pad = p / 2, int sharedSize = 16 + (2 * pad)>
+__device__ void fillBlockMain(const float* __restrict__ inputA, const float* __restrict__ inputB, float* __restrict__ sharedMem, const int width, const int height)
 {
+    // Exact same loop logic, written only once
     for (int i = threadIdx.y * blockDim.x + threadIdx.x; i < sharedSize * sharedSize; i += blockDim.x * blockDim.y)
     {
         const int tileRow = i % sharedSize;
         const int tileCol = i / sharedSize;
-        //clamp (mimic cudaAddressModeClamp)
         const int globalX = clamp<int>((int)(blockIdx.y * blockDim.y) + tileCol - pad, 0, width - 1);
         const int globalY = clamp<int>((int)(blockIdx.x * blockDim.x) + tileRow - pad, 0, height - 1);
-        sharedMem[tileRow * sharedSize + tileCol] = input[globalX * height + globalY];
+        const int idx = globalX * height + globalY;
+        float val = inputA[idx];
+        if constexpr (FUSED)
+            val *= inputB[idx];
+        sharedMem[tileRow * sharedSize + tileCol] = val;
     }
+}
+
+//non-fused version, one input only
+template<int p, int pad = p / 2, int sharedSize = 16 + (2 * pad)>
+__device__ void fillBlock(const float* __restrict__ input, float* __restrict__ sharedMem, const int width, const int height)
+{
+    fillBlockMain<false, p, pad, sharedSize>(input, nullptr, sharedMem, width, height);
+}
+
+//fused version, two inputs multiplied together
+template<int p, int pad = p / 2, int sharedSize = 16 + (2 * pad)>
+__device__ void fillBlock(const float* __restrict__ inputA, const float* __restrict__ inputB, float* __restrict__ sharedMem, const int width, const int height)
+{
+    fillBlockMain<true, p, pad, sharedSize>(inputA, inputB, sharedMem, width, height);
 }
 
 //helper methods of ME kernel, to calculate block-wide rx values in shared memory
@@ -77,8 +95,50 @@ __global__ void cholesky_solver_p3(const float* __restrict__ A, const float* __r
 //main ME kernel, calculates ME values for each pixel in the image
 __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height);
 
-//main kernel for error sequence calculation. used in ME kernel
-__global__ void calculate_error_sequence_p3(const float* __restrict__ input, float* __restrict__ x_, const float* __restrict__ coeffs, const unsigned int width, const unsigned int height, const bool calculateAbs, const int* __restrict__ stopFlag);
+//helper method for error sequence calculation with p = 3
+__device__ inline float error_sequence_coeffs_filter_p3(const float region[18][18], const float sCoeffs[8], const int localRow, const int localCol)
+{
+    const int r = localRow + 1;
+    const int c = localCol + 1;
+    float dot = 0.0f;
+    dot += sCoeffs[0] * region[r - 1][c - 1];
+    dot += sCoeffs[1] * region[r - 1][c];
+    dot += sCoeffs[2] * region[r - 1][c + 1];
+    dot += sCoeffs[3] * region[r][c - 1];
+    dot += sCoeffs[4] * region[r][c + 1];
+    dot += sCoeffs[5] * region[r + 1][c - 1];
+    dot += sCoeffs[6] * region[r + 1][c];
+    dot += sCoeffs[7] * region[r + 1][c + 1];
+    return region[r][c] - dot;
+}
+
+//main kernel for error sequence calculation
+template<bool FUSED>
+__global__ void calculate_error_sequence_p3(const float* __restrict__ inputA, const float* __restrict__ inputB, float* __restrict__ x_, const float* __restrict__ coeffs, const unsigned int width, const unsigned int height, const bool calculateAbs, const int* __restrict__ stopFlag)
+{
+    constexpr int sharedSize = 16 + 2;
+    const int tid = threadIdx.y * blockDim.x + threadIdx.x;
+
+    __shared__ float region[sharedSize][sharedSize];
+    __shared__ float sCoeffs[8];
+    if (tid < 8)
+        sCoeffs[tid] = coeffs[tid];
+    fillBlockMain<FUSED, 3>(inputA, inputB, &region[0][0], width, height);
+    __syncthreads();
+
+    const int y = blockIdx.x * blockDim.x + threadIdx.x;
+    const int x = blockIdx.y * blockDim.y + threadIdx.y;
+    if (x < width && y < height)
+    {
+        if (*stopFlag)
+        {
+            x_[(x * height + y)] = 0.0f;
+            return;
+        }
+        const float output = error_sequence_coeffs_filter_p3(region, sCoeffs, threadIdx.x, threadIdx.y);
+        x_[(x * height + y)] = calculateAbs ? fabsf(output) : output;
+    }
+}
 
 //main kernels for correlation calculation. used in detection.
 __global__ void calculate_partial_correlation(const float* __restrict__ e_u, const float* __restrict__ e_z, float* __restrict__ partialDots, float* __restrict__ partialNormU, float* __restrict__ partialNormZ, const unsigned int size);

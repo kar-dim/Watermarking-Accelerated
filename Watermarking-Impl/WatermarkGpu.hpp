@@ -42,9 +42,8 @@ public:
 	float detectWatermark(const ImageBuffer& inputImage, const MASK_TYPE maskType)
 	{
 		const af::array errorSequenceW = computePredictionErrorData(inputImage, false);
-		const af::array mask = maskType == NVF ? computeCustomMask(inputImage) : computePredictionErrorMask<true>(errorSequenceW);
-		const af::array u = mask * randomMatrix;
-		const float correlation = computeCorrelation(computeErrorSequence(u, false), errorSequenceW);
+		const af::array mask = maskType == ME ? computePredictionErrorMask<true>(errorSequenceW) : computeCustomMask(inputImage);
+		const float correlation = computeCorrelation(computeErrorSequence(mask, randomMatrix), errorSequenceW);
 		return std::isfinite(correlation) ? correlation : 0.0f;
 	}
 
@@ -77,6 +76,9 @@ protected:
 	
 	//computes error sequence, used in prediction error mask
 	virtual af::array computeErrorSequence(const af::array& image, const bool calculateAbs) const = 0;
+
+	//computes error sequence between two inputs, used in correlation calculation. calculateAbs is always false
+	virtual af::array computeErrorSequence(const af::array& inputA, const af::array& inputB) const = 0;
 	
 	//Used in both creation and detection of the watermark.
 	//Calculates error sequence and prediction error filter (coefficients)
