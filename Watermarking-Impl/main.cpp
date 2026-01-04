@@ -10,6 +10,7 @@
 #include "HostMemory.hpp"
 #include "utils.hpp"
 #include "ImageFileBuffer.hpp"
+#include "INIReader.h"
 #include "VideoProcessingContext.hpp"
 #include "video_defines.hpp"
 #include "video_utils.hpp"
@@ -20,8 +21,8 @@
 #include <cstdlib>
 #include <exception>
 #include <format>
-#include <INIReader.h>
 #include <iostream>
+#include <limits>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -134,7 +135,7 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 	cout << "Time to load image data from disk: " << secs << " seconds\n\n";
 	Utils::checkError(cols > maxImageDims.first || rows > maxImageDims.second, "Image dimensions too high");
 
-	float watermarkStrength;
+	float watermarkStrength = std::numeric_limits<float>::quiet_NaN(); //gpu release builds do not return strength to host for efficiency (always nan)
 	//initialize watermark functions class, including parameters, ME and custom (NVF in this example) kernels
 	const auto watermarkObj = Utils::createWatermarkObject(rows, cols, inir.Get("paths", "watermark", ""), p, psnr);
 #if defined(_USE_GPU_)
@@ -146,7 +147,14 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 
 	//helper lambdas to run watermark embedding and detection with time measurement and output
 	auto runMakeWatermark = [&](auto& outWatermark, auto method, const std::string& methodName) {
-		double s = Utils::executionTime([&]() { watermarkObj->makeWatermark(image, rgbImage, outWatermark, watermarkStrength, method); }, loops, warmupLoops);
+		double s = Utils::executionTime([&]() {
+			watermarkObj->makeWatermark(image, rgbImage, outWatermark, watermarkStrength, method);
+			//for GPU case make sure we include the final calculation times by syncing!
+#if defined(_USE_GPU_)
+			outWatermark.eval();
+			af::sync();
+#endif
+		}, loops, warmupLoops);
 		cout << std::format("Watermark strength (parameter a): {}\nCalculation of {} mask with {} rows and {} columns and parameters:\np = {}  PSNR(dB) = {}\n{}\n\n", watermarkStrength, methodName, rows, cols, p, psnr, Utils::formatExecutionTime(showFps, s / loops));
 	};
 	auto runDetectWatermark = [&](const auto& watermark, auto method, const std::string& methodName, float& outCorr) {
@@ -156,15 +164,15 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 	};
 
 	//embed watermark
-	runMakeWatermark(watermarkNVF, NVF, "NVF");
+	//runMakeWatermark(watermarkNVF, NVF, "NVF");
 	runMakeWatermark(watermarkME, ME, "ME");
 	//detect watermark
 	float correlationNvf, correlationMe;
-	runDetectWatermark(watermarkNVF, NVF, "NVF", correlationNvf);
+	//runDetectWatermark(watermarkNVF, NVF, "NVF", correlationNvf);
 	runDetectWatermark(watermarkME, ME, "ME", correlationMe);
 
 	//print the correlation values
-	cout << std::format("Correlation [NVF]: {:.16f}\n", correlationNvf);
+	//cout << std::format("Correlation [NVF]: {:.16f}\n", correlationNvf);
 	cout << std::format("Correlation [ME]:  {:.16f}\n", correlationMe);
 
 	//save watermarked images to disk

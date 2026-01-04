@@ -31,16 +31,12 @@ public:
 		const af::array mask = maskType == ME ?
 			computePredictionErrorMask<false>(computePredictionErrorData(inputGrayImage, true)) : computeCustomMask(inputGrayImage);
 		const af::array u = mask * randomMatrix;
-		//check if system is solvable here, because we pay the cost of norm calculation (host transfer) anyway
-		const double normU = af::norm(u);
-		if (!std::isfinite(normU) || normU <= 1e-6f)
-		{
-			watermarkStrength = 0.0f;
-			output = inputImage;
-			return;
-		}
-		watermarkStrength = strengthFactor / (static_cast<float>(normU / std::sqrt(u.elements())));
-		output = af::clamp(inputImage + (u * watermarkStrength), 0, 255);
+		const af::array sumSq = af::sum(af::flat(u * u));
+		const af::array watermarkStrengthDevice = af::select(sumSq > 1e-12f, strengthFactor * std::sqrt(static_cast<float>(u.elements())) * af::rsqrt(sumSq), 0.0f);
+#if defined(_DEBUG)
+		watermarkStrength = watermarkStrengthDevice.scalar<float>();
+#endif
+		output = af::clamp(inputImage + (u * watermarkStrengthDevice), 0, 255);
 	}
 
 	float detectWatermark(const ImageBuffer& inputImage, const MASK_TYPE maskType)
