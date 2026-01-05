@@ -155,6 +155,7 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 			af::sync();
 #endif
 		}, loops, warmupLoops);
+		//for GPU release only builds, we do not get the actual strength value back to host for efficiency (does not touch the passed reference)
 		cout << std::format("Watermark strength (parameter a): {}\nCalculation of {} mask with {} rows and {} columns and parameters:\np = {}  PSNR(dB) = {}\n{}\n\n", watermarkStrength, methodName, rows, cols, p, psnr, Utils::formatExecutionTime(showFps, s / loops));
 	};
 	auto runDetectWatermark = [&](const auto& watermark, auto method, const std::string& methodName, float& outCorr) {

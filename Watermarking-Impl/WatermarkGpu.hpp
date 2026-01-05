@@ -26,20 +26,21 @@ public:
 
 	~WatermarkGPU<p>() override = default;
 
-	void makeWatermark(const ImageBuffer& inputGrayImage, const ImageBuffer& inputImage, ImageBuffer& output, float& watermarkStrength, const MASK_TYPE maskType)
+	void makeWatermark(const ImageBuffer& inputGrayImage, const ImageBuffer& inputImage, ImageBuffer& output, float& watermarkStrength, const MASK_TYPE maskType) override
 	{
 		const af::array mask = maskType == ME ?
 			computePredictionErrorMask<false>(computePredictionErrorData(inputGrayImage, true)) : computeCustomMask(inputGrayImage);
 		const af::array u = mask * randomMatrix;
 		const af::array sumSq = af::sum(af::flat(u * u));
 		const af::array watermarkStrengthDevice = af::select(sumSq > 1e-12f, strengthFactor * std::sqrt(static_cast<float>(u.elements())) * af::rsqrt(sumSq), 0.0f);
+		//for debug builds only, copy watermark strength to host
 #if defined(_DEBUG)
 		watermarkStrength = watermarkStrengthDevice.scalar<float>();
 #endif
 		output = af::clamp(inputImage + (u * watermarkStrengthDevice), 0, 255);
 	}
 
-	float detectWatermark(const ImageBuffer& inputImage, const MASK_TYPE maskType)
+	float detectWatermark(const ImageBuffer& inputImage, const MASK_TYPE maskType) override
 	{
 		const af::array errorSequenceW = computePredictionErrorData(inputImage, false);
 		const af::array mask = maskType == ME ? computePredictionErrorMask<true>(errorSequenceW) : computeCustomMask(inputImage);

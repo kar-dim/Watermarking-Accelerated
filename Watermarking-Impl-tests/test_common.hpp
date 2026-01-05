@@ -48,27 +48,14 @@ protected:
     virtual void calculateMSE(const ImageBuffer& diskRgb, const ImageBuffer& watermark) = 0;
 
     //helper method to embed watermark in the image (and check if it is successful based on watermark strength)
-    ImageBuffer embedWatermark(ImageBuffer& output, float& strength, MASK_TYPE maskType)
-    {
-        watermarkObj->makeWatermark(buf.image, buf.rgbImage, output, strength, maskType);
-        EXPECT_GT(strength, 0.0f);
-        return output;
-    }
+    virtual ImageBuffer embedWatermark(ImageBuffer& output, float& strength, MASK_TYPE maskType) = 0;
+
+    //helper methhod to embed watermark for both mask types and check if the strength of ME is at least as strong as NVF
+    virtual void testEmbedding(ImageBuffer& output) = 0;
 
     float calculateCorrelation(MASK_TYPE maskType)
     {
         return watermarkObj->detectWatermark(embedAndConvertToGray(maskType), maskType);
-    }
-
-	//helper methhod to embed watermark for both mask types and check if the strength of ME is at least as strong as NVF
-    void testEmbedding(ImageBuffer& output)
-    {
-        float strengthNvf = 0.0f, strengthMe = 0.0f;
-        embedWatermark(output, strengthNvf, NVF);
-        embedWatermark(output, strengthMe, ME);
-        //for this specific test image we expect the below specific strengths
-        EXPECT_NEAR(strengthNvf, 8.4817f, 0.1f);
-        EXPECT_NEAR(strengthMe, 316.85f, 4.0f);
     }
 
     //helper method to save the watermarked image to disk and check if it matches the expected MSE threshold

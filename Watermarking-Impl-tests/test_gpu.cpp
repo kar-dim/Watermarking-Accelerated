@@ -61,6 +61,23 @@ protected:
         const float mse = af::sum<float>(af::abs(diskRgb - watermark)) / diskRgb.elements();
         EXPECT_LE(mse, mseThreshold);
     }
+
+    //helper method to embed watermark in the image
+    ImageBuffer embedWatermark(ImageBuffer& output, float& strength, MASK_TYPE maskType) override
+    {
+        watermarkObj->makeWatermark(buf.image, buf.rgbImage, output, strength, maskType);
+        EXPECT_GT(output.elements(), 0);
+        EXPECT_FALSE(af::anyTrue<bool>(af::isNaN(output) | af::isInf(output)));
+        return output;
+    }
+
+	//helper methhod to embed watermark for both mask types (we can't check strength values, they were on VRAM)
+    void testEmbedding(ImageBuffer& output) override
+    {
+        float strength = 0.0f;
+        embedWatermark(output, strength, NVF);
+        embedWatermark(output, strength, ME);
+    }
 };
 
 TEST_F(GpuFixture, EmbedWatermark)
