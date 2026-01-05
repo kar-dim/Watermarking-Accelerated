@@ -13,12 +13,17 @@ inline void fillBlock(
     const int width,
     const int height)
 {
-    for (int i = get_local_id(1) * get_local_size(0) + get_local_id(0); i < SHAREDSIZE * SHAREDSIZE; i += get_local_size(0) * get_local_size(1))
+    const int groupStartCol = (int)(get_group_id(1) * get_local_size(1));
+    const int groupStartRow = (int)(get_group_id(0) * get_local_size(0));
+    const int maxCol = width - 1;
+    const int maxRow = height - 1;
+    const int stride = (int)(get_local_size(0) * get_local_size(1));
+    for (int i = (int)(get_local_id(1) * get_local_size(0) + get_local_id(0)); i < SHAREDSIZE * SHAREDSIZE; i += stride)
     {
         const int tileRow = i % SHAREDSIZE;
         const int tileCol = i / SHAREDSIZE;
-        const int globalX = clamp((int)(get_group_id(1) * get_local_size(1) + tileCol - PAD), 0, width - 1);
-        const int globalY = clamp((int)(get_group_id(0) * get_local_size(0) + tileRow - PAD), 0, height - 1);
+        const int globalX = clamp(groupStartCol + tileCol - PAD, 0, maxCol);
+        const int globalY = clamp(groupStartRow + tileRow - PAD, 0, maxRow);
         sharedMem[tileRow * SHAREDSIZE + tileCol] = input[globalX * height + globalY];
     }
 }
@@ -113,15 +118,21 @@ __kernel void error_sequence_p3_fused(
 {
     __local float region[18][18];
     __local float* centerPtr = &region[get_local_id(0) + 1][get_local_id(1) + 1];
-    for (int i = get_local_id(1) * get_local_size(0) + get_local_id(0); i < SHAREDSIZE * SHAREDSIZE; i += get_local_size(0) * get_local_size(1))
-    {
-        const int tileRow = i % SHAREDSIZE;
-        const int tileCol = i / SHAREDSIZE;
-        const int globalX = clamp((int)(get_group_id(1) * get_local_size(1) + tileCol - PAD), 0, width - 1);
-        const int globalY = clamp((int)(get_group_id(0) * get_local_size(0) + tileRow - PAD), 0, height - 1);
-        const int idx = globalX * height + globalY;
-        region[tileRow][tileCol] = inputA[idx] * inputB[idx];
-    }
+   
+const int groupStartRow = (int)(get_group_id(0) * get_local_size(0));
+const int groupStartCol = (int)(get_group_id(1) * get_local_size(1));
+const int maxRow = height - 1;
+const int maxCol = width - 1;
+const int stride = (int)(get_local_size(0) * get_local_size(1));
+for (int i = (int)(get_local_id(1) * get_local_size(0) + get_local_id(0)); i < SHAREDSIZE * SHAREDSIZE; i += stride)
+{
+    const int tileRow = i % SHAREDSIZE;
+    const int tileCol = i / SHAREDSIZE;
+    const int globalX = clamp(groupStartCol + tileCol - PAD, 0, maxCol);
+    const int globalY = clamp(groupStartRow + tileRow - PAD, 0, maxRow);
+    const int idx = globalX * height + globalY;
+    region[tileRow][tileCol] = inputA[idx] * inputB[idx];
+}
     barrier(CLK_LOCAL_MEM_FENCE);
 
     const int x = get_global_id(1);
