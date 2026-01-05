@@ -109,7 +109,7 @@ __kernel void error_sequence_p3_fused(
     __constant float* restrict coeffs,
     const int width,
     const int height,
-    __global int* restrict stopFlag)
+    __constant int* restrict stopFlag)
 {
     __local float region[18][18];
     __local float* centerPtr = &region[get_local_id(0) + 1][get_local_id(1) + 1];
