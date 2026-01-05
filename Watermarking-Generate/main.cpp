@@ -14,15 +14,19 @@
  */
 int main(int argc, char* argv[])
 {
+    constexpr int numPartitions = 64;
+    constexpr int maxSize = 65536;
+
     if (argc != 5)
     {
         std::cerr << "Usage: " << argv[0] << " <rows> <cols> <seed> <output_file>\n";
         return EXIT_FAILURE;
     }
-	constexpr int maxSize = 65536;
+
     //parse arguments
     const int rows = std::stoi(argv[1]);
     const int cols = std::stoi(argv[2]);
+    const size_t numElements = static_cast<size_t>(rows) * cols;
     const unsigned int seed = std::stoul(argv[3]);
     const std::string filename = argv[4];
     if (rows <= 0 || cols <= 0 || rows > maxSize || cols > maxSize)
@@ -30,33 +34,29 @@ int main(int argc, char* argv[])
         std::cerr << "Rows and columns must be positive integers less than or equal to " << maxSize <<".\n";
         return EXIT_FAILURE;
     }
-    const int numElements = rows * cols;
-    const int maxThreads = omp_get_max_threads();
    
     std::mt19937 masterGenerator(seed);
-    std::vector<unsigned int> threadSeeds(maxThreads);
+    std::vector<unsigned int> partitionSeeds(numPartitions);
 
     //generate a unique deterministic starting seed for each thread
-    for (int i = 0; i < maxThreads; i++)
-        threadSeeds[i] = masterGenerator();
+    for (int i = 0; i < numPartitions; i++)
+        partitionSeeds[i] = masterGenerator();
 
     //generate random numbers in parallel
     std::vector<float> randomNums(numElements);
-#pragma omp parallel
+#pragma omp parallel for schedule(static)
+    for (int p = 0; p < numPartitions; p++)
     {
-        const int threadId = omp_get_thread_num();
-        const int numThreads = omp_get_num_threads();
-        std::mt19937 localGenerator(threadSeeds[threadId]);
+        std::mt19937 localGenerator(partitionSeeds[p]);
         //watermark is a Gaussian distribution with mean 0 and standard deviation 1
         std::normal_distribution<float> distribution(0.0f, 1.0f);
 
         //compute range for each thread
-        const int threadElements = numElements / numThreads;
-        const int start = threadId * threadElements;
-        const int end = (threadId == numThreads - 1) ? numElements : start + threadElements;
+        const auto start = p * numElements / numPartitions;
+        const auto end = (p + 1) * numElements / numPartitions;
         
         //generate random numbers for this thread
-        for (int i = start; i < end; i++)
+        for (auto i = start; i < end; i++)
             randomNums[i] = distribution(localGenerator);
     }
 
