@@ -3,7 +3,6 @@
 #include "ImageEigenOutputBuffer.hpp"
 #include <cstdint>
 #include <Eigen/Dense>
-#include <utility>
 #include <variant>
 
 /*!
@@ -14,6 +13,33 @@ class ImageEigenBuffer
 {
 private:
     std::variant<std::monostate, Eigen::ArrayXXf, EigenArrayRGB> data;
+
+	//helper method to process the output (either assign or apply watermark, always float to uint8)
+    template<bool EMBED>
+    void processOutput(ImageEigenOutputBuffer& output, const Eigen::ArrayXXf* uStrengthened = nullptr) const
+    {
+        auto finalize = [](const auto& expr) { return expr.round().cwiseMax(0).cwiseMin(255).template cast<uint8_t>(); };
+        if (isRGB())
+        {
+            auto& rgbOutput = output.getRGB();
+            const auto& rgbInput = getRGB();
+#pragma omp parallel for
+            for (int channel = 0; channel < 3; channel++)
+            {
+                if constexpr (EMBED)
+                    rgbOutput[channel] = finalize(rgbInput[channel] + *uStrengthened);
+                else
+                    rgbOutput[channel] = finalize(rgbInput[channel]);
+            }
+        }
+        else
+        {
+            if constexpr (EMBED)
+                output.getGray() = finalize(getGray() + *uStrengthened);
+            else
+                output.getGray() = finalize(getGray());
+        }
+    }
 
 public:
 	ImageEigenBuffer() = default;
@@ -29,31 +55,13 @@ public:
 	//apply watermark (float to uint8)
     void applyWatermark(const Eigen::ArrayXXf& uStrengthened, ImageEigenOutputBuffer& output) const
     {
-        if (isRGB())
-        {
-            auto& rgbOutput = output.getRGB();
-            const auto& rgbInput = getRGB();
-#pragma omp parallel for
-            for (int channel = 0; channel < 3; channel++)
-                rgbOutput[channel] = (rgbInput[channel] + uStrengthened).round().cwiseMax(0).cwiseMin(255).cast<uint8_t>();
-        }
-        else
-            output.getGray() = (getGray() + uStrengthened).round().cwiseMax(0).cwiseMin(255).cast<uint8_t>();
+        processOutput<true>(output, &uStrengthened);
     }
 
     //assign input to output (float to uint8)
     void assignTo(ImageEigenOutputBuffer& output) const
     {
-        if (isRGB())
-        {
-            auto& rgbOutput = output.getRGB();
-            const auto& rgbInput = getRGB();
-#pragma omp parallel for
-            for (int channel = 0; channel < 3; channel++)
-                rgbOutput[channel] = rgbInput[channel].round().cwiseMax(0.0f).cwiseMin(255.0f).cast<uint8_t>();
-        }
-        else
-			output.getGray() = getGray().round().cwiseMax(0).cwiseMin(255).cast<uint8_t>();
+        processOutput<false>(output, nullptr);
 	}
 
     //helper methods to retrieve the actual data type
