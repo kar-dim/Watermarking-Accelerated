@@ -285,8 +285,8 @@ namespace video_utils
 		data.watermarkedFrame.T().host(data.hostFramePtr);
 		fwrite(data.hostFramePtr, 1, elements, ffmpegPipe);
 #elif defined(_USE_EIGEN_)
-		//data.grayFrame = data.watermarkedFrame.getGray().transpose();
-		fwrite(data.watermarkedFrame.getGray().transpose().data(), 1, elements, ffmpegPipe);
+		data.grayFrame = data.watermarkedFrame.getGray().transpose();
+		fwrite(data.grayFrame.data(), 1, elements, ffmpegPipe);
 #endif
 	}
 
