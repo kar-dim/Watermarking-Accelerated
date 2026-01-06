@@ -282,11 +282,11 @@ namespace video_utils
 		float watermarkStrength;
 		data.watermarkObj->makeWatermark(buffer, buffer, data.watermarkedFrame, watermarkStrength, ME);
 #if defined(_USE_GPU_)
-		data.watermarkedFrame.as(u8).T().host(data.hostFramePtr);
+		data.watermarkedFrame.T().host(data.hostFramePtr);
 		fwrite(data.hostFramePtr, 1, elements, ffmpegPipe);
 #elif defined(_USE_EIGEN_)
-		data.grayFrame = data.watermarkedFrame.getGray().transpose().cast<uint8_t>();
-		fwrite(data.grayFrame.data(), 1, elements, ffmpegPipe);
+		//data.grayFrame = data.watermarkedFrame.getGray().transpose();
+		fwrite(data.watermarkedFrame.getGray().transpose().data(), 1, elements, ffmpegPipe);
 #endif
 	}
 

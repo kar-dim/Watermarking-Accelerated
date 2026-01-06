@@ -37,8 +37,8 @@ public:
 
 	//main watermark embedding method
 	//it embeds the watermark computed from "inputGrayImage" (always grayscale, 2D)
-	//into a new array "output" based on "inputImage" (RGB or grayscale)
-	virtual void makeWatermark(const ImageBuffer& inputGrayImage, const ImageBuffer& inputImage, ImageBuffer& output, float& watermarkStrength, const MASK_TYPE maskType) = 0;
+	//into a new array "output" based on "inputImage" (RGB or grayscale always u8)
+	virtual void makeWatermark(const ImageBuffer& inputGrayImage, const ImageBuffer& inputImage, ImageOutputBuffer& output, float& watermarkStrength, const MASK_TYPE maskType) = 0;
 	
 	//the main mask detector function
 	virtual float detectWatermark(const ImageBuffer& inputImage, const MASK_TYPE maskType) = 0;

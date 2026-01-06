@@ -19,7 +19,7 @@ public:
 	static constexpr float bPercent = 0.114f;
 
 	static std::string addSuffixBeforeExtension(const std::string& file, const std::string& suffix);
-	static void saveImage(const std::string& imagePath, const std::string& suffix, const ImageBuffer& watermark, const std::optional<AlphaBuffer>& alphaChannel);
+	static void saveImage(const std::string& imagePath, const std::string& suffix, const ImageOutputBuffer& watermark, const std::optional<AlphaBuffer>& alphaChannel);
 	static std::unique_ptr<WatermarkBase> createWatermarkObject(const unsigned int height, const unsigned int width, const std::string& randomMatrixPath, const int p, const float psnr);
 	//throws exception if an error condition is true
 	static void checkError(const bool isError, const std::string& errorMsg);
@@ -27,6 +27,7 @@ public:
 	static std::string formatExecutionTime(const bool showFps, const double seconds);
 	static void loadImage(ImageFileBuffer& imgBuffer, const std::string& imageFile);
 	static ImageBuffer rgb2gray(const ImageBuffer& rgbImage);
+	static ImageBuffer castToFloat(const ImageOutputBuffer& buffer);
 
 	template <typename Func>
 	static double executionTime(Func&& func, const int loops = 1, const int warmup = 0)

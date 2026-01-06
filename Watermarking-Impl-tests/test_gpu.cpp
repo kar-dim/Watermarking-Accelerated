@@ -51,11 +51,11 @@ protected:
     ImageBuffer embedAndConvertToGray(MASK_TYPE maskType) override
     {
         float strength = 0.0f;
-        ImageBuffer watermarkedImage;
+        ImageOutputBuffer watermarkedImage;
         return Utils::rgb2gray(embedWatermark(watermarkedImage, strength, maskType));
     }
 
-    void calculateMSE(const ImageBuffer& diskRgb, const ImageBuffer& watermark) override
+    void calculateMSE(const ImageBuffer& diskRgb, const ImageOutputBuffer& watermark) override
     {
         EXPECT_EQ(diskRgb.elements(), watermark.elements()) << "Expected disk image elements to match original";
         const float mse = af::sum<float>(af::abs(diskRgb - watermark)) / diskRgb.elements();
@@ -63,7 +63,7 @@ protected:
     }
 
     //helper method to embed watermark in the image
-    ImageBuffer embedWatermark(ImageBuffer& output, float& strength, MASK_TYPE maskType) override
+    ImageOutputBuffer embedWatermark(ImageOutputBuffer& output, float& strength, MASK_TYPE maskType) override
     {
         watermarkObj->makeWatermark(buf.image, buf.rgbImage, output, strength, maskType);
         EXPECT_GT(output.elements(), 0);
@@ -72,7 +72,7 @@ protected:
     }
 
 	//helper methhod to embed watermark for both mask types (we can't check strength values, they were on VRAM)
-    void testEmbedding(ImageBuffer& output) override
+    void testEmbedding(ImageOutputBuffer& output) override
     {
         float strength = 0.0f;
         embedWatermark(output, strength, NVF);
@@ -82,7 +82,7 @@ protected:
 
 TEST_F(GpuFixture, EmbedWatermark)
 {
-    ImageBuffer output;
+    ImageOutputBuffer output;
     testEmbedding(output);
 }
 
@@ -93,7 +93,7 @@ TEST_F(GpuFixture, DetectWatermark)
 
 TEST_F(GpuFixture, SaveToDisk)
 {
-    ImageBuffer watermark;
+    ImageOutputBuffer watermark;
     for (const auto& config : strategies)
         testSaveToDisk(watermark, config.strategy, config.label, config.outputFile);
 }

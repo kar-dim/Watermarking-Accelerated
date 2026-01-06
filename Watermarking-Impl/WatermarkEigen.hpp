@@ -39,7 +39,7 @@ public:
 	{ }
 
 	//main watermark embedding method
-	void makeWatermark(const ImageBuffer& inputGrayImage, const ImageBuffer& inputImage, ImageBuffer& output, float& watermarkStrength, const MASK_TYPE maskType) override
+	void makeWatermark(const ImageBuffer& inputGrayImage, const ImageBuffer& inputImage, ImageOutputBuffer& output, float& watermarkStrength, const MASK_TYPE maskType) override
 	{
 		//compute the strengthened watermark, if it fails assign input to output and return
 		if (!computeStrengthenedWatermark(inputGrayImage.getGray(), watermarkStrength, maskType))

@@ -45,13 +45,13 @@ protected:
 
     virtual ImageBuffer embedAndConvertToGray(MASK_TYPE maskType) = 0;
 
-    virtual void calculateMSE(const ImageBuffer& diskRgb, const ImageBuffer& watermark) = 0;
+    virtual void calculateMSE(const ImageBuffer& diskRgb, const ImageOutputBuffer& watermark) = 0;
 
     //helper method to embed watermark in the image (and check if it is successful based on watermark strength)
-    virtual ImageBuffer embedWatermark(ImageBuffer& output, float& strength, MASK_TYPE maskType) = 0;
+    virtual ImageOutputBuffer embedWatermark(ImageOutputBuffer& output, float& strength, MASK_TYPE maskType) = 0;
 
     //helper methhod to embed watermark for both mask types and check if the strength of ME is at least as strong as NVF
-    virtual void testEmbedding(ImageBuffer& output) = 0;
+    virtual void testEmbedding(ImageOutputBuffer& output) = 0;
 
     float calculateCorrelation(MASK_TYPE maskType)
     {
@@ -59,7 +59,7 @@ protected:
     }
 
     //helper method to save the watermarked image to disk and check if it matches the expected MSE threshold
-    void testSaveToDisk(ImageBuffer& watermark, MASK_TYPE mask, const std::string& label, const std::string& outputFileName)
+    void testSaveToDisk(ImageOutputBuffer& watermark, MASK_TYPE mask, const std::string& label, const std::string& outputFileName)
     {
         float strength = 0.0f;
         embedWatermark(watermark, strength, mask);

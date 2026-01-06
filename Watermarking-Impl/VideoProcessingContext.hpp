@@ -50,7 +50,7 @@ struct VideoProcessingContext
     //data host pointer and device/host buffers which are overwritten per frame
     uint8_t* hostFramePtr;
     ImageBuffer inputFrame;
-    ImageBuffer watermarkedFrame;
+    ImageOutputBuffer watermarkedFrame;
     Gray8Buffer grayFrame;
 
     VideoProcessingContext(AVFormatContext* inputCtx, AVCodecContext* decoderCtx, const int streamIdx,

@@ -143,5 +143,8 @@
     <ClInclude Include="ImageFileBuffer.hpp">
       <Filter>Header Files\util</Filter>
     </ClInclude>
+    <ClInclude Include="ImageEigenOutputBuffer.hpp">
+      <Filter>Header Files\eigen</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

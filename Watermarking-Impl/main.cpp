@@ -130,6 +130,7 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 
 	ImageFileBuffer imgBuffer;
 	//load image from disk into arrayfire (GPU), or CImg and copy from CImg object to Eigen arrays (CPU)
+	//internally convert to f32
 	double secs = Utils::executionTime([&] { Utils::loadImage(imgBuffer, imageFile); });
 	auto& [rgbImage, image, alphaChannel, rows, cols, isRGB] = imgBuffer;
 	cout << "Time to load image data from disk: " << secs << " seconds\n\n";
@@ -139,10 +140,10 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 	//initialize watermark functions class, including parameters, ME and custom (NVF in this example) kernels
 	const auto watermarkObj = Utils::createWatermarkObject(rows, cols, inir.Get("paths", "watermark", ""), p, psnr);
 #if defined(_USE_GPU_)
-	ImageBuffer watermarkNVF, watermarkME;
+	ImageOutputBuffer watermarkNVF, watermarkME;
 #elif defined(_USE_EIGEN_)
-	ImageBuffer watermarkNVF = isRGB ? ImageBuffer(eigen_utils::makeEigenRGB(rows, cols)) : ImageBuffer(ArrayXXf(rows, cols));
-	ImageBuffer watermarkME = isRGB ? ImageBuffer(eigen_utils::makeEigenRGB(rows, cols)) : ImageBuffer(ArrayXXf(rows, cols));
+	ImageOutputBuffer watermarkNVF = isRGB ? ImageOutputBuffer(eigen_utils::makeEigenRGBu8(rows, cols)) : ImageOutputBuffer(Gray8Buffer(rows, cols));
+	ImageOutputBuffer watermarkME = isRGB ? ImageOutputBuffer(eigen_utils::makeEigenRGBu8(rows, cols)) : ImageOutputBuffer(Gray8Buffer(rows, cols));
 #endif
 
 	//helper lambdas to run watermark embedding and detection with time measurement and output
@@ -169,8 +170,8 @@ int testForImage(const INIReader& inir, const int p, const float psnr)
 	runMakeWatermark(watermarkME, ME, "ME");
 	//detect watermark
 	float correlationNvf, correlationMe;
-	runDetectWatermark(watermarkNVF, NVF, "NVF", correlationNvf);
-	runDetectWatermark(watermarkME, ME, "ME", correlationMe);
+	runDetectWatermark(Utils::castToFloat(watermarkNVF), NVF, "NVF", correlationNvf);
+	runDetectWatermark(Utils::castToFloat(watermarkME), ME, "ME", correlationMe);
 
 	//print the correlation values
 	cout << std::format("Correlation [NVF]: {:.16f}\n", correlationNvf);

@@ -14,12 +14,12 @@ using namespace Eigen;
 
 namespace eigen_utils 
 {
-	CImg<float> eigenRgbToCimg(const EigenArrayRGB& arrayRgb, const std::optional<AlphaBuffer>& alphaChannel)
+	CImg<uint8_t> eigenRgbToCimg(const EigenArrayU8RGB& arrayRgb, const std::optional<AlphaBuffer>& alphaChannel)
 	{
 		const auto rows = arrayRgb[0].rows();
 		const auto cols = arrayRgb[0].cols();
 		const int channels = alphaChannel.has_value() ? 4 : 3;
-		CImg<float> output(static_cast<unsigned int>(cols), static_cast<unsigned int>(rows), 1, channels);
+		CImg<uint8_t> output(static_cast<unsigned int>(cols), static_cast<unsigned int>(rows), 1, channels);
 #pragma omp parallel for
 		for (int y = 0; y < rows; y++)
 		{
@@ -34,11 +34,11 @@ namespace eigen_utils
 		return output;
 	}
 
-	CImg<float> eigenGrayToCimg(const ArrayXXf& arrayGray)
+	CImg<uint8_t> eigenGrayToCimg(const Gray8Buffer& arrayGray)
 	{
 		const auto rows = arrayGray.rows();
 		const auto cols = arrayGray.cols();
-		CImg<float> output(static_cast<unsigned int>(cols), static_cast<unsigned int>(rows));
+		CImg<uint8_t> output(static_cast<unsigned int>(cols), static_cast<unsigned int>(rows));
 #pragma omp parallel for
 		for (int y = 0; y < rows; y++)
 			for (int x = 0; x < cols; x++)

@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cctype>
 #include "cimg_init.h"
+#include "eigen_rgb_array.hpp"
 #include "eigen_utils.hpp"
 #include "WatermarkEigen.hpp"
 #endif
@@ -29,7 +30,7 @@ string Utils::addSuffixBeforeExtension(const string& file, const string& suffix)
 	return file.substr(0, dot) + suffix + file.substr(dot);
 }
 
-void Utils::saveImage(const string& imagePath, const string& suffix, const ImageBuffer& watermark, const std::optional<AlphaBuffer>& alphaChannel)
+void Utils::saveImage(const string& imagePath, const string& suffix, const ImageOutputBuffer& watermark, const std::optional<AlphaBuffer>& alphaChannel)
 {
 #if defined(_USE_EIGEN_)
 	const string watermarkedFile = Utils::addSuffixBeforeExtension(imagePath, suffix);
@@ -40,9 +41,7 @@ void Utils::saveImage(const string& imagePath, const string& suffix, const Image
 	else if (extension == "bmp")  cimgToSave.save_bmp(watermarkedFile.c_str());
 	else if (extension == "jpg" || extension == "jpeg") cimgToSave.save_jpeg(watermarkedFile.c_str());
 	else if (extension == "webp") cimgToSave.save_webp(watermarkedFile.c_str());
-	//TIFF suppoorts 32bpp (floats) natively, we have to explicit cast to 8bpp before saving to reduce unecessary bytes
-	else if (extension == "tif" || extension == "tiff")
-		 cimg_library::CImg<unsigned char>(cimgToSave).save_tiff(watermarkedFile.c_str(), 20); //20 = LZW compression
+	else if (extension == "tif" || extension == "tiff") cimgToSave.save_tiff(watermarkedFile.c_str(), 20); //20 = LZW compression
 	else
 		throw std::runtime_error("Unsupported image format: " + extension);
 #elif defined(_USE_GPU_)
@@ -102,11 +101,13 @@ void Utils::loadImage(ImageFileBuffer& buf, const string& imageFile)
 		image = rgbImage; break;
 	case 3:
 		image = rgb2gray(rgbImage); break;
-	case 4:
-		alphaChannel.emplace(rgbImage(af::span, af::span, 3));
-		rgbImage = rgbImage(af::span, af::span, af::seq(0, 2)) * (af::tile(*alphaChannel, 1, 1, 3) != 0);
+	case 4: {
+		const af::array alpha = rgbImage(af::span, af::span, 3);
+		alphaChannel.emplace(alpha.as(u8)); //we want the alpha channel as 8-bit image later for saving the image with alpha
+		rgbImage = rgbImage(af::span, af::span, af::seq(0, 2)) * (af::tile(alpha, 1, 1, 3) != 0);
 		image = rgb2gray(rgbImage);
 		break;
+	}
 	default:
 		throw std::runtime_error("Invalid image dimensions");
 	}
@@ -128,7 +129,7 @@ void Utils::loadImage(ImageFileBuffer& buf, const string& imageFile)
 		break;
 	case 4:
 	{
-		alphaChannel.emplace(cimgRgb.get_channel(3));
+		alphaChannel.emplace(cimgRgb.get_shared_channel(3)); //CImg copies the float into uint8 here
 		auto rgbView = cimgRgb.get_shared_channels(0, 2);
 		eigen_utils::cimgAlphaZero(rgbView, *alphaChannel);
 		rgbImage = eigen_utils::cimgToEigenRgb(rgbView);
@@ -151,5 +152,24 @@ ImageBuffer Utils::rgb2gray(const ImageBuffer& rgbImage)
 #elif defined(_USE_EIGEN_)
 	const auto& rgb = rgbImage.getRGB();
 	return ((rgb[0] * rPercent) + (rgb[1] * gPercent) + (rgb[2] * bPercent)).eval();
+#endif
+}
+
+ImageBuffer Utils::castToFloat(const ImageOutputBuffer& buffer)
+{
+#if defined(_USE_GPU_)
+	return buffer.as(f32);
+#else
+	if (buffer.isRGB())
+	{
+		const auto& rgbU8 = buffer.getRGB();
+		EigenArrayRGB rgbFloat;
+#pragma omp parallel for
+		for (int channel = 0; channel < 3; channel++)
+			rgbFloat[channel] = rgbU8[channel].cast<float>();
+		return ImageBuffer(rgbFloat);
+	}
+	else
+		return ImageBuffer(buffer.getGray().cast<float>());
 #endif
 }
