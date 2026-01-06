@@ -20,7 +20,7 @@ __device__ __host__ inline T clamp(const T& val, const T& lo, const T& hi) { ret
 template<bool FUSED, int p, int pad = p / 2, int sharedSize = 16 + (2 * pad)>
 __device__ void fillBlockMain(const float* __restrict__ inputA, const float* __restrict__ inputB, float* __restrict__ sharedMem, const int width, const int height)
 {
-    // Exact same loop logic, written only once
+	//cooperatively fill 2D shared memory
     for (int i = threadIdx.y * blockDim.x + threadIdx.x; i < sharedSize * sharedSize; i += blockDim.x * blockDim.y)
     {
         const int tileRow = i % sharedSize;
@@ -29,6 +29,7 @@ __device__ void fillBlockMain(const float* __restrict__ inputA, const float* __r
         const int globalY = clamp<int>((int)(blockIdx.x * blockDim.x) + tileRow - pad, 0, height - 1);
         const int idx = globalX * height + globalY;
         float val = inputA[idx];
+		//if we need to fuse (A*B), do it here, branch-free because it its known at compile time
         if constexpr (FUSED)
             val *= inputB[idx];
         sharedMem[tileRow * sharedSize + tileCol] = val;
