@@ -32,7 +32,7 @@ public:
 			computePredictionErrorMask<false>(computePredictionErrorData(inputGrayImage, true)) : computeCustomMask(inputGrayImage);
 		const af::array u = mask * randomMatrix;
 		const af::array sumSq = af::sum(af::flat(u * u));
-		const af::array watermarkStrengthDevice = af::select(sumSq > 1e-12f, strengthFactor * std::sqrt(static_cast<float>(u.elements())) * af::rsqrt(sumSq), 0.0f);
+		const af::array watermarkStrengthDevice = af::select(sumSq > 1e-12f, strengthFactor * std::sqrt(static_cast<float>(inputGrayImage.elements())) * af::rsqrt(sumSq), 0.0f);
 		//for debug builds only, copy watermark strength to host
 #if defined(_DEBUG)
 		watermarkStrength = watermarkStrengthDevice.scalar<float>();
