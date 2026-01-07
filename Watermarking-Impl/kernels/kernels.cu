@@ -4,15 +4,11 @@
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include <mma.h>
+
 using namespace nvcuda;
 
 __device__ inline half HALF(float x) { return __float2half(x); }
 __device__ inline float FLOAT(half x) { return __half2float(x); }
-
-__device__ half8 make_half8(const float& a, const float& b, const float& c, const float& d, const float& e, const float& f, const float& g, const float& h)
-{
-    return half8 { HALF(a), HALF(b), HALF(c), HALF(d), HALF(e), HALF(f), HALF(g), HALF(h) };
-}
 
 __device__ half8 make_half8(const half& a, const half& b, const half& c, const half& d, const half& e, const half& f, const half& g, const half& h)
 {
@@ -36,14 +32,14 @@ __device__ void me_p3_rxCalculate(half8* RxLocalVec8, const half8& vec, const ha
 
 __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height)
 {
-	constexpr int sharedMemStride = 24; //16 + 8 padding for WMMA
+    constexpr int sharedMemStride = 24; //16 + 8 padding for WMMA
 
     const int tid = threadIdx.x;
     const int x = blockIdx.x * 256 + tid;
     const int y = blockIdx.y * blockDim.y + threadIdx.y;
     const int warpId = tid / 32;
     const int startRow = warpId * 32;
-	const half halfScaleFactor = HALF(0.00392156862f); //multiplication with stored value of (1/255) is faster than division by 255
+    const half halfScaleFactor = HALF(0.00392156862f); //multiplication with stored value of (1/255) is faster than division by 255
 
     //shared memory for Rx, rx, scratch and all pixels utilized by the whole block
     __shared__ alignas(16) half RxLocal[256][sharedMemStride];
@@ -74,18 +70,18 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
         blockValues[2][localX - 1], blockValues[2][localX], blockValues[2][localX + 1]
     );
 
-    
+
     half8* RxLocalVec8 = reinterpret_cast<half8*>(&RxLocal[tid][0]);
-    RxLocalVec8[1] = make_half8(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
-	//if/else is better than always writing (even vectorized) to shared memory unnecessarily
+    RxLocalVec8[1] = {};
+    //if/else is better than always writing (even vectorized) to shared memory unnecessarily
     if (x < width)
         RxLocalVec8[0] = localBlock;
-    else 
+    else
     {
-        RxLocalVec8[0] = make_half8(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
-        localBlock = make_half8(0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f);
+        RxLocalVec8[0] = {};
+        localBlock = {};
     }
-	//compute rx, use half2 for faster reductions
+    //compute rx, use half2 for faster reductions
     half8 rxVec;
     me_p3_rxCalculate(&rxVec, localBlock, center);
     half2* rxHalf2Ptr = reinterpret_cast<half2*>(&rxVec);
@@ -135,7 +131,7 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
         rx[outputIndex + tid] = sum_v;
     }
 
-	//first 64 threads write Rx
+    //first 64 threads write Rx
     if (tid < 64)
     {
         const int r = tid / 8;
@@ -161,7 +157,7 @@ __global__ void calculate_partial_correlation(const float* __restrict__ e_u, con
     __shared__ float normZCache[32];
 
     float a = 0.0f, b = 0.0f;
-    if (idx < size) 
+    if (idx < size)
     {
         a = e_u[idx];
         b = e_z[idx];
@@ -172,7 +168,7 @@ __global__ void calculate_partial_correlation(const float* __restrict__ e_u, con
     float normZVal = b * b;
 
     //intra-warp reduction
-    for (int offset = 16; offset > 0; offset /= 2) 
+    for (int offset = 16; offset > 0; offset /= 2)
     {
         dotVal += __shfl_down_sync(0xFFFFFFFF, dotVal, offset);
         normUVal += __shfl_down_sync(0xFFFFFFFF, normUVal, offset);
@@ -180,7 +176,7 @@ __global__ void calculate_partial_correlation(const float* __restrict__ e_u, con
     }
 
     //warp leaders write to shared memory
-    if ((tid & 31) == 0) 
+    if ((tid & 31) == 0)
     {
         dotCache[warpId] = dotVal;
         normUCache[warpId] = normUVal;
@@ -189,21 +185,21 @@ __global__ void calculate_partial_correlation(const float* __restrict__ e_u, con
     __syncthreads();
 
     //final reduction by first warp
-    if (tid < 32) 
+    if (tid < 32)
     {
-		const bool validTid = tid < (blockDim.x + warpSize - 1) / 32;
+        const bool validTid = tid < (blockDim.x + warpSize - 1) / 32;
         dotVal = validTid ? dotCache[tid] : 0.0f;
         normUVal = validTid ? normUCache[tid] : 0.0f;
         normZVal = validTid ? normZCache[tid] : 0.0f;
 
-        for (int offset = 16; offset > 0; offset /= 2) 
+        for (int offset = 16; offset > 0; offset /= 2)
         {
             dotVal += __shfl_down_sync(0xFFFFFFFF, dotVal, offset);
             normUVal += __shfl_down_sync(0xFFFFFFFF, normUVal, offset);
             normZVal += __shfl_down_sync(0xFFFFFFFF, normZVal, offset);
         }
 
-        if (tid == 0) 
+        if (tid == 0)
         {
             partialDots[blockIdx.x] = dotVal;
             partialNormU[blockIdx.x] = normUVal;
@@ -228,7 +224,7 @@ __global__ void calculate_final_correlation(const float* __restrict__ partialDot
     float localU = 0.0f;
     float localZ = 0.0f;
 
-    for (int i = tid; i < numBlocks; i += blockDim.x) 
+    for (int i = tid; i < numBlocks; i += blockDim.x)
     {
         localDot += partialDots[i];
         localU += partialNormU[i];
@@ -236,13 +232,13 @@ __global__ void calculate_final_correlation(const float* __restrict__ partialDot
     }
 
     //intra-warp reduction
-    for (int offset = 16; offset > 0; offset >>= 1) 
+    for (int offset = 16; offset > 0; offset >>= 1)
     {
         localDot += __shfl_down_sync(0xFFFFFFFF, localDot, offset);
         localU += __shfl_down_sync(0xFFFFFFFF, localU, offset);
         localZ += __shfl_down_sync(0xFFFFFFFF, localZ, offset);
     }
-    if (lane == 0) 
+    if (lane == 0)
     {
         warpDot[warpId] = localDot;
         warpU[warpId] = localU;
@@ -251,19 +247,19 @@ __global__ void calculate_final_correlation(const float* __restrict__ partialDot
     __syncthreads();
 
     //final warp reduces
-    if (warpId == 0) 
+    if (warpId == 0)
     {
-		const bool validTid = tid < numWarps;
+        const bool validTid = tid < numWarps;
         localDot = validTid ? warpDot[lane] : 0.0f;
         localU = validTid ? warpU[lane] : 0.0f;
         localZ = validTid ? warpZ[lane] : 0.0f;
-        for (int offset = 16; offset > 0; offset >>= 1) 
+        for (int offset = 16; offset > 0; offset >>= 1)
         {
             localDot += __shfl_down_sync(0xFFFFFFFF, localDot, offset);
             localU += __shfl_down_sync(0xFFFFFFFF, localU, offset);
             localZ += __shfl_down_sync(0xFFFFFFFF, localZ, offset);
         }
-        if (lane == 0) 
+        if (lane == 0)
         {
             float normU = sqrtf(localU);
             float normZ = sqrtf(localZ);
@@ -274,7 +270,7 @@ __global__ void calculate_final_correlation(const float* __restrict__ partialDot
 
 __global__ void cholesky_solver_p3(const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ X, int* __restrict__ stopFlag)
 {
-	constexpr int N = 8; //p = 3 -> 8x8 system
+    constexpr int N = 8; //p = 3 -> 8x8 system
 
     if (threadIdx.x > 0 || blockIdx.x > 0)
         return;
@@ -313,8 +309,8 @@ __global__ void cholesky_solver_p3(const float* __restrict__ A, const float* __r
             {
                 //diagonal element
                 const float val = localA[i * N + i] - sum;
-				//check if singular! if so, exit early with X = 0.0f
-                if (val <= 1e-12f) 
+                //check if singular! if so, exit early with X = 0.0f
+                if (val <= 1e-12f)
                 {
                     *stopFlag = 1;
                     goto exit;
@@ -325,8 +321,8 @@ __global__ void cholesky_solver_p3(const float* __restrict__ A, const float* __r
                 L[i][j] = (localA[i * N + j] - sum) * __frcp_rn(L[j][j]); //fast reciprocal
         }
     }
-	//solve the system with forward and backward substitution
-	//we again use fast reciprocal for better performance (1 GPU thread is weak, needs as fast math as possible)
+    //solve the system with forward and backward substitution
+    //we again use fast reciprocal for better performance (1 GPU thread is weak, needs as fast math as possible)
     //forward substitution -> solve L*y = b
     float y[N];
 #pragma unroll
@@ -372,7 +368,7 @@ __global__ void pitchedToFloat(const uint8_t* __restrict__ input, float* __restr
     const int x = blockIdx.x * blockDim.x + threadIdx.x;
     const int y = blockIdx.y * blockDim.y + threadIdx.y;
     float convertedValue = 0.0f;
-    if (x < width && y < height) 
+    if (x < width && y < height)
         convertedValue = static_cast<float>(input[y * pitch + x]);
 
     block[threadIdx.y][threadIdx.x] = convertedValue;
