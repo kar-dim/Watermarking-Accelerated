@@ -53,7 +53,7 @@ __kernel void nvf(__global const float* restrict input,
 	{
 		for (int j = -PAD; j <= PAD; j++)
 		{
-			float pixelValue = region[shY + i][shX + j];
+			const float pixelValue = region[shY + i][shX + j];
 			sum += pixelValue;
 			sumSq += pixelValue * pixelValue;
 		}

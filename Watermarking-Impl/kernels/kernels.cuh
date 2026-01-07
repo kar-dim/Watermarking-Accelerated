@@ -55,10 +55,12 @@ __device__ inline void me_p3_rxCalculate(half8* RxLocalVec8, const half8& vec, c
 
 //NVF kernel, calculates NVF values for each pixel in the image
 //works for all p values (3,5,7 and 9)
-template<int p, float nPixels = static_cast<float>(p * p), float nPixelsSq = nPixels * nPixels, int pad = p / 2>
+template<int p, int pad = p / 2, int sharedSize = 16 + (2 * pad)>
 __global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, const unsigned int width, const unsigned int height)
 {
-    constexpr int sharedSize = 16 + (2 * pad);
+    constexpr float nPixels = static_cast<float>(p * p);
+    constexpr float nPixelsSq = nPixels * nPixels;
+
     const int x = blockIdx.y * blockDim.y + threadIdx.y;
     const int y = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -79,9 +81,9 @@ __global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, co
     {
         for (int j = -pad; j <= pad; j++)
         {
-            float val = region[shY + j][shX + i];
-            sum += val;
-            sumSq += val * val;
+            const float pixelValue = region[shY + j][shX + i];
+            sum += pixelValue;
+            sumSq += pixelValue * pixelValue;
         }
     }
     //calculate NVF with optimized math (avoid divisions)
