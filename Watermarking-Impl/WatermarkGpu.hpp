@@ -92,7 +92,7 @@ protected:
 	af::array computePredictionErrorMask(const af::array& errorSequence) const
 	{
 		const af::array& input = CALC_ABS ? af::abs(errorSequence) : errorSequence;
-		return input / af::max(af::flat(input));
+		return input / (af::max(af::flat(input)) + 1.0e-6f);
 	}
 
 	//helper method to sum the incomplete RxPartial and rxPartial arrays which were produced from the custom "me" kernel
