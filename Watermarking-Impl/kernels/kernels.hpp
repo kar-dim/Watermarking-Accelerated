@@ -2,8 +2,10 @@
 #include <string>
 inline const std::string kernels = R"CLC(
 
-#define PAD           (WINDOW_SIZE / 2)
-#define SHAREDSIZE    (16 + 2 * PAD)
+#define PAD               (WINDOW_SIZE / 2)
+#define N_PIXELS          (float) (WINDOW_SIZE * WINDOW_SIZE)
+#define N_PIXELS_SQ       (N_PIXELS * N_PIXELS)
+#define SHAREDSIZE        (16 + 2 * PAD)
 
 #pragma OPENCL EXTENSION cl_khr_fp16 : enable
 
@@ -33,11 +35,9 @@ __kernel void nvf(__global const float* restrict input,
 	const unsigned int width,
     const unsigned int height)
 {	
-	const int pad = WINDOW_SIZE / 2;
-	const int pSquared = WINDOW_SIZE * WINDOW_SIZE;
 	const int x = get_global_id(1);
     const int y = get_global_id(0);
-    __local float region[16 + 2 * (WINDOW_SIZE/2)][16 + 2 * (WINDOW_SIZE/2)];
+    __local float region[16 + 2 * PAD][16 + 2 * PAD];
 
 	fillBlock(input, &region[0][0], width, height);
     barrier(CLK_LOCAL_MEM_FENCE);
@@ -45,22 +45,22 @@ __kernel void nvf(__global const float* restrict input,
     if (y >= height || x >= width)
         return;
 
-    const int shX = get_local_id(1) + pad;
-    const int shY = get_local_id(0) + pad;
+    const int shX = get_local_id(1) + PAD;
+    const int shY = get_local_id(0) + PAD;
 
 	float sum = 0.0f, sumSq = 0.0f;
-	for (int i = -pad; i <= pad; i++)
+	for (int i = -PAD; i <= PAD; i++)
 	{
-		for (int j = -pad; j <= pad; j++)
+		for (int j = -PAD; j <= PAD; j++)
 		{
 			float pixelValue = region[shY + i][shX + j];
 			sum += pixelValue;
 			sumSq += pixelValue * pixelValue;
 		}
 	}
-	float mean = sum / pSquared;
-	float variance = (sumSq / pSquared) - (mean * mean);
-	nvf[(x * height) + y] = fmax(variance / (1 + variance), 0.0f);
+	const float numerator = (N_PIXELS * sumSq) - (sum * sum);
+    const float output = native_divide(numerator, N_PIXELS_SQ + numerator);
+	nvf[(x * height) + y] = fmax(output, 0.0f);
 }
 
 inline float error_sequence_coeffs_filter_p3(__local float* centerPtr, __constant float* coeffs)

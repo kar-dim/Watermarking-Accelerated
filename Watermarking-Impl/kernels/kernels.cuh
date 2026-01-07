@@ -6,7 +6,7 @@
 
 struct alignas(16) half8
 {
-	half a, b, c, d, e, f, g, h;
+    half a, b, c, d, e, f, g, h;
 };
 
 __device__ half8 make_half8(const float& a, const float& b, const float& c, const float& d, const float& e, const float& f, const float& g, const float& h);
@@ -20,7 +20,7 @@ __device__ __host__ inline T clamp(const T& val, const T& lo, const T& hi) { ret
 template<bool FUSED, int p, int pad = p / 2, int sharedSize = 16 + (2 * pad)>
 __device__ void fillBlockMain(const float* __restrict__ inputA, const float* __restrict__ inputB, float* __restrict__ sharedMem, const int width, const int height)
 {
-	//cooperatively fill 2D shared memory
+    //cooperatively fill 2D shared memory
     for (int i = threadIdx.y * blockDim.x + threadIdx.x; i < sharedSize * sharedSize; i += blockDim.x * blockDim.y)
     {
         const int tileRow = i % sharedSize;
@@ -29,7 +29,7 @@ __device__ void fillBlockMain(const float* __restrict__ inputA, const float* __r
         const int globalY = clamp<int>((int)(blockIdx.x * blockDim.x) + tileRow - pad, 0, height - 1);
         const int idx = globalX * height + globalY;
         float val = inputA[idx];
-		//if we need to fuse (A*B), do it here, branch-free because it its known at compile time
+        //if we need to fuse (A*B), do it here, branch-free because it its known at compile time
         if constexpr (FUSED)
             val *= inputB[idx];
         sharedMem[tileRow * sharedSize + tileCol] = val;
@@ -55,7 +55,7 @@ __device__ inline void me_p3_rxCalculate(half8* RxLocalVec8, const half8& vec, c
 
 //NVF kernel, calculates NVF values for each pixel in the image
 //works for all p values (3,5,7 and 9)
-template<int p, int pSquared = p * p, int pad = p / 2>
+template<int p, float nPixels = static_cast<float>(p * p), float nPixelsSq = nPixels * nPixels, int pad = p / 2>
 __global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, const unsigned int width, const unsigned int height)
 {
     constexpr int sharedSize = 16 + (2 * pad);
@@ -64,7 +64,7 @@ __global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, co
 
     __shared__ float region[sharedSize][sharedSize]; //hold the region for this 16 x 16 block
 
-	fillBlock<p>(input, &region[0][0], width, height);
+    fillBlock<p>(input, &region[0][0], width, height);
     __syncthreads();
 
     if (x >= width || y >= height)
@@ -84,9 +84,10 @@ __global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, co
             sumSq += val * val;
         }
     }
-    const float mean = sum / pSquared;
-    const float variance = (sumSq / pSquared) - (mean * mean);
-    nvf[x * height + y] = fmaxf(variance / (1.0f + variance), 0.0f);
+    //calculate NVF with optimized math (avoid divisions)
+    const float numerator = (nPixels * sumSq) - (sum * sum);
+    const float output = __fdividef(numerator, nPixelsSq + numerator);
+    nvf[x * height + y] = fmaxf(output, 0.0f);
 }
 
 //main Cholesky solver kernel for p = 3 (8x8 system), faster than af::solve for small systems (no cuSOLVE overhead), no LU pivoting and most importantly:
