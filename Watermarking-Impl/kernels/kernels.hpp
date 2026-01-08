@@ -245,15 +245,33 @@ __kernel void me(__global const float* restrict input,
     barrier(CLK_LOCAL_MEM_FENCE);
 
     //OpenCL optimized Rx summation
-    if (localId < 36)
+    //parallel partial summation with 252 threads active
+    const int flatId = localId;
+    if (flatId < 252)
     {
-        float sum = 0.0f;
+        const int col = flatId % 36;
+        const int chunk = flatId / 36;
+        const int rowsPerChunk = 37;
+        const int startRow = chunk * rowsPerChunk;
+        const int endRow = min(startRow + rowsPerChunk, 256);
+        
+        float pSum = 0.0f;
+        for (int i = startRow; i < endRow; i++)
+            pSum += (float)RxLocal[i][col];
+        //smartly reuse rxPartial local memory here (for partial sum)
+        ((__local float*)rxPartial)[flatId] = pSum;
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    //final summation by the first 36 threads
+    if (flatId < 36)
+    {
+        float totalSum = 0.0f;
         #pragma unroll
-        for (int i = 0; i < 256; i++) 
-            sum += (float)RxLocal[i][localId];
-        const int blocksInX = get_num_groups(0);
-        const int blockOffset = (y * blocksInX * 36) + (get_group_id(0) * 36);
-        Rx[blockOffset + localId] = sum;
+        for (int k = 0; k < 7; k++)
+            totalSum += ((__local float*)rxPartial)[flatId + k * 36];
+        const int blockOffset = (y * get_num_groups(0) * 36) + (get_group_id(0) * 36);
+        Rx[blockOffset + flatId] = totalSum;
     }
 }
 
