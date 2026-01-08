@@ -32,7 +32,7 @@ private:
 		const dim3 gridSize = cuda_utils::gridSizeCalculate(windowBlockSize, this->baseCols, this->baseRows);
 		const af::array customMask(this->baseRows, this->baseCols);
 		//call NVF kernel
-		nvf<3> << <gridSize, windowBlockSize, 0, afStream >> > (inputImage.device<float>(), customMask.device<float>(), this->baseCols, this->baseRows);
+		nvf<p> << <gridSize, windowBlockSize, 0, afStream >> > (inputImage.device<float>(), customMask.device<float>(), this->baseCols, this->baseRows);
 		//transfer ownership to arrayfire and return output array
 		this->unlockArrays(inputImage, customMask);
 		return customMask;
