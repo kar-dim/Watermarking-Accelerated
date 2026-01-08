@@ -10,11 +10,6 @@ using namespace nvcuda;
 __device__ inline half HALF(float x) { return __float2half(x); }
 __device__ inline float FLOAT(half x) { return __half2float(x); }
 
-__device__ half8 make_half8(const half& a, const half& b, const half& c, const half& d, const half& e, const half& f, const half& g, const half& h)
-{
-    return half8 { a, b, c, d, e, f, g, h };
-}
-
 //STS.128
 __device__ void me_p3_rxCalculate(half8* RxLocalVec8, const half8& vec, const half& x4)
 {
@@ -64,11 +59,11 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
     //read the 3x3 window from shared memory
     const int localX = tid + 1; //center index
     const half center = blockValues[1][localX];
-    half8 localBlock = make_half8(
+    half8 localBlock = {
         blockValues[0][localX - 1], blockValues[0][localX], blockValues[0][localX + 1],
         blockValues[1][localX - 1], blockValues[1][localX + 1],
         blockValues[2][localX - 1], blockValues[2][localX], blockValues[2][localX + 1]
-    );
+    };
 
 
     half8* RxLocalVec8 = reinterpret_cast<half8*>(&RxLocal[tid][0]);

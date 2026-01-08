@@ -8,7 +8,6 @@ struct alignas(16) half8
 {
     half a, b, c, d, e, f, g, h;
 };
-__device__ half8 make_half8(const half& a, const half& b, const half& c, const half& d, const half& e, const half& f, const half& g, const half& h);
 
 //helper method to clamp a value between two limits
 template<typename T>
