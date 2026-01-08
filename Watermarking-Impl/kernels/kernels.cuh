@@ -47,9 +47,6 @@ __device__ void fillBlock(const float* __restrict__ inputA, const float* __restr
     fillBlockMain<true, p, pad, sharedSize>(inputA, inputB, sharedMem, width, height);
 }
 
-//helper methods of ME kernel, to calculate block-wide rx values in shared memory
-__device__ inline void me_p3_rxCalculate(half8* RxLocalVec8, const half8& vec, const half& x4);
-
 //NVF kernel, calculates NVF values for each pixel in the image
 //works for all p values (3,5,7 and 9)
 template<int p, int pad = p / 2, int sharedSize = 16 + (2 * pad)>
@@ -89,42 +86,40 @@ __global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, co
     nvf[x * height + y] = fmaxf(output, 0.0f);
 }
 
-//main Cholesky solver kernel for p = 3 (8x8 system), faster than af::solve for small systems (no cuSOLVE overhead), no LU pivoting and most importantly:
-//we can stop early by passing a GPU flag if the system is not solvable, without returning to host (used in both ME and detection)
-__global__ void cholesky_solver_p3(const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ X, int* __restrict__ stopFlag);
-
-//main ME kernel, calculates ME values for each pixel in the image
-__global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height);
-
 //helper method for error sequence calculation with p = 3
-__device__ inline float error_sequence_coeffs_filter_p3(const float region[18][18], const float sCoeffs[8], const int localRow, const int localCol)
+template<int p, int pad = p / 2, int sharedSize = 16 + (2 * pad), int coeffsSize = (p* p) - 1>
+__device__ inline float error_sequence_coeffs_filter(const float region[sharedSize][sharedSize], const float sCoeffs[coeffsSize], const int localRow, const int localCol)
 {
-    const int r = localRow + 1;
-    const int c = localCol + 1;
+    const int r = localRow + pad;
+    const int c = localCol + pad;
     float dot = 0.0f;
-    dot += sCoeffs[0] * region[r - 1][c - 1];
-    dot += sCoeffs[1] * region[r - 1][c];
-    dot += sCoeffs[2] * region[r - 1][c + 1];
-    dot += sCoeffs[3] * region[r][c - 1];
-    dot += sCoeffs[4] * region[r][c + 1];
-    dot += sCoeffs[5] * region[r + 1][c - 1];
-    dot += sCoeffs[6] * region[r + 1][c];
-    dot += sCoeffs[7] * region[r + 1][c + 1];
+    int k = 0;
+#pragma unroll
+    for (int i = -pad; i <= pad; i++)
+    {
+#pragma unroll
+        for (int j = -pad; j <= pad; j++)
+        {
+            if (i == 0 && j == 0)
+                continue;
+            dot += sCoeffs[k] * region[r + i][c + j];
+            k++;
+        }
+    }
     return region[r][c] - dot;
 }
 
 //main kernel for error sequence calculation
-template<bool FUSED>
-__global__ void calculate_error_sequence_p3(const float* __restrict__ inputA, const float* __restrict__ inputB, float* __restrict__ x_, const float* __restrict__ coeffs, const unsigned int width, const unsigned int height, const bool calculateAbs, const int* __restrict__ stopFlag)
+template<int p, bool FUSED, int pad = p / 2, int sharedSize = 16 + (2 * pad), int coeffsSize = (p* p) - 1>
+__global__ void calculate_error_sequence(const float* __restrict__ inputA, const float* __restrict__ inputB, float* __restrict__ x_, const float* __restrict__ coeffs, const unsigned int width, const unsigned int height, const bool calculateAbs, const int* __restrict__ stopFlag)
 {
-    constexpr int sharedSize = 16 + 2;
     const int tid = threadIdx.y * blockDim.x + threadIdx.x;
 
     __shared__ float region[sharedSize][sharedSize];
-    __shared__ float sCoeffs[8];
-    if (tid < 8)
+    __shared__ float sCoeffs[coeffsSize];
+    if (tid < coeffsSize)
         sCoeffs[tid] = coeffs[tid];
-    fillBlockMain<FUSED, 3>(inputA, inputB, &region[0][0], width, height);
+    fillBlockMain<FUSED, p>(inputA, inputB, &region[0][0], width, height);
     __syncthreads();
 
     const int y = blockIdx.x * blockDim.x + threadIdx.x;
@@ -136,10 +131,20 @@ __global__ void calculate_error_sequence_p3(const float* __restrict__ inputA, co
             x_[(x * height + y)] = 0.0f;
             return;
         }
-        const float output = error_sequence_coeffs_filter_p3(region, sCoeffs, threadIdx.x, threadIdx.y);
+        const float output = error_sequence_coeffs_filter<p>(region, sCoeffs, threadIdx.x, threadIdx.y);
         x_[(x * height + y)] = calculateAbs ? fabsf(output) : output;
     }
 }
+
+//main Cholesky solver kernel for p = 3 (8x8 system), faster than af::solve for small systems (no cuSOLVE overhead), no LU pivoting and most importantly:
+//we can stop early by passing a GPU flag if the system is not solvable, without returning to host (used in both ME and detection)
+__global__ void cholesky_solver_p3(const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ X, int* __restrict__ stopFlag);
+
+//helper methods of ME kernel, to calculate block-wide rx values in shared memory
+__device__ inline void me_p3_rxCalculate(half8* RxLocalVec8, const half8& vec, const half& x4);
+
+//main Prediction error kernel and the most heavy: computes prediction error matrices (Rx, rx) for each pixel of the image
+__global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height);
 
 //main kernels for correlation calculation. used in detection.
 __global__ void calculate_partial_correlation(const float* __restrict__ e_u, const float* __restrict__ e_z, float* __restrict__ partialDots, float* __restrict__ partialNormU, float* __restrict__ partialNormZ, const unsigned int size);

@@ -70,10 +70,10 @@ private:
 		//transposed global dimensions because of column-major order in arrayfire
 		executeKernel([&]() {
 			queue.enqueueNDRangeKernel(
-				KernelBuilder(programs, "error_sequence_p3").args(wrap(imageMem.get()), wrap(errorSequenceMem.get()), wrap(coeffsMem.get()), this->baseCols, this->baseRows, (int)calculateAbs, wrap(stopFlagMem.get())).build(),
+				KernelBuilder(programs, "error_sequence").args(wrap(imageMem.get()), wrap(errorSequenceMem.get()), wrap(coeffsMem.get()), this->baseCols, this->baseRows, (int)calculateAbs, wrap(stopFlagMem.get())).build(),
 				cl::NDRange(), cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(windowBlockSize, windowBlockSize));
 			this->unlockArrays(image, errorSequence, this->coefficients, this->stopFlag);
-		}, "error_sequence_p3");
+		}, "error_sequence");
 		return errorSequence;
 	}
 
@@ -88,10 +88,10 @@ private:
 		//transposed global dimensions because of column-major order in arrayfire
 		executeKernel([&]() {
 			queue.enqueueNDRangeKernel(
-				KernelBuilder(programs, "error_sequence_p3_fused").args(wrap(inputAmem.get()), wrap(inputBmem.get()), wrap(errorSequenceMem.get()), wrap(coeffsMem.get()), this->baseCols, this->baseRows, wrap(stopFlagMem.get())).build(),
+				KernelBuilder(programs, "error_sequence_fused").args(wrap(inputAmem.get()), wrap(inputBmem.get()), wrap(errorSequenceMem.get()), wrap(coeffsMem.get()), this->baseCols, this->baseRows, wrap(stopFlagMem.get())).build(),
 				cl::NDRange(), cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(windowBlockSize, windowBlockSize));
 			this->unlockArrays(inputA, inputB, errorSequence, this->coefficients, this->stopFlag);
-			}, "error_sequence_p3_fused");
+			}, "error_sequence_fused");
 		return errorSequence;
 	}
 
@@ -105,7 +105,7 @@ private:
 		const clMemPtr rxPartialMem(rxPartial.device<cl_mem>());
 		return executeKernel([&]() -> af::array {
 			queue.enqueueNDRangeKernel(
-				KernelBuilder(programs, "me").args(wrap(imageMem.get()), wrap(RxPartialMem.get()), wrap(rxPartialMem.get()), this->baseCols, this->baseRows).build(),
+				KernelBuilder(programs, "me_p3").args(wrap(imageMem.get()), wrap(RxPartialMem.get()), wrap(rxPartialMem.get()), this->baseCols, this->baseRows).build(),
 				cl::NDRange(), cl::NDRange(meKernelDims.cols, meKernelDims.rows), cl::NDRange(meBlockSize, 1));
 			//return memory to arrayfire
 			this->unlockArrays(image, RxPartial, rxPartial);
@@ -124,7 +124,7 @@ private:
 			//return memory to arrayfire
 			this->unlockArrays(Rx, rx, this->coefficients, this->stopFlag);
 			return computeErrorSequence(image, calculateAbs);
-		}, "me");
+		}, "me_p3");
 	}
 
 	float computeCorrelation(const af::array& e_u, const af::array& e_z) const

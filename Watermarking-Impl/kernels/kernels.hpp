@@ -9,11 +9,7 @@ inline const std::string kernels = R"CLC(
 
 #pragma OPENCL EXTENSION cl_khr_fp16 : enable
 
-inline void fillBlock(
-    __global const float* restrict input,
-    __local float* restrict sharedMem,
-    const int width,
-    const int height)
+inline void fillBlock(__global const float* restrict input, __local float* restrict sharedMem, const int width, const int height)
 {
     const int groupStartCol = (int)(get_group_id(1) * get_local_size(1));
     const int groupStartRow = (int)(get_group_id(0) * get_local_size(0));
@@ -30,14 +26,11 @@ inline void fillBlock(
     }
 }
 
-__kernel void nvf(__global const float* restrict input, 
-	__global float* restrict nvf,
-	const unsigned int width,
-    const unsigned int height)
+__kernel void nvf(__global const float* restrict input, __global float* restrict nvf, const unsigned int width, const unsigned int height)
 {	
 	const int x = get_global_id(1);
     const int y = get_global_id(0);
-    __local float region[16 + 2 * PAD][16 + 2 * PAD];
+    __local float region[SHAREDSIZE][SHAREDSIZE];
 
 	fillBlock(input, &region[0][0], width, height);
     barrier(CLK_LOCAL_MEM_FENCE);
@@ -63,23 +56,28 @@ __kernel void nvf(__global const float* restrict input,
 	nvf[(x * height) + y] = fmax(output, 0.0f);
 }
 
-inline float error_sequence_coeffs_filter_p3(__local float* centerPtr, __constant float* coeffs)
+inline float error_sequence_coeffs_filter(__local float* centerPtr, __constant float* coeffs)
 {
-    #define P(r, c) centerPtr[(r) * 18 + (c)] 
+    #define P(r, c) centerPtr[(r) * SHAREDSIZE + (c)] 
     float dot = 0.0f;
-    dot += coeffs[0] * P(-1, -1);
-    dot += coeffs[1] * P(-1,  0);
-    dot += coeffs[2] * P(-1,  1);
-    dot += coeffs[3] * P( 0, -1);
-    dot += coeffs[4] * P( 0,  1);
-    dot += coeffs[5] * P( 1, -1);
-    dot += coeffs[6] * P( 1,  0);
-    dot += coeffs[7] * P( 1,  1);
+    int k = 0;
+#pragma unroll
+    for (int i = -PAD; i <= PAD; i++)
+    {
+#pragma unroll
+        for (int j = -PAD; j <= PAD; j++)
+        {
+            if (i == 0 && j == 0)
+                continue;
+            dot += coeffs[k] * P(i, j);
+            k++;
+        }
+    }
     return P(0, 0) - dot;
     #undef P
 }
 
-__kernel void error_sequence_p3(
+__kernel void error_sequence(
     __global const float* restrict input, 
     __global float* restrict x_,
     __constant float* restrict coeffs,
@@ -88,8 +86,8 @@ __kernel void error_sequence_p3(
     const int calculateAbs,
     __global int* restrict stopFlag)
 {
-    __local float region[18][18];
-    __local float* centerPtr = &region[get_local_id(0) + 1][get_local_id(1) + 1];
+    __local float region[SHAREDSIZE][SHAREDSIZE];
+    __local float* centerPtr = &region[get_local_id(0) + PAD][get_local_id(1) + PAD];
     fillBlock(input, &region[0][0], width, height);
     barrier(CLK_LOCAL_MEM_FENCE);
 
@@ -102,12 +100,12 @@ __kernel void error_sequence_p3(
             x_[x * height + y] = 0.0f;
             return;
         }
-        const float output = error_sequence_coeffs_filter_p3(centerPtr, coeffs);
+        const float output = error_sequence_coeffs_filter(centerPtr, coeffs);
         x_[x * height + y] = calculateAbs ? fabs(output) : output;
     }
 }
 
-__kernel void error_sequence_p3_fused(
+__kernel void error_sequence_fused(
     __global const float* restrict inputA, 
     __global const float* restrict inputB,
     __global float* restrict x_,
@@ -116,23 +114,23 @@ __kernel void error_sequence_p3_fused(
     const int height,
     __constant int* restrict stopFlag)
 {
-    __local float region[18][18];
-    __local float* centerPtr = &region[get_local_id(0) + 1][get_local_id(1) + 1];
+    __local float region[SHAREDSIZE][SHAREDSIZE];
+    __local float* centerPtr = &region[get_local_id(0) + PAD][get_local_id(1) + PAD];
    
-const int groupStartRow = (int)(get_group_id(0) * get_local_size(0));
-const int groupStartCol = (int)(get_group_id(1) * get_local_size(1));
-const int maxRow = height - 1;
-const int maxCol = width - 1;
-const int stride = (int)(get_local_size(0) * get_local_size(1));
-for (int i = (int)(get_local_id(1) * get_local_size(0) + get_local_id(0)); i < SHAREDSIZE * SHAREDSIZE; i += stride)
-{
-    const int tileRow = i % SHAREDSIZE;
-    const int tileCol = i / SHAREDSIZE;
-    const int globalX = clamp(groupStartCol + tileCol - PAD, 0, maxCol);
-    const int globalY = clamp(groupStartRow + tileRow - PAD, 0, maxRow);
-    const int idx = globalX * height + globalY;
-    region[tileRow][tileCol] = inputA[idx] * inputB[idx];
-}
+    const int groupStartRow = (int)(get_group_id(0) * get_local_size(0));
+    const int groupStartCol = (int)(get_group_id(1) * get_local_size(1));
+    const int maxRow = height - 1;
+    const int maxCol = width - 1;
+    const int stride = (int)(get_local_size(0) * get_local_size(1));
+    for (int i = (int)(get_local_id(1) * get_local_size(0) + get_local_id(0)); i < SHAREDSIZE * SHAREDSIZE; i += stride)
+    {
+        const int tileRow = i % SHAREDSIZE;
+        const int tileCol = i / SHAREDSIZE;
+        const int globalX = clamp(groupStartCol + tileCol - PAD, 0, maxCol);
+        const int globalY = clamp(groupStartRow + tileRow - PAD, 0, maxRow);
+        const int idx = globalX * height + globalY;
+        region[tileRow][tileCol] = inputA[idx] * inputB[idx];
+    }
     barrier(CLK_LOCAL_MEM_FENCE);
 
     const int x = get_global_id(1);
@@ -144,7 +142,7 @@ for (int i = (int)(get_local_id(1) * get_local_size(0) + get_local_id(0)); i < S
             x_[x * height + y] = 0.0f; 
             return; 
         }
-        x_[x * height + y] = error_sequence_coeffs_filter_p3(centerPtr, coeffs);
+        x_[x * height + y] = error_sequence_coeffs_filter(centerPtr, coeffs);
     }
 }
 
@@ -164,7 +162,7 @@ inline void me_p3_RxCalculate(__local half RxLocal[256][40], const int localId, 
     rowPtr[4] = (half8)(x_6 * x_8, x_7 * x_7, x_7 * x_8, x_8 * x_8, 0.0h, 0.0h, 0.0h, 0.0h);
 }
 
-__kernel void me(__global const float* restrict input,
+__kernel void me_p3(__global const float* restrict input,
     __global float* restrict Rx,
     __global float* restrict rx,
     const unsigned int width,

@@ -44,7 +44,7 @@ private:
 		const dim3 gridSize = cuda_utils::gridSizeCalculate(windowBlockSize, this->baseCols, this->baseRows);
 		const af::array errorSequence(this->baseRows, this->baseCols);
 		//call error sequence kernel
-		calculate_error_sequence_p3<false> << <gridSize, windowBlockSize, 0, afStream >> > (image.device<float>(), nullptr, errorSequence.device<float>(), this->coefficients.template device<float>(), this->baseCols, this->baseRows, calculateAbs, this->stopFlag.template device<int>());
+		calculate_error_sequence<p, false> << <gridSize, windowBlockSize, 0, afStream >> > (image.device<float>(), nullptr, errorSequence.device<float>(), this->coefficients.template device<float>(), this->baseCols, this->baseRows, calculateAbs, this->stopFlag.template device<int>());
 		//transfer ownership to arrayfire and return output array
 		this->unlockArrays(image, errorSequence, this->coefficients, this->stopFlag);
 		return errorSequence;
@@ -56,7 +56,7 @@ private:
 		const dim3 gridSize = cuda_utils::gridSizeCalculate(windowBlockSize, this->baseCols, this->baseRows);
 		const af::array errorSequence(this->baseRows, this->baseCols);
 		//call error sequence kernel
-		calculate_error_sequence_p3<true> << <gridSize, windowBlockSize, 0, afStream >> > (inputA.device<float>(), inputB.device<float>(), errorSequence.device<float>(), this->coefficients.template device<float>(), this->baseCols, this->baseRows, false, this->stopFlag.template device<int>());
+		calculate_error_sequence<p, true> << <gridSize, windowBlockSize, 0, afStream >> > (inputA.device<float>(), inputB.device<float>(), errorSequence.device<float>(), this->coefficients.template device<float>(), this->baseCols, this->baseRows, false, this->stopFlag.template device<int>());
 		//transfer ownership to arrayfire and return output array
 		this->unlockArrays(inputA, inputB, errorSequence, this->coefficients, this->stopFlag);
 		return errorSequence;
