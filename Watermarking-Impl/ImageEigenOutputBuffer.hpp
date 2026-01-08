@@ -3,6 +3,10 @@
 #include <Eigen/Dense>
 #include <variant>
 
+/*!
+ *  \brief  Holds either an Eigen array or Eigen RGB array (uint8) by using std::variant. CPU implementation.
+ *  \author Dimitris Karatzas
+ */
 class ImageEigenOutputBuffer
 {
 private:
