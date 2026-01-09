@@ -15,6 +15,7 @@
 template<int p>
 class WatermarkCuda final : public WatermarkGPU<p>
 {
+	static_assert(p == 3 || p == 5, "Only p = 3 or p = 7 is currently supported in CUDA implementation");
 public:
 	WatermarkCuda<p>(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr)
 		: WatermarkGPU<p>(rows, cols, randomMatrixPath, psnr), meKernelDims{ WatermarkBase::align<meBlockSize.x>(cols), rows }, afStream(CudaStreamManager::getInstance().getAfStream())
@@ -64,21 +65,24 @@ private:
 
 	af::array computePredictionErrorData(const af::array& image, const bool calculateAbs) const
 	{
+		constexpr int RxMultiplier = p == 3 ? 1 : 9;
+		constexpr int rxMultiplier = p == 3 ? 1 : 3;
 		const dim3 gridSize = cuda_utils::gridSizeCalculate(meBlockSize, meKernelDims.y, meKernelDims.x);
+
 		//call prediction error mask kernel
-		const af::array RxPartial(this->baseRows, meKernelDims.x / 4);
-		const af::array rxPartial(this->baseRows, meKernelDims.x / 32);
-		me_p3 << <gridSize, meBlockSize, 0, afStream >> > (image.device<float>(), RxPartial.device<float>(), rxPartial.device<float>(), this->baseCols, this->baseRows);
+		const af::array RxPartial(this->baseRows, (meKernelDims.x * RxMultiplier) / 4);
+		const af::array rxPartial(this->baseRows, (meKernelDims.x * rxMultiplier) / 32);
+		if constexpr (p == 3)
+			me_p3 << <gridSize, meBlockSize, 0, afStream >> > (image.device<float>(), RxPartial.device<float>(), rxPartial.device<float>(), this->baseCols, this->baseRows);
+		else
+			me_p5 << <gridSize, meBlockSize, 0, afStream >> > (image.device<float>(), RxPartial.device<float>(), rxPartial.device<float>(), this->baseCols, this->baseRows);
 		this->unlockArrays(image, RxPartial, rxPartial);
 		//calculation of coefficients and error sequence
 		const auto correlationArrays = this->transformCorrelationArrays(RxPartial, rxPartial);
 		const af::array Rx = af::moddims(correlationArrays.first, this->localSize, this->localSize);
 		const af::array& rx = correlationArrays.second;
-		if constexpr (p == 3)
-			cholesky_solver<p> << <1, 1, 0, afStream >> > (Rx.device<float>(), rx.device<float>(), this->coefficients.template device<float>(), this->stopFlag.template device<int>());
-		else {
-			//todo
-		}
+		//very low latency solver for p = 3 and p = 5
+		cholesky_solver<p> << <1, 1, 0, afStream >> > (Rx.device<float>(), rx.device<float>(), this->coefficients.template device<float>(), this->stopFlag.template device<int>());
 		this->unlockArrays(Rx, rx, this->coefficients, this->stopFlag);
 		return computeErrorSequence(image, calculateAbs);
 	}

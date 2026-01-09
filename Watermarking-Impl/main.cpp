@@ -76,20 +76,13 @@ int main(void)
 #if defined(_USE_GPU_)
 		af::info();
 		cout << "\n";
-#endif
-		const int p = inir.GetInteger("parameters", "p", -1);
-		const float psnr = inir.GetFloat("parameters", "psnr", -1.0f);
-
-#if defined(_USE_EIGEN_)
-		//check valid parameter values
-		Utils::checkError(p <= 1 || p % 2 != 1 || p > 9, "p parameter must be a positive odd number greater than or equal to 3 and less than or equal to 9");
+#else
 		//initialize openmp
 #pragma omp parallel
 		{}
-#else
-		//TODO GPU: for p>3 we have problems with ME masking buffers
-		Utils::checkError(p != 3, "For now, only p=3 is allowed");
 #endif
+		const int p = inir.GetInteger("parameters", "p", -1);
+		const float psnr = inir.GetFloat("parameters", "psnr", -1.0f);
 		Utils::checkError(psnr <= 0, "PSNR must be a positive number");
 
 		//test algorithms

@@ -62,7 +62,6 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
         blockValues[2][localX - 1], blockValues[2][localX], blockValues[2][localX + 1]
     };
 
-
     half8* RxLocalVec8 = reinterpret_cast<half8*>(&RxLocal[tid][0]);
     RxLocalVec8[1] = {};
     //if/else is better than always writing (even vectorized) to shared memory unnecessarily
@@ -81,13 +80,13 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
     for (int k = 0; k < 4; k++)
     {
         half2 val = rxHalf2Ptr[k];
-        for (int offset = 16; offset > 0; offset /= 2)
+        for (int offset = 16; offset > 0; offset >>= 1)
             val = __hadd2(val, __shfl_down_sync(0xFFFFFFFF, val, offset));
         rxHalf2Ptr[k] = val;
     }
 
     //exchange (each warp leader)
-    if (tid % 32 == 0)
+    if ((tid & 31) == 0)
         RxLocalVec8[2] = rxVec;
     __syncthreads();
 
@@ -108,8 +107,8 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
     //store matrix at warpId * 32 (row 0, 32, 64...)
     //so that we will overwrite only the first 16 rows of the warp's chunk
     //rows 16-31 of the chunk are NOT touched (preventing race conditions with neighbor warps)
-    half* myWarpOutput = &RxLocal[warpId * 32][0];
-    wmma::store_matrix_sync(myWarpOutput, C, sharedMemStride, wmma::mem_row_major);
+    half* warpOutput = &RxLocal[warpId * 32][0];
+    wmma::store_matrix_sync(warpOutput, C, sharedMemStride, wmma::mem_row_major);
     __syncthreads();
 
     //first 8 threads write rx
@@ -137,6 +136,198 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
     }
 }
 
+__device__ void load_neighbor_vec_p5(half8* dst, const half blockValues[5][260], const int localX)
+{
+    //load all (5x5) - 1 = 24 neighbors and store them as 32
+    //(3 x half8, plus 1 x half8 with zeros for WMMA later) -> STS.128
+    half8 v0, v1, v2;
+
+    //row 0 begin
+    v0.a = blockValues[0][localX - 2];
+    v0.b = blockValues[0][localX - 1];
+    v0.c = blockValues[0][localX];
+    v0.d = blockValues[0][localX + 1];
+    v0.e = blockValues[0][localX + 2];
+    //row 1 begin
+    v0.f = blockValues[1][localX - 2];
+    v0.g = blockValues[1][localX - 1];
+    v0.h = blockValues[1][localX];
+
+    v1.a = blockValues[1][localX + 1];
+    v1.b = blockValues[1][localX + 2];
+    //row 2 begin (center row, skip center pixel)
+    v1.c = blockValues[2][localX - 2];
+    v1.d = blockValues[2][localX - 1];
+    v1.e = blockValues[2][localX + 1];
+    v1.f = blockValues[2][localX + 2];
+    //row 3 begin
+    v1.g = blockValues[3][localX - 2];
+    v1.h = blockValues[3][localX - 1];
+
+    v2.a = blockValues[3][localX];
+    v2.b = blockValues[3][localX + 1];
+    v2.c = blockValues[3][localX + 2];
+    //row 4
+    v2.d = blockValues[4][localX - 2];
+    v2.e = blockValues[4][localX - 1];
+    v2.f = blockValues[4][localX];
+    v2.g = blockValues[4][localX + 1];
+    v2.h = blockValues[4][localX + 2];
+
+    //4x STS.128
+    dst[0] = v0;
+    dst[1] = v1;
+    dst[2] = v2;
+    dst[3] = {};
+}
+
+__global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height)
+{
+    constexpr int sharedMemStride = 32;
+
+    const int tid = threadIdx.x;
+    const int x = blockIdx.x * 256 + tid;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+    const int warpId = tid / 32;
+    const int startRow = warpId * 32;
+    const half halfScaleFactor = __float2half(0.00392156862f); //multiplication with stored value of (1/255) is faster than division by 255
+
+    //shared memory for Rx, rx, scratch and all pixels utilized by the whole block
+    __shared__ alignas(16) half RxLocal[256][sharedMemStride];
+    __shared__ half blockValues[5][260];
+
+    //cooperatively load the 5 x (blockSize + 4) block (window size 5x5, for all threads in the block)
+    for (int i = tid; i < 5 * 260; i += 256)
+    {
+        const int tileCol = i / 5;
+        const int tileRow = i % 5;
+        //clamp (mimic cudaAddressModeClamp)
+        const int globalX = clamp<int>((int)(blockIdx.x * 256) + tileCol - 2, 0, width - 1);
+        const int globalY = clamp<int>((int)(blockIdx.y * 1) + tileRow - 2, 0, height - 1);
+        //normalize from [0,255] to [0,1] to support half precision and avoid overflow in multiplications
+        blockValues[tileRow][tileCol] = __float2half(input[globalX * height + globalY]) * halfScaleFactor;
+    }
+    __syncthreads();
+
+    if (y >= height)
+        return;
+
+    //read the 5x5 window from shared memory
+    const int localX = tid + 2; //center index
+    const half2 center = __half2half2(blockValues[2][localX]); //half -> half2 for vectorized ops later
+    half8* localVec8 = reinterpret_cast<half8*>(&RxLocal[tid][0]);
+    //if/else is better than always writing (even vectorized) to shared memory unnecessarily
+    if (x < width)
+        load_neighbor_vec_p5(localVec8, blockValues, localX);
+    else
+    {
+        half8 zero = {};
+        localVec8[0] = zero;
+        localVec8[1] = zero;
+        localVec8[2] = zero;
+        localVec8[3] = zero;
+    }
+
+    //do not compute rx yet, compute Rx first
+    //TENSOR CORE Rx ACCUMULATION (24x24 matrix -> 32x32 tiled)
+    wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::col_major> A_low, A_high;
+    wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::row_major> B_low, B_high;
+    //accumulators for the 32x32 grid
+    wmma::fragment<wmma::accumulator, 16, 16, 16, half> C00, C01, C10, C11;
+    wmma::fill_fragment(C00, 0.0f);
+    wmma::fill_fragment(C01, 0.0f);
+    wmma::fill_fragment(C10, 0.0f);
+    wmma::fill_fragment(C11, 0.0f);
+
+    //loop for the 32 pixels in this warp
+#pragma unroll
+    for (int k0 = 0; k0 < 32; k0 += 16)
+    {
+        //pointer to the start of the 16-pixel batch for this warp
+        const half* tilePtr = &RxLocal[startRow + k0][0];
+        //load lower half
+        wmma::load_matrix_sync(A_low, tilePtr, sharedMemStride);
+        wmma::load_matrix_sync(B_low, tilePtr, sharedMemStride);
+        //load upper half
+        wmma::load_matrix_sync(A_high, tilePtr + 16, sharedMemStride);
+        wmma::load_matrix_sync(B_high, tilePtr + 16, sharedMemStride);
+        //compute 4 Matrices (2x2)
+        wmma::mma_sync(C00, A_low, B_low, C00);   //top left
+        wmma::mma_sync(C01, A_low, B_high, C01);  //top right
+        wmma::mma_sync(C10, A_high, B_low, C10);  //bottom left
+        wmma::mma_sync(C11, A_high, B_high, C11); //bottom right
+    }
+
+    //compute rx (vectorized 128-bit plus half2 for maximum efficiency)
+    half8 rxVec[3];
+#pragma unroll
+    for (int i = 0; i < 3; i++)
+    {
+        half2* inPtr = reinterpret_cast<half2*>(&localVec8[i]);
+        half2* resultPtr = reinterpret_cast<half2*>(&rxVec[i]);
+        resultPtr[0] = __hmul2(inPtr[0], center);
+        resultPtr[1] = __hmul2(inPtr[1], center);
+        resultPtr[2] = __hmul2(inPtr[2], center);
+        resultPtr[3] = __hmul2(inPtr[3], center);
+    }
+
+    //store Rx to shared mem
+    half* myWarpOutput = &RxLocal[warpId * 32][0];
+    wmma::store_matrix_sync(myWarpOutput, C00, sharedMemStride, wmma::mem_row_major); //(0,0)
+    wmma::store_matrix_sync(myWarpOutput + 16, C01, sharedMemStride, wmma::mem_row_major); //(0,16)
+    wmma::store_matrix_sync(myWarpOutput + 16 * sharedMemStride, C10, sharedMemStride, wmma::mem_row_major); //(16,0)
+    wmma::store_matrix_sync(myWarpOutput + 16 * sharedMemStride + 16, C11, sharedMemStride, wmma::mem_row_major); //(16,16)
+
+    __syncthreads();
+
+    //write Rx
+    const int RxBaseIndex = (y * gridDim.x * 576) + (blockIdx.x * 576);
+    for (int i = tid; i < 576; i += blockDim.x)
+    {
+        const int r = i / 24;
+        const int c = i % 24;
+        float sum = 0.0f;
+        //sum across the 8 warps
+#pragma unroll
+        for (int w = 0; w < 8; w++)
+            sum += __half2float(RxLocal[w * 32 + r][c]);
+        Rx[RxBaseIndex + i] = sum;
+    }
+
+    //reduction for rx (vectorized 128-bit plus half2 for maximum efficiency)
+    half2* rxHalf2 = reinterpret_cast<half2*>(rxVec);
+#pragma unroll
+    for (int i = 0; i < 12; i++)
+    {
+        half2 sum = rxHalf2[i];
+        for (int offset = 16; offset > 0; offset >>= 1)
+        {
+            int shfl_int = __shfl_down_sync(0xFFFFFFFF, reinterpret_cast<int&>(sum), offset);
+            sum = __hadd2(sum, reinterpret_cast<half2&>(shfl_int));
+        }
+        rxHalf2[i] = sum;
+    }
+    if ((tid & 31) == 0)
+    {
+        half8* dstRow = reinterpret_cast<half8*>(&RxLocal[warpId][0]);
+        dstRow[0] = rxVec[0];
+        dstRow[1] = rxVec[1];
+        dstRow[2] = rxVec[2];
+    }
+    __syncthreads();
+
+    //first 24 threads sum the 8 warp results and write to rx
+    const int rxBaseIndex = (y * gridDim.x * 24) + (blockIdx.x * 24);
+    if (tid < 24) 
+    {
+        float sum = 0.0f;
+#pragma unroll
+        for (int w = 0; w < 8; w++)
+            sum += __half2float(RxLocal[w][tid]);
+        rx[rxBaseIndex + tid] = sum;
+    }
+}
+
 __global__ void calculate_partial_correlation(const float* __restrict__ e_u, const float* __restrict__ e_z, float* __restrict__ partialDots, float* __restrict__ partialNormU, float* __restrict__ partialNormZ, const unsigned int size)
 {
     const int tid = threadIdx.x;
@@ -160,7 +351,7 @@ __global__ void calculate_partial_correlation(const float* __restrict__ e_u, con
     float normZVal = b * b;
 
     //intra-warp reduction
-    for (int offset = 16; offset > 0; offset /= 2)
+    for (int offset = 16; offset > 0; offset >>= 1)
     {
         dotVal += __shfl_down_sync(0xFFFFFFFF, dotVal, offset);
         normUVal += __shfl_down_sync(0xFFFFFFFF, normUVal, offset);
@@ -184,7 +375,7 @@ __global__ void calculate_partial_correlation(const float* __restrict__ e_u, con
         normUVal = validTid ? normUCache[tid] : 0.0f;
         normZVal = validTid ? normZCache[tid] : 0.0f;
 
-        for (int offset = 16; offset > 0; offset /= 2)
+        for (int offset = 16; offset > 0; offset >>= 1)
         {
             dotVal += __shfl_down_sync(0xFFFFFFFF, dotVal, offset);
             normUVal += __shfl_down_sync(0xFFFFFFFF, normUVal, offset);

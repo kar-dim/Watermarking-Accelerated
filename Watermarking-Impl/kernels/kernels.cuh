@@ -136,11 +136,10 @@ __global__ void calculate_error_sequence(const float* __restrict__ inputA, const
     }
 }
 
-//fast 1-thread Cholesky solver for p = 3 (N = 8) only
+//naive 1-thread Cholesky solver used for its very low latency versus cuSOLVER but useful only for very small systems, p = 3 (N = 8) or p = 5 (N = 24)
 template<int p, int N = (p * p) - 1>
 __global__ void cholesky_solver(const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ X, int* __restrict__ stopFlag)
 {
-	static_assert(p == 3, "Custom Cholesky solver is usable only for p = 3 (N = 8)");
     if (threadIdx.x > 0 || blockIdx.x > 0)
         return;
 
@@ -219,11 +218,12 @@ exit:
         X[i] = localX[i];
 }
 
-//helper methods of ME kernel, to calculate block-wide rx values in shared memory
-__device__ inline void me_p3_rxCalculate(half8* RxLocalVec8, const half8& vec, const half& x4);
-
-//main Prediction error kernel and the most heavy: computes prediction error matrices (Rx, rx) for each pixel of the image
+//Prediction Error kernels (ME) for p = 3 and p = 5
 __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height);
+__global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height);
+//Prediction Error helper device kernels
+__device__ void me_p3_rxCalculate(half8* RxLocalVec8, const half8& vec, const half& x4);
+__device__ void load_neighbor_vec_p5(half8* dst, const half blockValues[5][260], const int localX);
 
 //main kernels for correlation calculation. used in detection.
 __global__ void calculate_partial_correlation(const float* __restrict__ e_u, const float* __restrict__ e_z, float* __restrict__ partialDots, float* __restrict__ partialNormU, float* __restrict__ partialNormZ, const unsigned int size);

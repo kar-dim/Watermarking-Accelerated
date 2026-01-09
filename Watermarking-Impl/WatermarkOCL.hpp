@@ -23,6 +23,7 @@ using namespace cl_utils;
 template<int p>
 class WatermarkOCL final : public WatermarkGPU<p>
 {
+	static_assert(p == 3, "Only p = 3 is currently supported in OpenCL implementation");
 public:
 	WatermarkOCL<p>(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr)
 		: WatermarkGPU<p>(rows, cols, randomMatrixPath, psnr),
@@ -114,15 +115,15 @@ private:
 			const auto correlationArrays = this->transformCorrelationArrays(RxPartial, rxPartial);
 			const af::array& Rx = correlationArrays.first;
 			const af::array& rx = correlationArrays.second;
-			const clMemPtr RxMemPtr(Rx.device<cl_mem>());
-			const clMemPtr rxMemPtr(rx.device<cl_mem>());
-			const clMemPtr coeffsMem(this->coefficients.template device<cl_mem>());
-			const clMemPtr stopFlagMem(this->stopFlag.template device<cl_mem>());
-			queue.enqueueNDRangeKernel(
-				KernelBuilder(programs, "cholesky_solver_p3").args(wrap(RxMemPtr.get()), wrap(rxMemPtr.get()), wrap(coeffsMem.get()), wrap(stopFlagMem.get())).build(),
-				cl::NDRange(), cl::NDRange(1), cl::NDRange(1));
-			//return memory to arrayfire
-			this->unlockArrays(Rx, rx, this->coefficients, this->stopFlag);
+				const clMemPtr RxMemPtr(Rx.device<cl_mem>());
+				const clMemPtr rxMemPtr(rx.device<cl_mem>());
+				const clMemPtr coeffsMem(this->coefficients.template device<cl_mem>());
+				const clMemPtr stopFlagMem(this->stopFlag.template device<cl_mem>());
+				queue.enqueueNDRangeKernel(
+					KernelBuilder(programs, "cholesky_solver_p3").args(wrap(RxMemPtr.get()), wrap(rxMemPtr.get()), wrap(coeffsMem.get()), wrap(stopFlagMem.get())).build(),
+					cl::NDRange(), cl::NDRange(1), cl::NDRange(1));
+				//return memory to arrayfire
+				this->unlockArrays(Rx, rx, this->coefficients, this->stopFlag);
 			return computeErrorSequence(image, calculateAbs);
 		}, "me_p3");
 	}
