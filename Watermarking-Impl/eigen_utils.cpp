@@ -3,7 +3,7 @@
 #include "eigen_rgb_array.hpp"
 #include "eigen_utils.hpp"
 #include <cstdint>
-#include <Eigen/Dense>
+#include <Eigen/Core>
 #include <omp.h>
 #include <optional>
 #include <vector>

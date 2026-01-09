@@ -3,7 +3,6 @@
 #elif defined(_USE_EIGEN_)
 #include "cimg_init.h"
 #include "eigen_utils.hpp"
-#include <Eigen/Dense>
 #include <omp.h>
 #endif
 #include "buffer.hpp"
@@ -35,10 +34,6 @@ extern "C" {
 }
 
 using namespace video_utils;
-#if defined(_USE_EIGEN_)
-using namespace cimg_library;
-using namespace Eigen;
-#endif
 
 using std::cout;
 using std::string;

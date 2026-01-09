@@ -6,7 +6,6 @@
 #include "test_common.hpp"
 #include "utils.hpp"
 #include "WatermarkBase.hpp"
-#include <Eigen/Dense>
 #include <iostream>
 #include <memory>
 #include <string>

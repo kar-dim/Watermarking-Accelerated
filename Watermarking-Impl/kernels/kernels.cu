@@ -7,9 +7,6 @@
 
 using namespace nvcuda;
 
-__device__ inline half HALF(float x) { return __float2half(x); }
-__device__ inline float FLOAT(half x) { return __half2float(x); }
-
 //STS.128
 __device__ void me_p3_rxCalculate(half8* RxLocalVec8, const half8& vec, const half& x4)
 {
@@ -34,7 +31,7 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
     const int y = blockIdx.y * blockDim.y + threadIdx.y;
     const int warpId = tid / 32;
     const int startRow = warpId * 32;
-    const half halfScaleFactor = HALF(0.00392156862f); //multiplication with stored value of (1/255) is faster than division by 255
+    const half halfScaleFactor = __float2half(0.00392156862f); //multiplication with stored value of (1/255) is faster than division by 255
 
     //shared memory for Rx, rx, scratch and all pixels utilized by the whole block
     __shared__ alignas(16) half RxLocal[256][sharedMemStride];
@@ -49,7 +46,7 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
         const int globalX = clamp<int>((int)(blockIdx.x * 256) + tileCol - 1, 0, width - 1);
         const int globalY = clamp<int>((int)(blockIdx.y * 1) + tileRow - 1, 0, height - 1);
         //normalize from [0,255] to [0,1] to support half precision and avoid overflow in multiplications
-        blockValues[tileRow][tileCol] = HALF(input[globalX * height + globalY]) * halfScaleFactor;
+        blockValues[tileRow][tileCol] = __float2half(input[globalX * height + globalY]) * halfScaleFactor;
     }
     __syncthreads();
 
@@ -122,7 +119,7 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
         float sum_v = 0.0f;
 #pragma unroll
         for (int w = 0; w < 8; w++)
-            sum_v += FLOAT(RxLocal[w * 32][16 + tid]);
+            sum_v += __half2float(RxLocal[w * 32][16 + tid]);
         rx[outputIndex + tid] = sum_v;
     }
 
@@ -134,7 +131,7 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
         float sum = 0.0f;
 #pragma unroll
         for (int w = 0; w < 8; w++)
-            sum += FLOAT(RxLocal[w * 32 + r][c]);
+            sum += __half2float(RxLocal[w * 32 + r][c]);
         const int outputIndex = (y * gridDim.x * 64) + (blockIdx.x * 64);
         Rx[outputIndex + tid] = sum;
     }
@@ -261,88 +258,6 @@ __global__ void calculate_final_correlation(const float* __restrict__ partialDot
             result[0] = (normU > 0.0f && normZ > 0.0f) ? (localDot / (normU * normZ)) : 0.0f;
         }
     }
-}
-
-__global__ void cholesky_solver_p3(const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ X, int* __restrict__ stopFlag)
-{
-    constexpr int N = 8; //p = 3 -> 8x8 system
-
-    if (threadIdx.x > 0 || blockIdx.x > 0)
-        return;
-
-    float localA[N * N], localB[N], localX[N];
-
-    //initialize Result to 0.0f (safe fallback for unsolvable systems)
-    for (int i = 0; i < N; i++)
-        localX[i] = 0.0f;
-
-    //initialize
-    for (int i = 0; i < N * N; i++)
-        localA[i] = A[i];
-    for (int i = 0; i < N; i++)
-        localB[i] = B[i];
-
-    //Cholesky Decomposition: A = L*L^T
-    //A is symmetric positive definite
-    float L[N][N];
-    //clear L
-#pragma unroll
-    for (int i = 0; i < N; i++)
-#pragma unroll
-        for (int j = 0; j < N; j++)
-            L[i][j] = 0.0f;
-#pragma unroll
-    for (int i = 0; i < N; i++)
-    {
-#pragma unroll
-        for (int j = 0; j <= i; j++)
-        {
-            float sum = 0.0f;
-            for (int k = 0; k < j; k++)
-                sum += L[i][k] * L[j][k];
-            if (i == j)
-            {
-                //diagonal element
-                const float val = localA[i * N + i] - sum;
-                //check if singular! if so, exit early with X = 0.0f
-                if (val <= 1e-12f)
-                {
-                    *stopFlag = 1;
-                    goto exit;
-                }
-                L[i][j] = sqrtf(val);
-            }
-            else //non diagonal
-                L[i][j] = (localA[i * N + j] - sum) * __frcp_rn(L[j][j]); //fast reciprocal
-        }
-    }
-    //solve the system with forward and backward substitution
-    //we again use fast reciprocal for better performance (1 GPU thread is weak, needs as fast math as possible)
-    //forward substitution -> solve L*y = b
-    float y[N];
-#pragma unroll
-    for (int i = 0; i < N; i++)
-    {
-        float sum = 0.0f;
-        for (int k = 0; k < i; k++)
-            sum += L[i][k] * y[k];
-        y[i] = (localB[i] - sum) * __frcp_rn(L[i][i]);
-    }
-
-    //backward substitution -> solve L^T * x = y
-#pragma unroll
-    for (int i = N - 1; i >= 0; i--)
-    {
-        float sum = 0.0f;
-        for (int k = i + 1; k < N; k++)
-            sum += L[k][i] * localX[k]; //transposed
-        localX[i] = (y[i] - sum) * __frcp_rn(L[i][i]);
-    }
-    *stopFlag = 0;
-    //write
-exit:
-    for (int i = 0; i < 8; i++)
-        X[i] = localX[i];
 }
 
 __global__ void nV12ToYUV420p(const uint8_t* __restrict__ uvSrc, const int uvPitch, uint8_t* __restrict__ uvDst, const int uvWidth, const int uvHeight)

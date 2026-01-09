@@ -1,6 +1,7 @@
 #pragma once
+#include "Eigen/Core"
 #include "eigen_rgb_array.hpp"
-#include <Eigen/Dense>
+#include <cstdint>
 #include <variant>
 
 /*!

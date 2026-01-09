@@ -11,6 +11,7 @@ using AlphaBuffer = af::array;
 #include "cimg_init.h"
 #include "ImageEigenBuffer.hpp"
 #include "ImageEigenOutputBuffer.hpp"
+#include <Eigen/Core>
 using ImageBuffer = ImageEigenBuffer;
 using ImageOutputBuffer = ImageEigenOutputBuffer;
 using Gray8Buffer = Eigen::Array<uint8_t, Eigen::Dynamic, Eigen::Dynamic>;

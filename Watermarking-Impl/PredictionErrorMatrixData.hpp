@@ -1,5 +1,6 @@
 #pragma once
-#include <Eigen/Dense>
+#include "Eigen/Cholesky"
+#include "Eigen/Core"
 #include <vector>
 
 //Aligned matrix to 64 bytes boundary (cache-line friendly),

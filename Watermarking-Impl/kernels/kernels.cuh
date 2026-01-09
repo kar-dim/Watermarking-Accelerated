@@ -11,7 +11,7 @@ struct alignas(16) half8
 
 //helper method to clamp a value between two limits
 template<typename T>
-__device__ __host__ inline T clamp(const T& val, const T& lo, const T& hi) { return (val < lo) ? lo : (val > hi) ? hi : val; }
+__device__ inline T clamp(const T& val, const T& lo, const T& hi) { return (val < lo) ? lo : (val > hi) ? hi : val; }
 
 //helper method to fill block-wide shared memory cooperatively for error sequence and NVF kernels
 template<bool FUSED, int p, int pad = p / 2, int sharedSize = 16 + (2 * pad)>
@@ -110,7 +110,7 @@ __device__ inline float error_sequence_coeffs_filter(const float region[sharedSi
 }
 
 //main kernel for error sequence calculation
-template<int p, bool FUSED, int pad = p / 2, int sharedSize = 16 + (2 * pad), int coeffsSize = (p* p) - 1>
+template<int p, bool FUSED, int pad = p / 2, int sharedSize = 16 + (2 * pad), int coeffsSize = (p * p) - 1>
 __global__ void calculate_error_sequence(const float* __restrict__ inputA, const float* __restrict__ inputB, float* __restrict__ x_, const float* __restrict__ coeffs, const unsigned int width, const unsigned int height, const bool calculateAbs, const int* __restrict__ stopFlag)
 {
     const int tid = threadIdx.y * blockDim.x + threadIdx.x;
@@ -136,9 +136,88 @@ __global__ void calculate_error_sequence(const float* __restrict__ inputA, const
     }
 }
 
-//main Cholesky solver kernel for p = 3 (8x8 system), faster than af::solve for small systems (no cuSOLVE overhead), no LU pivoting and most importantly:
-//we can stop early by passing a GPU flag if the system is not solvable, without returning to host (used in both ME and detection)
-__global__ void cholesky_solver_p3(const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ X, int* __restrict__ stopFlag);
+//fast 1-thread Cholesky solver for p = 3 (N = 8) only
+template<int p, int N = (p * p) - 1>
+__global__ void cholesky_solver(const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ X, int* __restrict__ stopFlag)
+{
+	static_assert(p == 3, "Custom Cholesky solver is usable only for p = 3 (N = 8)");
+    if (threadIdx.x > 0 || blockIdx.x > 0)
+        return;
+
+    float localA[N * N], localB[N], localX[N];
+
+    //initialize Result to 0.0f (safe fallback for unsolvable systems)
+    for (int i = 0; i < N; i++)
+        localX[i] = 0.0f;
+
+    //initialize
+    for (int i = 0; i < N * N; i++)
+        localA[i] = A[i];
+    for (int i = 0; i < N; i++)
+        localB[i] = B[i];
+
+    //Cholesky Decomposition: A = L*L^T
+    //A is symmetric positive definite
+    float L[N][N];
+    //clear L
+#pragma unroll
+    for (int i = 0; i < N; i++)
+#pragma unroll
+        for (int j = 0; j < N; j++)
+            L[i][j] = 0.0f;
+#pragma unroll
+    for (int i = 0; i < N; i++)
+    {
+#pragma unroll
+        for (int j = 0; j <= i; j++)
+        {
+            float sum = 0.0f;
+            for (int k = 0; k < j; k++)
+                sum += L[i][k] * L[j][k];
+            if (i == j)
+            {
+                //diagonal element
+                const float val = localA[i * N + i] - sum;
+                //check if singular! if so, exit early with X = 0.0f
+                if (val <= 1e-12f)
+                {
+                    *stopFlag = 1;
+                    goto exit;
+                }
+                L[i][j] = sqrtf(val);
+            }
+            else //non diagonal
+                L[i][j] = (localA[i * N + j] - sum) * __frcp_rn(L[j][j]); //fast reciprocal
+        }
+    }
+    //solve the system with forward and backward substitution
+    //we again use fast reciprocal for better performance (1 GPU thread is weak, needs as fast math as possible)
+    //forward substitution -> solve L*y = b
+    float y[N];
+#pragma unroll
+    for (int i = 0; i < N; i++)
+    {
+        float sum = 0.0f;
+        for (int k = 0; k < i; k++)
+            sum += L[i][k] * y[k];
+        y[i] = (localB[i] - sum) * __frcp_rn(L[i][i]);
+    }
+
+    //backward substitution -> solve L^T * x = y
+#pragma unroll
+    for (int i = N - 1; i >= 0; i--)
+    {
+        float sum = 0.0f;
+        for (int k = i + 1; k < N; k++)
+            sum += L[k][i] * localX[k]; //transposed
+        localX[i] = (y[i] - sum) * __frcp_rn(L[i][i]);
+    }
+    *stopFlag = 0;
+    //write
+exit:
+    for (int i = 0; i < N; i++)
+        X[i] = localX[i];
+}
 
 //helper methods of ME kernel, to calculate block-wide rx values in shared memory
 __device__ inline void me_p3_rxCalculate(half8* RxLocalVec8, const half8& vec, const half& x4);

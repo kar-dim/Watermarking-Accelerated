@@ -74,7 +74,11 @@ private:
 		const auto correlationArrays = this->transformCorrelationArrays(RxPartial, rxPartial);
 		const af::array Rx = af::moddims(correlationArrays.first, this->localSize, this->localSize);
 		const af::array& rx = correlationArrays.second;
-		cholesky_solver_p3 << <1, 1, 0, afStream >> > (Rx.device<float>(), rx.device<float>(), this->coefficients.template device<float>(), this->stopFlag.template device<int>());
+		if constexpr (p == 3)
+			cholesky_solver<p> << <1, 1, 0, afStream >> > (Rx.device<float>(), rx.device<float>(), this->coefficients.template device<float>(), this->stopFlag.template device<int>());
+		else {
+			//todo
+		}
 		this->unlockArrays(Rx, rx, this->coefficients, this->stopFlag);
 		return computeErrorSequence(image, calculateAbs);
 	}

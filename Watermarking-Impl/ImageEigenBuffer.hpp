@@ -1,8 +1,8 @@
 #pragma once
+#include "Eigen/Core"
 #include "eigen_rgb_array.hpp"
 #include "ImageEigenOutputBuffer.hpp"
 #include <cstdint>
-#include <Eigen/Dense>
 #include <variant>
 
 /*!
