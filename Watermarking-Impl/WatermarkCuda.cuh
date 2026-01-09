@@ -15,11 +15,14 @@
 template<int p>
 class WatermarkCuda final : public WatermarkGPU<p>
 {
-	static_assert(p == 3 || p == 5, "Only p = 3 or p = 7 is currently supported in CUDA implementation");
+	static_assert(p == 3 || p == 5, "Only p = 3 or p = 5 is currently supported in CUDA implementation");
 public:
 	WatermarkCuda<p>(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr)
 		: WatermarkGPU<p>(rows, cols, randomMatrixPath, psnr), meKernelDims{ WatermarkBase::align<meBlockSize.x>(cols), rows }, afStream(CudaStreamManager::getInstance().getAfStream())
-	{ }
+	{
+		if constexpr (p == 5)
+			uploadP5Map();
+	}
 
 private:
 	static constexpr dim3 windowBlockSize{ 16, 16 }, meBlockSize{ 256, 1 };
@@ -65,25 +68,32 @@ private:
 
 	af::array computePredictionErrorData(const af::array& image, const bool calculateAbs) const
 	{
-		constexpr int RxMultiplier = p == 3 ? 1 : 9;
-		constexpr int rxMultiplier = p == 3 ? 1 : 3;
+		const int blocksX = meKernelDims.x / meBlockSize.x;
 		const dim3 gridSize = cuda_utils::gridSizeCalculate(meBlockSize, meKernelDims.y, meKernelDims.x);
 
+		af::array RxPartial, rxPartial;
 		//call prediction error mask kernel
-		const af::array RxPartial(this->baseRows, (meKernelDims.x * RxMultiplier) / 4);
-		const af::array rxPartial(this->baseRows, (meKernelDims.x * rxMultiplier) / 32);
 		if constexpr (p == 3)
+		{
+			RxPartial = af::array(this->baseRows, blocksX * 64);
+			rxPartial = af::array(this->baseRows, blocksX * 8);
 			me_p3 << <gridSize, meBlockSize, 0, afStream >> > (image.device<float>(), RxPartial.device<float>(), rxPartial.device<float>(), this->baseCols, this->baseRows);
-		else
+		}
+		else 
+		{
+			RxPartial = af::array(this->baseRows, blocksX * 300);
+			rxPartial = af::array(this->baseRows, blocksX * 24);
 			me_p5 << <gridSize, meBlockSize, 0, afStream >> > (image.device<float>(), RxPartial.device<float>(), rxPartial.device<float>(), this->baseCols, this->baseRows);
+		}
 		this->unlockArrays(image, RxPartial, rxPartial);
 		//calculation of coefficients and error sequence
 		const auto correlationArrays = this->transformCorrelationArrays(RxPartial, rxPartial);
-		const af::array Rx = af::moddims(correlationArrays.first, this->localSize, this->localSize);
+		const af::array Rx = p == 3 ? af::moddims(correlationArrays.first, this->localSize, this->localSize) : correlationArrays.first;
 		const af::array& rx = correlationArrays.second;
 		//very low latency solver for p = 3 and p = 5
-		cholesky_solver<p> << <1, 1, 0, afStream >> > (Rx.device<float>(), rx.device<float>(), this->coefficients.template device<float>(), this->stopFlag.template device<int>());
+		launch_cholesky<p>(Rx.device<float>(), rx.device<float>(), this->coefficients.template device<float>(), this->stopFlag.template device<int>(), afStream);
 		this->unlockArrays(Rx, rx, this->coefficients, this->stopFlag);
+		//af::print("e", this->stopFlag);
 		return computeErrorSequence(image, calculateAbs);
 	}
 

@@ -7,6 +7,135 @@
 
 using namespace nvcuda;
 
+__constant__ short2 c_map_p5[300];
+
+__host__ void uploadP5Map()
+{
+    short2 h_map[300];
+    int idx = 0;
+    for (int r = 0; r < 24; r++)
+        for (int c = 0; c <= r; c++)
+            h_map[idx++] = make_short2((short)r, (short)c);
+    cudaMemcpyToSymbol(c_map_p5, h_map, sizeof(h_map));
+}
+
+//naive 1-thread Cholesky solver used for its very low latency versus cuSOLVER but useful only for very small systems, p = 3 (N = 8) or p = 5 (N = 24)
+template<int p>
+__global__ void cholesky_solver(const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ X, int* __restrict__ stopFlag)
+{
+    constexpr int N = (p * p) - 1;
+
+    if (threadIdx.x > 0 || blockIdx.x > 0)
+        return;
+
+    float localA[N * N], localB[N], localX[N];
+
+    //initialize Result to 0.0f (safe fallback for unsolvable systems)
+    for (int i = 0; i < N; i++)
+        localX[i] = 0.0f;
+
+    //initialize Rx and rx
+    if constexpr (p == 5)
+    {
+        //p=5: Rx is packed (300 floats)
+#pragma unroll
+        for (int k = 0; k < 300; k++)
+        {
+            const float val = A[k];
+            const short2 coords = c_map_p5[k];
+            const short r = coords.x;
+            const short c = coords.y;
+            localA[r * N + c] = val;
+            localA[c * N + r] = val;
+        }
+    }
+    else
+    {
+        //p=3: Rx is already full (64 floats, just copy)
+#pragma unroll
+        for (int i = 0; i < N * N; i++)
+            localA[i] = A[i];
+    }
+    //copy rx
+    for (int i = 0; i < N; i++)
+        localB[i] = B[i];
+
+    //Cholesky Decomposition: A = L*L^T
+    //A is symmetric positive definite
+    float L[N][N];
+    //clear L
+#pragma unroll
+    for (int i = 0; i < N; i++)
+#pragma unroll
+        for (int j = 0; j < N; j++)
+            L[i][j] = 0.0f;
+#pragma unroll
+    for (int i = 0; i < N; i++)
+    {
+#pragma unroll
+        for (int j = 0; j <= i; j++)
+        {
+            float sum = 0.0f;
+            for (int k = 0; k < j; k++)
+                sum += L[i][k] * L[j][k];
+            if (i == j)
+            {
+                //diagonal element
+                const float val = localA[i * N + i] - sum;
+                //check if singular! if so, exit early with X = 0.0f
+                if (val <= 1e-12f)
+                {
+                    *stopFlag = 1;
+                    goto exit;
+                }
+                L[i][j] = sqrtf(val);
+            }
+            else //non diagonal
+                L[i][j] = (localA[i * N + j] - sum) * __frcp_rn(L[j][j]); //fast reciprocal
+        }
+    }
+    //solve the system with forward and backward substitution
+    //we again use fast reciprocal for better performance (1 GPU thread is weak, needs as fast math as possible)
+    //forward substitution -> solve L*y = b
+    float y[N];
+#pragma unroll
+    for (int i = 0; i < N; i++)
+    {
+        float sum = 0.0f;
+        for (int k = 0; k < i; k++)
+            sum += L[i][k] * y[k];
+        y[i] = (localB[i] - sum) * __frcp_rn(L[i][i]);
+    }
+
+    //backward substitution -> solve L^T * x = y
+#pragma unroll
+    for (int i = N - 1; i >= 0; i--)
+    {
+        float sum = 0.0f;
+        for (int k = i + 1; k < N; k++)
+            sum += L[k][i] * localX[k]; //transposed
+        localX[i] = (y[i] - sum) * __frcp_rn(L[i][i]);
+    }
+    *stopFlag = 0;
+    //write
+exit:
+    for (int i = 0; i < N; i++)
+        X[i] = localX[i];
+}
+
+template<>
+void launch_cholesky<3>(const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ X, int* __restrict__ stopFlag, cudaStream_t stream)
+{
+    cholesky_solver<3> << <1, 1, 0, stream >> > (A, B, X, stopFlag);
+}
+
+// Specialization for p=5
+template<>
+void launch_cholesky<5>(const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ X, int* __restrict__ stopFlag, cudaStream_t stream)
+{
+    cholesky_solver<5> << <1, 1, 0, stream >> > (A, B, X, stopFlag);
+}
+
 //STS.128
 __device__ void me_p3_rxCalculate(half8* RxLocalVec8, const half8& vec, const half& x4)
 {
@@ -277,17 +406,16 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
     wmma::store_matrix_sync(myWarpOutput + 16, C01, sharedMemStride, wmma::mem_row_major); //(0,16)
     wmma::store_matrix_sync(myWarpOutput + 16 * sharedMemStride, C10, sharedMemStride, wmma::mem_row_major); //(16,0)
     wmma::store_matrix_sync(myWarpOutput + 16 * sharedMemStride + 16, C11, sharedMemStride, wmma::mem_row_major); //(16,16)
-
     __syncthreads();
 
     //write Rx
-    const int RxBaseIndex = (y * gridDim.x * 576) + (blockIdx.x * 576);
-    for (int i = tid; i < 576; i += blockDim.x)
+    const int RxBaseIndex = (y * gridDim.x * 300) + (blockIdx.x * 300);
+    for (int i = tid; i < 300; i += blockDim.x)
     {
-        const int r = i / 24;
-        const int c = i % 24;
+        const short2 coords = c_map_p5[i];
+        const int r = coords.x;
+        const int c = coords.y;
         float sum = 0.0f;
-        //sum across the 8 warps
 #pragma unroll
         for (int w = 0; w < 8; w++)
             sum += __half2float(RxLocal[w * 32 + r][c]);
