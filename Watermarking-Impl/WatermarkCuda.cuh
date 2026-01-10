@@ -95,7 +95,7 @@ private:
 		const af::array Rx = p == 3 ? af::moddims(correlationArrays.first, this->localSize, this->localSize) : correlationArrays.first;
 		const af::array& rx = correlationArrays.second;
 		//very low latency solver for p = 3 and p = 5
-		launch_cholesky<p>(Rx.device<float>(), rx.device<float>(), this->coefficients.template device<float>(), this->stopFlag.template device<int>(), afStream);
+		cholesky_solver<p><<<1, 1, 0, afStream>>>(Rx.device<float>(), rx.device<float>(), this->coefficients.template device<float>(), this->stopFlag.template device<int>());
 		this->unlockArrays(Rx, rx, this->coefficients, this->stopFlag);
 		//af::print("e", this->stopFlag);
 		return computeErrorSequence(image, calculateAbs);
