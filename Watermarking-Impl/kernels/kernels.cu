@@ -21,18 +21,81 @@ __host__ void initRxMapP5()
 }
 
 //STS.128
-__device__ void me_p3_rxCalculate(half8* RxLocalVec8, const half8& vec, const half& x4)
+__device__ void me_p3_rxCalculate(half8* RxLocalVec8, const half8& vec, const half& center)
 {
     half8 tmp;
-    tmp.a = vec.a * x4;
-    tmp.b = vec.b * x4;
-    tmp.c = vec.c * x4;
-    tmp.d = vec.d * x4;
-    tmp.e = vec.e * x4;
-    tmp.f = vec.f * x4;
-    tmp.g = vec.g * x4;
-    tmp.h = vec.h * x4;
+    tmp.a = vec.a * center;
+    tmp.b = vec.b * center;
+    tmp.c = vec.c * center;
+    tmp.d = vec.d * center;
+    tmp.e = vec.e * center;
+    tmp.f = vec.f * center;
+    tmp.g = vec.g * center;
+    tmp.h = vec.h * center;
     *RxLocalVec8 = tmp;
+}
+
+__device__  void load_neighbor_row_funnel_p3(half& p0, half& p1, half& p2, const half* rowBase, const int localX)
+{
+    //align down to nearest even index
+    const int startIdx = localX - 1;
+    //shift Amount (0 or 16 bits), ifstartIdx is odd, we shift right by 1 half (16 bits)
+    const uint32_t shift = (startIdx & 1) * 16;
+    //load 2x 32-bit chunks (4 halves) using the aligned index
+    //cast to uint* to load 32 bits at a time (equivalent to half2)
+    const uint32_t* ptr = reinterpret_cast<const uint32_t*>(&rowBase[startIdx & ~1]);
+    uint32_t u0 = ptr[0]; // Loads halves [aligned, aligned+1]
+    uint32_t u1 = ptr[1]; // Loads halves [aligned+2, aligned+3]
+    //funnel shift (vectorized selection, this reconstructs the sliding window)
+    uint32_t pair0 = __funnelshift_r(u0, u1, shift);
+    uint32_t final = u1 >> shift;
+    //unpack
+    const half2 h_pair0 = reinterpret_cast<half2&>(pair0);
+    const half2 h_final = reinterpret_cast<half2&>(final);
+    //store
+    p0 = h_pair0.x;
+    p1 = h_pair0.y;
+    p2 = h_final.x;
+}
+
+__device__ void load_neighbor_row_funnel_p5(half& p0, half& p1, half& p2, half& p3, half& p4, const half* rowBase, const int localX)
+{
+    //align down to nearest even index
+    const int startIdx = localX - 2;
+    //shift Amount (0 or 16 bits), ifstartIdx is odd, we shift right by 1 half (16 bits)
+    const uint32_t shift = (startIdx & 1) * 16;
+    //load 3 x 32-bit chunks (6 halves) using the aligned index
+    //cast to uint* to load 32 bits at a time (equivalent to half2)
+    const uint32_t* ptr = reinterpret_cast<const uint32_t*>(&rowBase[startIdx & ~1]);
+    //funnel shift (vectorized selection, this reconstructs the sliding window)
+    uint32_t pair0 = __funnelshift_r(ptr[0], ptr[1], shift);
+    uint32_t pair1 = __funnelshift_r(ptr[1], ptr[2], shift);
+    uint32_t final = ptr[2] >> shift;
+    //unpack
+    const half2 h_pair0 = reinterpret_cast<half2&>(pair0);
+    const half2 h_pair1 = reinterpret_cast<half2&>(pair1);
+    const half2 h_final = reinterpret_cast<half2&>(final);
+    //store
+    p0 = h_pair0.x;
+    p1 = h_pair0.y;
+    p2 = h_pair1.x;
+    p3 = h_pair1.y;
+    p4 = h_final.x;
+}
+
+__device__ void load_neighbor_vec_p5(half8* dst, const half blockValues[5][260], half& center, const int localX)
+{
+    half8 v0, v1, v2;
+    load_neighbor_row_funnel_p5(v0.a, v0.b, v0.c, v0.d, v0.e, blockValues[0], localX);
+    load_neighbor_row_funnel_p5(v0.f, v0.g, v0.h, v1.a, v1.b, blockValues[1], localX);
+    load_neighbor_row_funnel_p5(v1.c, v1.d, center, v1.e, v1.f, blockValues[2], localX);
+    load_neighbor_row_funnel_p5(v1.g, v1.h, v2.a, v2.b, v2.c, blockValues[3], localX);
+    load_neighbor_row_funnel_p5(v2.d, v2.e, v2.f, v2.g, v2.h, blockValues[4], localX);
+    //STS.128
+    dst[0] = v0;
+    dst[1] = v1;
+    dst[2] = v2;
+    dst[3] = {};
 }
 
 __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height)
@@ -68,22 +131,24 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
 
     //read the 3x3 window from shared memory
     const int localX = tid + 1; //center index
-    const half center = blockValues[1][localX];
-    half8 localBlock = {
-        blockValues[0][localX - 1], blockValues[0][localX], blockValues[0][localX + 1],
-        blockValues[1][localX - 1], blockValues[1][localX + 1],
-        blockValues[2][localX - 1], blockValues[2][localX], blockValues[2][localX + 1]
-    };
+    half center;
+    half8 localBlock;
 
     half8* RxLocalVec8 = reinterpret_cast<half8*>(&RxLocal[tid][0]);
     RxLocalVec8[1] = {};
     //if/else is better than always writing (even vectorized) to shared memory unnecessarily
     if (x < width)
+    {
+        load_neighbor_row_funnel_p3(localBlock.a, localBlock.b, localBlock.c, blockValues[0], localX);
+        load_neighbor_row_funnel_p3(localBlock.d, center, localBlock.e, blockValues[1], localX);
+        load_neighbor_row_funnel_p3(localBlock.f, localBlock.g, localBlock.h, blockValues[2], localX);
         RxLocalVec8[0] = localBlock;
+    }
     else
     {
         RxLocalVec8[0] = {};
         localBlock = {};
+        center = blockValues[1][localX];
     }
     //compute rx, use half2 for faster reductions
     half8 rxVec;
@@ -149,51 +214,6 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
     }
 }
 
-__device__ void load_neighbor_vec_p5(half8* dst, const half blockValues[5][260], const int localX)
-{
-    //load all (5x5) - 1 = 24 neighbors and store them as 32
-    //(3 x half8, plus 1 x half8 with zeros for WMMA later) -> STS.128
-    half8 v0, v1, v2;
-
-    //row 0 begin
-    v0.a = blockValues[0][localX - 2];
-    v0.b = blockValues[0][localX - 1];
-    v0.c = blockValues[0][localX];
-    v0.d = blockValues[0][localX + 1];
-    v0.e = blockValues[0][localX + 2];
-    //row 1 begin
-    v0.f = blockValues[1][localX - 2];
-    v0.g = blockValues[1][localX - 1];
-    v0.h = blockValues[1][localX];
-
-    v1.a = blockValues[1][localX + 1];
-    v1.b = blockValues[1][localX + 2];
-    //row 2 begin (center row, skip center pixel)
-    v1.c = blockValues[2][localX - 2];
-    v1.d = blockValues[2][localX - 1];
-    v1.e = blockValues[2][localX + 1];
-    v1.f = blockValues[2][localX + 2];
-    //row 3 begin
-    v1.g = blockValues[3][localX - 2];
-    v1.h = blockValues[3][localX - 1];
-
-    v2.a = blockValues[3][localX];
-    v2.b = blockValues[3][localX + 1];
-    v2.c = blockValues[3][localX + 2];
-    //row 4
-    v2.d = blockValues[4][localX - 2];
-    v2.e = blockValues[4][localX - 1];
-    v2.f = blockValues[4][localX];
-    v2.g = blockValues[4][localX + 1];
-    v2.h = blockValues[4][localX + 2];
-
-    //4x STS.128
-    dst[0] = v0;
-    dst[1] = v1;
-    dst[2] = v2;
-    dst[3] = {};
-}
-
 __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height)
 {
     constexpr int sharedMemStride = 40; //32 + 8 for padding to minimize bank conflicts (padding is CRITICAL for performance)
@@ -227,11 +247,15 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
 
     //read the 5x5 window from shared memory
     const int localX = tid + 2; //center index
-    const half2 center = __half2half2(blockValues[2][localX]); //half -> half2 for vectorized ops later
+    half centerVal;
+    half2 center; //half -> half2 for vectorized ops later
     half8* localVec8 = reinterpret_cast<half8*>(&RxLocal[tid][0]);
     //if/else is better than always writing (even vectorized) to shared memory unnecessarily
-    if (x < width)
-        load_neighbor_vec_p5(localVec8, blockValues, localX);
+    if (x < width) 
+    {
+        load_neighbor_vec_p5(localVec8, blockValues, centerVal, localX);
+        center = __half2half2(centerVal); 
+    }
     else
     {
         half8 zero = {};
@@ -239,8 +263,9 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
         localVec8[1] = zero;
         localVec8[2] = zero;
         localVec8[3] = zero;
+        center = __half2half2(blockValues[2][localX]);
     }
-
+     
     //do not compute rx yet, compute Rx first
     //TENSOR CORE Rx ACCUMULATION (24x24 matrix -> 32x32 tiled)
     wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::col_major> A_low, A_high;
