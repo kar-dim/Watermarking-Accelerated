@@ -143,7 +143,7 @@ void launch_cholesky(const float* __restrict__ A, const float* __restrict__ B, f
 
 //uploads the 300 element lookup table for p=5 to constant memory
 //must be called once during initialization.
-__host__ void uploadP5Map();
+__host__ void initRxMapP5();
 
 //Prediction Error kernels (ME) for p = 3 and p = 5
 __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height);

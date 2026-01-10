@@ -216,7 +216,7 @@ __kernel void me_p3(__global const float* restrict input,
     const int col = localId % 8;
     const int rowStart = (localId / 8) * 8; 
     half psum = 0.0h;
-    #pragma unroll
+#pragma unroll
     for (int r = 0; r < 8; r++)
         psum += RxLocal[rowStart + r][col];
     rxPartial[localId / 8][col] = (float)psum;
@@ -224,7 +224,7 @@ __kernel void me_p3(__global const float* restrict input,
     if (localId < 8)
     {
         float sum = 0.0f;
-        #pragma unroll
+#pragma unroll
         for (int i = 0; i < 32; i++)
             sum += rxPartial[i][localId];
         const int blockOffset = (y * get_num_groups(0) * 8) + (get_group_id(0) * 8);
@@ -236,7 +236,7 @@ __kernel void me_p3(__global const float* restrict input,
         me_p3_RxCalculate(RxLocal, localId, x_0, x_1, x_2, x_3, x_5, x_6, x_7, x_8);
     else 
     {
-        #pragma unroll
+#pragma unroll
         for(int v=0; v<5; v++)
             vstore_half8((float8)(0.0f), 0, (__local half*)&RxLocal[localId][v*8]);
     }
@@ -265,7 +265,7 @@ __kernel void me_p3(__global const float* restrict input,
     if (flatId < 36)
     {
         float totalSum = 0.0f;
-        #pragma unroll
+#pragma unroll
         for (int k = 0; k < 7; k++)
             totalSum += ((__local float*)rxPartial)[flatId + k * 36];
         const int blockOffset = (y * get_num_groups(0) * 36) + (get_group_id(0) * 36);
@@ -394,10 +394,10 @@ __kernel void cholesky_solver_p3(__global const float* restrict A,
 
     //OpenCL only: expand 36 elements of lower triangular matrix to full symmetric matrix
     int k = 0;
-    #pragma unroll
+#pragma unroll
     for (int i = 0; i < N; i++)
     {
-        #pragma unroll
+#pragma unroll
         for (int j = i; j < N; j++)
         {
             float val = A[k++];

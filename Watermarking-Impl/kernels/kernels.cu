@@ -7,16 +7,17 @@
 
 using namespace nvcuda;
 
-__constant__ short2 c_map_p5[300];
-
-__host__ void uploadP5Map()
+//constant cache used to map linear index of the [24x24] Rx matrix for p=5 into [x,y] coordinates
+//this helps to write back to global memory 300 Rx values per block instead of 576 (24x24) improving performance
+__constant__ short2 c_RxCoordsP5[300];
+__host__ void initRxMapP5()
 {
-    short2 h_map[300];
+    short2 hRxCoordsP5[300];
     int idx = 0;
     for (int r = 0; r < 24; r++)
         for (int c = 0; c <= r; c++)
-            h_map[idx++] = make_short2((short)r, (short)c);
-    cudaMemcpyToSymbol(c_map_p5, h_map, sizeof(h_map));
+            hRxCoordsP5[idx++] = make_short2((short)r, (short)c);
+    cudaMemcpyToSymbol(c_RxCoordsP5, hRxCoordsP5, sizeof(hRxCoordsP5));
 }
 
 //naive 1-thread Cholesky solver used for its very low latency versus cuSOLVER but useful only for very small systems, p = 3 (N = 8) or p = 5 (N = 24)
@@ -35,23 +36,26 @@ __global__ void cholesky_solver(const float* __restrict__ A, const float* __rest
         localX[i] = 0.0f;
 
     //initialize Rx and rx
+    //p=5: Rx is in packed format, unpack fast 
+    //because we use 1 thread, it is faster to unpack manually than use the constant cache map!
     if constexpr (p == 5)
     {
-        //p=5: Rx is packed (300 floats)
+        int k = 0;
 #pragma unroll
-        for (int k = 0; k < 300; k++)
+        for (int r = 0; r < N; r++)
         {
-            const float val = A[k];
-            const short2 coords = c_map_p5[k];
-            const short r = coords.x;
-            const short c = coords.y;
-            localA[r * N + c] = val;
-            localA[c * N + r] = val;
+#pragma unroll
+            for (int c = 0; c <= r; c++)
+            {
+                float val = A[k++];
+                localA[r * N + c] = val;
+                localA[c * N + r] = val;
+            }
         }
     }
+    //p=3: Rx is already full (64 floats, just copy)
     else
     {
-        //p=3: Rx is already full (64 floats, just copy)
 #pragma unroll
         for (int i = 0; i < N * N; i++)
             localA[i] = A[i];
@@ -412,7 +416,7 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
     const int RxBaseIndex = (y * gridDim.x * 300) + (blockIdx.x * 300);
     for (int i = tid; i < 300; i += blockDim.x)
     {
-        const short2 coords = c_map_p5[i];
+        const short2 coords = c_RxCoordsP5[i];
         const int r = coords.x;
         const int c = coords.y;
         float sum = 0.0f;
@@ -421,6 +425,7 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
             sum += __half2float(RxLocal[w * 32 + r][c]);
         Rx[RxBaseIndex + i] = sum;
     }
+    __syncthreads();
 
     //reduction for rx (vectorized 128-bit plus half2 for maximum efficiency)
     half2* rxHalf2 = reinterpret_cast<half2*>(rxVec);

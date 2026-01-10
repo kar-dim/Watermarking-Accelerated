@@ -6,6 +6,7 @@
 #include "WatermarkGpu.hpp"
 #include <arrayfire.h>
 #include <cuda_runtime.h>
+#include <mutex>
 #include <string>
 
 /*!
@@ -21,7 +22,10 @@ public:
 		: WatermarkGPU<p>(rows, cols, randomMatrixPath, psnr), meKernelDims{ WatermarkBase::align<meBlockSize.x>(cols), rows }, afStream(CudaStreamManager::getInstance().getAfStream())
 	{
 		if constexpr (p == 5)
-			uploadP5Map();
+		{
+			static std::once_flag flag;
+			std::call_once(flag, []() { initRxMapP5(); });
+		}
 	}
 
 private:
