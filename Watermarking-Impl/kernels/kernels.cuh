@@ -247,9 +247,9 @@ __host__ void initRxMapP5();
 
 //Prediction Error helper device kernels
 __device__ void me_p3_rxCalculate(half8* RxLocalVec8, const half8& vec, const half& center);
-__device__ void load_neighbor_row_funnel_p3(half& p0, half& p1, half& p2, const half* rowBase, const int localX);
-__device__ void load_neighbor_row_funnel_p5(half& p0, half& p1, half& p2, half& p3, half& p4, const half* rowBase, const int localX);
-__device__ void load_neighbor_vec_p5(half8* dst, const half blockValues[5][260], half& center, const int localX);
+__device__ void load_neighbor_row_funnel_p3(half& p0, half& p1, half& p2, const half* rowBase);
+__device__ void load_neighbor_row_funnel_p5(half& p0, half& p1, half& p2, half& p3, half& p4, const half* rowBase);
+__device__ void load_neighbor_vec_p5(half8* dst, const half blockValues[5][260], half& center);
 //Prediction Error kernels (ME) for p = 3 and p = 5
 __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height);
 __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height);

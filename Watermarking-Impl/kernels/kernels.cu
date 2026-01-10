@@ -35,15 +35,13 @@ __device__ void me_p3_rxCalculate(half8* RxLocalVec8, const half8& vec, const ha
     *RxLocalVec8 = tmp;
 }
 
-__device__  void load_neighbor_row_funnel_p3(half& p0, half& p1, half& p2, const half* rowBase, const int localX)
+__device__  void load_neighbor_row_funnel_p3(half& p0, half& p1, half& p2, const half* rowBase)
 {
-    //align down to nearest even index
-    const int startIdx = localX - 1;
-    //shift Amount (0 or 16 bits), ifstartIdx is odd, we shift right by 1 half (16 bits)
-    const uint32_t shift = (startIdx & 1) * 16;
+    //shift Amount (0 or 16 bits), if threadIdx.x is odd, we shift right by 1 half (16 bits)
+    const uint32_t shift = (threadIdx.x & 1) * 16;
     //load 2x 32-bit chunks (4 halves) using the aligned index
     //cast to uint* to load 32 bits at a time (equivalent to half2)
-    const uint32_t* ptr = reinterpret_cast<const uint32_t*>(&rowBase[startIdx & ~1]);
+    const uint32_t* ptr = reinterpret_cast<const uint32_t*>(&rowBase[threadIdx.x & ~1]);
     uint32_t u0 = ptr[0]; // Loads halves [aligned, aligned+1]
     uint32_t u1 = ptr[1]; // Loads halves [aligned+2, aligned+3]
     //funnel shift (vectorized selection, this reconstructs the sliding window)
@@ -58,15 +56,13 @@ __device__  void load_neighbor_row_funnel_p3(half& p0, half& p1, half& p2, const
     p2 = h_final.x;
 }
 
-__device__ void load_neighbor_row_funnel_p5(half& p0, half& p1, half& p2, half& p3, half& p4, const half* rowBase, const int localX)
+__device__ void load_neighbor_row_funnel_p5(half& p0, half& p1, half& p2, half& p3, half& p4, const half* rowBase)
 {
-    //align down to nearest even index
-    const int startIdx = localX - 2;
-    //shift Amount (0 or 16 bits), ifstartIdx is odd, we shift right by 1 half (16 bits)
-    const uint32_t shift = (startIdx & 1) * 16;
+    //shift Amount (0 or 16 bits), if threadIdx.x is odd, we shift right by 1 half (16 bits)
+    const uint32_t shift = (threadIdx.x & 1) * 16;
     //load 3 x 32-bit chunks (6 halves) using the aligned index
     //cast to uint* to load 32 bits at a time (equivalent to half2)
-    const uint32_t* ptr = reinterpret_cast<const uint32_t*>(&rowBase[startIdx & ~1]);
+    const uint32_t* ptr = reinterpret_cast<const uint32_t*>(&rowBase[threadIdx.x & ~1]);
     //funnel shift (vectorized selection, this reconstructs the sliding window)
     uint32_t pair0 = __funnelshift_r(ptr[0], ptr[1], shift);
     uint32_t pair1 = __funnelshift_r(ptr[1], ptr[2], shift);
@@ -83,14 +79,14 @@ __device__ void load_neighbor_row_funnel_p5(half& p0, half& p1, half& p2, half& 
     p4 = h_final.x;
 }
 
-__device__ void load_neighbor_vec_p5(half8* dst, const half blockValues[5][260], half& center, const int localX)
+__device__ void load_neighbor_vec_p5(half8* dst, const half blockValues[5][260], half& center)
 {
     half8 v0, v1, v2;
-    load_neighbor_row_funnel_p5(v0.a, v0.b, v0.c, v0.d, v0.e, blockValues[0], localX);
-    load_neighbor_row_funnel_p5(v0.f, v0.g, v0.h, v1.a, v1.b, blockValues[1], localX);
-    load_neighbor_row_funnel_p5(v1.c, v1.d, center, v1.e, v1.f, blockValues[2], localX);
-    load_neighbor_row_funnel_p5(v1.g, v1.h, v2.a, v2.b, v2.c, blockValues[3], localX);
-    load_neighbor_row_funnel_p5(v2.d, v2.e, v2.f, v2.g, v2.h, blockValues[4], localX);
+    load_neighbor_row_funnel_p5(v0.a, v0.b, v0.c, v0.d, v0.e, blockValues[0]);
+    load_neighbor_row_funnel_p5(v0.f, v0.g, v0.h, v1.a, v1.b, blockValues[1]);
+    load_neighbor_row_funnel_p5(v1.c, v1.d, center, v1.e, v1.f, blockValues[2]);
+    load_neighbor_row_funnel_p5(v1.g, v1.h, v2.a, v2.b, v2.c, blockValues[3]);
+    load_neighbor_row_funnel_p5(v2.d, v2.e, v2.f, v2.g, v2.h, blockValues[4]);
     //STS.128
     dst[0] = v0;
     dst[1] = v1;
@@ -130,25 +126,23 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
         return;
 
     //read the 3x3 window from shared memory
-    const int localX = tid + 1; //center index
     half center;
     half8 localBlock;
-
     half8* RxLocalVec8 = reinterpret_cast<half8*>(&RxLocal[tid][0]);
     RxLocalVec8[1] = {};
     //if/else is better than always writing (even vectorized) to shared memory unnecessarily
     if (x < width)
     {
-        load_neighbor_row_funnel_p3(localBlock.a, localBlock.b, localBlock.c, blockValues[0], localX);
-        load_neighbor_row_funnel_p3(localBlock.d, center, localBlock.e, blockValues[1], localX);
-        load_neighbor_row_funnel_p3(localBlock.f, localBlock.g, localBlock.h, blockValues[2], localX);
+        load_neighbor_row_funnel_p3(localBlock.a, localBlock.b, localBlock.c, blockValues[0]);
+        load_neighbor_row_funnel_p3(localBlock.d, center, localBlock.e, blockValues[1]);
+        load_neighbor_row_funnel_p3(localBlock.f, localBlock.g, localBlock.h, blockValues[2]);
         RxLocalVec8[0] = localBlock;
     }
     else
     {
         RxLocalVec8[0] = {};
         localBlock = {};
-        center = blockValues[1][localX];
+        center = blockValues[1][tid + 1]; //center pixel
     }
     //compute rx, use half2 for faster reductions
     half8 rxVec;
@@ -246,14 +240,13 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
         return;
 
     //read the 5x5 window from shared memory
-    const int localX = tid + 2; //center index
     half centerVal;
     half2 center; //half -> half2 for vectorized ops later
     half8* localVec8 = reinterpret_cast<half8*>(&RxLocal[tid][0]);
     //if/else is better than always writing (even vectorized) to shared memory unnecessarily
     if (x < width) 
     {
-        load_neighbor_vec_p5(localVec8, blockValues, centerVal, localX);
+        load_neighbor_vec_p5(localVec8, blockValues, centerVal);
         center = __half2half2(centerVal); 
     }
     else
@@ -263,7 +256,7 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
         localVec8[1] = zero;
         localVec8[2] = zero;
         localVec8[3] = zero;
-        center = __half2half2(blockValues[2][localX]);
+        center = __half2half2(blockValues[2][tid + 2]); //center pixel
     }
      
     //do not compute rx yet, compute Rx first
