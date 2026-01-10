@@ -285,11 +285,11 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
     }
 
     //store Rx to shared mem
-    half* myWarpOutput = &RxLocal[warpId * 32][0];
-    wmma::store_matrix_sync(myWarpOutput, C00, sharedMemStride, wmma::mem_row_major); //(0,0)
-    wmma::store_matrix_sync(myWarpOutput + 16, C01, sharedMemStride, wmma::mem_row_major); //(0,16)
-    wmma::store_matrix_sync(myWarpOutput + 16 * sharedMemStride, C10, sharedMemStride, wmma::mem_row_major); //(16,0)
-    wmma::store_matrix_sync(myWarpOutput + 16 * sharedMemStride + 16, C11, sharedMemStride, wmma::mem_row_major); //(16,16)
+    half* warpOutput = &RxLocal[warpId * 32][0];
+    wmma::store_matrix_sync(warpOutput, C00, sharedMemStride, wmma::mem_row_major); //(0,0)
+    wmma::store_matrix_sync(warpOutput + 16, C01, sharedMemStride, wmma::mem_row_major); //(0,16)
+    wmma::store_matrix_sync(warpOutput + 16 * sharedMemStride, C10, sharedMemStride, wmma::mem_row_major); //(16,0)
+    wmma::store_matrix_sync(warpOutput + 16 * sharedMemStride + 16, C11, sharedMemStride, wmma::mem_row_major); //(16,16)
     __syncthreads();
 
     //write Rx
@@ -297,12 +297,10 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
     for (int i = tid; i < 300; i += blockDim.x)
     {
         const short2 coords = c_RxCoordsP5[i];
-        const int r = coords.x;
-        const int c = coords.y;
         float sum = 0.0f;
 #pragma unroll
         for (int w = 0; w < 8; w++)
-            sum += __half2float(RxLocal[w * 32 + r][c]);
+            sum += __half2float(RxLocal[w * 32 + coords.x][coords.y]);
         Rx[RxBaseIndex + i] = sum;
     }
     __syncthreads();
@@ -315,8 +313,8 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
         half2 sum = rxHalf2[i];
         for (int offset = 16; offset > 0; offset >>= 1)
         {
-            int shfl_int = __shfl_down_sync(0xFFFFFFFF, reinterpret_cast<int&>(sum), offset);
-            sum = __hadd2(sum, reinterpret_cast<half2&>(shfl_int));
+            int shflInt = __shfl_down_sync(0xFFFFFFFF, reinterpret_cast<int&>(sum), offset);
+            sum = __hadd2(sum, reinterpret_cast<half2&>(shflInt));
         }
         rxHalf2[i] = sum;
     }
