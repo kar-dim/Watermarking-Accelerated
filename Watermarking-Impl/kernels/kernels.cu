@@ -109,17 +109,7 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
     __shared__ alignas(16) half RxLocal[256][sharedMemStride];
     __shared__ half blockValues[3][258];
 
-    //cooperatively load the 3 x (blockSize + 2) block (window size 3x3, for all threads in the block)
-    for (int i = tid; i < 3 * 258; i += 256)
-    {
-        const int tileCol = i / 3;
-        const int tileRow = i % 3;
-        //clamp (mimic cudaAddressModeClamp)
-        const int globalX = clamp<int>((int)(blockIdx.x * 256) + tileCol - 1, 0, width - 1);
-        const int globalY = clamp<int>((int)(blockIdx.y * 1) + tileRow - 1, 0, height - 1);
-        //normalize from [0,255] to [0,1] to support half precision and avoid overflow in multiplications
-        blockValues[tileRow][tileCol] = __float2half(input[globalX * height + globalY]) * halfScaleFactor;
-    }
+    fillBlockStrip<3>(blockValues, input, width, height);
     __syncthreads();
 
     if (y >= height)
@@ -217,23 +207,12 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
     const int y = blockIdx.y * blockDim.y + threadIdx.y;
     const int warpId = tid / 32;
     const int startRow = warpId * 32;
-    const half halfScaleFactor = __float2half(0.00392156862f); //multiplication with stored value of (1/255) is faster than division by 255
 
     //shared memory for Rx, rx, scratch and all pixels utilized by the whole block
     __shared__ alignas(16) half RxLocal[256][sharedMemStride];
     __shared__ half blockValues[5][260];
 
-    //cooperatively load the 5 x (blockSize + 4) block (window size 5x5, for all threads in the block)
-    for (int i = tid; i < 5 * 260; i += 256)
-    {
-        const int tileCol = i / 5;
-        const int tileRow = i % 5;
-        //clamp (mimic cudaAddressModeClamp)
-        const int globalX = clamp<int>((int)(blockIdx.x * 256) + tileCol - 2, 0, width - 1);
-        const int globalY = clamp<int>((int)(blockIdx.y * 1) + tileRow - 2, 0, height - 1);
-        //normalize from [0,255] to [0,1] to support half precision and avoid overflow in multiplications
-        blockValues[tileRow][tileCol] = __float2half(input[globalX * height + globalY]) * halfScaleFactor;
-    }
+    fillBlockStrip<5>(blockValues, input, width, height);
     __syncthreads();
 
     if (y >= height)

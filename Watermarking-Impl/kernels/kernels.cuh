@@ -47,6 +47,59 @@ __device__ void fillBlock(const float* __restrict__ inputA, const float* __restr
     fillBlockMain<true, p, pad, sharedSize>(inputA, inputB, sharedMem, width, height);
 }
 
+//helper method to fill block-wide shared memory cooperatively for prediction error kernels where
+//the shared memory is a wide "strip" on the x-axis 
+template <int p>
+__device__ inline void fillBlockStrip(half blockValues[p][256 + p - 1], const float* __restrict__ input, const int width, const int height)
+{
+    const half halfScaleFactor = __float2half(0.00392156862f);
+    //parallel indexing, fastest for p=3
+    if constexpr (p == 3)
+    {
+#pragma unroll
+        for (int i = threadIdx.x; i < 3 * 258; i += 256)
+        {
+            const int tileCol = i / 3;
+            const int tileRow = i % 3;
+            //clamp (mimic cudaAddressModeClamp)
+            const int globalX = clamp<int>((int)(blockIdx.x * 256) + tileCol - 1, 0, width - 1);
+            const int globalY = clamp<int>((int)(blockIdx.y * 1) + tileRow - 1, 0, height - 1);
+            //normalize from [0,255] to [0,1] to support half precision and avoid overflow in multiplications
+            blockValues[tileRow][tileCol] = __float2half(input[globalX * height + globalY]) * halfScaleFactor;
+        }
+    }
+    //Incremental update, fastest for p=5
+    else
+    {
+        constexpr int radius = (p - 1) / 2;
+        constexpr int stride = 256 / p;
+        constexpr int remainderLimit = p * (p - 1);
+        const int blockGlobalX = (int)(blockIdx.x * 256) - radius;
+        const int blockGlobalY = (int)(blockIdx.y * 1) - radius;
+        int tileRow = threadIdx.x % p;
+        int tileCol = threadIdx.x / p;
+#pragma unroll
+        for (int k = 0; k < p; k++)
+        {
+            //clamp (mimic cudaAddressModeClamp)
+            const int globalX = clamp<int>(blockGlobalX + tileCol, 0, width - 1);
+            const int globalY = clamp<int>(blockGlobalY + tileRow, 0, height - 1);
+            //normalize from [0,255] to [0,1] to support half precision and avoid overflow in multiplications
+            blockValues[tileRow][tileCol] = __float2half(input[globalX * height + globalY]) * halfScaleFactor;
+            tileRow++;
+            const int wrap = (tileRow >= p);
+            tileRow -= (wrap * p);
+            tileCol += stride + wrap;
+        }
+        if (threadIdx.x < remainderLimit)
+        {
+            const int globalX = clamp<int>(blockGlobalX + tileCol, 0, width - 1);
+            const int globalY = clamp<int>(blockGlobalY + tileRow, 0, height - 1);
+            blockValues[tileRow][tileCol] = __float2half(input[globalX * height + globalY]) * halfScaleFactor;
+        }
+    }
+}
+
 //NVF kernel, calculates NVF values for each pixel in the image
 //works for all p values (3,5,7 and 9)
 template<int p, int pad = p / 2, int sharedSize = 16 + (2 * pad)>
