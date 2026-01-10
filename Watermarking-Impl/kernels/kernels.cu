@@ -183,28 +183,28 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
     wmma::store_matrix_sync(warpOutput, C, sharedMemStride, wmma::mem_row_major);
     __syncthreads();
 
-    //first 8 threads write rx
-    if (tid < 8)
-    {
-        const int outputIndex = (y * gridDim.x * 8) + (blockIdx.x * 8);
-        float sum_v = 0.0f;
-#pragma unroll
-        for (int w = 0; w < 8; w++)
-            sum_v += __half2float(RxLocal[w * 32][16 + tid]);
-        rx[outputIndex + tid] = sum_v;
-    }
-
-    //first 64 threads write Rx
+    //first 64 threads (warps 1 and 2) write Rx
     if (tid < 64)
     {
-        const int r = tid / 8;
-        const int c = tid % 8;
+        const int r = tid >> 3; //tid / 8
+        const int c = tid & 7; //tid % 8
         float sum = 0.0f;
 #pragma unroll
         for (int w = 0; w < 8; w++)
             sum += __half2float(RxLocal[w * 32 + r][c]);
         const int outputIndex = (y * gridDim.x * 64) + (blockIdx.x * 64);
         Rx[outputIndex + tid] = sum;
+    }
+    //next 8 threads (part of warp 3) write rx in parallel to Rx
+    else if (tid < 72)
+    {
+        const int rxTid = tid - 64; //bring tid to [0,7]
+        float sum_v = 0.0f;
+#pragma unroll
+        for (int w = 0; w < 8; w++)
+            sum_v += __half2float(RxLocal[w * 32][16 + rxTid]);
+        const int outputIndex = (y * gridDim.x * 8) + (blockIdx.x * 8);
+        rx[outputIndex + rxTid] = sum_v;
     }
 }
 
@@ -244,21 +244,19 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
     half2 center; //half -> half2 for vectorized ops later
     half8* localVec8 = reinterpret_cast<half8*>(&RxLocal[tid][0]);
     //if/else is better than always writing (even vectorized) to shared memory unnecessarily
-    if (x < width) 
+    if (x < width)
     {
         load_neighbor_vec_p5(localVec8, blockValues, centerVal);
-        center = __half2half2(centerVal); 
+        center = __half2half2(centerVal);
     }
     else
     {
-        half8 zero = {};
-        localVec8[0] = zero;
-        localVec8[1] = zero;
-        localVec8[2] = zero;
-        localVec8[3] = zero;
+#pragma unroll
+        for (int i = 0; i < 4; i++)
+            localVec8[i] = {};
         center = __half2half2(blockValues[2][tid + 2]); //center pixel
     }
-     
+
     //do not compute rx yet, compute Rx first
     //TENSOR CORE Rx ACCUMULATION (24x24 matrix -> 32x32 tiled)
     wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::col_major> A_low, A_high;
@@ -296,34 +294,13 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
     {
         half2* inPtr = reinterpret_cast<half2*>(&localVec8[i]);
         half2* resultPtr = reinterpret_cast<half2*>(&rxVec[i]);
-        resultPtr[0] = __hmul2(inPtr[0], center);
-        resultPtr[1] = __hmul2(inPtr[1], center);
-        resultPtr[2] = __hmul2(inPtr[2], center);
-        resultPtr[3] = __hmul2(inPtr[3], center);
-    }
-
-    //store Rx to shared mem
-    half* warpOutput = &RxLocal[warpId * 32][0];
-    wmma::store_matrix_sync(warpOutput, C00, sharedMemStride, wmma::mem_row_major); //(0,0)
-    wmma::store_matrix_sync(warpOutput + 16, C01, sharedMemStride, wmma::mem_row_major); //(0,16)
-    wmma::store_matrix_sync(warpOutput + 16 * sharedMemStride, C10, sharedMemStride, wmma::mem_row_major); //(16,0)
-    wmma::store_matrix_sync(warpOutput + 16 * sharedMemStride + 16, C11, sharedMemStride, wmma::mem_row_major); //(16,16)
-    __syncthreads();
-
-    //write Rx
-    const int RxBaseIndex = (y * gridDim.x * 300) + (blockIdx.x * 300);
-    for (int i = tid; i < 300; i += blockDim.x)
-    {
-        const short2 coords = c_RxCoordsP5[i];
-        float sum = 0.0f;
 #pragma unroll
-        for (int w = 0; w < 8; w++)
-            sum += __half2float(RxLocal[w * 32 + coords.x][coords.y]);
-        Rx[RxBaseIndex + i] = sum;
+        for (int i = 0; i < 4; i++)
+            resultPtr[i] = __hmul2(inPtr[i], center);
     }
-    __syncthreads();
 
-    //reduction for rx (vectorized 128-bit plus half2 for maximum efficiency)
+    //rx warp-level reduction
+    //lane 0 will end up holding the sum of the entire warp
     half2* rxHalf2 = reinterpret_cast<half2*>(rxVec);
 #pragma unroll
     for (int i = 0; i < 12; i++)
@@ -336,24 +313,53 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
         }
         rxHalf2[i] = sum;
     }
+
+    //store Rx to shared mem, NOTE: we don't care about top-right, don't store C01 and waste speed
+    half* warpOutput = &RxLocal[warpId * 32][0];
+    wmma::store_matrix_sync(warpOutput, C00, sharedMemStride, wmma::mem_row_major);
+    wmma::store_matrix_sync(warpOutput + 16 * sharedMemStride, C10, sharedMemStride, wmma::mem_row_major);
+    wmma::store_matrix_sync(warpOutput + 16 * sharedMemStride + 16, C11, sharedMemStride, wmma::mem_row_major);
+
+    //store rx partials to the unused memory zone (row 31)
+    //row 31 is unused by the 24x24 matrix (chunk is 32x32) -> safe from overwrite
     if ((tid & 31) == 0)
     {
-        half8* dstRow = reinterpret_cast<half8*>(&RxLocal[warpId][0]);
-        dstRow[0] = rxVec[0];
-        dstRow[1] = rxVec[1];
-        dstRow[2] = rxVec[2];
+        half8* dst = reinterpret_cast<half8*>(&RxLocal[warpId * 32 + 31][0]);
+        dst[0] = rxVec[0];
+        dst[1] = rxVec[1];
+        dst[2] = rxVec[2];
     }
     __syncthreads();
 
-    //first 24 threads sum the 8 warp results and write to rx
-    const int rxBaseIndex = (y * gridDim.x * 24) + (blockIdx.x * 24);
-    if (tid < 24) 
+    //write rx entirely by warp 1 
+    if (tid < 32)
     {
-        float sum = 0.0f;
+        if (tid < 24)
+        {
+            float sum = 0.0f;
+            //this is the unused memory zone we wrote before (row 31 of each chunk)
 #pragma unroll
-        for (int w = 0; w < 8; w++)
-            sum += __half2float(RxLocal[w][tid]);
-        rx[rxBaseIndex + tid] = sum;
+            for (int w = 0; w < 8; w++)
+                sum += __half2float(RxLocal[w * 32 + 31][tid]);
+            const int rxBaseIndex = (y * gridDim.x * 24) + (blockIdx.x * 24);
+            rx[rxBaseIndex + tid] = sum;
+        }
+    }
+    //warps 2-8 handle Rx in parallel (threads with id from 32 to 255) write 300 values
+    else
+    {
+        const int workerIdx = tid - 32; //bring tid to [0,223]
+        const int RxBaseIndex = (y * gridDim.x * 300) + (blockIdx.x * 300);
+
+        for (int i = workerIdx; i < 300; i += 224)
+        {
+            const short2 coords = c_RxCoordsP5[i];
+            float sum = 0.0f;
+#pragma unroll
+            for (int w = 0; w < 8; w++)
+                sum += __half2float(RxLocal[w * 32 + coords.x][coords.y]);
+            Rx[RxBaseIndex + i] = sum;
+        }
     }
 }
 
