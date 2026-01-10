@@ -37,7 +37,7 @@ __device__ void me_p3_rxCalculate(half8* RxLocalVec8, const half8& vec, const ha
 
 __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height)
 {
-    constexpr int sharedMemStride = 24; //16 + 8 padding for WMMA
+    constexpr int sharedMemStride = 24; //16 + 8 for padding to minimize bank conflicts (padding is CRITICAL for performance)
 
     const int tid = threadIdx.x;
     const int x = blockIdx.x * 256 + tid;
@@ -196,7 +196,7 @@ __device__ void load_neighbor_vec_p5(half8* dst, const half blockValues[5][260],
 
 __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height)
 {
-    constexpr int sharedMemStride = 32;
+    constexpr int sharedMemStride = 40; //32 + 8 for padding to minimize bank conflicts (padding is CRITICAL for performance)
 
     const int tid = threadIdx.x;
     const int x = blockIdx.x * 256 + tid;
