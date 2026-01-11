@@ -205,29 +205,18 @@ __global__ void cholesky_solver(const float* __restrict__ A, const float* __rest
         localX[i] = 0.0f;
 
     //initialize Rx and rx
-    //p=5: Rx is in packed format, unpack fast 
-    //because we use 1 thread, it is faster to unpack manually than use the constant cache map!
-    if constexpr (p == 5)
-    {
-        int k = 0;
+    //because we use 1 thread, it is faster to reconstruct Rx manually than to use the constant cache map!
+    int k = 0;
 #pragma unroll
-        for (int r = 0; r < N; r++)
+    for (int r = 0; r < N; r++)
+    {
+#pragma unroll
+        for (int c = 0; c <= r; c++)
         {
-#pragma unroll
-            for (int c = 0; c <= r; c++)
-            {
-                float val = A[k++];
-                localA[r * N + c] = val;
-                localA[c * N + r] = val;
-            }
+            float val = A[k++];
+            localA[r * N + c] = val;
+            localA[c * N + r] = val;
         }
-    }
-    //p=3: Rx is already full (64 floats, just copy)
-    else
-    {
-#pragma unroll
-        for (int i = 0; i < N * N; i++)
-            localA[i] = A[i];
     }
     //copy rx
     for (int i = 0; i < N; i++)
