@@ -101,7 +101,7 @@ protected:
 	{
 		//reduction sum of blocks
 		//all [p^2-1,1] blocks will be summed in rx
-		//all [p^2-1, p^2-1] blocks will be summed in Rx (CUDA) or all [((p^2-1)(p^2))/2] vector blocks (OpenCL)
+		//all [p^2-1, p^2-1] blocks will be summed in Rx (CUDA p=3) or all [((p^2-1)(p^2))/2] vector blocks (OpenCL p=3, CUDA p=5)
 		const auto totalBlocks = rxPartial.elements() / localSize;
 		const auto RxStride = RxPartial.elements() / totalBlocks;
 		const af::array rx = af::sum(af::moddims(rxPartial, localSize, totalBlocks), 1);
