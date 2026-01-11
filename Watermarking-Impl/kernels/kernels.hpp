@@ -229,8 +229,7 @@ __kernel void me_p3(__global const float* restrict input,
             sum += rxPartial[i][localId];
         const int blockOffset = (y * get_num_groups(0) * 8) + (get_group_id(0) * 8);
         rx[blockOffset + localId] = sum;
-    }
-    barrier(CLK_LOCAL_MEM_FENCE);
+    } //no barrier needed here
 
     if (isValid)
         me_p3_RxCalculate(RxLocal, localId, x_0, x_1, x_2, x_3, x_5, x_6, x_7, x_8);
