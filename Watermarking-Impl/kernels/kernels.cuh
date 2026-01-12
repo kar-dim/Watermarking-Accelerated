@@ -14,6 +14,7 @@ template<typename T>
 __device__ inline T clamp(const T& val, const T& lo, const T& hi) { return (val < lo) ? lo : (val > hi) ? hi : val; }
 
 //helper method to fill block-wide shared memory cooperatively for error sequence and NVF kernels
+//sharedMem must be of size: [sharedSize][sharedSize + 1] to avoid bank conflicts
 template<bool FUSED, int p, int pad = p / 2, int sharedSize = 16 + (2 * pad)>
 __device__ void fillBlockMain(const float* __restrict__ inputA, const float* __restrict__ inputB, float* __restrict__ sharedMem, const int width, const int height)
 {
@@ -31,7 +32,7 @@ __device__ void fillBlockMain(const float* __restrict__ inputA, const float* __r
         //if we need to fuse (A*B), do it here, branch-free because it its known at compile time
         if constexpr (FUSED)
             val *= inputB[idx];
-        sharedMem[tileRow * sharedSize + tileCol] = val;
+        sharedMem[tileRow * (sharedSize + 1) + tileCol] = val;
     }
 }
 
@@ -113,7 +114,7 @@ __global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, co
     const int x = blockIdx.y * blockDim.y + threadIdx.y;
     const int y = blockIdx.x * blockDim.x + threadIdx.x;
 
-    __shared__ float region[sharedSize][sharedSize]; //hold the region for this 16 x 16 block
+    __shared__ float region[sharedSize][sharedSize + 1]; //+1 for bank conflicts
 
     fillBlock<p>(input, &region[0][0], width, height);
     __syncthreads();
@@ -170,7 +171,7 @@ __global__ void calculate_error_sequence(const float* __restrict__ inputA, const
 {
     const int tid = threadIdx.y * blockDim.x + threadIdx.x;
 
-    __shared__ float region[sharedSize][sharedSize];
+    __shared__ float region[sharedSize][sharedSize + 1]; //+1 for bank conflicts
     __shared__ float sCoeffs[coeffsSize];
     if (tid < coeffsSize)
         sCoeffs[tid] = coeffs[tid];

@@ -22,7 +22,7 @@ inline void fillBlock(__global const float* restrict input, __local float* restr
         const int tileCol = i / SHAREDSIZE;
         const int globalX = clamp(groupStartCol + tileCol - PAD, 0, maxCol);
         const int globalY = clamp(groupStartRow + tileRow - PAD, 0, maxRow);
-        sharedMem[tileRow * SHAREDSIZE + tileCol] = input[globalX * height + globalY];
+        sharedMem[tileRow * (SHAREDSIZE + 1) + tileCol] = input[globalX * height + globalY];
     }
 }
 
@@ -30,7 +30,7 @@ __kernel void nvf(__global const float* restrict input, __global float* restrict
 {	
 	const int x = get_global_id(1);
     const int y = get_global_id(0);
-    __local float region[SHAREDSIZE][SHAREDSIZE];
+    __local float region[SHAREDSIZE][SHAREDSIZE + 1];
 
 	fillBlock(input, &region[0][0], width, height);
     barrier(CLK_LOCAL_MEM_FENCE);
@@ -56,9 +56,10 @@ __kernel void nvf(__global const float* restrict input, __global float* restrict
 	nvf[(x * height) + y] = fmax(output, 0.0f);
 }
 
+//use pointer arithmetic for dot product to help compilers optimize address calculations fast
 inline float error_sequence_coeffs_filter(__local float* centerPtr, __constant float* coeffs)
 {
-    #define P(r, c) centerPtr[(r) * SHAREDSIZE + (c)] 
+    #define P(r, c) centerPtr[(r) * (SHAREDSIZE + 1) + (c)] 
     float dot = 0.0f;
     int k = 0;
 #pragma unroll
@@ -86,7 +87,7 @@ __kernel void error_sequence(
     const int calculateAbs,
     __global int* restrict stopFlag)
 {
-    __local float region[SHAREDSIZE][SHAREDSIZE];
+    __local float region[SHAREDSIZE][SHAREDSIZE + 1];
     __local float* centerPtr = &region[get_local_id(0) + PAD][get_local_id(1) + PAD];
     fillBlock(input, &region[0][0], width, height);
     barrier(CLK_LOCAL_MEM_FENCE);
@@ -114,7 +115,7 @@ __kernel void error_sequence_fused(
     const int height,
     __constant int* restrict stopFlag)
 {
-    __local float region[SHAREDSIZE][SHAREDSIZE];
+    __local float region[SHAREDSIZE][SHAREDSIZE + 1];
     __local float* centerPtr = &region[get_local_id(0) + PAD][get_local_id(1) + PAD];
    
     const int groupStartRow = (int)(get_group_id(0) * get_local_size(0));
