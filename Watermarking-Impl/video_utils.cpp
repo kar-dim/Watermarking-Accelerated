@@ -146,9 +146,8 @@ namespace video_utils
 			return "";  //8-bit SDR, no filtering (save processing time)
 		if (!isHDR(codecCtx))
 			return useHwDecoder ? "scale_cuda=format=nv12" : "format=yuv420p";  //10-bit SDR, fast downscale to 8-bit
-		//HDR10 / 10-bit HDR GPU case -> unfortunately no way to tonemap in GPU with cuda filters yet! Should use CPU decoder instead 
-		if (useHwDecoder)
-			throw std::runtime_error("Cannot tonemap HDR input to SDR with Hardware Accelerated Decoder yet. Use CPU decoder instead.");
+		//HDR10 / 10-bit HDR GPU case -> unfortunately no way to tonemap in GPU with cuda filters yet! Should use CPU decoder instead
+		Utils::checkError(useHwDecoder, "Cannot tonemap HDR input to SDR with Hardware Accelerated Decoder yet. Use CPU decoder instead.");
 		//HDR10 / 10-bit HDR CPU case -> scaler needs more input info
 		const char* primaries = av_color_primaries_name(codecCtx->color_primaries);
 		const char* matrix = av_color_space_name(codecCtx->colorspace);
@@ -170,8 +169,7 @@ namespace video_utils
 		//don't exit if more frames (buffering is used) are needed to produce one output frame, just keep the original
 		if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
 			return;
-		else if (ret < 0)
-			throw std::runtime_error("Failed to get filtered frame: " + std::to_string(ret));
+		Utils::checkError(ret < 0, "Failed to get filtered frame: " + std::to_string(ret));
 		//replace original frame with filtered one
 		av_frame_unref(frame.get());
 		av_frame_move_ref(frame.get(), filteredFrame.get());

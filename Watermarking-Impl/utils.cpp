@@ -25,8 +25,7 @@ using std::string;
 string Utils::addSuffixBeforeExtension(const string& file, const string& suffix)
 {
 	const auto dot = file.find_last_of('.');
-	if (dot == string::npos || dot == file.size() - 1)
-		throw std::runtime_error("Filename has no valid extension: " + file);
+	Utils::checkError(dot == string::npos || dot == file.size() - 1, "Filename has no valid extension: " + file);
 	return file.substr(0, dot) + suffix + file.substr(dot);
 }
 
