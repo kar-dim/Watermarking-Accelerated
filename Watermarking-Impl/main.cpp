@@ -199,9 +199,9 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
 	bool useHwDecoder = false;
 	const string hwCodec = inir.Get("parameters_video", "cuda_hw_decoder", "");
 	const AVCodecContextPtr inputDecoderCtx = openDecoder(videoStream->codecpar, hwCodec, useHwDecoder);
+	Utils::checkError(!inputDecoderCtx.get(), "ERROR: Could not open video decoder");
 	if (!hwCodec.empty() && !useHwDecoder && !inputDecoderCtx->hw_device_ctx)
 		cout << info("WARNING: Hardware decoder '" + hwCodec + "' was requested, but not available. Using software decoder instead.\n");
-	Utils::checkError(!inputDecoderCtx.get(), "ERROR: Could not open video decoder");
 
 	//initialize watermark functions class and host pinned memory for fast GPU<->CPU transfers, or simple Eigen memory for CPU implementation
 	const int height = videoStream->codecpar->height;
