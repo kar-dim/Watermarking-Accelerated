@@ -75,14 +75,14 @@ __device__  void load_neighbor_row_funnel_p3(half& p0, half& p1, half& p2, const
     uint32_t u1 = ptr[1]; // Loads halves [aligned+2, aligned+3]
     //funnel shift (vectorized selection, this reconstructs the sliding window)
     uint32_t pair0 = __funnelshift_r(u0, u1, shift);
-    uint32_t final = u1 >> shift;
+    uint32_t pairFinal = u1 >> shift;
     //unpack
-    const half2 h_pair0 = reinterpret_cast<half2&>(pair0);
-    const half2 h_final = reinterpret_cast<half2&>(final);
+    const half2 hPair0 = reinterpret_cast<half2&>(pair0);
+    const half2 hFinal = reinterpret_cast<half2&>(pairFinal);
     //store
-    p0 = h_pair0.x;
-    p1 = h_pair0.y;
-    p2 = h_final.x;
+    p0 = hPair0.x;
+    p1 = hPair0.y;
+    p2 = hFinal.x;
 }
 
 __device__ void load_neighbor_row_funnel_p5(half& p0, half& p1, half& p2, half& p3, half& p4, const half* rowBase)
@@ -95,17 +95,17 @@ __device__ void load_neighbor_row_funnel_p5(half& p0, half& p1, half& p2, half& 
     //funnel shift (vectorized selection, this reconstructs the sliding window)
     uint32_t pair0 = __funnelshift_r(ptr[0], ptr[1], shift);
     uint32_t pair1 = __funnelshift_r(ptr[1], ptr[2], shift);
-    uint32_t final = ptr[2] >> shift;
+    uint32_t pairFinal = ptr[2] >> shift;
     //unpack
-    const half2 h_pair0 = reinterpret_cast<half2&>(pair0);
-    const half2 h_pair1 = reinterpret_cast<half2&>(pair1);
-    const half2 h_final = reinterpret_cast<half2&>(final);
+    const half2 hPair0 = reinterpret_cast<half2&>(pair0);
+    const half2 hPair1 = reinterpret_cast<half2&>(pair1);
+    const half2 hFinal = reinterpret_cast<half2&>(pairFinal);
     //store
-    p0 = h_pair0.x;
-    p1 = h_pair0.y;
-    p2 = h_pair1.x;
-    p3 = h_pair1.y;
-    p4 = h_final.x;
+    p0 = hPair0.x;
+    p1 = hPair0.y;
+    p2 = hPair1.x;
+    p3 = hPair1.y;
+    p4 = hFinal.x;
 }
 
 __device__ void load_neighbor_vec_p5(half8* dst, const half blockValues[5][260], half& center)
