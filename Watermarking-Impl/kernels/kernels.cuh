@@ -36,17 +36,17 @@ __device__ void fillBlockMain(const float* __restrict__ inputA, const float* __r
 }
 
 //non-fused version, one input only
-template<int p, int pad = p / 2, int sharedSize = 16 + (2 * pad)>
+template<int p>
 __device__ void fillBlock(const float* __restrict__ input, float* __restrict__ sharedMem, const int width, const int height)
 {
-    fillBlockMain<false, p, pad, sharedSize>(input, nullptr, sharedMem, width, height);
+    fillBlockMain<false, p>(input, nullptr, sharedMem, width, height);
 }
 
 //fused version, two inputs multiplied together
-template<int p, int pad = p / 2, int sharedSize = 16 + (2 * pad)>
+template<int p>
 __device__ void fillBlock(const float* __restrict__ inputA, const float* __restrict__ inputB, float* __restrict__ sharedMem, const int width, const int height)
 {
-    fillBlockMain<true, p, pad, sharedSize>(inputA, inputB, sharedMem, width, height);
+    fillBlockMain<true, p>(inputA, inputB, sharedMem, width, height);
 }
 
 //helper method to fill block-wide shared memory cooperatively for prediction error kernels where
