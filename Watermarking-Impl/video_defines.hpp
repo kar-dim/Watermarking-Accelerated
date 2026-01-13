@@ -13,10 +13,8 @@ extern "C" {
 }
 
 namespace video_utils::detail {
-template <auto FreeFunc>
-struct AVDeleter {
-    template <typename T>
-    void operator()(T* p) const noexcept {
+template <auto FreeFunc> struct AVDeleter {
+    template <typename T> void operator()(T* p) const noexcept {
         if (p)
             FreeFunc(&p);
     }
@@ -34,8 +32,7 @@ struct AVGenericDeleter {
  *  \author Dimitris Karatzas
  */
 namespace video_utils {
-enum VideoOp { EMBED,
-               DETECT };
+enum VideoOp { EMBED, DETECT };
 
 using AVPacketPtr = std::unique_ptr<AVPacket, detail::AVDeleter<av_packet_free>>;
 using AVFramePtr = std::unique_ptr<AVFrame, detail::AVDeleter<av_frame_free>>;

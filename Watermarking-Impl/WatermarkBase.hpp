@@ -9,10 +9,7 @@
 #include <stdexcept>
 #include <string>
 
-enum MASK_TYPE {
-    ME,
-    NVF
-};
+enum MASK_TYPE { ME, NVF };
 
 /*!
  *  \brief  Functions for watermark computation and detection, Base class.
@@ -40,8 +37,7 @@ class WatermarkBase {
     virtual float detectWatermark(const ImageBuffer& inputImage, const MASK_TYPE maskType) = 0;
 
   protected:
-    template <unsigned int ALIGN>
-    static constexpr unsigned int align(const unsigned int x) { return (x + (ALIGN - 1)) & ~(ALIGN - 1); }
+    template <unsigned int ALIGN> static constexpr unsigned int align(const unsigned int x) { return (x + (ALIGN - 1)) & ~(ALIGN - 1); }
     static constexpr bool maskCalcRequired = true;
     static constexpr bool maskCalcNotRequired = false;
     unsigned int baseRows, baseCols;
@@ -58,7 +54,8 @@ class WatermarkBase {
         randomMatrixStream.seekg(0, std::ios::beg);
         const size_t expectedBytes = static_cast<size_t>(baseRows) * baseCols * sizeof(float);
         if (expectedBytes != totalBytes)
-            throw std::runtime_error(std::string("Error: W file total elements != image dimensions! W file total elements: " + std::to_string(totalBytes / (sizeof(float))) + ", Image width: " + std::to_string(baseCols) + ", Image height: " + std::to_string(baseRows) + "\n"));
+            throw std::runtime_error(std::string("Error: W file total elements != image dimensions! W file total elements: " + std::to_string(totalBytes / (sizeof(float))) +
+                                                 ", Image width: " + std::to_string(baseCols) + ", Image height: " + std::to_string(baseRows) + "\n"));
 #if defined(_USE_GPU_)
         std::vector<float> watermarkBuffer(baseRows * baseCols);
         randomMatrixStream.read(reinterpret_cast<char*>(watermarkBuffer.data()), totalBytes);

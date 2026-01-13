@@ -12,8 +12,7 @@
  *  \brief  Functions for watermark computation and detection, CUDA implementation.
  *  \author Dimitris Karatzas
  */
-template <int p>
-class WatermarkCuda final : public WatermarkGPU<p> {
+template <int p> class WatermarkCuda final : public WatermarkGPU<p> {
     static_assert(p == 3 || p == 5, "Only p = 3 or p = 5 is currently supported in CUDA implementation");
 
   public:
@@ -42,7 +41,8 @@ class WatermarkCuda final : public WatermarkGPU<p> {
         const dim3 gridSize = cuda_utils::gridSizeCalculate(windowBlockSize, this->baseCols, this->baseRows);
         const af::array errorSequence(this->baseRows, this->baseCols);
         // call error sequence kernel
-        calculate_error_sequence<p, false><<<gridSize, windowBlockSize, 0, afStream>>>(image.device<float>(), nullptr, errorSequence.device<float>(), this->coefficients.template device<float>(), this->baseCols, this->baseRows, calculateAbs, this->stopFlag.template device<int>());
+        calculate_error_sequence<p, false><<<gridSize, windowBlockSize, 0, afStream>>>(image.device<float>(), nullptr, errorSequence.device<float>(), this->coefficients.template device<float>(),
+                                                                                       this->baseCols, this->baseRows, calculateAbs, this->stopFlag.template device<int>());
         // transfer ownership to arrayfire and return output array
         this->unlockArrays(image, errorSequence, this->coefficients, this->stopFlag);
         return errorSequence;
@@ -53,7 +53,9 @@ class WatermarkCuda final : public WatermarkGPU<p> {
         const dim3 gridSize = cuda_utils::gridSizeCalculate(windowBlockSize, this->baseCols, this->baseRows);
         const af::array errorSequence(this->baseRows, this->baseCols);
         // call error sequence kernel
-        calculate_error_sequence<p, true><<<gridSize, windowBlockSize, 0, afStream>>>(inputA.device<float>(), inputB.device<float>(), errorSequence.device<float>(), this->coefficients.template device<float>(), this->baseCols, this->baseRows, false, this->stopFlag.template device<int>());
+        calculate_error_sequence<p, true><<<gridSize, windowBlockSize, 0, afStream>>>(inputA.device<float>(), inputB.device<float>(), errorSequence.device<float>(),
+                                                                                      this->coefficients.template device<float>(), this->baseCols, this->baseRows, false,
+                                                                                      this->stopFlag.template device<int>());
         // transfer ownership to arrayfire and return output array
         this->unlockArrays(inputA, inputB, errorSequence, this->coefficients, this->stopFlag);
         return errorSequence;

@@ -13,11 +13,9 @@
  *  \brief  Functions for watermark computation and detection, Eigen implementation.
  *  \author Dimitris Karatzas
  */
-template <int p>
-class WatermarkEigen final : public WatermarkBase {
+template <int p> class WatermarkEigen final : public WatermarkBase {
   private:
-    enum class Op { ADD,
-                    SUB };
+    enum class Op { ADD, SUB };
     static constexpr int pSquared = p * p;
     static constexpr int pad = p / 2;
     static constexpr int localSize = pSquared - 1;
@@ -29,12 +27,12 @@ class WatermarkEigen final : public WatermarkBase {
     using LocalVector = Eigen::Matrix<float, localSize, 1>;
     using ArrayXXf = Eigen::ArrayXXf;
     using VectorXf = Eigen::VectorXf;
-    template <typename T>
-    using Map = Eigen::Map<T>;
+    template <typename T> using Map = Eigen::Map<T>;
 
   public:
     WatermarkEigen<p>(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr)
-        : WatermarkBase(rows, cols, randomMatrixPath, psnr), mask(rows, cols), errorSequence(rows, cols), filteredEstimation(rows, cols), u(rows, cols), uStrengthened(rows, cols), meMatrixData(omp_get_max_threads(), rows) {}
+        : WatermarkBase(rows, cols, randomMatrixPath, psnr), mask(rows, cols), errorSequence(rows, cols), filteredEstimation(rows, cols), u(rows, cols), uStrengthened(rows, cols),
+          meMatrixData(omp_get_max_threads(), rows) {}
 
     // main watermark embedding method
     void makeWatermark(const ImageBuffer& inputGrayImage, const ImageBuffer& inputImage, ImageOutputBuffer& output, float& watermarkStrength, const MASK_TYPE maskType) override {
@@ -81,13 +79,10 @@ class WatermarkEigen final : public WatermarkBase {
     PredictionErrorMatrixData<p> meMatrixData;
 
     // helper method to clamp the pixel value to the image boundaries if out of bounds
-    inline float clampedValue(const ArrayXXf& img, int r, int c, const int rows, const int cols) {
-        return img(std::clamp(r, 0, rows - 1), std::clamp(c, 0, cols - 1));
-    }
+    inline float clampedValue(const ArrayXXf& img, int r, int c, const int rows, const int cols) { return img(std::clamp(r, 0, rows - 1), std::clamp(c, 0, cols - 1)); }
 
     // helper method for custom mask sums accumulation
-    template <Op OP>
-    inline void computeCustomMaskSums(const float pixelValue, float& sum, float& sumSq) {
+    template <Op OP> inline void computeCustomMaskSums(const float pixelValue, float& sum, float& sumSq) {
         if constexpr (OP == Op::ADD) {
             sum += pixelValue;
             sumSq += pixelValue * pixelValue;
@@ -205,8 +200,7 @@ bool computeStrengthenedWatermark(const ArrayXXf& inputImage, float& watermarkSt
 }
 
 // compute Prediction error data (coefficients, error sequence), and if needed, prediction error mask
-template <bool maskNeeded>
-bool computePredictionErrorData(const ArrayXXf& image) {
+template <bool maskNeeded> bool computePredictionErrorData(const ArrayXXf& image) {
     meMatrixData.setZero();
     // process CENTER region
     if (hasCenterRegion) {
@@ -241,9 +235,8 @@ bool computePredictionErrorData(const ArrayXXf& image) {
     }
     // process BORDER regions
     auto processBorder = [&](const int startRow, const int endRow, const int startCol, const int endCol) {
-        processPredictionErrorBorder(image, startRow, endRow, startCol, endCol, [&](int i, int j, const LocalVector& neighbors, const int threadId) {
-            meMatrixData.computePredictionErrorMatrices(neighbors, image(i, j), threadId);
-        });
+        processPredictionErrorBorder(image, startRow, endRow, startCol, endCol,
+                                     [&](int i, int j, const LocalVector& neighbors, const int threadId) { meMatrixData.computePredictionErrorMatrices(neighbors, image(i, j), threadId); });
     };
     computeMaskBorders(startRow, endRow, startCol, endCol, hasCenterRegion, processBorder);
 
@@ -284,9 +277,8 @@ void computeErrorSequence(const ArrayXXf& image, ArrayXXf& outputErrorSequence) 
     }
     // process BORDER regions
     auto processBorder = [&](const int startRow, const int endRow, const int startCol, const int endCol) {
-        processPredictionErrorBorder(image, startRow, endRow, startCol, endCol, [&](int i, int j, const LocalVector& neighbors, const int) {
-            outputErrorSequence(i, j) = image(i, j) - neighbors.dot(coefficients);
-        });
+        processPredictionErrorBorder(image, startRow, endRow, startCol, endCol,
+                                     [&](int i, int j, const LocalVector& neighbors, const int) { outputErrorSequence(i, j) = image(i, j) - neighbors.dot(coefficients); });
     };
     computeMaskBorders(startRow, endRow, startCol, endCol, hasCenterRegion, processBorder);
 }

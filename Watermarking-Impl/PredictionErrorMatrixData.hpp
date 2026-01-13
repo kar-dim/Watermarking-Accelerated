@@ -5,8 +5,7 @@
 
 // Aligned matrix to 64 bytes boundary (cache-line friendly),
 // improves performance massively when used in parallel computations
-template <typename T>
-struct alignas(64) AlignedMatrix {
+template <typename T> struct alignas(64) AlignedMatrix {
     T mat;
 };
 
@@ -15,8 +14,7 @@ struct alignas(64) AlignedMatrix {
  *			used by the Eigen implementation.
  *  \author Dimitris Karatzas
  */
-template <int p>
-class PredictionErrorMatrixData {
+template <int p> class PredictionErrorMatrixData {
   private:
     static constexpr int localSize = (p * p) - 1;
     static constexpr int center = p / 2;

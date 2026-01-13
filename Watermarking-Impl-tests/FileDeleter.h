@@ -9,15 +9,15 @@
  */
 class FileDeleter {
     std::filesystem::path filePath;
-public:
+
+  public:
     explicit FileDeleter(const std::filesystem::path& path) : filePath(path) {}
-    ~FileDeleter() 
-    {
+    ~FileDeleter() {
         using std::filesystem::exists;
         using std::filesystem::remove;
         std::error_code ec;
         if (exists(filePath, ec) && !remove(filePath, ec))
-            std::cerr << "Warning: Failed to delete file " << filePath << ": " << ec.message() << "\n"; 
+            std::cerr << "Warning: Failed to delete file " << filePath << ": " << ec.message() << "\n";
     }
     FileDeleter(const FileDeleter&) = delete;
     FileDeleter& operator=(const FileDeleter&) = delete;

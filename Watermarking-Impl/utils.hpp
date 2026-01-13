@@ -28,8 +28,7 @@ class Utils {
     static ImageBuffer rgb2gray(const ImageBuffer& rgbImage);
     static ImageBuffer castToFloat(const ImageOutputBuffer& buffer);
 
-    template <typename Func>
-    static double executionTime(Func&& func, const int loops = 1, const int warmup = 0) {
+    template <typename Func> static double executionTime(Func&& func, const int loops = 1, const int warmup = 0) {
         using clock = std::chrono::high_resolution_clock;
         using seconds = std::chrono::duration<double>;
 

@@ -12,8 +12,7 @@
  *  \brief  Used only for video, holds pinned host memory for fast GPU<->CPU transfers, or simple heap memory for CPU implementation.
  *  \author Dimitris Karatzas
  */
-template <typename T>
-class HostMemory {
+template <typename T> class HostMemory {
   public:
     HostMemory(const size_t size) {
 #if defined(_USE_CUDA_)

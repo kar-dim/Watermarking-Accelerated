@@ -9,9 +9,7 @@ struct alignas(16) half8 {
 };
 
 // helper method to clamp a value between two limits
-template <typename T>
-__device__ inline T clamp(const T& val, const T& lo, const T& hi) { return (val < lo) ? lo : (val > hi) ? hi
-                                                                                                        : val; }
+template <typename T> __device__ inline T clamp(const T& val, const T& lo, const T& hi) { return (val < lo) ? lo : (val > hi) ? hi : val; }
 
 // helper method to fill block-wide shared memory cooperatively for error sequence and NVF kernels
 // sharedMem must be of size: [sharedSize][sharedSize + 1] to avoid bank conflicts
@@ -35,21 +33,18 @@ __device__ void fillBlockMain(const float* __restrict__ inputA, const float* __r
 }
 
 // non-fused version, one input only
-template <int p>
-__device__ void fillBlock(const float* __restrict__ input, float* __restrict__ sharedMem, const int width, const int height) {
+template <int p> __device__ void fillBlock(const float* __restrict__ input, float* __restrict__ sharedMem, const int width, const int height) {
     fillBlockMain<false, p>(input, nullptr, sharedMem, width, height);
 }
 
 // fused version, two inputs multiplied together
-template <int p>
-__device__ void fillBlock(const float* __restrict__ inputA, const float* __restrict__ inputB, float* __restrict__ sharedMem, const int width, const int height) {
+template <int p> __device__ void fillBlock(const float* __restrict__ inputA, const float* __restrict__ inputB, float* __restrict__ sharedMem, const int width, const int height) {
     fillBlockMain<true, p>(inputA, inputB, sharedMem, width, height);
 }
 
 // helper method to fill block-wide shared memory cooperatively for prediction error kernels where
 // the shared memory is a wide "strip" on the x-axis
-template <int p>
-__device__ inline void fillBlockStrip(half blockValues[p][256 + p - 1], const float* __restrict__ input, const int width, const int height) {
+template <int p> __device__ inline void fillBlockStrip(half blockValues[p][256 + p - 1], const float* __restrict__ input, const int width, const int height) {
     const half halfScaleFactor = __float2half(0.00392156862f);
     // parallel indexing, fastest for p=3
     if constexpr (p == 3) {
@@ -95,8 +90,7 @@ __device__ inline void fillBlockStrip(half blockValues[p][256 + p - 1], const fl
 
 // NVF kernel, calculates NVF values for each pixel in the image
 // works for all p values (3,5,7 and 9)
-template <int p, int pad = p / 2, int sharedSize = 16 + (2 * pad)>
-__global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, const unsigned int width, const unsigned int height) {
+template <int p, int pad = p / 2, int sharedSize = 16 + (2 * pad)> __global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, const unsigned int width, const unsigned int height) {
     constexpr float nPixels = static_cast<float>(p * p);
     constexpr float nPixelsSq = nPixels * nPixels;
 
@@ -151,7 +145,8 @@ __device__ inline float error_sequence_coeffs_filter(const float region[sharedSi
 
 // main kernel for error sequence calculation
 template <int p, bool FUSED, int pad = p / 2, int sharedSize = 16 + (2 * pad), int coeffsSize = (p * p) - 1>
-__global__ void calculate_error_sequence(const float* __restrict__ inputA, const float* __restrict__ inputB, float* __restrict__ x_, const float* __restrict__ coeffs, const unsigned int width, const unsigned int height, const bool calculateAbs, const int* __restrict__ stopFlag) {
+__global__ void calculate_error_sequence(const float* __restrict__ inputA, const float* __restrict__ inputB, float* __restrict__ x_, const float* __restrict__ coeffs, const unsigned int width,
+                                         const unsigned int height, const bool calculateAbs, const int* __restrict__ stopFlag) {
     const int tid = threadIdx.y * blockDim.x + threadIdx.x;
 
     __shared__ float region[sharedSize][sharedSize + 1]; //+1 for bank conflicts
@@ -174,8 +169,7 @@ __global__ void calculate_error_sequence(const float* __restrict__ inputA, const
 }
 
 // naive 1-thread Cholesky solver used for its very low latency versus cuSOLVER but useful only for very small systems, p = 3 (N = 8) or p = 5 (N = 24)
-template <int p, int N = (p * p) - 1>
-__global__ void cholesky_solver(const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ X, int* __restrict__ stopFlag) {
+template <int p, int N = (p * p) - 1> __global__ void cholesky_solver(const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ X, int* __restrict__ stopFlag) {
     if (threadIdx.x > 0 || blockIdx.x > 0)
         return;
 
@@ -271,8 +265,10 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
 __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height);
 
 // main kernels for correlation calculation. used in detection.
-__global__ void calculate_partial_correlation(const float* __restrict__ e_u, const float* __restrict__ e_z, float* __restrict__ partialDots, float* __restrict__ partialNormU, float* __restrict__ partialNormZ, const unsigned int size);
-__global__ void calculate_final_correlation(const float* __restrict__ partialDots, const float* __restrict__ partialNormU, const float* __restrict__ partialNormZ, float* __restrict__ result, const unsigned int numBlocks);
+__global__ void calculate_partial_correlation(const float* __restrict__ e_u, const float* __restrict__ e_z, float* __restrict__ partialDots, float* __restrict__ partialNormU,
+                                              float* __restrict__ partialNormZ, const unsigned int size);
+__global__ void calculate_final_correlation(const float* __restrict__ partialDots, const float* __restrict__ partialNormU, const float* __restrict__ partialNormZ, float* __restrict__ result,
+                                            const unsigned int numBlocks);
 
 // used for converting NV12 to YUV420p format, in HW accelerated video decoding
 __global__ void nV12ToYUV420p(const uint8_t* __restrict__ uvSrc, const int uvPitch, uint8_t* __restrict__ uvDst, const int uvWidth, const int uvHeight);

@@ -19,14 +19,12 @@ using namespace cl_utils;
  *  \brief  Functions for watermark computation and detection, OpenCL implementation.
  *  \author Dimitris Karatzas
  */
-template <int p>
-class WatermarkOCL final : public WatermarkGPU<p> {
+template <int p> class WatermarkOCL final : public WatermarkGPU<p> {
     static_assert(p == 3, "Only p = 3 is currently supported in OpenCL implementation");
 
   public:
     WatermarkOCL<p>(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr)
-        : WatermarkGPU<p>(rows, cols, randomMatrixPath, psnr),
-          texKernelDims{align<windowBlockSize>(rows), align<windowBlockSize>(cols)}, meKernelDims{rows, align<meBlockSize>(cols)},
+        : WatermarkGPU<p>(rows, cols, randomMatrixPath, psnr), texKernelDims{align<windowBlockSize>(rows), align<windowBlockSize>(cols)}, meKernelDims{rows, align<meBlockSize>(cols)},
           programs(buildKernels(p)) {}
 
   private:
@@ -49,12 +47,13 @@ class WatermarkOCL final : public WatermarkGPU<p> {
         const clMemPtr imageMem(image.device<cl_mem>());
         const clMemPtr outputMem(customMask.device<cl_mem>());
         // transposed global dimensions because of column-major order in arrayfire
-        executeKernel([&]() {
-            queue.enqueueNDRangeKernel(
-                KernelBuilder(programs, "nvf").args(wrap(imageMem.get()), wrap(outputMem.get()), this->baseCols, this->baseRows).build(),
-                cl::NDRange(), cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(windowBlockSize, windowBlockSize));
-            this->unlockArrays(image, customMask);
-        }, "nvf");
+        executeKernel(
+            [&]() {
+                queue.enqueueNDRangeKernel(KernelBuilder(programs, "nvf").args(wrap(imageMem.get()), wrap(outputMem.get()), this->baseCols, this->baseRows).build(), cl::NDRange(),
+                                           cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(windowBlockSize, windowBlockSize));
+                this->unlockArrays(image, customMask);
+            },
+            "nvf");
         return customMask;
     }
 
@@ -65,12 +64,16 @@ class WatermarkOCL final : public WatermarkGPU<p> {
         const clMemPtr errorSequenceMem(errorSequence.device<cl_mem>());
         const clMemPtr stopFlagMem(this->stopFlag.template device<cl_mem>());
         // transposed global dimensions because of column-major order in arrayfire
-        executeKernel([&]() {
-            queue.enqueueNDRangeKernel(
-                KernelBuilder(programs, "error_sequence").args(wrap(imageMem.get()), wrap(errorSequenceMem.get()), wrap(coeffsMem.get()), this->baseCols, this->baseRows, (int)calculateAbs, wrap(stopFlagMem.get())).build(),
-                cl::NDRange(), cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(windowBlockSize, windowBlockSize));
-            this->unlockArrays(image, errorSequence, this->coefficients, this->stopFlag);
-        }, "error_sequence");
+        executeKernel(
+            [&]() {
+                queue.enqueueNDRangeKernel(
+                    KernelBuilder(programs, "error_sequence")
+                        .args(wrap(imageMem.get()), wrap(errorSequenceMem.get()), wrap(coeffsMem.get()), this->baseCols, this->baseRows, (int)calculateAbs, wrap(stopFlagMem.get()))
+                        .build(),
+                    cl::NDRange(), cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(windowBlockSize, windowBlockSize));
+                this->unlockArrays(image, errorSequence, this->coefficients, this->stopFlag);
+            },
+            "error_sequence");
         return errorSequence;
     }
 
@@ -82,12 +85,16 @@ class WatermarkOCL final : public WatermarkGPU<p> {
         const clMemPtr errorSequenceMem(errorSequence.device<cl_mem>());
         const clMemPtr stopFlagMem(this->stopFlag.template device<cl_mem>());
         // transposed global dimensions because of column-major order in arrayfire
-        executeKernel([&]() {
-            queue.enqueueNDRangeKernel(
-                KernelBuilder(programs, "error_sequence_fused").args(wrap(inputAmem.get()), wrap(inputBmem.get()), wrap(errorSequenceMem.get()), wrap(coeffsMem.get()), this->baseCols, this->baseRows, wrap(stopFlagMem.get())).build(),
-                cl::NDRange(), cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(windowBlockSize, windowBlockSize));
-            this->unlockArrays(inputA, inputB, errorSequence, this->coefficients, this->stopFlag);
-        }, "error_sequence_fused");
+        executeKernel(
+            [&]() {
+                queue.enqueueNDRangeKernel(
+                    KernelBuilder(programs, "error_sequence_fused")
+                        .args(wrap(inputAmem.get()), wrap(inputBmem.get()), wrap(errorSequenceMem.get()), wrap(coeffsMem.get()), this->baseCols, this->baseRows, wrap(stopFlagMem.get()))
+                        .build(),
+                    cl::NDRange(), cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(windowBlockSize, windowBlockSize));
+                this->unlockArrays(inputA, inputB, errorSequence, this->coefficients, this->stopFlag);
+            },
+            "error_sequence_fused");
         return errorSequence;
     }
 
@@ -98,28 +105,28 @@ class WatermarkOCL final : public WatermarkGPU<p> {
         const clMemPtr imageMem(image.device<cl_mem>());
         const clMemPtr RxPartialMem(RxPartial.device<cl_mem>());
         const clMemPtr rxPartialMem(rxPartial.device<cl_mem>());
-        return executeKernel([&]() -> af::array {
-            queue.enqueueNDRangeKernel(
-                KernelBuilder(programs, "me_p3").args(wrap(imageMem.get()), wrap(RxPartialMem.get()), wrap(rxPartialMem.get()), this->baseCols, this->baseRows).build(),
-                cl::NDRange(), cl::NDRange(meKernelDims.cols, meKernelDims.rows), cl::NDRange(meBlockSize, 1));
-            // return memory to arrayfire
-            this->unlockArrays(image, RxPartial, rxPartial);
+        return executeKernel(
+            [&]() -> af::array {
+                queue.enqueueNDRangeKernel(KernelBuilder(programs, "me_p3").args(wrap(imageMem.get()), wrap(RxPartialMem.get()), wrap(rxPartialMem.get()), this->baseCols, this->baseRows).build(),
+                                           cl::NDRange(), cl::NDRange(meKernelDims.cols, meKernelDims.rows), cl::NDRange(meBlockSize, 1));
+                // return memory to arrayfire
+                this->unlockArrays(image, RxPartial, rxPartial);
 
-            // calculation of coefficients and error sequence
-            const auto correlationArrays = this->transformCorrelationArrays(RxPartial, rxPartial);
-            const af::array& Rx = correlationArrays.first;
-            const af::array& rx = correlationArrays.second;
-            const clMemPtr RxMemPtr(Rx.device<cl_mem>());
-            const clMemPtr rxMemPtr(rx.device<cl_mem>());
-            const clMemPtr coeffsMem(this->coefficients.template device<cl_mem>());
-            const clMemPtr stopFlagMem(this->stopFlag.template device<cl_mem>());
-            queue.enqueueNDRangeKernel(
-                KernelBuilder(programs, "cholesky_solver_p3").args(wrap(RxMemPtr.get()), wrap(rxMemPtr.get()), wrap(coeffsMem.get()), wrap(stopFlagMem.get())).build(),
-                cl::NDRange(), cl::NDRange(1), cl::NDRange(1));
-            // return memory to arrayfire
-            this->unlockArrays(Rx, rx, this->coefficients, this->stopFlag);
-            return computeErrorSequence(image, calculateAbs);
-        }, "me_p3");
+                // calculation of coefficients and error sequence
+                const auto correlationArrays = this->transformCorrelationArrays(RxPartial, rxPartial);
+                const af::array& Rx = correlationArrays.first;
+                const af::array& rx = correlationArrays.second;
+                const clMemPtr RxMemPtr(Rx.device<cl_mem>());
+                const clMemPtr rxMemPtr(rx.device<cl_mem>());
+                const clMemPtr coeffsMem(this->coefficients.template device<cl_mem>());
+                const clMemPtr stopFlagMem(this->stopFlag.template device<cl_mem>());
+                queue.enqueueNDRangeKernel(KernelBuilder(programs, "cholesky_solver_p3").args(wrap(RxMemPtr.get()), wrap(rxMemPtr.get()), wrap(coeffsMem.get()), wrap(stopFlagMem.get())).build(),
+                                           cl::NDRange(), cl::NDRange(1), cl::NDRange(1));
+                // return memory to arrayfire
+                this->unlockArrays(Rx, rx, this->coefficients, this->stopFlag);
+                return computeErrorSequence(image, calculateAbs);
+            },
+            "me_p3");
     }
 
     float computeCorrelation(const af::array& e_u, const af::array& e_z) const {
@@ -137,19 +144,23 @@ class WatermarkOCL final : public WatermarkGPU<p> {
         const clMemPtr zNormPartialMem(zNormPartial.device<cl_mem>());
         const clMemPtr correlationResultMem(correlationResult.device<cl_mem>());
         float correlation = 0.0f;
-        executeKernel([&]() {
-            // calculate partial dot products and norms
-            queue.enqueueNDRangeKernel(
-                KernelBuilder(programs, "calculate_partial_correlation").args(wrap(euMem.get()), wrap(ezMem.get()), wrap(dotPartialMem.get()), wrap(uNormPartialMem.get()), wrap(zNormPartialMem.get()), N).build(),
-                cl::NDRange(), cl::NDRange(globalSizePartials), cl::NDRange(corrPartialBlockSize));
-            // reduce partials and compute correlation
-            queue.enqueueNDRangeKernel(
-                KernelBuilder(programs, "calculate_final_correlation").args(wrap(dotPartialMem.get()), wrap(uNormPartialMem.get()), wrap(zNormPartialMem.get()), wrap(correlationResultMem.get()), blocks).build(),
-                cl::NDRange(), cl::NDRange(corrFinalLocalSize), cl::NDRange(corrFinalLocalSize));
-            // retrieve the correlation result
-            this->unlockArrays(e_u, e_z, dotPartial, uNormPartial, zNormPartial, correlationResult);
-            correlation = correlationResult.scalar<float>();
-        }, "compute correlation kernels");
+        executeKernel(
+            [&]() {
+                // calculate partial dot products and norms
+                queue.enqueueNDRangeKernel(KernelBuilder(programs, "calculate_partial_correlation")
+                                               .args(wrap(euMem.get()), wrap(ezMem.get()), wrap(dotPartialMem.get()), wrap(uNormPartialMem.get()), wrap(zNormPartialMem.get()), N)
+                                               .build(),
+                                           cl::NDRange(), cl::NDRange(globalSizePartials), cl::NDRange(corrPartialBlockSize));
+                // reduce partials and compute correlation
+                queue.enqueueNDRangeKernel(KernelBuilder(programs, "calculate_final_correlation")
+                                               .args(wrap(dotPartialMem.get()), wrap(uNormPartialMem.get()), wrap(zNormPartialMem.get()), wrap(correlationResultMem.get()), blocks)
+                                               .build(),
+                                           cl::NDRange(), cl::NDRange(corrFinalLocalSize), cl::NDRange(corrFinalLocalSize));
+                // retrieve the correlation result
+                this->unlockArrays(e_u, e_z, dotPartial, uNormPartial, zNormPartial, correlationResult);
+                correlation = correlationResult.scalar<float>();
+            },
+            "compute correlation kernels");
         return correlation;
     }
 };

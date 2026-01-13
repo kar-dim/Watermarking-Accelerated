@@ -6,6 +6,7 @@
 #include <mma.h>
 
 using namespace nvcuda;
+
 // clang-format off
 
 // constant cache used to map linear index of the [8x8] Rx matrix for p=3 into [x,y] coordinates
@@ -50,7 +51,7 @@ __constant__ const short2 c_RxCoordsP5[300] = {
     {23,0}, {23,1}, {23,2}, {23,3}, {23,4}, {23,5}, {23,6}, {23,7}, {23,8}, {23,9}, {23,10}, {23,11}, {23,12}, {23,13}, {23,14}, {23,15}, {23,16}, {23,17}, {23,18}, {23,19}, {23,20}, {23,21}, {23,22}, {23,23}
 };
 // clang-format on
-//
+
 // STS.128
 __device__ void me_p3_rxCalculate(half8* RxLocalVec8, const half8& vec, const half& center) {
     half8 tmp;
@@ -349,7 +350,8 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
     }
 }
 
-__global__ void calculate_partial_correlation(const float* __restrict__ e_u, const float* __restrict__ e_z, float* __restrict__ partialDots, float* __restrict__ partialNormU, float* __restrict__ partialNormZ, const unsigned int size) {
+__global__ void calculate_partial_correlation(const float* __restrict__ e_u, const float* __restrict__ e_z, float* __restrict__ partialDots, float* __restrict__ partialNormU,
+                                              float* __restrict__ partialNormZ, const unsigned int size) {
     const int tid = threadIdx.x;
     const int idx = blockIdx.x * blockDim.x + tid;
     const int warpId = tid / 32;
@@ -405,7 +407,8 @@ __global__ void calculate_partial_correlation(const float* __restrict__ e_u, con
     }
 }
 
-__global__ void calculate_final_correlation(const float* __restrict__ partialDots, const float* __restrict__ partialNormU, const float* __restrict__ partialNormZ, float* __restrict__ result, const unsigned int numBlocks) {
+__global__ void calculate_final_correlation(const float* __restrict__ partialDots, const float* __restrict__ partialNormU, const float* __restrict__ partialNormZ, float* __restrict__ result,
+                                            const unsigned int numBlocks) {
     const int tid = threadIdx.x;
     const int lane = tid % 32;
     const int warpId = tid / 32;

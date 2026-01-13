@@ -14,8 +14,7 @@ class ImageEigenBuffer {
     std::variant<std::monostate, Eigen::ArrayXXf, EigenArrayRGB> data;
 
     // helper method to process the output (either assign or apply watermark, always float to uint8)
-    template <bool EMBED>
-    void processOutput(ImageEigenOutputBuffer& output, const Eigen::ArrayXXf* uStrengthened = nullptr) const {
+    template <bool EMBED> void processOutput(ImageEigenOutputBuffer& output, const Eigen::ArrayXXf* uStrengthened = nullptr) const {
         auto finalize = [](const auto& expr) { return expr.round().cwiseMax(0).cwiseMin(255).template cast<uint8_t>(); };
         if (isRGB()) {
             auto& rgbOutput = output.getRGB();
@@ -59,14 +58,10 @@ class ImageEigenBuffer {
     }
 
     // apply watermark (float to uint8)
-    void applyWatermark(const Eigen::ArrayXXf& uStrengthened, ImageEigenOutputBuffer& output) const {
-        processOutput<true>(output, &uStrengthened);
-    }
+    void applyWatermark(const Eigen::ArrayXXf& uStrengthened, ImageEigenOutputBuffer& output) const { processOutput<true>(output, &uStrengthened); }
 
     // assign input to output (float to uint8)
-    void assignTo(ImageEigenOutputBuffer& output) const {
-        processOutput<false>(output, nullptr);
-    }
+    void assignTo(ImageEigenOutputBuffer& output) const { processOutput<false>(output, nullptr); }
 
     // helper methods to retrieve the actual data type
     bool isRGB() const { return std::holds_alternative<EigenArrayRGB>(data); }

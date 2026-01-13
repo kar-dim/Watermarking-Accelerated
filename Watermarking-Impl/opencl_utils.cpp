@@ -10,8 +10,7 @@ using std::cout;
 using std::string;
 
 namespace cl_utils {
-KernelBuilder::KernelBuilder(const cl::Program& program, const char* name)
-    : kernel(program, name), argsCounter(0) {}
+KernelBuilder::KernelBuilder(const cl::Program& program, const char* name) : kernel(program, name), argsCounter(0) {}
 
 cl::Kernel KernelBuilder::build() const { return kernel; }
 
@@ -28,9 +27,7 @@ cl::Program buildKernels(const int p) {
         cout << "Could not build a kernel, Reason: " << e.what() << "\n\n";
         if (program.get() != NULL && program.getBuildInfo<CL_PROGRAM_BUILD_STATUS>(device) != CL_BUILD_SUCCESS)
             cout << program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(device) << "\n";
-    } catch (const std::exception& ex) {
-        cout << ex.what() << "\n";
-    }
+    } catch (const std::exception& ex) { cout << ex.what() << "\n"; }
     throw std::runtime_error("Failed to build OpenCL kernels. Check the error messages above for details.");
 }
 
