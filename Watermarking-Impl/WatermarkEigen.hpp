@@ -82,7 +82,7 @@ template <int p> class WatermarkEigen final : public WatermarkBase {
     inline float clampedValue(const ArrayXXf& img, int r, int c, const int rows, const int cols) { return img(std::clamp(r, 0, rows - 1), std::clamp(c, 0, cols - 1)); }
 
     // helper method for custom mask sums accumulation
-    template <Op OP> inline void computeCustomMaskSums(const float pixelValue, float& sum, float& sumSq) {
+    template <Op OP> inline void computeCustomMaskSums(const float pixelValue, double& sum, double& sumSq) {
         if constexpr (OP == Op::ADD) {
             sum += pixelValue;
             sumSq += pixelValue * pixelValue;
@@ -93,10 +93,11 @@ template <int p> class WatermarkEigen final : public WatermarkBase {
     }
 
     // helper method for custom mask calculation per pixel
-    inline void computeCustomMaskPixel(const float sum, const float sumSq, const int i, const int j) {
-        float mean = sum / pSquared;
-        float variance = (sumSq / pSquared) - (mean * mean);
-        mask(i, j) = std::max(variance / (1.0f + variance), 0.0f);
+    inline void computeCustomMaskPixel(const double sum, const double sumSq, const int i, const int j) {
+        const double mean = sum / pSquared;
+        const double variance = (sumSq / pSquared) - (mean * mean);
+        const double maskValue = variance / (1.0 + variance);
+        mask(i, j) = std::clamp(static_cast<float>(maskValue), 0.0f, 1.0f);
     }
 
     // helper method for calling lambda border handlers for both custom and prediction error masks
@@ -118,7 +119,7 @@ template <int p> class WatermarkEigen final : public WatermarkBase {
         if (hasCenterRegion) {
 #pragma omp parallel for
             for (int j = startCol; j < endCol; j++) {
-                float sum = 0.0f, sumSq = 0.0f;
+                double sum = 0.0, sumSq = 0.0;
                 for (int jj = -pad; jj <= pad; jj++)
                     for (int ii = -pad; ii <= pad; ii++)
                         computeCustomMaskSums<Op::ADD>(image(pad + ii, j + jj), sum, sumSq);
@@ -140,7 +141,7 @@ template <int p> class WatermarkEigen final : public WatermarkBase {
 #pragma omp parallel for collapse(2) schedule(dynamic, 8)
             for (int j = startCol; j < endCol; j++)
                 for (int i = startRow; i < endRow; i++) {
-                    float sum = 0.0f, sumSq = 0.0f;
+                    double sum = 0.0, sumSq = 0.0;
                     for (int jj = -pad; jj <= pad; jj++)
                         for (int ii = -pad; ii <= pad; ii++)
                             computeCustomMaskSums<Op::ADD>(clampedValue(image, i + ii, j + jj, baseRows, baseCols), sum, sumSq);
