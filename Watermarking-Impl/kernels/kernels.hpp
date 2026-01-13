@@ -9,15 +9,13 @@ inline const std::string kernels = R"CLC(
 
 #pragma OPENCL EXTENSION cl_khr_fp16 : enable
 
-inline void fillBlock(__global const float* restrict input, __local float* restrict sharedMem, const int width, const int height)
-{
+inline void fillBlock(__global const float* restrict input, __local float* restrict sharedMem, const int width, const int height) {
     const int groupStartCol = (int)(get_group_id(1) * get_local_size(1));
     const int groupStartRow = (int)(get_group_id(0) * get_local_size(0));
     const int maxCol = width - 1;
     const int maxRow = height - 1;
     const int stride = (int)(get_local_size(0) * get_local_size(1));
-    for (int i = (int)(get_local_id(1) * get_local_size(0) + get_local_id(0)); i < SHAREDSIZE * SHAREDSIZE; i += stride)
-    {
+    for (int i = (int)(get_local_id(1) * get_local_size(0) + get_local_id(0)); i < SHAREDSIZE * SHAREDSIZE; i += stride) {
         const int tileRow = i % SHAREDSIZE;
         const int tileCol = i / SHAREDSIZE;
         const int globalX = clamp(groupStartCol + tileCol - PAD, 0, maxCol);
@@ -26,8 +24,7 @@ inline void fillBlock(__global const float* restrict input, __local float* restr
     }
 }
 
-__kernel void nvf(__global const float* restrict input, __global float* restrict nvf, const unsigned int width, const unsigned int height)
-{	
+__kernel void nvf(__global const float* restrict input, __global float* restrict nvf, const unsigned int width, const unsigned int height) {	
 	const int x = get_global_id(1);
     const int y = get_global_id(0);
     __local float region[SHAREDSIZE][SHAREDSIZE + 1];
@@ -42,10 +39,8 @@ __kernel void nvf(__global const float* restrict input, __global float* restrict
     const int shY = get_local_id(0) + PAD;
 
 	float sum = 0.0f, sumSq = 0.0f;
-	for (int i = -PAD; i <= PAD; i++)
-	{
-		for (int j = -PAD; j <= PAD; j++)
-		{
+	for (int i = -PAD; i <= PAD; i++) {
+		for (int j = -PAD; j <= PAD; j++) {
 			const float pixelValue = region[shY + i][shX + j];
 			sum += pixelValue;
 			sumSq += pixelValue * pixelValue;
@@ -57,17 +52,14 @@ __kernel void nvf(__global const float* restrict input, __global float* restrict
 }
 
 //use pointer arithmetic for dot product to help compilers optimize address calculations fast
-inline float error_sequence_coeffs_filter(__local float* centerPtr, __constant float* coeffs)
-{
+inline float error_sequence_coeffs_filter(__local float* centerPtr, __constant float* coeffs) {
     #define P(r, c) centerPtr[(r) * (SHAREDSIZE + 1) + (c)] 
     float dot = 0.0f;
     int k = 0;
 #pragma unroll
-    for (int i = -PAD; i <= PAD; i++)
-    {
+    for (int i = -PAD; i <= PAD; i++) {
 #pragma unroll
-        for (int j = -PAD; j <= PAD; j++)
-        {
+        for (int j = -PAD; j <= PAD; j++) {
             if (i == 0 && j == 0)
                 continue;
             dot += coeffs[k] * P(i, j);
@@ -85,8 +77,7 @@ __kernel void error_sequence(
     const unsigned int width,
     const unsigned int height,
     const int calculateAbs,
-    __global int* restrict stopFlag)
-{
+    __global int* restrict stopFlag) {
     __local float region[SHAREDSIZE][SHAREDSIZE + 1];
     __local float* centerPtr = &region[get_local_id(0) + PAD][get_local_id(1) + PAD];
     fillBlock(input, &region[0][0], width, height);
@@ -94,10 +85,8 @@ __kernel void error_sequence(
 
     const int x = get_global_id(1);
     const int y = get_global_id(0);
-    if (x < width && y < height) 
-    {
-        if (*stopFlag)
-        {
+    if (x < width && y < height) {
+        if (*stopFlag) {
             x_[x * height + y] = 0.0f;
             return;
         }
@@ -113,8 +102,7 @@ __kernel void error_sequence_fused(
     __constant float* restrict coeffs,
     const int width,
     const int height,
-    __constant int* restrict stopFlag)
-{
+    __constant int* restrict stopFlag) {
     __local float region[SHAREDSIZE][SHAREDSIZE + 1];
     __local float* centerPtr = &region[get_local_id(0) + PAD][get_local_id(1) + PAD];
    
@@ -123,8 +111,7 @@ __kernel void error_sequence_fused(
     const int maxRow = height - 1;
     const int maxCol = width - 1;
     const int stride = (int)(get_local_size(0) * get_local_size(1));
-    for (int i = (int)(get_local_id(1) * get_local_size(0) + get_local_id(0)); i < SHAREDSIZE * SHAREDSIZE; i += stride)
-    {
+    for (int i = (int)(get_local_id(1) * get_local_size(0) + get_local_id(0)); i < SHAREDSIZE * SHAREDSIZE; i += stride) {
         const int tileRow = i % SHAREDSIZE;
         const int tileCol = i / SHAREDSIZE;
         const int globalX = clamp(groupStartCol + tileCol - PAD, 0, maxCol);
@@ -136,10 +123,8 @@ __kernel void error_sequence_fused(
 
     const int x = get_global_id(1);
     const int y = get_global_id(0);
-    if (x < width && y < height) 
-    {
-        if (*stopFlag)
-        { 
+    if (x < width && y < height) {
+        if (*stopFlag) { 
             x_[x * height + y] = 0.0f; 
             return; 
         }
@@ -183,8 +168,7 @@ __kernel void me_p3(__global const float* restrict input,
     if (y >= height)
         return;
 
-    for (int i = localId; i < 3 * 258; i += get_local_size(0))
-    {
+    for (int i = localId; i < 3 * 258; i += get_local_size(0)) {
         const int tileCol = i / 3;
         const int tileRow = i % 3;
         const int globalX = clamp((int)(get_group_id(0) * get_local_size(0)) + tileCol - 1, 0, (int) width - 1);
@@ -195,8 +179,7 @@ __kernel void me_p3(__global const float* restrict input,
 
     half x_0, x_1, x_2, x_3, x_4, x_5, x_6, x_7, x_8;
     const bool isValid = (x < width);
-    if (isValid)
-    {
+    if (isValid) {
         const int localX = localId + 1;
         x_0 = blockValues[0][localX - 1];
         x_1 = blockValues[0][localX];
@@ -222,8 +205,7 @@ __kernel void me_p3(__global const float* restrict input,
         psum += RxLocal[rowStart + r][col];
     rxPartial[localId / 8][col] = (float)psum;
     barrier(CLK_LOCAL_MEM_FENCE);
-    if (localId < 8)
-    {
+    if (localId < 8) {
         float sum = 0.0f;
 #pragma unroll
         for (int i = 0; i < 32; i++)
@@ -234,8 +216,7 @@ __kernel void me_p3(__global const float* restrict input,
 
     if (isValid)
         me_p3_RxCalculate(RxLocal, localId, x_0, x_1, x_2, x_3, x_5, x_6, x_7, x_8);
-    else 
-    {
+    else {
 #pragma unroll
         for(int v=0; v<5; v++)
             vstore_half8((float8)(0.0f), 0, (__local half*)&RxLocal[localId][v*8]);
@@ -245,8 +226,7 @@ __kernel void me_p3(__global const float* restrict input,
     //OpenCL optimized Rx summation
     //parallel partial summation with 252 threads active
     const int flatId = localId;
-    if (flatId < 252)
-    {
+    if (flatId < 252) {
         const int col = flatId % 36;
         const int chunk = flatId / 36;
         const int rowsPerChunk = 37;
@@ -262,8 +242,7 @@ __kernel void me_p3(__global const float* restrict input,
     barrier(CLK_LOCAL_MEM_FENCE);
 
     //final summation by the first 36 threads
-    if (flatId < 36)
-    {
+    if (flatId < 36) {
         float totalSum = 0.0f;
 #pragma unroll
         for (int k = 0; k < 7; k++)
@@ -279,8 +258,8 @@ __kernel void calculate_partial_correlation(
     __global float* restrict partialDots,
     __global float* restrict partialNormU,
     __global float* restrict partialNormZ,
-    const unsigned int size)
-{
+    const unsigned int size) {
+
     const int tid = get_local_id(0);
     const int gid = get_global_id(0);
     const int groupId = get_group_id(0);
@@ -290,8 +269,7 @@ __kernel void calculate_partial_correlation(
     __local float normZCache[256];
 
     float a = 0.0f, b = 0.0f;
-    if (gid < size) 
-    {
+    if (gid < size) {
         a = e_u[gid];
         b = e_z[gid];
     }
@@ -301,10 +279,8 @@ __kernel void calculate_partial_correlation(
     normZCache[tid] = b * b;
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    for (int s = 128; s > 0; s >>= 1) 
-    {
-        if (tid < s) 
-        {
+    for (int s = 128; s > 0; s >>= 1) {
+        if (tid < s) {
             dotCache[tid] += dotCache[tid + s];
             normUCache[tid] += normUCache[tid + s];
             normZCache[tid] += normZCache[tid + s];
@@ -312,8 +288,7 @@ __kernel void calculate_partial_correlation(
         barrier(CLK_LOCAL_MEM_FENCE);
     }
 
-    if (tid == 0) 
-    {
+    if (tid == 0) {
         partialDots[groupId] = dotCache[0];
         partialNormU[groupId] = normUCache[0];
         partialNormZ[groupId] = normZCache[0];
@@ -325,8 +300,8 @@ __kernel void calculate_final_correlation(
     __global const float* restrict partialNormU,
     __global const float* restrict partialNormZ,
     __global float* restrict result,
-    const unsigned int numBlocks)
-{
+    const unsigned int numBlocks) {
+
     const int tid = get_local_id(0);
     const int localSize = get_local_size(0);
 
@@ -338,8 +313,7 @@ __kernel void calculate_final_correlation(
     __local float sumU[1024];
     __local float sumZ[1024];
 
-    for (int i = tid; i < numBlocks; i += localSize) 
-    {
+    for (int i = tid; i < numBlocks; i += localSize) {
         localDot += partialDots[i];
         localU += partialNormU[i];
         localZ += partialNormZ[i];
@@ -350,10 +324,8 @@ __kernel void calculate_final_correlation(
     sumZ[tid] = localZ;
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    for (int s = localSize / 2; s > 0; s >>= 1) 
-    {
-        if (tid < s) 
-        {
+    for (int s = localSize / 2; s > 0; s >>= 1) {
+        if (tid < s) {
             sumDot[tid] += sumDot[tid + s];
             sumU[tid] += sumU[tid + s];
             sumZ[tid] += sumZ[tid + s];
@@ -361,8 +333,7 @@ __kernel void calculate_final_correlation(
         barrier(CLK_LOCAL_MEM_FENCE);
     }
 
-    if (tid == 0) 
-    {
+    if (tid == 0) {
         float final_dot = sumDot[0];
         float final_norm_u = sqrt(sumU[0]);
         float final_norm_z = sqrt(sumZ[0]);
@@ -373,8 +344,7 @@ __kernel void calculate_final_correlation(
 __kernel void cholesky_solver_p3(__global const float* restrict A, 
                                  __global const float* restrict B,
                                  __global float* restrict X,
-                                 __global int* restrict stopFlag)
-{
+                                 __global int* restrict stopFlag) {
     const int N = 8; //p = 3 -> 8x8 system
 
     if (get_local_id(0) > 0 || get_group_id(0) > 0)
@@ -395,11 +365,9 @@ __kernel void cholesky_solver_p3(__global const float* restrict A,
     //OpenCL only: expand 36 elements of lower triangular matrix to full symmetric matrix
     int k = 0;
 #pragma unroll
-    for (int i = 0; i < N; i++)
-    {
+    for (int i = 0; i < N; i++) {
 #pragma unroll
-        for (int j = i; j < N; j++)
-        {
+        for (int j = i; j < N; j++) {
             float val = A[k++];
             // Write to (Row, Col) and (Col, Row)
             localA[i * N + j] = val;
@@ -418,16 +386,13 @@ __kernel void cholesky_solver_p3(__global const float* restrict A,
             L[i][j] = 0.0f;
 
 #pragma unroll
-    for (int i = 0; i < N; i++)
-    {
+    for (int i = 0; i < N; i++) {
 #pragma unroll
-        for (int j = 0; j <= i; j++)
-        {
+        for (int j = 0; j <= i; j++) {
             float sum = 0.0f;
             for (int k = 0; k < j; k++)
                 sum += L[i][k] * L[j][k];
-            if (i == j)
-            {
+            if (i == j) {
                 //diagonal element
                 const float val = localA[i * N + i] - sum;
                 //check if singular! if so, exit early with X = 0.0f
@@ -446,8 +411,7 @@ __kernel void cholesky_solver_p3(__global const float* restrict A,
     //forward substitution -> solve L*y = b
     float y[8];
 #pragma unroll
-    for (int i = 0; i < N; i++)
-    {
+    for (int i = 0; i < N; i++) {
         float sum = 0.0f;
         for (int k = 0; k < i; k++)
             sum += L[i][k] * y[k];
@@ -456,8 +420,7 @@ __kernel void cholesky_solver_p3(__global const float* restrict A,
 
     //backward substitution -> solve L^T * x = y
 #pragma unroll
-    for (int i = N - 1; i >= 0; i--)
-    {
+    for (int i = N - 1; i >= 0; i--) {
         float sum = 0.0f;
         for (int k = i + 1; k < N; k++)
             sum += L[k][i] * localX[k]; //transposed

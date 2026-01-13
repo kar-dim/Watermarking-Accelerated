@@ -8,16 +8,15 @@
  *  \brief  Holds either an Eigen array or Eigen RGB array (uint8) by using std::variant. CPU implementation.
  *  \author Dimitris Karatzas
  */
-class ImageEigenOutputBuffer
-{
-private:
+class ImageEigenOutputBuffer {
+  private:
     using Gray8Buffer = Eigen::Array<uint8_t, Eigen::Dynamic, Eigen::Dynamic>;
 
     std::variant<std::monostate, Gray8Buffer, EigenArrayU8RGB> data;
 
-public:
+  public:
     ImageEigenOutputBuffer(const Gray8Buffer& gray) : data(gray) {}
-	ImageEigenOutputBuffer(const EigenArrayU8RGB& rgb) : data(rgb) {}
+    ImageEigenOutputBuffer(const EigenArrayU8RGB& rgb) : data(rgb) {}
 
     bool isRGB() const { return std::holds_alternative<EigenArrayU8RGB>(data); }
     const Gray8Buffer& getGray() const { return std::get<Gray8Buffer>(data); }

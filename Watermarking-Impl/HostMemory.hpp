@@ -13,11 +13,9 @@
  *  \author Dimitris Karatzas
  */
 template <typename T>
-class HostMemory 
-{
-public:
-    HostMemory(const size_t size) 
-    {
+class HostMemory {
+  public:
+    HostMemory(const size_t size) {
 #if defined(_USE_CUDA_)
         cudaHostAlloc(&ptr, size * sizeof(T), cudaHostAllocDefault);
 #elif defined(_USE_OPENCL_)
@@ -28,25 +26,25 @@ public:
         ptr = pinnedBuffer.get();
 #endif
     }
-    ~HostMemory()
-    {
+    ~HostMemory() {
 #if defined(_USE_CUDA_)
-        if (ptr) cudaFreeHost(ptr);
+        if (ptr)
+            cudaFreeHost(ptr);
 #elif defined(_USE_OPENCL_)
-        if (ptr) queue.enqueueUnmapMemObject(pinnedBuffer, ptr);
+        if (ptr)
+            queue.enqueueUnmapMemObject(pinnedBuffer, ptr);
 #endif
     }
 
     T* get() { return ptr; }
 
-private:
+  private:
     T* ptr = nullptr;
 
 #if defined(_USE_OPENCL_)
     cl::Buffer pinnedBuffer;
-    cl::CommandQueue queue{ afcl::getQueue(true) };
+    cl::CommandQueue queue{afcl::getQueue(true)};
 #elif defined(_USE_EIGEN_)
     std::unique_ptr<T[]> pinnedBuffer;
 #endif
-
 };

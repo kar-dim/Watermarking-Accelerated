@@ -17,27 +17,23 @@ using video_utils::AVFilterGraphPtr;
  *          used only when needed (10-bit or HDR video embedding only)
  *  \author Dimitris Karatzas
  */
-struct FilterGraphContext
-{
+struct FilterGraphContext {
     AVFilterGraphPtr filterGraph;
     AVFilterContext* buffersrcCtx;
     AVFilterContext* buffersinkCtx;
 
-    FilterGraphContext() : filterGraph(nullptr), buffersrcCtx(nullptr), buffersinkCtx(nullptr)
-    { }
+    FilterGraphContext() : filterGraph(nullptr), buffersrcCtx(nullptr), buffersinkCtx(nullptr) {}
 
     FilterGraphContext(AVFilterGraph* graph, AVFilterContext* srcCtx, AVFilterContext* sinkCtx)
-        : filterGraph(graph), buffersrcCtx(srcCtx), buffersinkCtx(sinkCtx)
-    { }
+        : filterGraph(graph), buffersrcCtx(srcCtx), buffersinkCtx(sinkCtx) {}
 };
 
 /*!
  *  \brief  Struct to hold common data for video watermarking and detection
  *  \author Dimitris Karatzas
  */
-struct VideoProcessingContext
-{
-    //common libav contexts and constants
+struct VideoProcessingContext {
+    // common libav contexts and constants
     AVFormatContext* inputFormatCtx;
     AVCodecContext* inputDecoderCtx;
     const int videoStreamIndex;
@@ -47,16 +43,14 @@ struct VideoProcessingContext
     const int width;
     const int watermarkInterval;
     FilterGraphContext filterGraphContext;
-    //data host pointer and device/host buffers which are overwritten per frame
+    // data host pointer and device/host buffers which are overwritten per frame
     uint8_t* hostFramePtr;
     ImageBuffer inputFrame;
     ImageOutputBuffer watermarkedFrame;
     Gray8Buffer grayFrame;
 
     VideoProcessingContext(AVFormatContext* inputCtx, AVCodecContext* decoderCtx, const int streamIdx,
-        const AVStream* videoStream, WatermarkBase* watermark, const int interval, uint8_t* inputFrame)
+                           const AVStream* videoStream, WatermarkBase* watermark, const int interval, uint8_t* inputFrame)
         : inputFormatCtx(inputCtx), inputDecoderCtx(decoderCtx), videoStreamIndex(streamIdx), videoStream(videoStream), watermarkObj(watermark), height(videoStream->codecpar->height), width(videoStream->codecpar->width),
-        watermarkInterval(interval), hostFramePtr(inputFrame), inputFrame({ height, width }), watermarkedFrame({ height, width }), grayFrame({ height, width })
-    { }
+          watermarkInterval(interval), hostFramePtr(inputFrame), inputFrame({height, width}), watermarkedFrame({height, width}), grayFrame({height, width}) {}
 };
-

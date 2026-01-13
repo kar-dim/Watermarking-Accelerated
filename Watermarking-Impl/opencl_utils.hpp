@@ -7,46 +7,42 @@
  *  \brief  Helper utility functions related to OpenCL.
  *  \author Dimitris Karatzas
  */
-namespace cl_utils 
-{
-    class KernelBuilder 
-    {
-    private:
-        cl::Kernel kernel;
-        int argsCounter;
-    public:
-        KernelBuilder(const cl::Program& program, const char* name);
+namespace cl_utils {
+class KernelBuilder {
+  private:
+    cl::Kernel kernel;
+    int argsCounter;
 
-        /*! \brief setArg overload taking a POD type */
-        template <typename... T>
-        KernelBuilder& args(const T&... values)
-        {
-            (kernel.setArg<T>(argsCounter++, values), ...);
-            return *this;
-        }
+  public:
+    KernelBuilder(const cl::Program& program, const char* name);
 
-        /*! \brief build the cl::Kernel object */
-        cl::Kernel build() const;
-    };
+    /*! \brief setArg overload taking a POD type */
+    template <typename... T>
+    KernelBuilder& args(const T&... values) {
+        (kernel.setArg<T>(argsCounter++, values), ...);
+        return *this;
+    }
 
-    //helper method to build opencl kernels from source
-    cl::Program buildKernels(const int p);
+    /*! \brief build the cl::Kernel object */
+    cl::Kernel build() const;
+};
 
-	//wrap a cl_mem pointer into a cl::Buffer
-    inline cl::Buffer wrap(const cl_mem* mem) { return cl::Buffer(*mem, true); }
+// helper method to build opencl kernels from source
+cl::Program buildKernels(const int p);
 
-	//calculate the maximum power of two work group size for a device
-    unsigned int maxPow2WorkGroupSize(const cl::Device& device);
+// wrap a cl_mem pointer into a cl::Buffer
+inline cl::Buffer wrap(const cl_mem* mem) { return cl::Buffer(*mem, true); }
 
-	//helper method to execute an OpenCL kernel and throw detailed error on failure
-    template<typename Func>
-    auto executeKernel(const Func& kernelFunc, const std::string& context)
-    {
-        try {
-            return kernelFunc();
-        }
-        catch (const cl::Error& ex) {
-            throw std::runtime_error("OpenCL Error in " + context + ": " + std::string(ex.what()) + " Error code: " + std::to_string(ex.err()) + "\n");
-        }
+// calculate the maximum power of two work group size for a device
+unsigned int maxPow2WorkGroupSize(const cl::Device& device);
+
+// helper method to execute an OpenCL kernel and throw detailed error on failure
+template <typename Func>
+auto executeKernel(const Func& kernelFunc, const std::string& context) {
+    try {
+        return kernelFunc();
+    } catch (const cl::Error& ex) {
+        throw std::runtime_error("OpenCL Error in " + context + ": " + std::string(ex.what()) + " Error code: " + std::to_string(ex.err()) + "\n");
     }
 }
+} // namespace cl_utils

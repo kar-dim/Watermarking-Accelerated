@@ -9,31 +9,25 @@
  *  \brief  Holds either an Eigen array or Eigen RGB array by using std::variant. CPU implementation.
  *  \author Dimitris Karatzas
  */
-class ImageEigenBuffer 
-{
-private:
+class ImageEigenBuffer {
+  private:
     std::variant<std::monostate, Eigen::ArrayXXf, EigenArrayRGB> data;
 
-	//helper method to process the output (either assign or apply watermark, always float to uint8)
-    template<bool EMBED>
-    void processOutput(ImageEigenOutputBuffer& output, const Eigen::ArrayXXf* uStrengthened = nullptr) const
-    {
+    // helper method to process the output (either assign or apply watermark, always float to uint8)
+    template <bool EMBED>
+    void processOutput(ImageEigenOutputBuffer& output, const Eigen::ArrayXXf* uStrengthened = nullptr) const {
         auto finalize = [](const auto& expr) { return expr.round().cwiseMax(0).cwiseMin(255).template cast<uint8_t>(); };
-        if (isRGB())
-        {
+        if (isRGB()) {
             auto& rgbOutput = output.getRGB();
             const auto& rgbInput = getRGB();
 #pragma omp parallel for
-            for (int channel = 0; channel < 3; channel++)
-            {
+            for (int channel = 0; channel < 3; channel++) {
                 if constexpr (EMBED)
                     rgbOutput[channel] = finalize(rgbInput[channel] + *uStrengthened);
                 else
                     rgbOutput[channel] = finalize(rgbInput[channel]);
             }
-        }
-        else
-        {
+        } else {
             if constexpr (EMBED)
                 output.getGray() = finalize(getGray() + *uStrengthened);
             else
@@ -41,30 +35,40 @@ private:
         }
     }
 
-public:
-	ImageEigenBuffer() = default;
+  public:
+    ImageEigenBuffer() = default;
     ImageEigenBuffer(const Eigen::ArrayXXf& gray) : data(gray) {}
     ImageEigenBuffer(const EigenArrayRGB& rgb) : data(rgb) {}
     ImageEigenBuffer(Eigen::ArrayXXf&& gray) noexcept : data(std::move(gray)) {}
-    ImageEigenBuffer(EigenArrayRGB&& rgb)    noexcept : data(std::move(rgb)) {}
-    ImageEigenBuffer& operator=(const Eigen::ArrayXXf& gray) { data = gray; return *this; }
-    ImageEigenBuffer& operator=(const EigenArrayRGB& rgb) { data = rgb; return *this; }
-    ImageEigenBuffer& operator=(Eigen::ArrayXXf&& gray) { data = std::move(gray); return *this; }
-    ImageEigenBuffer& operator=(EigenArrayRGB&& rgb) { data = std::move(rgb); return *this; }
+    ImageEigenBuffer(EigenArrayRGB&& rgb) noexcept : data(std::move(rgb)) {}
+    ImageEigenBuffer& operator=(const Eigen::ArrayXXf& gray) {
+        data = gray;
+        return *this;
+    }
+    ImageEigenBuffer& operator=(const EigenArrayRGB& rgb) {
+        data = rgb;
+        return *this;
+    }
+    ImageEigenBuffer& operator=(Eigen::ArrayXXf&& gray) {
+        data = std::move(gray);
+        return *this;
+    }
+    ImageEigenBuffer& operator=(EigenArrayRGB&& rgb) {
+        data = std::move(rgb);
+        return *this;
+    }
 
-	//apply watermark (float to uint8)
-    void applyWatermark(const Eigen::ArrayXXf& uStrengthened, ImageEigenOutputBuffer& output) const
-    {
+    // apply watermark (float to uint8)
+    void applyWatermark(const Eigen::ArrayXXf& uStrengthened, ImageEigenOutputBuffer& output) const {
         processOutput<true>(output, &uStrengthened);
     }
 
-    //assign input to output (float to uint8)
-    void assignTo(ImageEigenOutputBuffer& output) const
-    {
+    // assign input to output (float to uint8)
+    void assignTo(ImageEigenOutputBuffer& output) const {
         processOutput<false>(output, nullptr);
-	}
+    }
 
-    //helper methods to retrieve the actual data type
+    // helper methods to retrieve the actual data type
     bool isRGB() const { return std::holds_alternative<EigenArrayRGB>(data); }
 
     Eigen::ArrayXXf& getGray() { return std::get<Eigen::ArrayXXf>(data); }
