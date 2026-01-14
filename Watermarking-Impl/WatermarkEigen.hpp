@@ -153,135 +153,133 @@ template <int p> class WatermarkEigen final : public WatermarkBase {
 
     // helper method to process the border pixels (clamp if out of bounds)
     // by using a supplied function (used in prediction error correlation and error sequence calculation)
-    template <typename BorderFunc>
-    inline void processPredictionErrorBorder(const ArrayXXf& image, const int startRow, const int endRow, const int startCol, const int endCol, BorderFunc&& func){
-#pragma omp parallel
-        {const int threadId = omp_get_thread_num();
-    LocalVector neighbors;
-#pragma omp for collapse(2)
-    for (int j = startCol; j < endCol; j++)
-        for (int i = startRow; i < endRow; i++) {
-            int k = 0;
-            for (int dj = 0; dj < p; dj++)
-                for (int di = 0; di < p; di++) {
-                    if (di == center && dj == center)
-                        continue;
-                    neighbors(k++) = clampedValue(image, i + di - center, j + dj - center, baseRows, baseCols);
-                }
-            func(i, j, neighbors, threadId);
-        }
-}
-}
-;
-
-// compute the strengthened watermark, calculated by multiplying the mask with the strengthened watermark (random matrix)
-bool computeStrengthenedWatermark(const ArrayXXf& inputImage, float& watermarkStrength, MASK_TYPE maskType) {
-    if (maskType == NVF)
-        computeCustomMask(inputImage);
-    else {
-        if (!computePredictionErrorData<maskCalcRequired>(inputImage))
-            return false;
-    }
-    const auto& w = randomMatrix.getGray();
-
-    // optimized calculation of the strengthened watermark
-    float sumSq = 0.0f;
-#pragma omp parallel for reduction(+ : sumSq)
-    for (auto i = 0; i < mask.size(); i++) {
-        float u = mask(i) * w(i);
-        uStrengthened(i) = u;
-        sumSq += u * u;
-    }
-    if (sumSq <= 1e-3f) // for flat images/frames
-        return false;
-
-    watermarkStrength = strengthFactor / std::sqrt(sumSq / (baseRows * baseCols));
-    uStrengthened *= watermarkStrength;
-    return true;
-}
-
-// compute Prediction error data (coefficients, error sequence), and if needed, prediction error mask
-template <bool maskNeeded> bool computePredictionErrorData(const ArrayXXf& image) {
-    meMatrixData.setZero();
-    // process CENTER region
-    if (hasCenterRegion) {
-        const float* imgData = image.data();
-        const auto& offsets = meMatrixData.offsets;
+    template <typename BorderFunc> inline void processPredictionErrorBorder(const ArrayXXf& image, const int startRow, const int endRow, const int startCol, const int endCol, BorderFunc&& func) {
 #pragma omp parallel
         {
             const int threadId = omp_get_thread_num();
-            auto& RxVec = meMatrixData.RxVec_all[threadId].mat;
-            auto& rx = meMatrixData.rx_all[threadId].mat;
-#pragma omp for
-            for (int j = startCol; j < endCol; j++) {
-                const int colOffset = j * baseRows;
-                const float* centerPtr = imgData + colOffset + startRow;
-                const Map<const VectorXf> centerBatch(centerPtr, stripHeight);
+            LocalVector neighbors;
+#pragma omp for collapse(2)
+            for (int j = startCol; j < endCol; j++)
+                for (int i = startRow; i < endRow; i++) {
+                    int k = 0;
+                    for (int dj = 0; dj < p; dj++)
+                        for (int di = 0; di < p; di++) {
+                            if (di == center && dj == center)
+                                continue;
+                            neighbors(k++) = clampedValue(image, i + di - center, j + dj - center, baseRows, baseCols);
+                        }
+                    func(i, j, neighbors, threadId);
+                }
+        }
+    }
 
-                int k = 0;
-                // rx(u) = sum(center * neighbor_u)
-                // Rx(u, v) = sum(neighbor_u * neighbor_v)
-                for (int u = 0; u < localSize; u++) {
-                    const float* neighborPtr = centerPtr + offsets[u];
-                    const Map<const VectorXf> neighborBatch(neighborPtr, stripHeight);
-                    rx(u) += neighborBatch.dot(centerBatch);
-                    for (int v = 0; v <= u; v++, k++) {
-                        const float* ptrV = centerPtr + offsets[v];
-                        const Map<const VectorXf> mapV(ptrV, stripHeight);
-                        RxVec(k) += neighborBatch.dot(mapV);
+    // compute the strengthened watermark, calculated by multiplying the mask with the strengthened watermark (random matrix)
+    bool computeStrengthenedWatermark(const ArrayXXf& inputImage, float& watermarkStrength, MASK_TYPE maskType) {
+        if (maskType == NVF)
+            computeCustomMask(inputImage);
+        else {
+            if (!computePredictionErrorData<maskCalcRequired>(inputImage))
+                return false;
+        }
+        const auto& w = randomMatrix.getGray();
+
+        // optimized calculation of the strengthened watermark
+        float sumSq = 0.0f;
+#pragma omp parallel for reduction(+ : sumSq)
+        for (auto i = 0; i < mask.size(); i++) {
+            float u = mask(i) * w(i);
+            uStrengthened(i) = u;
+            sumSq += u * u;
+        }
+        if (sumSq <= 1e-3f) // for flat images/frames
+            return false;
+
+        watermarkStrength = strengthFactor / std::sqrt(sumSq / (baseRows * baseCols));
+        uStrengthened *= watermarkStrength;
+        return true;
+    }
+
+    // compute Prediction error data (coefficients, error sequence), and if needed, prediction error mask
+    template <bool maskNeeded> bool computePredictionErrorData(const ArrayXXf& image) {
+        meMatrixData.setZero();
+        // process CENTER region
+        if (hasCenterRegion) {
+            const float* imgData = image.data();
+            const auto& offsets = meMatrixData.offsets;
+#pragma omp parallel
+            {
+                const int threadId = omp_get_thread_num();
+                auto& RxVec = meMatrixData.RxVec_all[threadId].mat;
+                auto& rx = meMatrixData.rx_all[threadId].mat;
+#pragma omp for
+                for (int j = startCol; j < endCol; j++) {
+                    const int colOffset = j * baseRows;
+                    const float* centerPtr = imgData + colOffset + startRow;
+                    const Map<const VectorXf> centerBatch(centerPtr, stripHeight);
+
+                    int k = 0;
+                    // rx(u) = sum(center * neighbor_u)
+                    // Rx(u, v) = sum(neighbor_u * neighbor_v)
+                    for (int u = 0; u < localSize; u++) {
+                        const float* neighborPtr = centerPtr + offsets[u];
+                        const Map<const VectorXf> neighborBatch(neighborPtr, stripHeight);
+                        rx(u) += neighborBatch.dot(centerBatch);
+                        for (int v = 0; v <= u; v++, k++) {
+                            const float* ptrV = centerPtr + offsets[v];
+                            const Map<const VectorXf> mapV(ptrV, stripHeight);
+                            RxVec(k) += neighborBatch.dot(mapV);
+                        }
                     }
                 }
             }
         }
+        // process BORDER regions
+        auto processBorder = [&](const int startRow, const int endRow, const int startCol, const int endCol) {
+            processPredictionErrorBorder(image, startRow, endRow, startCol, endCol,
+                                         [&](int i, int j, const LocalVector& neighbors, const int threadId) { meMatrixData.computePredictionErrorMatrices(neighbors, image(i, j), threadId); });
+        };
+        computeMaskBorders(startRow, endRow, startCol, endCol, hasCenterRegion, processBorder);
+
+        // solve system and coefficients
+        if (!meMatrixData.computeCoefficients())
+            return false;
+
+        // calculate ex(i,j)
+        computeErrorSequence(image, errorSequence);
+        if constexpr (maskNeeded) {
+            const auto errorSequenceAbs = errorSequence.abs();
+            mask = errorSequenceAbs / errorSequenceAbs.maxCoeff();
+        }
+        return true;
     }
-    // process BORDER regions
-    auto processBorder = [&](const int startRow, const int endRow, const int startCol, const int endCol) {
-        processPredictionErrorBorder(image, startRow, endRow, startCol, endCol,
-                                     [&](int i, int j, const LocalVector& neighbors, const int threadId) { meMatrixData.computePredictionErrorMatrices(neighbors, image(i, j), threadId); });
-    };
-    computeMaskBorders(startRow, endRow, startCol, endCol, hasCenterRegion, processBorder);
 
-    // solve system and coefficients
-    if (!meMatrixData.computeCoefficients())
-        return false;
-
-    // calculate ex(i,j)
-    computeErrorSequence(image, errorSequence);
-    if constexpr (maskNeeded) {
-        const auto errorSequenceAbs = errorSequence.abs();
-        mask = errorSequenceAbs / errorSequenceAbs.maxCoeff();
-    }
-    return true;
-}
-
-// computes the prediction error sequence of the input image
-void computeErrorSequence(const ArrayXXf& image, ArrayXXf& outputErrorSequence) {
-    const auto& coefficients = meMatrixData.coefficients;
-    const auto& offsets = meMatrixData.offsets;
-    // process CENTER region
-    if (hasCenterRegion) {
-        const float* imgData = image.data();
-        float* outData = outputErrorSequence.data();
+    // computes the prediction error sequence of the input image
+    void computeErrorSequence(const ArrayXXf& image, ArrayXXf& outputErrorSequence) {
+        const auto& coefficients = meMatrixData.coefficients;
+        const auto& offsets = meMatrixData.offsets;
+        // process CENTER region
+        if (hasCenterRegion) {
+            const float* imgData = image.data();
+            float* outData = outputErrorSequence.data();
 #pragma omp parallel for
-        for (int j = startCol; j < endCol; j++) {
-            const int colOffset = (j * baseRows) + startRow;
-            const Map<const VectorXf> imgBatch(imgData + colOffset, stripHeight);
-            Map<VectorXf> errorBatch(outData + colOffset, stripHeight);
-            errorBatch = imgBatch; // initialize with image values
-            // compute prediction error
-            for (int k = 0; k < localSize; k++) {
-                const float* neighborPtr = imgData + colOffset + offsets[k];
-                const Map<const VectorXf> neighborBatch(neighborPtr, stripHeight);
-                errorBatch.noalias() -= neighborBatch * coefficients(k);
+            for (int j = startCol; j < endCol; j++) {
+                const int colOffset = (j * baseRows) + startRow;
+                const Map<const VectorXf> imgBatch(imgData + colOffset, stripHeight);
+                Map<VectorXf> errorBatch(outData + colOffset, stripHeight);
+                errorBatch = imgBatch; // initialize with image values
+                // compute prediction error
+                for (int k = 0; k < localSize; k++) {
+                    const float* neighborPtr = imgData + colOffset + offsets[k];
+                    const Map<const VectorXf> neighborBatch(neighborPtr, stripHeight);
+                    errorBatch.noalias() -= neighborBatch * coefficients(k);
+                }
             }
         }
+        // process BORDER regions
+        auto processBorder = [&](const int startRow, const int endRow, const int startCol, const int endCol) {
+            processPredictionErrorBorder(image, startRow, endRow, startCol, endCol,
+                                         [&](int i, int j, const LocalVector& neighbors, const int) { outputErrorSequence(i, j) = image(i, j) - neighbors.dot(coefficients); });
+        };
+        computeMaskBorders(startRow, endRow, startCol, endCol, hasCenterRegion, processBorder);
     }
-    // process BORDER regions
-    auto processBorder = [&](const int startRow, const int endRow, const int startCol, const int endCol) {
-        processPredictionErrorBorder(image, startRow, endRow, startCol, endCol,
-                                     [&](int i, int j, const LocalVector& neighbors, const int) { outputErrorSequence(i, j) = image(i, j) - neighbors.dot(coefficients); });
-    };
-    computeMaskBorders(startRow, endRow, startCol, endCol, hasCenterRegion, processBorder);
-}
-}
-;
+};
