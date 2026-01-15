@@ -1,5 +1,4 @@
 #include "buffer.hpp"
-#include "cimg_init.h"
 #include "eigen_rgb_array.hpp"
 #include "eigen_utils.hpp"
 #include <cstdint>
@@ -9,15 +8,14 @@
 #include <vector>
 #include <windows.h>
 
-using namespace cimg_library;
 using namespace Eigen;
 
 namespace eigen_utils {
-CImg<uint8_t> eigenRgbToCimg(const EigenArrayU8RGB& arrayRgb, const std::optional<AlphaBuffer>& alphaChannel) {
+Gray8BufferIO eigenRgbToCimg(const EigenArrayU8RGB& arrayRgb, const std::optional<Gray8BufferIO>& alphaChannel) {
     const auto rows = arrayRgb[0].rows();
     const auto cols = arrayRgb[0].cols();
     const int channels = alphaChannel.has_value() ? 4 : 3;
-    CImg<uint8_t> output(static_cast<unsigned int>(cols), static_cast<unsigned int>(rows), 1, channels);
+    Gray8BufferIO output(static_cast<unsigned int>(cols), static_cast<unsigned int>(rows), 1, channels);
 #pragma omp parallel for
     for (int y = 0; y < rows; y++) {
         for (int x = 0; x < cols; x++) {
@@ -30,10 +28,10 @@ CImg<uint8_t> eigenRgbToCimg(const EigenArrayU8RGB& arrayRgb, const std::optiona
     return output;
 }
 
-CImg<uint8_t> eigenGrayToCimg(const Gray8Buffer& arrayGray) {
+Gray8BufferIO eigenGrayToCimg(const Gray8Buffer& arrayGray) {
     const auto rows = arrayGray.rows();
     const auto cols = arrayGray.cols();
-    CImg<uint8_t> output(static_cast<unsigned int>(cols), static_cast<unsigned int>(rows));
+    Gray8BufferIO output(static_cast<unsigned int>(cols), static_cast<unsigned int>(rows));
 #pragma omp parallel for
     for (int y = 0; y < rows; y++)
         for (int x = 0; x < cols; x++)
@@ -42,7 +40,7 @@ CImg<uint8_t> eigenGrayToCimg(const Gray8Buffer& arrayGray) {
     return output;
 }
 
-void cimgAlphaZero(CImg<float>& rgbImage, const AlphaBuffer& alphaChannel) {
+void cimgAlphaZero(FloatBufferIO& rgbImage, const Gray8BufferIO& alphaChannel) {
 #pragma omp parallel for
     for (int y = 0; y < rgbImage.height(); y++) {
         for (int x = 0; x < rgbImage.width(); x++) {
@@ -54,7 +52,7 @@ void cimgAlphaZero(CImg<float>& rgbImage, const AlphaBuffer& alphaChannel) {
     }
 }
 
-EigenArrayRGB cimgToEigenRgb(const CImg<float>& rgbImage) {
+EigenArrayRGB cimgToEigenRgb(const FloatBufferIO& rgbImage) {
     const int rows = rgbImage.height();
     const int cols = rgbImage.width();
     EigenArrayRGB output = {ArrayXXf(rows, cols), ArrayXXf(rows, cols), ArrayXXf(rows, cols)};
@@ -66,7 +64,7 @@ EigenArrayRGB cimgToEigenRgb(const CImg<float>& rgbImage) {
     return output;
 }
 
-ImageBuffer cimgToEigenGray(const CImg<float>& grayImage) {
+ImageBuffer cimgToEigenGray(const FloatBufferIO& grayImage) {
     const int rows = grayImage.height();
     const int cols = grayImage.width();
     ArrayXXf output(rows, cols);

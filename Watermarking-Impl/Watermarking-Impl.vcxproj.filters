@@ -75,6 +75,9 @@
     <ClCompile Include="eigen_utils.cpp">
       <Filter>Source Files\eigen</Filter>
     </ClCompile>
+    <ClCompile Include="TinyEXIF.cpp">
+      <Filter>Source Files\util</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="utils.hpp">
@@ -145,6 +148,9 @@
     </ClInclude>
     <ClInclude Include="ImageEigenOutputBuffer.hpp">
       <Filter>Header Files\eigen</Filter>
+    </ClInclude>
+    <ClInclude Include="TinyEXIF.h">
+      <Filter>Header Files\util</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

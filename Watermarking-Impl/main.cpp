@@ -1,7 +1,6 @@
 #if defined(_USE_GPU_)
 #include <arrayfire.h>
 #elif defined(_USE_EIGEN_)
-#include "cimg_init.h"
 #include "eigen_utils.hpp"
 #include <omp.h>
 #endif

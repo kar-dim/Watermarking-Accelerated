@@ -70,7 +70,7 @@
       <OptimizeReferences>true</OptimizeReferences>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <AdditionalLibraryDirectories>$(SolutionDir)Watermarking-Impl\x64\CUDA_Release;$(AF_PATH)\lib;$(ProjectDir)libs\googletest-1.17.0\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>cudart_static.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;afcuda.lib;cuda_utils.cu.obj;kernels.cu.obj;utils.cpp.obj;gtest.lib;gtest_main.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>cudart_static.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;afcuda.lib;cuda_utils.cu.obj;kernels.cu.obj;TinyEXIF.obj;utils.cpp.obj;gtest.lib;gtest_main.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <IgnoreSpecificDefaultLibraries>LIBCMT</IgnoreSpecificDefaultLibraries>
     </Link>
     <PostBuildEvent>
@@ -103,7 +103,7 @@ xcopy "$(AF_PATH)\lib\afcuda.dll" "$(OutDir)" /y /D</Command>
       <OptimizeReferences>true</OptimizeReferences>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <AdditionalLibraryDirectories>$(SolutionDir)Watermarking-Impl\x64\EIGEN_Release;$(SolutionDir)Watermarking-Impl\libs\libpng\lib;$(LLVMInstallDir)\lib;$(SolutionDir)Watermarking-Impl\libs\zlib\lib;$(SolutionDir)Watermarking-Impl\libs\libjpeg\lib;$(SolutionDir)Watermarking-Impl\libs\libwebp\lib;$(SolutionDir)Watermarking-Impl\libs\libtiff\lib;$(ProjectDir)libs\googletest-1.17.0\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>eigen_utils.obj;utils.obj;zlib.lib;libomp.lib;libpng16.lib;jpeg.lib;tiff.lib;libwebp.lib;gtest.lib;gtest_main.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>eigen_utils.obj;TinyEXIF.obj;utils.obj;zlib.lib;libomp.lib;libpng16.lib;jpeg.lib;tiff.lib;libwebp.lib;gtest.lib;gtest_main.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>xcopy "$(LLVMInstallDir)\bin\libomp.dll" "$(SolutionDir)x64\EIGEN_Release\" /y /D
@@ -133,7 +133,7 @@ xcopy "$(SolutionDir)Watermarking-Impl\libs\libtiff\bin\tiff.dll" "$(SolutionDir
       <OptimizeReferences>true</OptimizeReferences>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <AdditionalLibraryDirectories>$(AF_PATH)\lib;$(SolutionDir)Watermarking-Impl\x64\OPENCL_Release;$(SolutionDir)Watermarking-Impl\libs\opencl\lib;$(ProjectDir)libs\googletest-1.17.0\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>afopencl.lib;OpenCL.lib;opencl_utils.obj;utils.obj;gtest.lib;gtest_main.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>afopencl.lib;OpenCL.lib;opencl_utils.obj;TinyEXIF.obj;utils.obj;gtest.lib;gtest_main.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>xcopy "$(AF_PATH)\lib\afopencl.dll" "$(OutDir)" /y /D

@@ -290,6 +290,7 @@ xcopy "$(ProjectDir)libs\ffmpeg\bin\ffmpeg.exe" "$(OutDir)" /y /D</Command>
     </ClCompile>
     <CudaCompile Include="utils.cpp" Condition="'$(Configuration)|$(Platform)'=='CUDA_Debug|x64'" />
     <CudaCompile Include="utils.cpp" Condition="'$(Configuration)|$(Platform)'=='CUDA_Release|x64'" />
+    <ClCompile Include="TinyEXIF.cpp" />
     <ClCompile Include="utils.cpp" Condition="'$(Configuration)|$(Platform)'=='OPENCL_Release|x64'" />
     <ClCompile Include="utils.cpp" Condition="'$(Configuration)|$(Platform)'=='EIGEN_Debug|x64'" />
     <ClCompile Include="utils.cpp" Condition="'$(Configuration)|$(Platform)'=='EIGEN_Release|x64'" />
@@ -366,6 +367,7 @@ xcopy "$(ProjectDir)libs\ffmpeg\bin\ffmpeg.exe" "$(OutDir)" /y /D</Command>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='CUDA_Release|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='OPENCL_Release|x64'">true</ExcludedFromBuild>
     </ClInclude>
+    <ClInclude Include="TinyEXIF.h" />
     <ClInclude Include="utils.hpp" />
     <ClInclude Include="VideoProcessingContext.hpp" />
     <ClInclude Include="video_defines.hpp" />

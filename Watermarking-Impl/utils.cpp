@@ -1,8 +1,11 @@
+#include "ImageFileBuffer.hpp"
+#include "TinyEXIF.h"
+#include "WatermarkBase.hpp"
 #include "buffer.hpp"
 #include "utils.hpp"
-#include "ImageFileBuffer.hpp"
-#include "WatermarkBase.hpp"
+#include <cstdint>
 #include <format>
+#include <fstream>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -28,7 +31,7 @@ string Utils::addSuffixBeforeExtension(const string& file, const string& suffix)
     return file.substr(0, dot) + suffix + file.substr(dot);
 }
 
-void Utils::saveImage(const string& imagePath, const string& suffix, const ImageOutputBuffer& watermark, const std::optional<AlphaBuffer>& alphaChannel) {
+void Utils::saveImage(const string& imagePath, const string& suffix, const ImageOutputBuffer& watermark, const std::optional<Gray8BufferIO>& alphaChannel) {
 #if defined(_USE_EIGEN_)
     const string watermarkedFile = Utils::addSuffixBeforeExtension(imagePath, suffix);
     string extension = watermarkedFile.substr(watermarkedFile.find_last_of('.') + 1);
@@ -79,10 +82,65 @@ void Utils::checkError(const bool isError, const string& errorMsg) {
 // helper method to calculate execution time in FPS or in seconds
 string Utils::formatExecutionTime(const bool showFps, const double seconds) { return showFps ? std::format("FPS: {:.2f} FPS", 1.0 / seconds) : std::format("{:.6f} seconds", seconds); }
 
+// helper method to rotate an image based on EXIF metadata
+void Utils::rotate(FloatBufferIO& img, const uint16_t orientation) {
+#if defined(_USE_GPU_)
+    switch (orientation) {
+    case 2: img = af::flip(img, 1); break;
+    case 3:
+        img = af::flip(img, 0);
+        img = af::flip(img, 1);
+        break;
+    case 4: img = af::flip(img, 0); break;
+    case 5:
+        img = af::flip(img, 1);
+        img = af::reorder(img, 1, 0, 2);
+        img = af::flip(img, 0);
+        break;
+    case 6:
+        img = af::reorder(img, 1, 0, 2);
+        img = af::flip(img, 1);
+        break;
+    case 7:
+        img = af::flip(img, 1);
+        img = af::reorder(img, 1, 0, 2);
+        img = af::flip(img, 1);
+        break;
+    case 8:
+        img = af::reorder(img, 1, 0, 2);
+        img = af::flip(img, 0);
+        break;
+    default: break;
+    }
+#else
+    switch (orientation) {
+    case 2: img.mirror('x'); break;
+    case 3: img.rotate(180); break;
+    case 4: img.mirror('y'); break;
+    case 5:
+        img.mirror('x');
+        img.rotate(270);
+        break;
+    case 6: img.rotate(90); break;
+    case 7:
+        img.mirror('x');
+        img.rotate(90);
+        break;
+    case 8: img.rotate(270); break;
+    default: break;
+    }
+#endif
+}
+
 void Utils::loadImage(ImageFileBuffer& buf, const string& imageFile) {
     auto& [rgbImage, image, alphaChannel, rows, cols, isRGB] = buf;
+    // read file exif data for orientation
+    std::ifstream fileStream(imageFile, std::ifstream::binary);
+    TinyEXIF::EXIFInfo exif(fileStream);
+
 #if defined(_USE_GPU_)
     rgbImage = af::loadImageNative(imageFile.c_str()).as(f32);
+    Utils::rotate(rgbImage, exif.Orientation);
     switch (rgbImage.dims(2)) {
     case 1: image = rgbImage; break;
     case 3: image = rgb2gray(rgbImage); break;
@@ -100,7 +158,9 @@ void Utils::loadImage(ImageFileBuffer& buf, const string& imageFile) {
     isRGB = rgbImage.dims(2) == 3;
     af::sync();
 #elif defined(_USE_EIGEN_)
-    auto cimgRgb = cimg_library::CImg<float>(imageFile.c_str());
+    auto cimgRgb = FloatBufferIO(imageFile.c_str());
+    Utils::rotate(cimgRgb, exif.Orientation);
+
     switch (cimgRgb.spectrum()) {
     case 1:
         rgbImage = eigen_utils::cimgToEigenGray(cimgRgb);

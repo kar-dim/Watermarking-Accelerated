@@ -9,7 +9,7 @@
 struct ImageFileBuffer {
     ImageBuffer rgbImage;
     ImageBuffer image;
-    std::optional<AlphaBuffer> alphaChannel;
+    std::optional<Gray8BufferIO> alphaChannel;
     unsigned int rows = 0, cols = 0;
     bool isRGB = false;
 };
