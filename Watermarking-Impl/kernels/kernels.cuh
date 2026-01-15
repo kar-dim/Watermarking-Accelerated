@@ -251,10 +251,6 @@ exit:
         X[i] = localX[i];
 }
 
-// uploads the 300 element lookup table for p=5 to constant memory
-// must be called once during initialization.
-__host__ void initRxMapP5();
-
 // Prediction Error helper device kernels
 __device__ void me_p3_rxCalculate(half8* RxLocalVec8, const half8& vec, const half& center);
 __device__ void load_neighbor_row_funnel_p3(half& p0, half& p1, half& p2, const half* rowBase);
