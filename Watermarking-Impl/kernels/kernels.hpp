@@ -345,92 +345,72 @@ __kernel void cholesky_solver_p3(__global const float* restrict A,
                                  __global const float* restrict B,
                                  __global float* restrict X,
                                  __global int* restrict stopFlag) {
-    const int N = 8; //p = 3 -> 8x8 system
+    // OpenCL upper packed Indexing:
+    // maps Lower diagonal coords (r, c) where r >= c to the corresponding upper diagonal packed index (c, r).
+    #define IDX(r, c) ((c * N) - (c * (c - 1)) / 2 + (r - c))
 
+    const int N = 8; // p = 3 -> 8x8 system
+    
     if (get_local_id(0) > 0 || get_group_id(0) > 0)
         return;
 
-    float localA[64], localB[8], localX[8];
+    float packed[36]; 
+    float localB[8];
 
-    //initialize Result to 0.0f (safe fallback for unsolvable systems)
-    for (int i = 0; i < N; i++)
-        localX[i] = 0.0f;
+    #pragma unroll
+    for (int k = 0; k < 36; k++)
+        packed[k] = A[k];
 
-    //initialize
-    for (int i = 0; i < N * N; i++)
-        localA[i] = A[i];
+    #pragma unroll
     for (int i = 0; i < N; i++)
         localB[i] = B[i];
 
-    //OpenCL only: expand 36 elements of lower triangular matrix to full symmetric matrix
-    int k = 0;
-#pragma unroll
+    #pragma unroll
     for (int i = 0; i < N; i++) {
-#pragma unroll
-        for (int j = i; j < N; j++) {
-            float val = A[k++];
-            // Write to (Row, Col) and (Col, Row)
-            localA[i * N + j] = val;
-            localA[j * N + i] = val;
-        }
-    }
-
-    //Cholesky Decomposition: A = L*L^T
-	//A is symmetric positive definite
-    float L[8][8];
-    // clear L
-#pragma unroll
-    for (int i = 0; i < N; i++)
-#pragma unroll
-        for (int j = 0; j < N; j++)
-            L[i][j] = 0.0f;
-
-#pragma unroll
-    for (int i = 0; i < N; i++) {
-#pragma unroll
+        #pragma unroll
         for (int j = 0; j <= i; j++) {
             float sum = 0.0f;
+            #pragma unroll
             for (int k = 0; k < j; k++)
-                sum += L[i][k] * L[j][k];
+                sum += packed[IDX(i, k)] * packed[IDX(j, k)];
+
             if (i == j) {
-                //diagonal element
-                const float val = localA[i * N + i] - sum;
-                //check if singular! if so, exit early with X = 0.0f
-                if (val <= 1e-12f) 
-                {
+                const float val = packed[IDX(i, i)] - sum;
+                if (val <= 1e-12f) {
                     *stopFlag = 1;
-                    goto exit;
+                    goto exit; 
                 }
-                L[i][j] = sqrt(val);
+                packed[IDX(i, i)] = sqrt(val);
+            } else {
+                packed[IDX(i, j)] = (packed[IDX(i, j)] - sum) / packed[IDX(j, j)];
             }
-            else //non diagonal
-                L[i][j] = (localA[i * N + j] - sum) / L[j][j];
         }
     }
-	//solve the system with forward and backward substitution
-    //forward substitution -> solve L*y = b
-    float y[8];
-#pragma unroll
+
+    #pragma unroll
     for (int i = 0; i < N; i++) {
         float sum = 0.0f;
+        #pragma unroll
         for (int k = 0; k < i; k++)
-            sum += L[i][k] * y[k];
-        y[i] = (localB[i] - sum) / L[i][i];
+            sum += packed[IDX(i, k)] * localB[k];
+        localB[i] = (localB[i] - sum) / packed[IDX(i, i)];
     }
 
-    //backward substitution -> solve L^T * x = y
-#pragma unroll
+    #pragma unroll
     for (int i = N - 1; i >= 0; i--) {
         float sum = 0.0f;
+        #pragma unroll
         for (int k = i + 1; k < N; k++)
-            sum += L[k][i] * localX[k]; //transposed
-        localX[i] = (y[i] - sum) / L[i][i];
+            sum += packed[IDX(k, i)] * localB[k];
+        localB[i] = (localB[i] - sum) / packed[IDX(i, i)];
     }
     *stopFlag = 0;
-	//write
 exit:
-    for (int i = 0; i < 8; i++)
-        X[i] = localX[i];
+    #pragma unroll
+    for (int i = 0; i < N; i++)
+        X[i] = localB[i];
+
+    #undef IDX
 }
 
 )CLC";

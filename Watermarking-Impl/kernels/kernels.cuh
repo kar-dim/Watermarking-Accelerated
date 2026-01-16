@@ -170,85 +170,84 @@ __global__ void calculate_error_sequence(const float* __restrict__ inputA, const
 
 // naive 1-thread Cholesky solver used for its very low latency versus cuSOLVER but useful only for very small systems, p = 3 (N = 8) or p = 5 (N = 24)
 template <int p, int N = (p * p) - 1> __global__ void cholesky_solver(const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ X, int* __restrict__ stopFlag) {
+#define IDX(r, c) ((r * (r + 1)) / 2 + c)
+
     if (threadIdx.x > 0 || blockIdx.x > 0)
         return;
 
-    float localA[N * N], localB[N], localX[N];
+    // packed format: N*(N+1)/2 elements
+    // p=3 (N=8) -> 36 floats
+    // p=5 (N=24) -> 300 floats
+    constexpr int SIZE = (N * (N + 1)) / 2;
+    float packed[SIZE];
+    float localB[N];
 
-    // initialize result to 0.0f (safe fallback for unsolvable systems)
-    for (int i = 0; i < N; i++)
-        localX[i] = 0.0f;
+   // load A
+#pragma unroll
+    for (int k = 0; k < SIZE; k++)
+        packed[k] = A[k];
 
-    // initialize Rx and rx
-    // because we use 1 thread, it is faster to reconstruct Rx manually than to use the constant cache map!
-    int k = 0;
+    // load B
 #pragma unroll
-    for (int r = 0; r < N; r++) {
-#pragma unroll
-        for (int c = 0; c <= r; c++) {
-            float val = A[k++];
-            localA[r * N + c] = val;
-            localA[c * N + r] = val;
-        }
-    }
-    // copy rx
     for (int i = 0; i < N; i++)
         localB[i] = B[i];
 
-    // Cholesky Decomposition: A = L*L^T
-    // A is symmetric positive definite
-    float L[N][N];
-    // clear L
-#pragma unroll
-    for (int i = 0; i < N; i++)
-#pragma unroll
-        for (int j = 0; j < N; j++)
-            L[i][j] = 0.0f;
+    // in-place Cholesky Decomposition
+    // overwrite packed (which holds A) with L
 #pragma unroll
     for (int i = 0; i < N; i++) {
 #pragma unroll
         for (int j = 0; j <= i; j++) {
             float sum = 0.0f;
+
+            //dot product of previous L rows
+#pragma unroll
             for (int k = 0; k < j; k++)
-                sum += L[i][k] * L[j][k];
+                sum += packed[IDX(i, k)] * packed[IDX(j, k)];
+
             if (i == j) {
-                // diagonal element
-                const float val = localA[i * N + i] - sum;
-                // check if singular! if so, exit early with X = 0.0f
+                const float val = packed[IDX(i, i)] - sum;
                 if (val <= 1e-12f) {
                     *stopFlag = 1;
                     goto exit;
                 }
-                L[i][j] = sqrtf(val);
-            } else                                                        // non diagonal
-                L[i][j] = (localA[i * N + j] - sum) * __frcp_rn(L[j][j]); // fast reciprocal
+                packed[IDX(i, i)] = sqrtf(val);
+            } else {
+                // off-diagonal, packed[IDX(j, j)] was updated in previous iteration of j loop
+                packed[IDX(i, j)] = (packed[IDX(i, j)] - sum) * __frcp_rn(packed[IDX(j, j)]);
+            }
         }
     }
-    // solve the system with forward and backward substitution
-    // we again use fast reciprocal for better performance (1 GPU thread is weak, needs as fast math as possible)
-    // forward substitution -> solve L*y = b
-    float y[N];
+
+    // forward Substitution (solve L * y = b)
+    // use packed[IDX(i, k)] which now holds L_ik
 #pragma unroll
     for (int i = 0; i < N; i++) {
         float sum = 0.0f;
+#pragma unroll
         for (int k = 0; k < i; k++)
-            sum += L[i][k] * y[k];
-        y[i] = (localB[i] - sum) * __frcp_rn(L[i][i]);
+            sum += packed[IDX(i, k)] * localB[k];
+        localB[i] = (localB[i] - sum) * __frcp_rn(packed[IDX(i, i)]);
     }
 
-    // backward substitution -> solve L^T * x = y
+    // backward Substitution (solve L^T * x = y)
+    // solving U * x = y where U = L^T
+    // U_ik = L_ki, we need L_ki, since k > i in the logic (upper tri), we access packed[IDX(k, i)] because we stored lower
 #pragma unroll
     for (int i = N - 1; i >= 0; i--) {
         float sum = 0.0f;
+#pragma unroll
         for (int k = i + 1; k < N; k++)
-            sum += L[k][i] * localX[k]; // transposed
-        localX[i] = (y[i] - sum) * __frcp_rn(L[i][i]);
+            sum += packed[IDX(k, i)] * localB[k];
+        localB[i] = (localB[i] - sum) * __frcp_rn(packed[IDX(i, i)]);
     }
     *stopFlag = 0;
-    // write
 exit:
+    // write Result
+#pragma unroll
     for (int i = 0; i < N; i++)
-        X[i] = localX[i];
+        X[i] = localB[i];
+#undef IDX
 }
 
 // Prediction Error helper device kernels
