@@ -182,9 +182,9 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
     wmma::fill_fragment(C, 0.0f);
 #pragma unroll
     for (int k0 = 0; k0 < 32; k0 += 16) {
-        const half* tile_ptr = &RxLocal[startRow + k0][0];
-        wmma::load_matrix_sync(A, tile_ptr, sharedMemStride);
-        wmma::load_matrix_sync(B, tile_ptr, sharedMemStride);
+        const half* tilePtr = &RxLocal[startRow + k0][0];
+        wmma::load_matrix_sync(A, tilePtr, sharedMemStride);
+        wmma::load_matrix_sync(B, tilePtr, sharedMemStride);
         wmma::mma_sync(C, A, B, C);
     }
 
