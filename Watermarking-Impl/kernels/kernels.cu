@@ -254,13 +254,13 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
     }
 
     // do not compute rx yet, compute Rx first
-    // TENSOR CORE Rx ACCUMULATION (24x24 matrix -> 32x32 tiled)
+    // TENSOR CORE Rx ACCUMULATION (24x24 matrix -> 32x32 tiled, but we want the lower diagonal part only!
+    // so we don't compute the upper-right -> skip one tensor core matrix multiply!
     wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::col_major> A_low, A_high;
     wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::row_major> B_low, B_high;
-    // accumulators for the 32x32 grid
-    wmma::fragment<wmma::accumulator, 16, 16, 16, half> C00, C01, C10, C11;
+    // accumulators for the 3 matrices
+    wmma::fragment<wmma::accumulator, 16, 16, 16, half> C00, C10, C11;
     wmma::fill_fragment(C00, 0.0f);
-    wmma::fill_fragment(C01, 0.0f);
     wmma::fill_fragment(C10, 0.0f);
     wmma::fill_fragment(C11, 0.0f);
 
@@ -275,9 +275,9 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
         // load upper half
         wmma::load_matrix_sync(A_high, tilePtr + 16, sharedMemStride);
         wmma::load_matrix_sync(B_high, tilePtr + 16, sharedMemStride);
-        // compute 4 Matrices (2x2)
+        // compute 3 Matrices (2x1)
         wmma::mma_sync(C00, A_low, B_low, C00);   // top left
-        wmma::mma_sync(C01, A_low, B_high, C01);  // top right
+        // skip top right
         wmma::mma_sync(C10, A_high, B_low, C10);  // bottom left
         wmma::mma_sync(C11, A_high, B_high, C11); // bottom right
     }
