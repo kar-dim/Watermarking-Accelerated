@@ -48,7 +48,7 @@ __kernel void nvf(__global const float* restrict input, __global float* restrict
 	}
 	const float numerator = (N_PIXELS * sumSq) - (sum * sum);
     const float output = native_divide(numerator, N_PIXELS_SQ + numerator);
-	nvf[(x * height) + y] = fmax(output, 0.0f);
+	nvf[(x * height) + y] = clamp(output, 0.0f, 255.0f);
 }
 
 //use pointer arithmetic for dot product to help compilers optimize address calculations fast
@@ -252,6 +252,9 @@ __kernel void me_p3(__global const float* restrict input,
     }
 }
 
+)CLC"
+R"CLC(
+
 __kernel void calculate_partial_correlation(
     __global const float* restrict e_u,
     __global const float* restrict e_z,
@@ -381,20 +384,45 @@ __kernel void cholesky_solver_p3(__global const float* restrict A,
     float packed[36]; 
     float localB[8];
 
-    #pragma unroll
-    for (int k = 0; k < 36; k++)
-        packed[k] = A[k];
+    const size_t rawA = (size_t)A;
+    const size_t rawB = (size_t)B;
+    const size_t rawX = (size_t)X;
+    if ( ((rawA | rawB | rawX) & 0xF) == 0) {
+        __global const float4* vecA = (__global const float4*)A;
+        __global const float4* vecB = (__global const float4*)B;
+#pragma unroll
+        for (int k = 0; k < 9; k++) {
+            float4 v = vecA[k];
+            packed[k * 4 + 0] = v.x;
+            packed[k * 4 + 1] = v.y;
+            packed[k * 4 + 2] = v.z;
+            packed[k * 4 + 3] = v.w;
+        }
 
-    #pragma unroll
-    for (int i = 0; i < N; i++)
-        localB[i] = B[i];
+#pragma unroll
+        for (int i = 0; i < 2; i++) {
+            float4 v = vecB[i];
+            localB[i * 4 + 0] = v.x;
+            localB[i * 4 + 1] = v.y;
+            localB[i * 4 + 2] = v.z;
+            localB[i * 4 + 3] = v.w;
+        }
+    } 
+    else {
+#pragma unroll
+        for (int k = 0; k < 36; k++)
+            packed[k] = A[k];
+#pragma unroll
+        for (int i = 0; i < N; i++)
+            localB[i] = B[i];
+    }
 
-    #pragma unroll
+#pragma unroll
     for (int i = 0; i < N; i++) {
-        #pragma unroll
+#pragma unroll
         for (int j = 0; j <= i; j++) {
             float sum = 0.0f;
-            #pragma unroll
+#pragma unroll
             for (int k = 0; k < j; k++)
                 sum += packed[IDX(i, k)] * packed[IDX(j, k)];
 
@@ -411,26 +439,26 @@ __kernel void cholesky_solver_p3(__global const float* restrict A,
         }
     }
 
-    #pragma unroll
+#pragma unroll
     for (int i = 0; i < N; i++) {
         float sum = 0.0f;
-        #pragma unroll
+#pragma unroll
         for (int k = 0; k < i; k++)
             sum += packed[IDX(i, k)] * localB[k];
         localB[i] = (localB[i] - sum) / packed[IDX(i, i)];
     }
 
-    #pragma unroll
+#pragma unroll
     for (int i = N - 1; i >= 0; i--) {
         float sum = 0.0f;
-        #pragma unroll
+#pragma unroll
         for (int k = i + 1; k < N; k++)
             sum += packed[IDX(k, i)] * localB[k];
         localB[i] = (localB[i] - sum) / packed[IDX(i, i)];
     }
     *stopFlag = 0;
 exit:
-    #pragma unroll
+#pragma unroll
     for (int i = 0; i < N; i++)
         X[i] = localB[i];
 

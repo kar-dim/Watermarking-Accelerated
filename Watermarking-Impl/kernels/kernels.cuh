@@ -120,7 +120,7 @@ template <int p, int pad = p / 2, int sharedSize = 16 + (2 * pad)> __global__ vo
     // calculate NVF with optimized math (avoid divisions)
     const float numerator = (nPixels * sumSq) - (sum * sum);
     const float output = __fdividef(numerator, nPixelsSq + numerator);
-    nvf[x * height + y] = fmaxf(output, 0.0f);
+    nvf[x * height + y] = clamp(output, 0.0f, 255.0f);
 }
 
 // helper method for error sequence calculation with p = 3
@@ -182,15 +182,51 @@ template <int p, int N = (p * p) - 1> __global__ void cholesky_solver(const floa
     float packed[SIZE];
     float localB[N];
 
-   // load A
-#pragma unroll
-    for (int k = 0; k < SIZE; k++)
-        packed[k] = A[k];
+    // check if A, B, and X are 16-byte aligned for vectorized loads
+    const uintptr_t rawA = reinterpret_cast<uintptr_t>(A);
+    const uintptr_t rawB = reinterpret_cast<uintptr_t>(B);
+    const uintptr_t rawX = reinterpret_cast<uintptr_t>(X);
 
-    // load B
+    if (((rawA | rawB | rawX) & 0xF) == 0) {
+        const float4* vecA = reinterpret_cast<const float4*>(A);
+        const float4* vecB = reinterpret_cast<const float4*>(B);
+
+        // load A (Rx)
+        const int vecLimitA = SIZE / 4;
 #pragma unroll
-    for (int i = 0; i < N; i++)
-        localB[i] = B[i];
+        for (int k = 0; k < vecLimitA; k++) {
+            float4 v = vecA[k];
+            packed[k * 4 + 0] = v.x;
+            packed[k * 4 + 1] = v.y;
+            packed[k * 4 + 2] = v.z;
+            packed[k * 4 + 3] = v.w;
+        }
+        // tail elements of A (if SIZE is not multiple of 4)
+        for (int k = vecLimitA << 2; k < SIZE; k++)
+            packed[k] = A[k];
+
+        // load B (rx)
+        const int vecLimitB = N / 4;
+#pragma unroll
+        for (int i = 0; i < vecLimitB; i++) {
+            float4 v = vecB[i];
+            localB[i * 4 + 0] = v.x;
+            localB[i * 4 + 1] = v.y;
+            localB[i * 4 + 2] = v.z;
+            localB[i * 4 + 3] = v.w;
+        }
+        // tail elements of B (if SIZE is not multiple of 4)
+        for (int i = vecLimitB << 2; i < N; i++)
+            localB[i] = B[i];
+        // scalar path
+    } else {
+#pragma unroll
+        for (int k = 0; k < SIZE; k++)
+            packed[k] = A[k];
+#pragma unroll
+        for (int i = 0; i < N; i++)
+            localB[i] = B[i];
+    }
 
     // in-place Cholesky Decomposition
     // overwrite packed (which holds A) with L
@@ -200,7 +236,7 @@ template <int p, int N = (p * p) - 1> __global__ void cholesky_solver(const floa
         for (int j = 0; j <= i; j++) {
             float sum = 0.0f;
 
-            //dot product of previous L rows
+            // dot product of previous L rows
 #pragma unroll
             for (int k = 0; k < j; k++)
                 sum += packed[IDX(i, k)] * packed[IDX(j, k)];
