@@ -276,7 +276,7 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
         wmma::load_matrix_sync(A_high, tilePtr + 16, sharedMemStride);
         wmma::load_matrix_sync(B_high, tilePtr + 16, sharedMemStride);
         // compute 3 Matrices (2x1)
-        wmma::mma_sync(C00, A_low, B_low, C00);   // top left
+        wmma::mma_sync(C00, A_low, B_low, C00); // top left
         // skip top right
         wmma::mma_sync(C10, A_high, B_low, C10);  // bottom left
         wmma::mma_sync(C11, A_high, B_high, C11); // bottom right
@@ -410,9 +410,9 @@ __global__ void calculate_partial_correlation(const float* __restrict__ e_u, con
 __global__ void calculate_final_correlation(const float* __restrict__ partialDots, const float* __restrict__ partialNormU, const float* __restrict__ partialNormZ, float* __restrict__ result,
                                             const unsigned int numBlocks) {
     const int tid = threadIdx.x;
-    const int lane = tid % 32;
-    const int warpId = tid / 32;
-    const int numWarps = (blockDim.x + 31) / 32;
+    const int lane = tid & 31;
+    const int warpId = tid >> 5;
+    const int numWarps = (blockDim.x + 31) >> 5;
 
     // shared memory must match number of warps
     __shared__ float warpDot[32];
@@ -423,13 +423,44 @@ __global__ void calculate_final_correlation(const float* __restrict__ partialDot
     float localU = 0.0f;
     float localZ = 0.0f;
 
-    for (int i = tid; i < numBlocks; i += blockDim.x) {
-        localDot += partialDots[i];
-        localU += partialNormU[i];
-        localZ += partialNormZ[i];
+    // if pointers are 16-byte aligned we can use vectorized loads to massively speedup the kernel
+    const uintptr_t rawDots = reinterpret_cast<const uintptr_t>(partialDots);
+    const uintptr_t rawU = reinterpret_cast<const uintptr_t>(partialNormU);
+    const uintptr_t rawZ = reinterpret_cast<const uintptr_t>(partialNormZ);
+    if (((rawDots | rawU | rawZ) & 0xF) == 0) {
+        const float4* vecDots = reinterpret_cast<const float4*>(partialDots);
+        const float4* vecU = reinterpret_cast<const float4*>(partialNormU);
+        const float4* vecZ = reinterpret_cast<const float4*>(partialNormZ);
+
+        const int vecLoopLimit = numBlocks >> 2;
+        // vectorized grid stride Loop
+        for (int i = tid; i < vecLoopLimit; i += blockDim.x) {
+            const float4 d = vecDots[i];
+            const float4 u = vecU[i];
+            const float4 z = vecZ[i];
+            localDot += d.x + d.y + d.z + d.w;
+            localU += u.x + u.y + u.z + u.w;
+            localZ += z.x + z.y + z.z + z.w;
+        }
+        // tail elements
+        for (int i = (vecLoopLimit << 2) + tid; i < numBlocks; i += blockDim.x) {
+            localDot += partialDots[i];
+            localU += partialNormU[i];
+            localZ += partialNormZ[i];
+        }
+    }
+
+    // non vectorized path (alignment not met), fallback to scalar loads
+    else {
+        for (int i = tid; i < numBlocks; i += blockDim.x) {
+            localDot += partialDots[i];
+            localU += partialNormU[i];
+            localZ += partialNormZ[i];
+        }
     }
 
     // intra-warp reduction
+#pragma unroll
     for (int offset = 16; offset > 0; offset >>= 1) {
         localDot += __shfl_down_sync(0xFFFFFFFF, localDot, offset);
         localU += __shfl_down_sync(0xFFFFFFFF, localU, offset);
@@ -448,15 +479,16 @@ __global__ void calculate_final_correlation(const float* __restrict__ partialDot
         localDot = validTid ? warpDot[lane] : 0.0f;
         localU = validTid ? warpU[lane] : 0.0f;
         localZ = validTid ? warpZ[lane] : 0.0f;
+#pragma unroll
         for (int offset = 16; offset > 0; offset >>= 1) {
             localDot += __shfl_down_sync(0xFFFFFFFF, localDot, offset);
             localU += __shfl_down_sync(0xFFFFFFFF, localU, offset);
             localZ += __shfl_down_sync(0xFFFFFFFF, localZ, offset);
         }
         if (lane == 0) {
-            float normU = sqrtf(localU);
-            float normZ = sqrtf(localZ);
-            result[0] = (normU > 0.0f && normZ > 0.0f) ? (localDot / (normU * normZ)) : 0.0f;
+            const float normU = sqrtf(localU);
+            const float normZ = sqrtf(localZ);
+            result[0] = (normU > 1e-12f && normZ > 1e-12f) ? (localDot / (normU * normZ)) : 0.0f;
         }
     }
 }

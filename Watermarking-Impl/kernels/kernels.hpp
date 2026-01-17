@@ -313,12 +313,36 @@ __kernel void calculate_final_correlation(
     __local float sumU[1024];
     __local float sumZ[1024];
 
-    for (int i = tid; i < numBlocks; i += localSize) {
-        localDot += partialDots[i];
-        localU += partialNormU[i];
-        localZ += partialNormZ[i];
-    }
+    const size_t rawDots = (size_t)partialDots;
+    const size_t rawU = (size_t)partialNormU;
+    const size_t rawZ = (size_t)partialNormZ;
+    if (((rawDots | rawU | rawZ) & 0xF) == 0) {
+        __global const float4* vecDots = (__global const float4*)partialDots;
+        __global const float4* vecU = (__global const float4*)partialNormU;
+        __global const float4* vecZ = (__global const float4*)partialNormZ;
 
+        const int vecLoopLimit = numBlocks >> 2; 
+        for (int i = tid; i < vecLoopLimit; i += localSize) {
+            float4 d = vecDots[i];
+            float4 u = vecU[i];
+            float4 z = vecZ[i];
+            localDot += d.x + d.y + d.z + d.w;
+            localU += u.x + u.y + u.z + u.w;
+            localZ += z.x + z.y + z.z + z.w;
+        }
+        for (int i = (vecLoopLimit << 2) + tid; i < numBlocks; i += localSize) {
+            localDot += partialDots[i];
+            localU += partialNormU[i];
+            localZ += partialNormZ[i];
+        }
+    } 
+    else {
+        for (int i = tid; i < numBlocks; i += localSize) {
+            localDot += partialDots[i];
+            localU += partialNormU[i];
+            localZ += partialNormZ[i];
+        }
+    }
     sumDot[tid] = localDot;
     sumU[tid] = localU;
     sumZ[tid] = localZ;
