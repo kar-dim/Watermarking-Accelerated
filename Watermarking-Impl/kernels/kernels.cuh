@@ -195,7 +195,7 @@ template <int p, int N = (p * p) - 1> __global__ void cholesky_solver(const floa
         const int vecLimitA = SIZE / 4;
 #pragma unroll
         for (int k = 0; k < vecLimitA; k++) {
-            float4 v = vecA[k];
+            const float4 v = vecA[k];
             packed[k * 4 + 0] = v.x;
             packed[k * 4 + 1] = v.y;
             packed[k * 4 + 2] = v.z;
@@ -209,7 +209,7 @@ template <int p, int N = (p * p) - 1> __global__ void cholesky_solver(const floa
         const int vecLimitB = N / 4;
 #pragma unroll
         for (int i = 0; i < vecLimitB; i++) {
-            float4 v = vecB[i];
+            const float4 v = vecB[i];
             localB[i * 4 + 0] = v.x;
             localB[i * 4 + 1] = v.y;
             localB[i * 4 + 2] = v.z;

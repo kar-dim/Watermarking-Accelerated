@@ -326,9 +326,9 @@ __kernel void calculate_final_correlation(
 
         const int vecLoopLimit = numBlocks >> 2; 
         for (int i = tid; i < vecLoopLimit; i += localSize) {
-            float4 d = vecDots[i];
-            float4 u = vecU[i];
-            float4 z = vecZ[i];
+            const float4 d = vecDots[i];
+            const float4 u = vecU[i];
+            const float4 z = vecZ[i];
             localDot += d.x + d.y + d.z + d.w;
             localU += u.x + u.y + u.z + u.w;
             localZ += z.x + z.y + z.z + z.w;
@@ -392,7 +392,7 @@ __kernel void cholesky_solver_p3(__global const float* restrict A,
         __global const float4* vecB = (__global const float4*)B;
 #pragma unroll
         for (int k = 0; k < 9; k++) {
-            float4 v = vecA[k];
+            const float4 v = vecA[k];
             packed[k * 4 + 0] = v.x;
             packed[k * 4 + 1] = v.y;
             packed[k * 4 + 2] = v.z;
@@ -401,7 +401,7 @@ __kernel void cholesky_solver_p3(__global const float* restrict A,
 
 #pragma unroll
         for (int i = 0; i < 2; i++) {
-            float4 v = vecB[i];
+            const float4 v = vecB[i];
             localB[i * 4 + 0] = v.x;
             localB[i * 4 + 1] = v.y;
             localB[i * 4 + 2] = v.z;
