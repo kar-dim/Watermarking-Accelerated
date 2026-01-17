@@ -183,9 +183,9 @@ template <int p, int N = (p * p) - 1> __global__ void cholesky_solver(const floa
     float localB[N];
 
     // check if A, B, and X are 16-byte aligned for vectorized loads
-    const uintptr_t rawA = reinterpret_cast<uintptr_t>(A);
-    const uintptr_t rawB = reinterpret_cast<uintptr_t>(B);
-    const uintptr_t rawX = reinterpret_cast<uintptr_t>(X);
+    const uintptr_t rawA = reinterpret_cast<const uintptr_t>(A);
+    const uintptr_t rawB = reinterpret_cast<const uintptr_t>(B);
+    const uintptr_t rawX = reinterpret_cast<const uintptr_t>(X);
 
     if (((rawA | rawB | rawX) & 0xF) == 0) {
         const float4* vecA = reinterpret_cast<const float4*>(A);
