@@ -19,7 +19,7 @@ This project implements and evaluates the performance (execution speed) of image
 
 The repository contains all required source code and dependencies needed to reproduce the benchmarks and experiments.
 
-- Comparative performance analysis between CPU and GPU implementations (check [Releases](https://github.com/kar-dim/Watermarking-Accelerated/releases)).
+- Comparative performance analysis between CPU and GPU implementations (check `time_comparisons.zip` on the [Releases](https://github.com/kar-dim/Watermarking-Accelerated/releases) section).
 
 Implementations are optimized for maximum performance:
 - CPU implementation: Uses the ```Eigen``` library for efficient linear algebra operations. The application utilizes all available logical (or physical, specifically on video embedding) CPU cores for maximum performance.
