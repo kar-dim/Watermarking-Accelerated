@@ -124,8 +124,8 @@ template <int p, int pad = p / 2, int sharedSize = 16 + (2 * pad)> __global__ vo
 }
 
 // helper method for error sequence calculation with p = 3
-template <int p, int pad = p / 2, int sharedSize = 16 + (2 * pad), int coeffsSize = (p * p) - 1>
-__device__ inline float error_sequence_coeffs_filter(const float region[sharedSize][sharedSize], const float sCoeffs[coeffsSize], const int localRow, const int localCol) {
+template <int p, int pad = p / 2, int sharedSize = 16 + (2 * pad), int stride = sharedSize + 1, int coeffsSize = (p * p) - 1>
+__device__ inline float error_sequence_coeffs_filter(const float* __restrict__ region, const float* __restrict__ sCoeffs, const int localRow, const int localCol) {
     const int r = localRow + pad;
     const int c = localCol + pad;
     float dot = 0.0f;
@@ -136,11 +136,11 @@ __device__ inline float error_sequence_coeffs_filter(const float region[sharedSi
         for (int j = -pad; j <= pad; j++) {
             if (i == 0 && j == 0)
                 continue;
-            dot += sCoeffs[k] * region[r + i][c + j];
+            dot += sCoeffs[k] * region[(r + i) * stride + (c + j)];
             k++;
         }
     }
-    return region[r][c] - dot;
+    return region[r * stride + c] - dot;
 }
 
 // main kernel for error sequence calculation
@@ -163,7 +163,7 @@ __global__ void calculate_error_sequence(const float* __restrict__ inputA, const
             x_[(x * height + y)] = 0.0f;
             return;
         }
-        const float output = error_sequence_coeffs_filter<p>(region, sCoeffs, threadIdx.x, threadIdx.y);
+        const float output = error_sequence_coeffs_filter<p>(&region[0][0], sCoeffs, threadIdx.x, threadIdx.y);
         x_[(x * height + y)] = calculateAbs ? fabsf(output) : output;
     }
 }
