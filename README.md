@@ -23,7 +23,7 @@ The repository contains all required source code and dependencies needed to repr
 
 Implementations are optimized for maximum performance:
 - CPU implementation: Uses the ```Eigen``` library for efficient linear algebra operations. The application utilizes all available logical (or physical, specifically on video embedding) CPU cores for maximum performance.
-- GPU implementation: Provides both OpenCL and CUDA backends. The GPU kernels are highly optimized to maximize throughput and minimize latency. CUDA implementation uses Tensor Cores in some of its kernels to maximize performance. The efficient ```ArrayFire``` library is used for most common work and specialized high performance kernels for custom work, or where ArrayFire is not fast enough.
+- GPU implementation: Provides both OpenCL and CUDA backends. The GPU kernels are highly optimized to maximize throughput and minimize latency. CUDA implementation uses Tensor Cores in some of its kernels to maximize performance. The efficient ```ArrayFire``` library is used for most common and simple work, and specialized high performance kernels for custom work where ArrayFire is not fast enough. Specifically for CUDA, we use warp shuffle techniques and Tensor Cores to improve performance wherever possible.
 
 # Run the pre-built binaries
 
