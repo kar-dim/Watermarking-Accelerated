@@ -7,50 +7,13 @@
 
 using namespace nvcuda;
 
-// clang-format off
-
-// constant cache used to map linear index of the [8x8] Rx matrix for p=3 into [x,y] coordinates
-// this helps to write back to global memory 36 Rx values per block instead of 64 (8x8) improving performance
-__constant__ const short2 c_RxCoordsP3[36] = 
-{
-    {0,0},
-    {1,0}, {1,1},
-    {2,0}, {2,1}, {2,2},
-    {3,0}, {3,1}, {3,2}, {3,3},
-    {4,0}, {4,1}, {4,2}, {4,3}, {4,4},
-    {5,0}, {5,1}, {5,2}, {5,3}, {5,4}, {5,5},
-    {6,0}, {6,1}, {6,2}, {6,3}, {6,4}, {6,5}, {6,6},
-    {7,0}, {7,1}, {7,2}, {7,3}, {7,4}, {7,5}, {7,6}, {7,7}
-};
-// constant cache used to map linear index of the [24x24] Rx matrix for p=5 into [x,y] coordinates
-// this helps to write back to global memory 300 Rx values per block instead of 576 (24x24) improving performance
-__constant__ const short2 c_RxCoordsP5[300] = {
-    {0,0},
-    {1,0}, {1,1},
-    {2,0}, {2,1}, {2,2},
-    {3,0}, {3,1}, {3,2}, {3,3},
-    {4,0}, {4,1}, {4,2}, {4,3}, {4,4},
-    {5,0}, {5,1}, {5,2}, {5,3}, {5,4}, {5,5},
-    {6,0}, {6,1}, {6,2}, {6,3}, {6,4}, {6,5}, {6,6},
-    {7,0}, {7,1}, {7,2}, {7,3}, {7,4}, {7,5}, {7,6}, {7,7},
-    {8,0}, {8,1}, {8,2}, {8,3}, {8,4}, {8,5}, {8,6}, {8,7}, {8,8},
-    {9,0}, {9,1}, {9,2}, {9,3}, {9,4}, {9,5}, {9,6}, {9,7}, {9,8}, {9,9},
-    {10,0}, {10,1}, {10,2}, {10,3}, {10,4}, {10,5}, {10,6}, {10,7}, {10,8}, {10,9}, {10,10},
-    {11,0}, {11,1}, {11,2}, {11,3}, {11,4}, {11,5}, {11,6}, {11,7}, {11,8}, {11,9}, {11,10}, {11,11},
-    {12,0}, {12,1}, {12,2}, {12,3}, {12,4}, {12,5}, {12,6}, {12,7}, {12,8}, {12,9}, {12,10}, {12,11}, {12,12},
-    {13,0}, {13,1}, {13,2}, {13,3}, {13,4}, {13,5}, {13,6}, {13,7}, {13,8}, {13,9}, {13,10}, {13,11}, {13,12}, {13,13},
-    {14,0}, {14,1}, {14,2}, {14,3}, {14,4}, {14,5}, {14,6}, {14,7}, {14,8}, {14,9}, {14,10}, {14,11}, {14,12}, {14,13}, {14,14},
-    {15,0}, {15,1}, {15,2}, {15,3}, {15,4}, {15,5}, {15,6}, {15,7}, {15,8}, {15,9}, {15,10}, {15,11}, {15,12}, {15,13}, {15,14}, {15,15},
-    {16,0}, {16,1}, {16,2}, {16,3}, {16,4}, {16,5}, {16,6}, {16,7}, {16,8}, {16,9}, {16,10}, {16,11}, {16,12}, {16,13}, {16,14}, {16,15}, {16,16},
-    {17,0}, {17,1}, {17,2}, {17,3}, {17,4}, {17,5}, {17,6}, {17,7}, {17,8}, {17,9}, {17,10}, {17,11}, {17,12}, {17,13}, {17,14}, {17,15}, {17,16}, {17,17},
-    {18,0}, {18,1}, {18,2}, {18,3}, {18,4}, {18,5}, {18,6}, {18,7}, {18,8}, {18,9}, {18,10}, {18,11}, {18,12}, {18,13}, {18,14}, {18,15}, {18,16}, {18,17}, {18,18},
-    {19,0}, {19,1}, {19,2}, {19,3}, {19,4}, {19,5}, {19,6}, {19,7}, {19,8}, {19,9}, {19,10}, {19,11}, {19,12}, {19,13}, {19,14}, {19,15}, {19,16}, {19,17}, {19,18}, {19,19},
-    {20,0}, {20,1}, {20,2}, {20,3}, {20,4}, {20,5}, {20,6}, {20,7}, {20,8}, {20,9}, {20,10}, {20,11}, {20,12}, {20,13}, {20,14}, {20,15}, {20,16}, {20,17}, {20,18}, {20,19}, {20,20},
-    {21,0}, {21,1}, {21,2}, {21,3}, {21,4}, {21,5}, {21,6}, {21,7}, {21,8}, {21,9}, {21,10}, {21,11}, {21,12}, {21,13}, {21,14}, {21,15}, {21,16}, {21,17}, {21,18}, {21,19}, {21,20}, {21,21},
-    {22,0}, {22,1}, {22,2}, {22,3}, {22,4}, {22,5}, {22,6}, {22,7}, {22,8}, {22,9}, {22,10}, {22,11}, {22,12}, {22,13}, {22,14}, {22,15}, {22,16}, {22,17}, {22,18}, {22,19}, {22,20}, {22,21}, {22,22},
-    {23,0}, {23,1}, {23,2}, {23,3}, {23,4}, {23,5}, {23,6}, {23,7}, {23,8}, {23,9}, {23,10}, {23,11}, {23,12}, {23,13}, {23,14}, {23,15}, {23,16}, {23,17}, {23,18}, {23,19}, {23,20}, {23,21}, {23,22}, {23,23}
-};
-// clang-format on
+// maps a linear index k to(row, col) coordinates for a packed lower triangular matrix
+__device__ int2 getPackedCoords(const int k) {
+    // inverse triangular number formula: r = floor((sqrt(1 + 8k) - 1) / 2)
+    const int r = __float2int_rd(0.5f * (sqrtf(1.0f + 8.0f * k) - 1.0f));
+    const int c = k - (r * (r + 1)) / 2;
+    return make_int2(r, c);
+}
 
 // STS.128
 __device__ void me_p3_rxCalculate(half8* RxLocalVec8, const half8& vec, const half& center) {
@@ -108,6 +71,30 @@ __device__ void load_neighbor_row_funnel_p5(half& p0, half& p1, half& p2, half& 
     p4 = hFinal.x;
 }
 
+__device__ void load_neighbor_row_funnel_p7(half* dst, const half* rowBase) {
+    // shift Amount (0 or 16 bits), if threadIdx.x is odd, we shift right by 1 half (16 bits)
+    const uint32_t shift = (threadIdx.x & 1) * 16;
+    // load 4 x 32-bit chunks (8 halves) using the aligned index
+    // cast to uint* to load 32 bits at a time (equivalent to half2)
+    const uint32_t* ptr = reinterpret_cast<const uint32_t*>(&rowBase[threadIdx.x & ~1]);
+    // load 4 chunks (128 bits total read, covers 8 halves)
+    uint32_t u0 = ptr[0];
+    uint32_t u1 = ptr[1];
+    uint32_t u2 = ptr[2];
+    uint32_t u3 = ptr[3];
+    // funnel shift (vectorized selection, this reconstructs the sliding window)
+    uint32_t p0 = __funnelshift_r(u0, u1, shift);
+    uint32_t p1 = __funnelshift_r(u1, u2, shift);
+    uint32_t p2 = __funnelshift_r(u2, u3, shift);
+    uint32_t p3 = u3 >> shift;
+    // unpack
+    reinterpret_cast<half2*>(dst)[0] = reinterpret_cast<half2&>(p0);
+    reinterpret_cast<half2*>(dst)[1] = reinterpret_cast<half2&>(p1);
+    reinterpret_cast<half2*>(dst)[2] = reinterpret_cast<half2&>(p2);
+    // store
+    dst[6] = reinterpret_cast<half2&>(p3).x;
+}
+
 __device__ void load_neighbor_vec_p5(half8* dst, const half blockValues[5][260], half& center) {
     half8 v0, v1, v2;
     load_neighbor_row_funnel_p5(v0.a, v0.b, v0.c, v0.d, v0.e, blockValues[0]);
@@ -122,6 +109,35 @@ __device__ void load_neighbor_vec_p5(half8* dst, const half blockValues[5][260],
     dst[3] = {};
 }
 
+__device__ void load_neighbor_vec_p7(half8* dst, const half blockValues[7][262], half& center) {
+    half rows[7][8]; // 8 cols for padding/alignment simplicity
+    load_neighbor_row_funnel_p7(rows[0], blockValues[0]);
+    load_neighbor_row_funnel_p7(rows[1], blockValues[1]);
+    load_neighbor_row_funnel_p7(rows[2], blockValues[2]);
+    load_neighbor_row_funnel_p7(rows[3], blockValues[3]);
+    load_neighbor_row_funnel_p7(rows[4], blockValues[4]);
+    load_neighbor_row_funnel_p7(rows[5], blockValues[5]);
+    load_neighbor_row_funnel_p7(rows[6], blockValues[6]);
+    center = rows[3][3];
+    half* d = reinterpret_cast<half*>(dst);
+    int idx = 0;
+#pragma unroll
+    for (int r = 0; r < 7; r++) {
+        if (r == 3) {
+            d[idx++] = rows[r][0];
+            d[idx++] = rows[r][1];
+            d[idx++] = rows[r][2];
+            d[idx++] = rows[r][4];
+            d[idx++] = rows[r][5];
+            d[idx++] = rows[r][6];
+        } else {
+#pragma unroll
+            for (int c = 0; c < 7; c++)
+                d[idx++] = rows[r][c];
+        }
+    }
+}
+
 __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height) {
     constexpr int sharedMemStride = 24; // 16 + 8 for padding to minimize bank conflicts (padding is CRITICAL for performance)
 
@@ -130,7 +146,6 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
     const int y = blockIdx.y * blockDim.y + threadIdx.y;
     const int warpId = tid / 32;
     const int startRow = warpId * 32;
-    const half halfScaleFactor = __float2half(0.00392156862f); // multiplication with stored value of (1/255) is faster than division by 255
 
     // shared memory for Rx, rx, scratch and all pixels utilized by the whole block
     __shared__ alignas(16) half RxLocal[256][sharedMemStride];
@@ -197,7 +212,7 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
 
     // first 36 threads (warps 1 and partial from 2) write Rx
     if (tid < 36) {
-        const short2 coords = c_RxCoordsP3[tid];
+        const int2 coords = getPackedCoords(tid);
         const int r = coords.x;
         const int c = coords.y;
         float sum = 0.0f;
@@ -289,8 +304,8 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
         half2* inPtr = reinterpret_cast<half2*>(&localVec8[i]);
         half2* resultPtr = reinterpret_cast<half2*>(&rxVec[i]);
 #pragma unroll
-        for (int i = 0; i < 4; i++)
-            resultPtr[i] = __hmul2(inPtr[i], center);
+        for (int j = 0; j < 4; j++)
+            resultPtr[j] = __hmul2(inPtr[j], center);
     }
 
     // rx warp-level reduction
@@ -340,13 +355,147 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
         const int RxBaseIndex = (y * gridDim.x * 300) + (blockIdx.x * 300);
 
         for (int i = workerIdx; i < 300; i += 224) {
-            const short2 coords = c_RxCoordsP5[i];
+            const int2 coords = getPackedCoords(i);
             float sum = 0.0f;
 #pragma unroll
             for (int w = 0; w < 8; w++)
                 sum += __half2float(RxLocal[w * 32 + coords.x][coords.y]);
             Rx[RxBaseIndex + i] = sum;
         }
+    }
+}
+
+__global__ void me_p7(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height) {
+    constexpr int sharedMemStride = 56; // 48 + 8 for padding to minimize bank conflicts (padding is CRITICAL for performance)
+
+    const int tid = threadIdx.x;
+    const int x = blockIdx.x * 256 + tid;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+    const int warpId = tid / 32;
+    const int startRow = warpId * 32;
+
+    // shared memory for Rx, rx, scratch and all pixels utilized by the whole block
+    __shared__ alignas(16) half RxLocal[384][sharedMemStride];
+    __shared__ half blockValues[7][262];
+
+    fillBlockStrip<7>(blockValues, input, width, height);
+    __syncthreads();
+
+    if (y >= height)
+        return;
+
+    // read the 7x7 window from shared memory
+    half centerVal;
+    half2 center; // half -> half2 for vectorized ops later
+    half8* localVec8 = reinterpret_cast<half8*>(&RxLocal[tid][0]);
+    // if/else is better than always writing (even vectorized) to shared memory unnecessarily
+    if (x < width) {
+        load_neighbor_vec_p7(localVec8, blockValues, centerVal);
+        center = __half2half2(centerVal);
+    } else {
+#pragma unroll
+        for (int i = 0; i < 6; i++)
+            localVec8[i] = {};
+        center = __half2half2(blockValues[3][tid + 3]); // center pixel
+    }
+
+    // do not compute rx yet, compute Rx first
+    // TENSOR CORE Rx ACCUMULATION
+    wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::col_major> A[3];
+    wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::row_major> B[3];
+    wmma::fragment<wmma::accumulator, 16, 16, 16, half> C[6];
+    // accumulators
+#pragma unroll
+    for (int i = 0; i < 6; i++)
+        wmma::fill_fragment(C[i], 0.0f);
+
+    // loop for the 32 pixels in this warp
+#pragma unroll
+    for (int k0 = 0; k0 < 32; k0 += 16) {
+        // pointer to the start of the 16-pixel batch for this warp
+        const half* tilePtr = &RxLocal[startRow + k0][0];
+#pragma unroll
+        // load A and B matrices (3 each)
+        for (int i = 0; i < 3; i++) {
+            wmma::load_matrix_sync(A[i], tilePtr + (i * 16), sharedMemStride);
+            wmma::load_matrix_sync(B[i], tilePtr + (i * 16), sharedMemStride);
+        }
+
+        // lower triangle calculation (6 tiles)
+        wmma::mma_sync(C[0], A[0], B[0], C[0]);
+        wmma::mma_sync(C[1], A[1], B[0], C[1]);
+        wmma::mma_sync(C[2], A[1], B[1], C[2]);
+        wmma::mma_sync(C[3], A[2], B[0], C[3]);
+        wmma::mma_sync(C[4], A[2], B[1], C[4]);
+        wmma::mma_sync(C[5], A[2], B[2], C[5]);
+    }
+
+    // compute rx (vectorized 128-bit plus half2 for maximum efficiency)
+    half8 rxVec[6];
+#pragma unroll
+    for (int i = 0; i < 6; i++) {
+        half2* inPtr = reinterpret_cast<half2*>(&localVec8[i]);
+        half2* resultPtr = reinterpret_cast<half2*>(&rxVec[i]);
+#pragma unroll
+        for (int j = 0; j < 4; j++)
+            resultPtr[j] = __hmul2(inPtr[j], center);
+    }
+
+    // rx warp-level reduction
+    // lane 0 will end up holding the sum of the entire warp
+    half2* rxHalf2 = reinterpret_cast<half2*>(rxVec);
+#pragma unroll
+    for (int i = 0; i < 24; i++) {
+        half2 sum = rxHalf2[i];
+        for (int offset = 16; offset > 0; offset >>= 1) {
+            int shflInt = __shfl_down_sync(0xFFFFFFFF, reinterpret_cast<int&>(sum), offset);
+            sum = __hadd2(sum, reinterpret_cast<half2&>(shflInt));
+        }
+        rxHalf2[i] = sum;
+    }
+    __syncthreads(); // here (p = 7 version) it is needed!
+
+    // store Rx to shared mem
+    const int outputRowStart = warpId * 48;
+    half* warpOutput = &RxLocal[outputRowStart][0];
+    wmma::store_matrix_sync(warpOutput, C[0], sharedMemStride, wmma::mem_row_major);
+    wmma::store_matrix_sync(warpOutput + 16 * sharedMemStride, C[1], sharedMemStride, wmma::mem_row_major);
+    wmma::store_matrix_sync(warpOutput + 16 * sharedMemStride + 16, C[2], sharedMemStride, wmma::mem_row_major);
+    wmma::store_matrix_sync(warpOutput + 32 * sharedMemStride, C[3], sharedMemStride, wmma::mem_row_major);
+    wmma::store_matrix_sync(warpOutput + 32 * sharedMemStride + 16, C[4], sharedMemStride, wmma::mem_row_major);
+    wmma::store_matrix_sync(warpOutput + 32 * sharedMemStride + 32, C[5], sharedMemStride, wmma::mem_row_major);
+
+    // Store rx partials (vertical strip in padding column 48)
+    if ((tid & 31) == 0) {
+#pragma unroll
+        for (int i = 0; i < 6; i++) {
+            half* vecPtr = reinterpret_cast<half*>(&rxVec[i]);
+#pragma unroll
+            for (int k = 0; k < 8; k++)
+                RxLocal[outputRowStart + i * 8 + k][48] = vecPtr[k];
+        }
+    }
+    __syncthreads();
+
+    // write Rx by everyone
+    const int RxBaseIndex = (y * gridDim.x * 1176) + (blockIdx.x * 1176);
+    for (int k = tid; k < 1176; k += 256) {
+        const int2 coords = getPackedCoords(k);
+        float sum = 0.0f;
+#pragma unroll
+        for (int w = 0; w < 8; w++)
+            sum += __half2float(RxLocal[w * 48 + coords.x][coords.y]);
+        Rx[RxBaseIndex + k] = sum;
+    }
+
+    // write rx by first 48 threads (2 warps)
+    if (tid < 48) {
+        const int rxBaseIndex = (y * gridDim.x * 48) + (blockIdx.x * 48);
+        float sum = 0.0f;
+#pragma unroll
+        for (int w = 0; w < 8; w++)
+            sum += __half2float(RxLocal[w * 48 + tid][48]);
+        rx[rxBaseIndex + tid] = sum;
     }
 }
 
@@ -404,6 +553,144 @@ __global__ void calculate_partial_correlation(const float* __restrict__ e_u, con
             partialNormU[blockIdx.x] = normUVal;
             partialNormZ[blockIdx.x] = normZVal;
         }
+    }
+}
+
+__global__ void cholesky_solver_p7(const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ X, int* __restrict__ stopFlag) {
+    const int laneId = threadIdx.x;
+
+    // volatile to ensure visibility (because we use the faster __syncwarp)
+    __shared__ volatile float sA[48][48 + 1]; // +1 to avoid bank conflicts
+    __shared__ volatile float sB[48];
+
+    // cooperative load (1176 elements -> 48x48 Shared)
+    // check if A, B, and X are 16-byte aligned for vectorized loads
+    const bool isAligned = ((reinterpret_cast<uintptr_t>(A) | reinterpret_cast<uintptr_t>(B) | reinterpret_cast<uintptr_t>(X)) & 0xF) == 0;
+
+    // if aligned: 1176 floats = 294 float4
+    if (isAligned) {
+        const float4* vecA = reinterpret_cast<const float4*>(A);
+        // loop over 294 vectors
+        for (int k = laneId; k < 294; k += 32) {
+            float4 v = vecA[k];
+            // unpack vector into Shared Memory
+            const int baseIdx = k * 4;
+            const int2 c0 = getPackedCoords(baseIdx + 0);
+            sA[c0.x][c0.y] = v.x;
+            const int2 c1 = getPackedCoords(baseIdx + 1);
+            sA[c1.x][c1.y] = v.y;
+            const int2 c2 = getPackedCoords(baseIdx + 2);
+            sA[c2.x][c2.y] = v.z;
+            const int2 c3 = getPackedCoords(baseIdx + 3);
+            sA[c3.x][c3.y] = v.w;
+        }
+        // scalar path
+    } else {
+        for (int k = laneId; k < 1176; k += 32) {
+            int2 c = getPackedCoords(k);
+            sA[c.x][c.y] = A[k];
+        }
+    }
+
+    // if aligned: 48 floats = 12 float4
+    if (isAligned) {
+        const float4* vecB = reinterpret_cast<const float4*>(B);
+        if (laneId < 12) {
+            const float4 v = vecB[laneId];
+            sB[laneId * 4 + 0] = v.x;
+            sB[laneId * 4 + 1] = v.y;
+            sB[laneId * 4 + 2] = v.z;
+            sB[laneId * 4 + 3] = v.w;
+        }
+        // scalar path
+    } else {
+        for (int k = laneId; k < 48; k += 32)
+            sB[k] = B[k];
+    }
+
+    // initialize stop flag
+    if (laneId == 0)
+        *stopFlag = 0;
+    __syncwarp();
+
+    // in-place Cholesky Decomposition
+    for (int k = 0; k < 48; k++) {
+        // check diagonal and calculate sqrt
+        float diag = sA[k][k];
+        int abortFlag = 0;
+        float invDiag = 0.0f;
+        if (laneId == 0) {
+            if (diag <= 1e-12f) {
+                *stopFlag = 1; // write by 1 thread only
+                abortFlag = 1;
+            } else {
+                invDiag = rsqrtf(diag);
+                sA[k][k] = invDiag;
+            }
+        }
+
+        // broadcast abort
+        int abort_warp = __shfl_sync(0xFFFFFFFF, abortFlag, 0);
+        if (abort_warp)
+            return;
+
+        // Broadcast L_kk
+        float L_kk_inv = __shfl_sync(0xFFFFFFFF, invDiag, 0);
+
+        for (int i = k + 1 + laneId; i < 48; i += 32)
+            sA[i][k] = sA[i][k] * L_kk_inv;
+        __syncwarp();
+
+        // update trailing matrix
+        for (int j = k + 1; j < 48; j += 2) {
+            float L_jk0 = sA[j][k];
+            float L_jk1 = (j + 1 < 48) ? sA[j + 1][k] : 0.0f;
+            for (int i = j + laneId; i < 48; i += 32) {
+                float Lik = sA[i][k];
+                sA[i][j] = sA[i][j] - (Lik * L_jk0);
+                if (j + 1 < 48 && i >= j + 1)
+                    sA[i][j + 1] = sA[i][j + 1] - (Lik * L_jk1);
+            }
+        }
+        __syncwarp();
+    }
+
+    // forward Substitution (solve L * y = b)
+    for (int k = 0; k < 48; k++) {
+        float val = sB[k];
+        if (laneId == 0) {
+            val *= sA[k][k];
+            sB[k] = val;
+        }
+        float y_k = __shfl_sync(0xFFFFFFFF, val, 0);
+        for (int i = k + 1 + laneId; i < 48; i += 32)
+            sB[i] = sB[i] - (sA[i][k] * y_k);
+        __syncwarp();
+    }
+
+    // backward Substitution (solve L^T * x = y)
+    // solving U * x = y where U = L^T
+    for (int k = 47; k >= 0; k--) {
+        float val = sB[k];
+        if (laneId == 0) {
+            val *= sA[k][k];
+            sB[k] = val;
+        }
+        float x_k = __shfl_sync(0xFFFFFFFF, val, 0);
+        for (int i = laneId; i < k; i += 32)
+            sB[i] = sB[i] - (sA[k][i] * x_k);
+        __syncwarp();
+    }
+
+    // write Result
+    if (isAligned) {
+        float4* vecX = reinterpret_cast<float4*>(X);
+        const float4* sbVec = (const float4*)((float*)sB);
+        if (laneId < 12)
+            vecX[laneId] = sbVec[laneId];
+    } else {
+        for (int k = laneId; k < 48; k += 32)
+            X[k] = sB[k];
     }
 }
 

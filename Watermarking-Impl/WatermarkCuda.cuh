@@ -13,7 +13,7 @@
  *  \author Dimitris Karatzas
  */
 template <int p> class WatermarkCuda final : public WatermarkGPU<p> {
-    static_assert(p == 3 || p == 5, "Only p = 3 or p = 5 is currently supported in CUDA implementation");
+    static_assert(p == 3 || p == 5 || p == 7, "Only p = 3, p = 5 and p = 7 is currently supported in CUDA implementation");
 
   public:
     WatermarkCuda<p>(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr)
@@ -71,10 +71,14 @@ template <int p> class WatermarkCuda final : public WatermarkGPU<p> {
             RxPartial = af::array(this->baseRows, blocksX * 36);
             rxPartial = af::array(this->baseRows, blocksX * 8);
             me_p3<<<gridSize, meBlockSize, 0, afStream>>>(image.device<float>(), RxPartial.device<float>(), rxPartial.device<float>(), this->baseCols, this->baseRows);
-        } else {
+        } else if (p == 5) {
             RxPartial = af::array(this->baseRows, blocksX * 300);
             rxPartial = af::array(this->baseRows, blocksX * 24);
             me_p5<<<gridSize, meBlockSize, 0, afStream>>>(image.device<float>(), RxPartial.device<float>(), rxPartial.device<float>(), this->baseCols, this->baseRows);
+        } else {
+            RxPartial = af::array(this->baseRows, blocksX * 1176);
+            rxPartial = af::array(this->baseRows, blocksX * 48);
+            me_p7<<<gridSize, meBlockSize, 0, afStream>>>(image.device<float>(), RxPartial.device<float>(), rxPartial.device<float>(), this->baseCols, this->baseRows);
         }
         this->unlockArrays(image, RxPartial, rxPartial);
         // calculation of coefficients and error sequence
@@ -82,7 +86,12 @@ template <int p> class WatermarkCuda final : public WatermarkGPU<p> {
         const af::array& Rx = correlationArrays.first;
         const af::array& rx = correlationArrays.second;
         // very low latency solver for p = 3 and p = 5
-        cholesky_solver<p><<<1, 1, 0, afStream>>>(Rx.device<float>(), rx.device<float>(), this->coefficients.template device<float>(), this->stopFlag.template device<int>());
+        if constexpr (p == 3 || p == 5)
+            cholesky_solver<p><<<1, 1, 0, afStream>>>(Rx.device<float>(), rx.device<float>(), this->coefficients.template device<float>(), this->stopFlag.template device<int>());
+        // parallel solver for p = 7 (one warp)
+        else 
+            cholesky_solver_p7<<<1, 32, 0, afStream>>>(Rx.device<float>(), rx.device<float>(), this->coefficients.template device<float>(), this->stopFlag.template device<int>());
+        this->unlockArrays(Rx, rx, this->coefficients, this->stopFlag);
         this->unlockArrays(Rx, rx, this->coefficients, this->stopFlag);
         return computeErrorSequence(image, calculateAbs);
     }

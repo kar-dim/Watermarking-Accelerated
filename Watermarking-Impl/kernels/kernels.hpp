@@ -384,10 +384,8 @@ __kernel void cholesky_solver_p3(__global const float* restrict A,
     float packed[36]; 
     float localB[8];
 
-    const size_t rawA = (size_t)A;
-    const size_t rawB = (size_t)B;
-    const size_t rawX = (size_t)X;
-    if ( ((rawA | rawB | rawX) & 0xF) == 0) {
+    const bool isAligned = ((((size_t)A | (size_t)B | (size_t)X) & 0xF) == 0);
+    if (isAligned) {
         __global const float4* vecA = (__global const float4*)A;
         __global const float4* vecB = (__global const float4*)B;
 #pragma unroll
@@ -458,10 +456,25 @@ __kernel void cholesky_solver_p3(__global const float* restrict A,
     }
     *stopFlag = 0;
 exit:
-#pragma unroll
-    for (int i = 0; i < N; i++)
-        X[i] = localB[i];
-
+    if (isAligned) {
+        __global float4* vecX = (__global float4*)X;
+        const int vecLimitB = N / 4;
+        #pragma unroll
+        for (int i = 0; i < vecLimitB; i++) {
+            float4 v;
+            v.x = localB[i * 4 + 0];
+            v.y = localB[i * 4 + 1];
+            v.z = localB[i * 4 + 2];
+            v.w = localB[i * 4 + 3];
+            vecX[i] = v;
+        }
+        for (int i = vecLimitB * 4; i < N; i++)
+            X[i] = localB[i];
+    } else {
+        #pragma unroll
+        for (int i = 0; i < N; i++)
+            X[i] = localB[i];
+    }
     #undef IDX
 }
 

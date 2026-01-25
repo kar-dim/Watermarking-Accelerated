@@ -44,47 +44,18 @@ template <int p> __device__ void fillBlock(const float* __restrict__ inputA, con
 
 // helper method to fill block-wide shared memory cooperatively for prediction error kernels where
 // the shared memory is a wide "strip" on the x-axis
-template <int p> __device__ inline void fillBlockStrip(half blockValues[p][256 + p - 1], const float* __restrict__ input, const int width, const int height) {
-    const half halfScaleFactor = __float2half(0.00392156862f);
-    // parallel indexing, fastest for p=3
-    if constexpr (p == 3) {
-#pragma unroll
-        for (int i = threadIdx.x; i < 3 * 258; i += 256) {
-            const int tileCol = i / 3;
-            const int tileRow = i % 3;
-            // clamp (mimic cudaAddressModeClamp)
-            const int globalX = clamp<int>((int)(blockIdx.x * 256) + tileCol - 1, 0, width - 1);
-            const int globalY = clamp<int>((int)(blockIdx.y * 1) + tileRow - 1, 0, height - 1);
-            // normalize from [0,255] to [0,1] to support half precision and avoid overflow in multiplications
-            blockValues[tileRow][tileCol] = __float2half(input[globalX * height + globalY]) * halfScaleFactor;
-        }
-    }
-    // Incremental update, fastest for p=5
-    else {
-        constexpr int radius = (p - 1) / 2;
-        constexpr int stride = 256 / p;
-        constexpr int remainderLimit = p * (p - 1);
-        const int blockGlobalX = (int)(blockIdx.x * 256) - radius;
-        const int blockGlobalY = (int)(blockIdx.y * 1) - radius;
-        int tileRow = threadIdx.x % p;
-        int tileCol = threadIdx.x / p;
-#pragma unroll
-        for (int k = 0; k < p; k++) {
-            // clamp (mimic cudaAddressModeClamp)
-            const int globalX = clamp<int>(blockGlobalX + tileCol, 0, width - 1);
-            const int globalY = clamp<int>(blockGlobalY + tileRow, 0, height - 1);
-            // normalize from [0,255] to [0,1] to support half precision and avoid overflow in multiplications
-            blockValues[tileRow][tileCol] = __float2half(input[globalX * height + globalY]) * halfScaleFactor;
-            tileRow++;
-            const int wrap = (tileRow >= p);
-            tileRow -= (wrap * p);
-            tileCol += stride + wrap;
-        }
-        if (threadIdx.x < remainderLimit) {
-            const int globalX = clamp<int>(blockGlobalX + tileCol, 0, width - 1);
-            const int globalY = clamp<int>(blockGlobalY + tileRow, 0, height - 1);
-            blockValues[tileRow][tileCol] = __float2half(input[globalX * height + globalY]) * halfScaleFactor;
-        }
+template <int p, int stripWidth = 256 + p - 1, int radius = (p - 1) / 2>
+__device__ inline void fillBlockStrip(half blockValues[p][stripWidth], const float* __restrict__ input, const int width, const int height) {
+    const float scaleFactor = 0.00392156862f;
+    const int baseGlobalCol = (int)(blockIdx.x * 256) - radius;
+    const int baseGlobalRow = (int)(blockIdx.y * 1) - radius;
+    // grid-Stride Loop
+    for (int i = threadIdx.x; i < p * stripWidth; i += 256) {
+        const int r = i % p; // tileRow
+        const int c = i / p; // tileCol
+        const int globalCol = clamp(baseGlobalCol + c, 0, width - 1);
+        const int globalRow = clamp(baseGlobalRow + r, 0, height - 1);
+        blockValues[r][c] = __float2half(input[globalCol * height + globalRow] * scaleFactor);
     }
 }
 
@@ -183,11 +154,8 @@ template <int p, int N = (p * p) - 1> __global__ void cholesky_solver(const floa
     float localB[N];
 
     // check if A, B, and X are 16-byte aligned for vectorized loads
-    const uintptr_t rawA = reinterpret_cast<const uintptr_t>(A);
-    const uintptr_t rawB = reinterpret_cast<const uintptr_t>(B);
-    const uintptr_t rawX = reinterpret_cast<const uintptr_t>(X);
-
-    if (((rawA | rawB | rawX) & 0xF) == 0) {
+    const bool isAligned = (((reinterpret_cast<uintptr_t>(A) | reinterpret_cast<uintptr_t>(B) | reinterpret_cast<uintptr_t>(X)) & 0xF) == 0);
+    if (isAligned) {
         const float4* vecA = reinterpret_cast<const float4*>(A);
         const float4* vecB = reinterpret_cast<const float4*>(B);
 
@@ -280,20 +248,47 @@ template <int p, int N = (p * p) - 1> __global__ void cholesky_solver(const floa
     *stopFlag = 0;
 exit:
     // write Result
+    if (isAligned) {
+        float4* vecX = reinterpret_cast<float4*>(X);
+        constexpr int vecLimitB = N / 4;
+        // vectorized store
 #pragma unroll
-    for (int i = 0; i < N; i++)
-        X[i] = localB[i];
+        for (int i = 0; i < vecLimitB; i++) {
+            float4 v;
+            v.x = localB[i * 4 + 0];
+            v.y = localB[i * 4 + 1];
+            v.z = localB[i * 4 + 2];
+            v.w = localB[i * 4 + 3];
+            vecX[i] = v;
+        }
+        // tail elements
+        for (int i = vecLimitB * 4; i < N; i++)
+            X[i] = localB[i];
+        // scalar store
+    } else {
+#pragma unroll
+        for (int i = 0; i < N; i++)
+            X[i] = localB[i];
+    }
 #undef IDX
 }
 
+// parallel cholesky solver for p = 7 (N = 48), using one warp (32 threads)
+__global__ void cholesky_solver_p7(const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ X, int* __restrict__ stopFlag);
+
 // Prediction Error helper device kernels
+__device__ int2 getPackedCoords(const int k);
 __device__ void me_p3_rxCalculate(half8* RxLocalVec8, const half8& vec, const half& center);
 __device__ void load_neighbor_row_funnel_p3(half& p0, half& p1, half& p2, const half* rowBase);
 __device__ void load_neighbor_row_funnel_p5(half& p0, half& p1, half& p2, half& p3, half& p4, const half* rowBase);
+__device__ void load_neighbor_row_funnel_p7(half* dst, const half* rowBase);
 __device__ void load_neighbor_vec_p5(half8* dst, const half blockValues[5][260], half& center);
-// Prediction Error kernels (ME) for p = 3 and p = 5
+__device__ void load_neighbor_vec_p7(half8* dst, const half blockValues[7][262], half& center);
+
+// Prediction Error kernels (ME) for p = 3, p = 5 and p = 7
 __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height);
 __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height);
+__global__ void me_p7(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height);
 
 // main kernels for correlation calculation. used in detection.
 __global__ void calculate_partial_correlation(const float* __restrict__ e_u, const float* __restrict__ e_z, float* __restrict__ partialDots, float* __restrict__ partialNormU,
