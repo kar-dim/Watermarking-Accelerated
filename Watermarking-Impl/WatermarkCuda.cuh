@@ -13,14 +13,12 @@
  *  \author Dimitris Karatzas
  */
 template <int p> class WatermarkCuda final : public WatermarkGPU<p> {
-    static_assert(p == 3 || p == 5 || p == 7, "Only p = 3, p = 5 and p = 7 is currently supported in CUDA implementation");
-
   public:
     WatermarkCuda<p>(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr)
         : WatermarkGPU<p>(rows, cols, randomMatrixPath, psnr), meKernelDims{WatermarkBase::align<meBlockSize.x>(cols), rows}, afStream(CudaStreamManager::getInstance().getAfStream()) {}
 
   private:
-    static constexpr dim3 windowBlockSize{16, 16}, meBlockSize{256, 1};
+    static constexpr dim3 windowBlockSize{16, 16}, meBlockSize{p == 9 ? 128 : 256, 1};
     static constexpr unsigned int corrPartialBlockSize = 256, corrFinalBlockSize = 1024;
     dim3 meKernelDims;
     cudaStream_t afStream;
@@ -75,10 +73,14 @@ template <int p> class WatermarkCuda final : public WatermarkGPU<p> {
             RxPartial = af::array(this->baseRows, blocksX * 300);
             rxPartial = af::array(this->baseRows, blocksX * 24);
             me_p5<<<gridSize, meBlockSize, 0, afStream>>>(image.device<float>(), RxPartial.device<float>(), rxPartial.device<float>(), this->baseCols, this->baseRows);
-        } else {
+        } else if (p == 7) {
             RxPartial = af::array(this->baseRows, blocksX * 1176);
             rxPartial = af::array(this->baseRows, blocksX * 48);
             me_p7<<<gridSize, meBlockSize, 0, afStream>>>(image.device<float>(), RxPartial.device<float>(), rxPartial.device<float>(), this->baseCols, this->baseRows);
+        } else {
+            RxPartial = af::array(this->baseRows, blocksX * 3240);
+            rxPartial = af::array(this->baseRows, blocksX * 80);
+            me_p9<<<gridSize, meBlockSize, 0, afStream>>>(image.device<float>(), RxPartial.device<float>(), rxPartial.device<float>(), this->baseCols, this->baseRows);
         }
         this->unlockArrays(image, RxPartial, rxPartial);
         // calculation of coefficients and error sequence
@@ -89,8 +91,8 @@ template <int p> class WatermarkCuda final : public WatermarkGPU<p> {
         if constexpr (p == 3 || p == 5)
             cholesky_solver<p><<<1, 1, 0, afStream>>>(Rx.device<float>(), rx.device<float>(), this->coefficients.template device<float>(), this->stopFlag.template device<int>());
         // parallel solver for p = 7 (one warp)
-        else 
-            cholesky_solver_p7<<<1, 32, 0, afStream>>>(Rx.device<float>(), rx.device<float>(), this->coefficients.template device<float>(), this->stopFlag.template device<int>());
+        else
+            cholesky_solver_parallel<p><<<1, 32, 0, afStream>>>(Rx.device<float>(), rx.device<float>(), this->coefficients.template device<float>(), this->stopFlag.template device<int>());
         this->unlockArrays(Rx, rx, this->coefficients, this->stopFlag);
         this->unlockArrays(Rx, rx, this->coefficients, this->stopFlag);
         return computeErrorSequence(image, calculateAbs);

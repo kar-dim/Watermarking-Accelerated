@@ -8,6 +8,14 @@ struct alignas(16) half8 {
     half a, b, c, d, e, f, g, h;
 };
 
+// maps a linear index k to(row, col) coordinates for a packed lower triangular matrix
+__device__ inline int2 getPackedCoords(const int k) {
+    // inverse triangular number formula: r = floor((sqrt(1 + 8k) - 1) / 2)
+    const int r = __float2int_rd(0.5f * (sqrtf(1.0f + 8.0f * k) - 1.0f));
+    const int c = k - (r * (r + 1)) / 2;
+    return make_int2(r, c);
+}
+
 // helper method to clamp a value between two limits
 template <typename T> __device__ inline T clamp(const T& val, const T& lo, const T& hi) { return (val < lo) ? lo : (val > hi) ? hi : val; }
 
@@ -273,22 +281,208 @@ exit:
 #undef IDX
 }
 
-// parallel cholesky solver for p = 7 (N = 48), using one warp (32 threads)
-__global__ void cholesky_solver_p7(const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ X, int* __restrict__ stopFlag);
+// parallel cholesky solver for p = 7 (N = 48) and p = 9 (N =80), using one warp (32 threads)
+template <int p, int N = (p * p) - 1> __global__ void cholesky_solver_parallel(const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ X, int* __restrict__ stopFlag) {
+    const int laneId = threadIdx.x;
+
+    // constants derived from N
+    constexpr int packedSize = (N * (N + 1)) / 2;
+    constexpr int vecPackedLimit = packedSize / 4;
+    constexpr int vecBlimit = N / 4;
+
+    // volatile to ensure visibility (because we use the faster __syncwarp)
+    __shared__ volatile float sA[N][N + 1]; // +1 to avoid bank conflicts
+    __shared__ volatile float sB[N];
+
+    // cooperative load (packedSize elements -> NxN Shared)
+    // check if A, B, and X are 16-byte aligned for vectorized loads
+    const bool isAligned = ((reinterpret_cast<uintptr_t>(A) | reinterpret_cast<uintptr_t>(B) | reinterpret_cast<uintptr_t>(X)) & 0xF) == 0;
+
+    // if aligned: packedSize floats = vecPackedLimit float4
+    if (isAligned) {
+        const float4* vecA = reinterpret_cast<const float4*>(A);
+        // loop over vecPackedLimit vectors
+        for (int k = laneId; k < vecPackedLimit; k += 32) {
+            float4 v = vecA[k];
+            // unpack vector into Shared Memory
+            const int baseIdx = k * 4;
+            const int2 c0 = getPackedCoords(baseIdx + 0);
+            sA[c0.x][c0.y] = v.x;
+            const int2 c1 = getPackedCoords(baseIdx + 1);
+            sA[c1.x][c1.y] = v.y;
+            const int2 c2 = getPackedCoords(baseIdx + 2);
+            sA[c2.x][c2.y] = v.z;
+            const int2 c3 = getPackedCoords(baseIdx + 3);
+            sA[c3.x][c3.y] = v.w;
+        }
+        // scalar path
+    } else {
+        for (int k = laneId; k < packedSize; k += 32) {
+            int2 c = getPackedCoords(k);
+            sA[c.x][c.y] = A[k];
+        }
+    }
+
+    // if aligned: N floats = vecBlimit float4
+    if (isAligned) {
+        const float4* vecB = reinterpret_cast<const float4*>(B);
+        if (laneId < vecBlimit) {
+            const float4 v = vecB[laneId];
+            sB[laneId * 4 + 0] = v.x;
+            sB[laneId * 4 + 1] = v.y;
+            sB[laneId * 4 + 2] = v.z;
+            sB[laneId * 4 + 3] = v.w;
+        }
+        // scalar path
+    } else {
+        for (int k = laneId; k < N; k += 32)
+            sB[k] = B[k];
+    }
+
+    // initialize stop flag
+    if (laneId == 0)
+        *stopFlag = 0;
+    __syncwarp();
+
+    // in-place Cholesky Decomposition
+    for (int k = 0; k < N; k++) {
+        // check diagonal and calculate sqrt
+        float diag = sA[k][k];
+        int abortFlag = 0;
+        float invDiag = 0.0f;
+        if (laneId == 0) {
+            if (diag <= 1e-12f) {
+                *stopFlag = 1; // write by 1 thread only
+                abortFlag = 1;
+            } else {
+                invDiag = rsqrtf(diag);
+                sA[k][k] = invDiag;
+            }
+        }
+
+        // broadcast abort
+        int abort_warp = __shfl_sync(0xFFFFFFFF, abortFlag, 0);
+        if (abort_warp)
+            return;
+
+        // broadcast L_kk
+        float L_kk_inv = __shfl_sync(0xFFFFFFFF, invDiag, 0);
+
+        for (int i = k + 1 + laneId; i < N; i += 32)
+            sA[i][k] = sA[i][k] * L_kk_inv;
+        __syncwarp();
+
+        // update trailing matrix
+        for (int j = k + 1; j < N; j += 2) {
+            float L_jk0 = sA[j][k];
+            float L_jk1 = (j + 1 < N) ? sA[j + 1][k] : 0.0f;
+            for (int i = j + laneId; i < N; i += 32) {
+                float Lik = sA[i][k];
+                sA[i][j] = sA[i][j] - (Lik * L_jk0);
+                if (j + 1 < N && i >= j + 1)
+                    sA[i][j + 1] = sA[i][j + 1] - (Lik * L_jk1);
+            }
+        }
+        __syncwarp();
+    }
+
+    // forward Substitution (solve L * y = b)
+    for (int k = 0; k < N; k++) {
+        float val = sB[k];
+        if (laneId == 0) {
+            val *= sA[k][k];
+            sB[k] = val;
+        }
+        float y_k = __shfl_sync(0xFFFFFFFF, val, 0);
+        for (int i = k + 1 + laneId; i < N; i += 32)
+            sB[i] = sB[i] - (sA[i][k] * y_k);
+        __syncwarp();
+    }
+
+    // backward Substitution (solve L^T * x = y)
+    // solving U * x = y where U = L^T
+    for (int k = N - 1; k >= 0; k--) {
+        float val = sB[k];
+        if (laneId == 0) {
+            val *= sA[k][k];
+            sB[k] = val;
+        }
+        float x_k = __shfl_sync(0xFFFFFFFF, val, 0);
+        for (int i = laneId; i < k; i += 32)
+            sB[i] = sB[i] - (sA[k][i] * x_k);
+        __syncwarp();
+    }
+
+    // write Result
+    if (isAligned) {
+        float4* vecX = reinterpret_cast<float4*>(X);
+        const float4* sbVec = (const float4*)((float*)sB);
+        if (laneId < vecBlimit)
+            vecX[laneId] = sbVec[laneId];
+    } else {
+        for (int k = laneId; k < N; k += 32)
+            X[k] = sB[k];
+    }
+}
+
+// helper method to perform a streaming reduction of rx values from registers to global memory
+// used ONLY in the ME kernels for p = 9 specifically
+template <int startIdx, int count> __device__ void rxStreamPass(const int tid, const int warpWindowStart, half (*RxLocal)[88], const half8* rxVec, float* rxGlobal, const int rxBaseIndex) {
+    // warp leaders flush registers to shared memory window
+    if ((tid & 31) == 0) {
+#pragma unroll
+        for (int k = 0; k < count; k++) {
+            // calculate absolute index to find the right half8 vector
+            const int absK = startIdx + k;
+            const int vecIdx = absK / 8;
+            const int elemIdx = absK % 8;
+            // write to column 80 of the window
+            RxLocal[warpWindowStart + k][80] = reinterpret_cast<const half*>(&rxVec[vecIdx])[elemIdx];
+        }
+    }
+    __syncthreads(); // wait for leaders to write to Shared Mem
+    for (int k = startIdx + tid; k < startIdx + count; k += 128) {
+        float sum = 0.0f;
+        const int localK = k - startIdx; // map global K to window index [0,31]
+        // sum across the 4 warps (rows 0, 32, 64, 96)
+#pragma unroll
+        for (int w = 0; w < 4; w++)
+            sum += __half2float(RxLocal[w * 32 + localK][80]);
+        rxGlobal[rxBaseIndex + k] = sum;
+    }
+    __syncthreads(); // wait for readers before next pass overwrites the window
+}
+
+// helper method to perform a streaming reduction of Rx values from shared window to global memory
+// Templates allow the compiler to hardcode constants for each specific chunk
+template <int startIdx, int endIdx, int rowOffset> __device__ void RxStreamPass(const int tid, half (*RxLocal)[88], float* Rx, const int RxBaseIndex) {
+    for (int k = startIdx + tid; k < endIdx; k += 128) {
+        const int2 coords = getPackedCoords(k);
+        const int rowInWindow = coords.x - rowOffset;
+        float sum = 0.0f;
+        // sum across the 4 warps (stacked vertically in shared mem at offsets 0, 32, 64, 96)
+#pragma unroll
+        for (int w = 0; w < 4; w++)
+            sum += __half2float(RxLocal[w * 32 + rowInWindow][coords.y]);
+        Rx[RxBaseIndex + k] = sum;
+    }
+}
 
 // Prediction Error helper device kernels
-__device__ int2 getPackedCoords(const int k);
 __device__ void me_p3_rxCalculate(half8* RxLocalVec8, const half8& vec, const half& center);
 __device__ void load_neighbor_row_funnel_p3(half& p0, half& p1, half& p2, const half* rowBase);
 __device__ void load_neighbor_row_funnel_p5(half& p0, half& p1, half& p2, half& p3, half& p4, const half* rowBase);
 __device__ void load_neighbor_row_funnel_p7(half* dst, const half* rowBase);
+__device__ void load_neighbor_row_funnel_p9(half* dst, const half* rowBase);
 __device__ void load_neighbor_vec_p5(half8* dst, const half blockValues[5][260], half& center);
 __device__ void load_neighbor_vec_p7(half8* dst, const half blockValues[7][262], half& center);
+__device__ void load_neighbor_vec_p9(half8* dst, const half* blockValuesFlat, half& center);
 
 // Prediction Error kernels (ME) for p = 3, p = 5 and p = 7
 __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height);
 __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height);
 __global__ void me_p7(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height);
+__global__ void me_p9(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height);
 
 // main kernels for correlation calculation. used in detection.
 __global__ void calculate_partial_correlation(const float* __restrict__ e_u, const float* __restrict__ e_z, float* __restrict__ partialDots, float* __restrict__ partialNormU,

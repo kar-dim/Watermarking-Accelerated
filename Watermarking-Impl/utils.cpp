@@ -64,6 +64,7 @@ std::unique_ptr<WatermarkBase> Utils::createWatermarkObject(const unsigned int h
     case 3: return std::make_unique<WatermarkCuda<3>>(height, width, randomMatrixPath, psnr); break;
     case 5: return std::make_unique<WatermarkCuda<5>>(height, width, randomMatrixPath, psnr); break;
     case 7: return std::make_unique<WatermarkCuda<7>>(height, width, randomMatrixPath, psnr); break;
+    case 9: return std::make_unique<WatermarkCuda<9>>(height, width, randomMatrixPath, psnr); break;
 #elif defined(_USE_EIGEN_)
     switch (p) {
     case 3: return std::make_unique<WatermarkEigen<3>>(height, width, randomMatrixPath, psnr); break;
