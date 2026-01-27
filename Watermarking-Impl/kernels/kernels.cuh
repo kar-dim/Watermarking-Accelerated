@@ -427,7 +427,8 @@ template <int p, int N = (p * p) - 1> __global__ void cholesky_solver_parallel(c
 
 // helper method to perform a streaming reduction of rx values from registers to global memory
 // used ONLY in the ME kernels for p = 9 specifically
-template <int startIdx, int count> __device__ void rxStreamPass(const int tid, const int warpWindowStart, half (*RxLocal)[88], const half8* rxVec, float* rxGlobal, const int rxBaseIndex) {
+template <int startIdx, int count>
+__device__ void rxStreamPass(const int tid, const int warpWindowStart, half (*__restrict__ RxLocal)[88], const half8* __restrict__ rxVec, float* __restrict__ rxGlobal, const int rxBaseIndex) {
     // warp leaders flush registers to shared memory window
     if ((tid & 31) == 0) {
 #pragma unroll
@@ -455,7 +456,7 @@ template <int startIdx, int count> __device__ void rxStreamPass(const int tid, c
 
 // helper method to perform a streaming reduction of Rx values from shared window to global memory
 // Templates allow the compiler to hardcode constants for each specific chunk
-template <int startIdx, int endIdx, int rowOffset> __device__ void RxStreamPass(const int tid, half (*RxLocal)[88], float* Rx, const int RxBaseIndex) {
+template <int startIdx, int endIdx, int rowOffset> __device__ void RxStreamPass(const int tid, half (*__restrict__ RxLocal)[88], float* __restrict__ Rx, const int RxBaseIndex) {
     for (int k = startIdx + tid; k < endIdx; k += 128) {
         const int2 coords = getPackedCoords(k);
         const int rowInWindow = coords.x - rowOffset;
@@ -490,8 +491,8 @@ __global__ void calculate_partial_correlation(const float* __restrict__ e_u, con
 __global__ void calculate_final_correlation(const float* __restrict__ partialDots, const float* __restrict__ partialNormU, const float* __restrict__ partialNormZ, float* __restrict__ result,
                                             const unsigned int numBlocks);
 
-// used for converting NV12 to YUV420p format, in HW accelerated video decoding
+// used for converting NV12 to YUV420p format, used in HW accelerated video decoding
 __global__ void nV12ToYUV420p(const uint8_t* __restrict__ uvSrc, const int uvPitch, uint8_t* __restrict__ uvDst, const int uvWidth, const int uvHeight);
 
-// used for converting 8 pitched memory to float, in HW accelerated video decoding
+// used for converting uint8 pitched memory to non pitched float, used in HW accelerated video decoding
 __global__ void pitchedToFloat(const uint8_t* __restrict__ input, float* __restrict__ output, const int width, const int height, const int pitch);
