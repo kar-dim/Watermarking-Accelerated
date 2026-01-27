@@ -26,6 +26,12 @@ class WatermarkBase {
     WatermarkBase(const unsigned int rows, const unsigned int cols, const ImageBuffer& randomMatrix, const float strengthFactor)
         : baseRows(rows), baseCols(cols), randomMatrix(randomMatrix), strengthFactor(strengthFactor) {}
 
+    //delete copy and move operations we don't wannt them
+    WatermarkBase(const WatermarkBase&) = delete;
+    WatermarkBase(WatermarkBase&&) = delete;
+    WatermarkBase& operator=(const WatermarkBase&) = delete;
+    WatermarkBase& operator=(WatermarkBase&&) = delete;
+
     virtual ~WatermarkBase() = default;
 
     // main watermark embedding method
