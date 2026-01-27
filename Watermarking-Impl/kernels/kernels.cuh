@@ -476,7 +476,7 @@ __device__ void load_neighbor_row_funnel_p7(half* dst, const half* rowBase);
 __device__ void load_neighbor_row_funnel_p9(half* dst, const half* rowBase);
 __device__ void load_neighbor_vec_p5(half8* dst, const half blockValues[5][260], half& center);
 __device__ void load_neighbor_vec_p7(half8* dst, const half blockValues[7][262], half& center);
-__device__ void load_neighbor_vec_p9(half8* dst, const half* blockValuesFlat, half& center);
+__device__ void load_neighbor_vec_p9(half8* dst, const half blockValues[9][136], half& center);
 
 // Prediction Error kernels (ME) for p = 3, p = 5 and p = 7
 __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height);
