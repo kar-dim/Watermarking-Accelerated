@@ -281,7 +281,7 @@ exit:
 #undef IDX
 }
 
-// parallel cholesky solver for p = 7 (N = 48) and p = 9 (N =80), using one warp (32 threads)
+// parallel cholesky solver for p = 7 (N = 48) and p = 9 (N = 80), using one warp (32 threads)
 template <int p, int N = (p * p) - 1> __global__ void cholesky_solver_parallel(const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ X, int* __restrict__ stopFlag) {
     const int laneId = threadIdx.x;
 

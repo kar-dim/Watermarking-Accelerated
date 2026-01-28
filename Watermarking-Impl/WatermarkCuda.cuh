@@ -64,7 +64,7 @@ template <int p> class WatermarkCuda final : public WatermarkGPU<p> {
         const dim3 gridSize = cuda_utils::gridSizeCalculate(meBlockSize, meKernelDims.y, meKernelDims.x);
 
         af::array RxPartial, rxPartial;
-        // call prediction error mask kernel
+        // call prediction error Rx/rx partials calculation kernel
         if constexpr (p == 3) {
             RxPartial = af::array(this->baseRows, blocksX * 36);
             rxPartial = af::array(this->baseRows, blocksX * 8);
@@ -90,7 +90,7 @@ template <int p> class WatermarkCuda final : public WatermarkGPU<p> {
         // very low latency solver for p = 3 and p = 5
         if constexpr (p == 3 || p == 5)
             cholesky_solver<p><<<1, 1, 0, afStream>>>(Rx.device<float>(), rx.device<float>(), this->coefficients.template device<float>(), this->stopFlag.template device<int>());
-        // parallel solver for p = 7 (one warp)
+        // parallel solver for p >= 7 (one warp)
         else
             cholesky_solver_parallel<p><<<1, 32, 0, afStream>>>(Rx.device<float>(), rx.device<float>(), this->coefficients.template device<float>(), this->stopFlag.template device<int>());
         this->unlockArrays(Rx, rx, this->coefficients, this->stopFlag);

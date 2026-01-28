@@ -59,6 +59,9 @@ std::unique_ptr<WatermarkBase> Utils::createWatermarkObject(const unsigned int h
 #if defined(_USE_OPENCL_)
     switch (p) {
     case 3: return std::make_unique<WatermarkOCL<3>>(height, width, randomMatrixPath, psnr); break;
+    case 5: return std::make_unique<WatermarkOCL<5>>(height, width, randomMatrixPath, psnr); break;
+    case 7: return std::make_unique<WatermarkOCL<7>>(height, width, randomMatrixPath, psnr); break;
+    case 9: return std::make_unique<WatermarkOCL<9>>(height, width, randomMatrixPath, psnr); break;
 #elif defined(_USE_CUDA_)
     switch (p) {
     case 3: return std::make_unique<WatermarkCuda<3>>(height, width, randomMatrixPath, psnr); break;
@@ -72,7 +75,7 @@ std::unique_ptr<WatermarkBase> Utils::createWatermarkObject(const unsigned int h
     case 7: return std::make_unique<WatermarkEigen<7>>(height, width, randomMatrixPath, psnr); break;
     case 9: return std::make_unique<WatermarkEigen<9>>(height, width, randomMatrixPath, psnr); break;
 #endif
-    default: throw std::invalid_argument("Unsupported value for p. Allowed OpenCL p values: 3, CUDA: 3, 5, CPU: 3, 5, 7, 9");
+    default: throw std::invalid_argument("Unsupported value for p. Allowed p values: 3, 5, 7, 9");
     }
 }
 
