@@ -64,7 +64,7 @@ int main(void) {
         // initialize GPU specific backend data (OpenCL and CUDA)
 #if defined(_USE_OPENCL_)
         try {
-            af::setDevice(inir.GetInteger("options", "opencl_device", 0));
+            af::setDevice(inir.GetInteger("compute", "opencl_device_id", 0));
         } catch (const std::exception&) {
             cout << info("NOTE: Invalid OpenCL device specified, using default 0\n");
             af::setDevice(0);
@@ -78,12 +78,12 @@ int main(void) {
 #pragma omp parallel
         {}
 #endif
-        const int p = inir.GetInteger("parameters", "p", -1);
-        const float psnr = inir.GetFloat("parameters", "psnr", -1.0f);
+        const int p = inir.GetInteger("global", "p", -1);
+        const float psnr = inir.GetFloat("global", "psnr", -1.0f);
         Utils::checkError(psnr <= 0, "PSNR must be a positive number");
 
         // test algorithms
-        const string videoFile = inir.Get("paths", "video", "");
+        const string videoFile = inir.Get("video", "path", "");
         const int code = videoFile != "" ? testForVideo(inir, videoFile, p, psnr) : testForImage(inir, p, psnr);
         return code;
     } catch (const std::exception& ex) {
@@ -98,9 +98,9 @@ int testForImage(const INIReader& inir, const int p, const float psnr) {
     // not hardware specific, but a reasonable limit for images
     constexpr auto maxImageDims = std::pair<unsigned int, unsigned int>(65536, 65536);
 
-    const string imageFile = inir.Get("paths", "image", "NO_IMAGE");
-    const bool showFps = inir.GetBoolean("options", "execution_time_in_fps", false);
-    int loops = inir.GetInteger("parameters", "loops_for_test", 5);
+    const string imageFile = inir.Get("image", "path", "NO_IMAGE");
+    const bool showFps = inir.GetBoolean("global", "display_fps", true);
+    int loops = inir.GetInteger("image", "benchmark_loops", 5);
     loops = loops <= 0 ? 5 : loops;
 #if defined(_USE_EIGEN_)
     cout << info("\nUsing " + std::to_string(omp_get_max_threads()) + " parallel threads for Watermark calculations.\n");
@@ -120,7 +120,7 @@ int testForImage(const INIReader& inir, const int p, const float psnr) {
 
     float watermarkStrength = std::numeric_limits<float>::quiet_NaN(); // gpu release builds do not return strength to host for efficiency (always nan)
     // initialize watermark functions class, including parameters, ME and custom (NVF in this example) kernels
-    const auto watermarkObj = Utils::createWatermarkObject(rows, cols, inir.Get("paths", "watermark", ""), p, psnr);
+    const auto watermarkObj = Utils::createWatermarkObject(rows, cols, inir.Get("global", "watermark_data_file", ""), p, psnr);
 #if defined(_USE_GPU_)
     ImageOutputBuffer watermarkNVF, watermarkME;
 #elif defined(_USE_EIGEN_)
@@ -164,7 +164,7 @@ int testForImage(const INIReader& inir, const int p, const float psnr) {
     cout << std::format("Correlation [ME]:  {:.16f}\n", correlationMe);
 
     // save watermarked images to disk
-    if (inir.GetBoolean("options", "save_watermarked_files_to_disk", false)) {
+    if (inir.GetBoolean("image", "save_to_disk", false)) {
         cout << "\nSaving watermarked files to disk...\n";
         Utils::saveImage(imageFile, "W_NVF", watermarkNVF, alphaChannel);
         Utils::saveImage(imageFile, "W_ME", watermarkME, alphaChannel);
@@ -175,8 +175,8 @@ int testForImage(const INIReader& inir, const int p, const float psnr) {
 
 // embed watermark for a video or try to detect watermark in a video
 int testForVideo(const INIReader& inir, const string& videoFile, const int p, const float psnr) {
-    const bool showFps = inir.GetBoolean("options", "execution_time_in_fps", false);
-    const int watermarkInterval = std::max(1, static_cast<int>(inir.GetInteger("parameters_video", "watermark_interval", 1)));
+    const bool showFps = inir.GetBoolean("global", "display_fps", true);
+    const int watermarkInterval = std::max(1, static_cast<int>(inir.GetInteger("video", "watermark_interval", 1)));
 
     // set ffmpeg log level
     av_log_set_level(AV_LOG_INFO);
@@ -193,7 +193,7 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
     const AVStream* videoStream = inputFormatCtx->streams[videoStreamIndex];
 
     bool useHwDecoder = false;
-    const string hwCodec = inir.Get("parameters_video", "cuda_hw_decoder", "");
+    const string hwCodec = inir.Get("compute", "cuda_hw_decoder", "");
     const AVCodecContextPtr inputDecoderCtx = openDecoder(videoStream->codecpar, hwCodec, useHwDecoder);
     Utils::checkError(!inputDecoderCtx.get(), "ERROR: Could not open video decoder");
     if (!hwCodec.empty() && !useHwDecoder && !inputDecoderCtx->hw_device_ctx)
@@ -202,15 +202,16 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
     // initialize watermark functions class and host pinned memory for fast GPU<->CPU transfers, or simple Eigen memory for CPU implementation
     const int height = videoStream->codecpar->height;
     const int width = videoStream->codecpar->width;
-    const auto watermarkObj = Utils::createWatermarkObject(height, width, inir.Get("paths", "watermark", ""), p, psnr);
+    const auto watermarkObj = Utils::createWatermarkObject(height, width, inir.Get("global", "watermark_data_file", ""), p, psnr);
     // if CUDA HW decoder is used, allocate more pinned memory for YUV420 frames (3 planes: Y, U, V)
     HostMemory<uint8_t> framePinned(useHwDecoder ? width * height * 3 / 2 : width * height);
     // group common video data for both embedding and detection
     VideoProcessingContext videoData(inputFormatCtx.get(), inputDecoderCtx.get(), videoStreamIndex, videoStream, watermarkObj.get(), watermarkInterval, framePinned.get());
 
     // realtime watermarking of raw video
-    const string makeWatermarkVideoPath = inir.Get("parameters_video", "encode_watermark_file_path", "");
-    if (makeWatermarkVideoPath != "") {
+    if (inir.Get("video", "mode", "embed") == "embed") {
+        const string makeWatermarkVideoPath = inir.Get("video", "encode_output_path", "");
+        Utils::checkError(makeWatermarkVideoPath == "", "ERROR: No output path for watermarked video specified");
         // for embedding we may need to apply a filter graph (for 10-bit or HDR content)
         const bool needsFilter = initFilterGraph(inputDecoderCtx.get(), videoStream, useHwDecoder, videoData.filterGraphContext);
 #if defined(_USE_EIGEN_)
@@ -218,7 +219,7 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
         eigen_utils::setThreadsToPhysicalCores();
         cout << info("\nUsing " + std::to_string(omp_get_max_threads()) + " parallel threads for Watermark calculations.\n");
 #endif
-        const string ffmpegOptions = inir.Get("parameters_video", "encode_options", "-c:v libx265 -preset fast -crf 23");
+        const string ffmpegOptions = inir.Get("video", "encode_codec_options", "-c:v libx265 -preset fast -crf 23");
         // build the FFmpeg command
         std::ostringstream ffmpegCmd;
         ffmpegCmd << "ffmpeg -y -f rawvideo " << getPixFmt(videoStream) << "-s " << width << "x" << height << " -r " << getFrameRate(videoStream) << " -i - -i \"" << videoFile << "\" "
@@ -235,7 +236,7 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
     }
 
     // realtime watermarked video detection
-    else if (inir.GetBoolean("parameters_video", "watermark_detection", false)) {
+    else {
 #if defined(_USE_EIGEN_)
         cout << info("\nUsing " + std::to_string(omp_get_max_threads()) + " parallel threads for Watermark calculations.\n");
 #endif
