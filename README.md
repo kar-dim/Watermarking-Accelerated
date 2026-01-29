@@ -181,3 +181,36 @@ Below we include some comparisons of the original image (left) versus the final 
 <p>Resolution: 3840x2160, p=5, PSNR=40dB</p>
 <img width="11520" height="2160" alt="4k__4kW_NVF__4kW_ME" src="https://github.com/user-attachments/assets/9e2ab520-6710-4cbc-9e6e-95805089222b" />
 
+# Benchmarks
+
+This section includes a performance comparison between the three backends: CPU (Eigen), CUDA, and OpenCL. The benchmarks measure the throughput (in Frames Per Second) of the watermarking algorithm across various resolutions (480p to 4K) and window sizes (p=3,5,7,9). The results are also available in the `time_comparisons.zip` file on the [Releases](https://github.com/kar-dim/Watermarking-Accelerated/releases) section.
+
+## Test Environment
+
+All benchmarks were conducted on the following hardware configuration:
+
+- CPU: AMD Ryzen 7 7800X3D (8-Core)
+- GPU: NVIDIA RTX 4070 SUPER (12 GB VRAM)
+- RAM: 32 GB DDR5 @ 6000 MHz (2x16GB)
+
+## Methodology
+
+Tests were executed with a loop count of 1000 iterations to ensure statistical stability. The graphs below illustrate the performance scaling for both the embedding (ME make) and correlation (ME Corr) phases.
+
+## Observations
+
+- CUDA: consistently delivers the highest throughput, peaking at over 8,000 FPS for p=3 at 480p. It effectively leverages the massive parallelism of the RTX 4070 Super, making it the ideal choice for real-time applications.
+- OpenCL: Serves as a good middle ground, offering significant acceleration over the CPU (often 5x-10x faster) while maintaining portability across non-NVIDIA hardware (AMD, Intel, etc.).
+- CPU: Functions as the fallback implementation. While slower, it ensures compatibility on systems without dedicated GPUs.
+
+- Impact of Window Size (p): As the window size increases, the computational complexity grows quadratically.
+     - p=3 (Small Window): Extremely high throughput (CUDA > 8000 FPS).
+     - p=9 (Large Window): Throughput naturally decreases due to the heavier matrix construction and solving steps (80×80 linear systems), but the CUDA implementation still maintains real-time performance thanks to the Tensor Cores.
+
+- Resolution Scaling: Performance scales inversely with pixel count. However, even at 4K resolution, the GPU implementations remain viable for interactive framerates, whereas the CPU implementation becomes a bottleneck.
+        
+p = 3            |  p = 5
+:-------------------------:|:-------------------------:
+ ![p3](https://github.com/user-attachments/assets/ddeccb3e-1777-46d6-b644-7671f3b8718b) | ![p5](https://github.com/user-attachments/assets/c233b6dd-be82-4659-9704-9b7d28922dde)
+p = 7            |  p = 9
+ ![p3](https://github.com/user-attachments/assets/79135441-f9a2-4f02-a8d3-a809940c8b27) | ![p5](https://github.com/user-attachments/assets/9f956101-745e-462c-ae72-4781360b4dce)
