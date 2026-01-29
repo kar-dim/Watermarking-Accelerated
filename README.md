@@ -49,30 +49,30 @@ The application should be parameterized from the corresponding ```settings.ini``
 
 | Parameter                         | Description                                                                                                                 |
 |-----------------------------------|-----------------------------------------------------------------------------------------------------------------------------               |
-| image                             | Path to the input image to embed and detect watermark. This will set the sample application to ```image mode``` |
-| watermark                         | Path to the Random Matrix (watermark). This is produced by the ```Watermarking-Generate``` project. Watermark and Image sizes should match exactly. |
-| save_watermarked_files_to_disk    | ```[true/false]```: Set to true to save the watermarked NVF and Prediction-Error files to disk.                                                |
-| execution_time_in_fps             | ```[true/false]```: Set to true to display execution times in FPS. Else, it will display execution time in seconds.                            |
+| \[image\]/path                    | Path to the input image to embed and detect watermark. This will set the sample application to ```image mode``` |
+| watermark_data_file               | Path to the Random Matrix (watermark). This is produced by the ```Watermarking-Generate``` project. Watermark and Image sizes should match exactly. |
+| save_to_disk                      | ```[true/false]```: (Image mode only) Set to true to save the watermarked NVF and Prediction-Error files to disk.                                                |
+| display_fps                       | ```[true/false]```: Set to true to display execution times in FPS. Else, it will display execution time in seconds.                            |
 | p                                 | Window size for masking algorithms. All implementations support values of ```p=3,5,7``` and ```9```. |
 | psnr                              | PSNR (Peak Signal-to-Noise Ratio). Higher values correspond to less watermark in the image, reducing noise, but making detection harder.   |
-| loops_for_test                    | (Image mode only) Loops the algorithms many times, simulating more work. A value of ```100~1000``` produces consistent execution times.                          |
-| opencl_device                     | ```[OpenCL only / Number]```: Works only for OpenCL binary. If multiple OpenCL devices are found, then set this to the desired device. Set it to 0 if one device is found. |
+| benchmark_loops                   | (Image mode only) Loops the algorithms many times, simulating more work. A value of ```100~1000``` produces consistent execution times.                          |
+| opencl_device_id                  | ```[OpenCL only / Number]```: Works only for OpenCL binary. If multiple OpenCL devices are found, then set this to the desired device. Set it to 0 if one device is found. |
 
 
 **Video-only settings:**
 
 | Parameter                         | Description                                                                                                                 |
 |-----------------------------------|-----------------------------------------------------------------------------------------------------------------------------                |
-| video                             | Path to the video file, if we want to embed or detect the watermark for a video. This will set the sample application to ```video mode``` and will read the video-only settings that are described in this section plus the common settings (```watermark```, ```execution_time_in_fps```, ```p```, ```psnr``` and ```opencl_device```) |
-| watermark_interval                | ```[Number]```: Embed or try to detect the watermark every X frames. If set to 1 when embedding, the watermark will be embedded for all frames, which degrades video quality.|
+| mode                              | ```[embed/detect]```: Sets the video mode. Both options read the ```[video]/path``` as input video and either embed the watermark encode via ffmpeg) or try to detect the watermark.
+| \[video\]/path                    | Path to the video file, if we want to embed or detect the watermark for a video. This will set the sample application to ```video mode``` and will read the video-only settings that are described in this section plus the common settings (```watermark_data_file```, ```display_fps```, ```p```, ```psnr``` and ```opencl_device_id```) |
+| watermark_interval                | ```[Number]```: Embed or try to detect the watermark every ```watermark_interval``` frames. If set to 1 when embedding, the watermark will be embedded for all frames, which degrades video quality. If the current frame is not divisible by this parameter, then for embedding the frame is passed to the encoder as-is (no watermark), and for detection the frame is decoded and skipped. |
 | cuda_hw_decoder                   | ```[CUDA only]```: Offload decoding to the GPU using **NVDEC**. This is **much** more effective on ```HEVC``` or ```AV1``` videos (especially 4K and above) and tasks like watermark detection, as software decoders are generally fast for lower resolutions and less complex algorithms such as ```H264```. Valid options are ```hevc_cuvid``` , ```h264_cuvid``` and ```av1_cuvid```. Other decoders may be available like ```vp9_cuvid```, ```vc1_cuvid``` or ```mjpeg_cuvid```. If HW decoders aren't available, the application will automatically fall back to CPU decoding.|
-| encode_watermark_file_path        | Set this value to a file path, in order to embed watermark on the video from ```video``` parameter and save the watermarked file to disk. This will set the sample application to ```video embedding mode```. If you want to detect the watermark from the ```video``` parameter then comment this line, effectively setting the sample application to ```video detect mode```. |
-| encode_options                    | These are FFmpeg options for encoding. Example: ```-c:v libx265 -preset fast -crf 23```  will pass these encoding options to FFmpeg.|
-| watermark_detection               | ```[true/false]```: Set to true to try to detect the watermark of the "video" parameter. The detection occurs after ```watermark_interval``` frames. It is ignored when ```encode_watermark_file_path``` is set. |
+| encode_output_path                | Set this value to a file path, in order to embed watermark on the video from ```[video]/path``` parameter and save the watermarked file to disk. This will set the sample application to ```video embedding mode```. If you want to detect the watermark from the ```video``` parameter then comment this line, effectively setting the sample application to ```video detect mode```. |
+| encode_codec_options              | These are FFmpeg options for encoding. Example: ```-c:v libx265 -preset fast -crf 23```  will pass these encoding options to FFmpeg.|
 
 # FFmpeg Command Used for Video Encoding
 
-The following FFmpeg command is used to encode a new video while preserving the original input's metadata, subtitles, and audio tracks. It decodes the input video, embeds the watermark, and passes the resulting frames into standard input (stdin) for encoding, while copying audio/subtitles from the original input file as is. You can customize **video codec** encoding settings (codec, CRF, presets, etc) via the ```encode_options``` option as described above.
+The following FFmpeg command is used to encode a new video while preserving the original input's metadata, subtitles, and audio tracks. It decodes the input video, embeds the watermark, and passes the resulting frames into standard input (stdin) for encoding, while copying audio/subtitles from the original input file as is. You can customize **video codec** encoding settings (codec, CRF, presets, etc) via the ```encode_codec_options``` option as described above.
 ```
 ffmpeg -y -f rawvideo
   -pix_fmt <fmt>
@@ -80,7 +80,7 @@ ffmpeg -y -f rawvideo
   -r <frame_rate>
   -i -
   -i <input_video_file>
-  <ffmpegOptions>
+  <encode_codec_options>
   -c:s copy -c:a copy
   -map 1:s? -map 0:v -map 1:a?
   -max_interleave_delta 0
@@ -95,7 +95,7 @@ ffmpeg -y -f rawvideo
 - `-r <frame_rate>`: Frame rate of the video (extracted from the input).
 - `-i -`: Accepts raw video from stdin.
 - `-i <input_video_file>`: **USER SUPPLIED**: Original input file.
-- `<ffmpegOptions>`: **USER SUPPLIED**: Encoder options such as codec, preset, and quality options (e.g., ```-c:v libx265 -preset fast -crf 23```).
+- `<encode_codec_options>`: **USER SUPPLIED**: Encoder options such as codec, preset, and quality options (e.g., ```-c:v libx265 -preset fast -crf 23```).
 - `-c:s copy -c:a copy`: Copies subtitle and audio streams without re-encoding.
 - `-map 1:s? -map 0:v -map 1:a?`: Maps subtitles/audio from the original input, and video from stdin.
 - `-max_interleave_delta 0`: Reduces potential interleaving delay issues.
