@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "buffer.hpp"
 #include "Eigen/Core"
@@ -273,17 +273,34 @@ template <int p> class WatermarkEigen final : public WatermarkBase {
         if (hasCenterRegion) {
             const float* imgData = image.data();
             float* outData = outputErrorSequence.data();
+            // calculate prediction error for center region using Eigen maps and OpenMP
+            // optimized to calculate 8 neighbors at a time to fully utilize vectorization
+            // and eigen lazy evaluation with big expression trees
 #pragma omp parallel for
             for (int j = startCol; j < endCol; j++) {
                 const int colOffset = (j * baseRows) + startRow;
                 const Map<const VectorXf> imgBatch(imgData + colOffset, stripHeight);
                 Map<VectorXf> errorBatch(outData + colOffset, stripHeight);
-                errorBatch = imgBatch; // initialize with image values
-                // compute prediction error
-                for (int k = 0; k < localSize; k++) {
-                    const float* neighborPtr = imgData + colOffset + offsets[k];
-                    const Map<const VectorXf> neighborBatch(neighborPtr, stripHeight);
-                    errorBatch.noalias() -= neighborBatch * coefficients(k);
+                // first block: initialization and calculation of 8 neighbors
+                // E = I - (c0*N0 + c1*N1... + c7*N7)
+                errorBatch.noalias() =
+                    imgBatch -
+                    (Map<const VectorXf>(imgData + colOffset + offsets[0], stripHeight) * coefficients(0) + Map<const VectorXf>(imgData + colOffset + offsets[1], stripHeight) * coefficients(1) +
+                     Map<const VectorXf>(imgData + colOffset + offsets[2], stripHeight) * coefficients(2) + Map<const VectorXf>(imgData + colOffset + offsets[3], stripHeight) * coefficients(3) +
+                     Map<const VectorXf>(imgData + colOffset + offsets[4], stripHeight) * coefficients(4) + Map<const VectorXf>(imgData + colOffset + offsets[5], stripHeight) * coefficients(5) +
+                     Map<const VectorXf>(imgData + colOffset + offsets[6], stripHeight) * coefficients(6) + Map<const VectorXf>(imgData + colOffset + offsets[7], stripHeight) * coefficients(7));
+                // calculate remaining blocks (indices 8 to localSize)
+                // for p=3 this won't even run (compiler will optimize it out entirely)
+                // E = E - (c8*N8 + ...)
+                for (int k = 8; k < localSize; k += 8) {
+                    errorBatch.noalias() -= (Map<const VectorXf>(imgData + colOffset + offsets[k + 0], stripHeight) * coefficients(k + 0) +
+                                             Map<const VectorXf>(imgData + colOffset + offsets[k + 1], stripHeight) * coefficients(k + 1) +
+                                             Map<const VectorXf>(imgData + colOffset + offsets[k + 2], stripHeight) * coefficients(k + 2) +
+                                             Map<const VectorXf>(imgData + colOffset + offsets[k + 3], stripHeight) * coefficients(k + 3) +
+                                             Map<const VectorXf>(imgData + colOffset + offsets[k + 4], stripHeight) * coefficients(k + 4) +
+                                             Map<const VectorXf>(imgData + colOffset + offsets[k + 5], stripHeight) * coefficients(k + 5) +
+                                             Map<const VectorXf>(imgData + colOffset + offsets[k + 6], stripHeight) * coefficients(k + 6) +
+                                             Map<const VectorXf>(imgData + colOffset + offsets[k + 7], stripHeight) * coefficients(k + 7));
                 }
             }
         }
