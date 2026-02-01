@@ -59,18 +59,30 @@ template <int p> class WatermarkEigen final : public WatermarkBase {
         }
         u = mask * randomMatrix.getGray();
         computeErrorSequence(u, filteredEstimation);
-        float dot_ez_eu, d_ez, d_eu;
+        // optimized and fused correlation calculation using Eigen and OpenMP
+        float globalDot = 0.0;
+        float globalSqEz = 0.0;
+        float globalSqEu = 0.0;
+        const float* ezPtr = errorSequence.data();
+        const float* euPtr = filteredEstimation.data();
+        const auto totalPixels = errorSequence.size();
 
-#pragma omp parallel sections
+#pragma omp parallel reduction(+ : globalDot, globalSqEz, globalSqEu)
         {
-#pragma omp section
-            dot_ez_eu = errorSequence.cwiseProduct(filteredEstimation).sum();
-#pragma omp section
-            d_ez = errorSequence.matrix().norm();
-#pragma omp section
-            d_eu = filteredEstimation.matrix().norm();
+            const int numThreads = omp_get_num_threads();
+            const int tid = omp_get_thread_num();
+            const auto chunkSize = totalPixels / numThreads;
+            const auto start = tid * chunkSize;
+            const auto actualSize = (tid == numThreads - 1) ? (totalPixels - start) : chunkSize;
+            if (actualSize > 0) {
+                Eigen::Map<const Eigen::VectorXf> ezVec(ezPtr + start, actualSize);
+                Eigen::Map<const Eigen::VectorXf> euVec(euPtr + start, actualSize);
+                globalDot += ezVec.dot(euVec);
+                globalSqEz += ezVec.squaredNorm();
+                globalSqEu += euVec.squaredNorm();
+            }
         }
-        float correlation = dot_ez_eu / (d_ez * d_eu);
+        const float correlation = globalDot / (std::sqrt(globalSqEz) * std::sqrt(globalSqEu));
         return std::isfinite(correlation) ? correlation : 0.0f;
     }
 
