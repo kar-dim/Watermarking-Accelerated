@@ -25,6 +25,10 @@ Implementations are optimized for maximum performance:
 - CPU implementation: Uses the ```Eigen``` library for efficient linear algebra operations. The application utilizes all available logical (or physical, specifically on video embedding) CPU cores for maximum performance.
 - GPU implementation: Provides both OpenCL and CUDA backends. The GPU kernels are highly optimized to maximize throughput and minimize latency. CUDA implementation uses Tensor Cores in some of its kernels to maximize performance. The efficient ```ArrayFire``` library is used for most common and simple work, and specialized high performance kernels for custom work where ArrayFire is not fast enough. Specifically for CUDA, we use warp shuffle techniques and Tensor Cores to improve performance wherever possible.
 
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/c1a3acea-3e4b-4584-9f96-500167f78368" width="50%" height="50%">
+</p>
+
 # Run the pre-built binaries
 
 - Get the latest binaries [here](https://github.com/kar-dim/Watermarking-Accelerated/releases) for Eigen, OpenCL or CUDA platform. The binaries contain the sample application and the embedded CUDA/OpenCL/Eigen implementations of the watermarking algorithms.
