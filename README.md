@@ -212,9 +212,10 @@ Tests were executed with a loop count of 1000 iterations to ensure statistical s
      - p=9 (Large Window): Throughput naturally decreases due to the heavier matrix construction and solving steps (80×80 linear systems), but the CUDA implementation still maintains real-time performance thanks to the Tensor Cores.
 
 - Resolution Scaling: Performance scales inversely with pixel count. However, even at 4K resolution, the GPU implementations remain viable for interactive framerates, whereas the CPU implementation becomes a bottleneck.
-        
+
+
 p = 3            |  p = 5
 :-------------------------:|:-------------------------:
- ![p3](https://github.com/user-attachments/assets/ddeccb3e-1777-46d6-b644-7671f3b8718b) | ![p5](https://github.com/user-attachments/assets/c233b6dd-be82-4659-9704-9b7d28922dde)
+ ![p3](https://github.com/user-attachments/assets/e23073d8-3c94-4464-a35d-db87fcdeb448) | ![p5](https://github.com/user-attachments/assets/61b4bf55-bd6b-46ff-9fbf-931e87315a2d)
 p = 7            |  p = 9
- ![p3](https://github.com/user-attachments/assets/79135441-f9a2-4f02-a8d3-a809940c8b27) | ![p5](https://github.com/user-attachments/assets/9f956101-745e-462c-ae72-4781360b4dce)
+ ![p3](https://github.com/user-attachments/assets/25c869ab-91e5-44ab-a394-552da104d0c5) | ![p5](https://github.com/user-attachments/assets/0bcac365-ebf4-4c73-9052-a4c29aaeee11)
