@@ -203,9 +203,9 @@ Tests were executed with a loop count of 1000 iterations to ensure statistical s
 
 ## Observations
 
-- CUDA: consistently delivers the highest throughput, peaking at over 8,000 FPS for p=3 at 480p. It effectively leverages the massive parallelism of the RTX 4070 Super, making it the ideal choice for real-time applications.
+- CUDA: Consistently delivers the highest throughput, peaking at over 8,000 FPS for p=3 at 480p. It is the ideal choice for realtime applications.
 - OpenCL: Serves as a good middle ground, offering significant acceleration over the CPU (often 5x-10x faster) while maintaining portability across non-NVIDIA hardware (AMD, Intel, etc.).
-- CPU: Functions as the fallback implementation. While slower, it ensures compatibility on systems without dedicated GPUs.
+- CPU: Functions as the fallback implementation. While slower, it is very optimized for CPU architecture, and also eensures compatibility on systems without dedicated GPUs.
 
 - Impact of Window Size (p): As the window size increases, the computational complexity grows quadratically.
      - p=3 (Small Window): Extremely high throughput (CUDA > 8000 FPS).
