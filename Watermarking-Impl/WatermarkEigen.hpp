@@ -75,8 +75,8 @@ template <int p> class WatermarkEigen final : public WatermarkBase {
             const auto start = tid * chunkSize;
             const auto actualSize = (tid == numThreads - 1) ? (totalPixels - start) : chunkSize;
             if (actualSize > 0) {
-                Eigen::Map<const Eigen::VectorXf> ezVec(ezPtr + start, actualSize);
-                Eigen::Map<const Eigen::VectorXf> euVec(euPtr + start, actualSize);
+                Map<const VectorXf> ezVec(ezPtr + start, actualSize);
+                Map<const VectorXf> euVec(euPtr + start, actualSize);
                 globalDot += ezVec.dot(euVec);
                 globalSqEz += ezVec.squaredNorm();
                 globalSqEu += euVec.squaredNorm();
@@ -112,19 +112,6 @@ template <int p> class WatermarkEigen final : public WatermarkBase {
         mask(i, j) = std::clamp(static_cast<float>(maskValue), 0.0f, 1.0f);
     }
 
-    // helper method for calling lambda border handlers for both custom and prediction error masks
-    template <typename ProcessBorderFunc>
-    inline void computeMaskBorders(const int startRow, const int endRow, const int startCol, const int endCol, bool hasCenterRegion, const ProcessBorderFunc& processBorder) {
-        if (startRow > 0)
-            processBorder(0, startRow, 0, baseCols);
-        if (endRow < baseRows)
-            processBorder(endRow, baseRows, 0, baseCols);
-        if (startCol > 0 && hasCenterRegion)
-            processBorder(startRow, endRow, 0, startCol);
-        if (endCol < baseCols && hasCenterRegion)
-            processBorder(startRow, endRow, endCol, baseCols);
-    }
-
     // main method to compute the custom mask
     void computeCustomMask(const ArrayXXf& image) {
         // process CENTER region
@@ -149,39 +136,73 @@ template <int p> class WatermarkEigen final : public WatermarkBase {
         }
 
         // process BORDER regions
-        auto processBorder = [&](const int startRow, const int endRow, int const startCol, const int endCol) {
-#pragma omp parallel for collapse(2) schedule(dynamic, 8)
-            for (int j = startCol; j < endCol; j++)
-                for (int i = startRow; i < endRow; i++) {
-                    double sum = 0.0, sumSq = 0.0;
-                    for (int jj = -pad; jj <= pad; jj++)
-                        for (int ii = -pad; ii <= pad; ii++)
-                            computeCustomMaskSums<Op::ADD>(clampedValue(image, i + ii, j + jj, baseRows, baseCols), sum, sumSq);
-                    computeCustomMaskPixel(sum, sumSq, i, j);
+#pragma omp parallel
+        {
+            auto processRect = [&](int rStart, int rEnd, int cStart, int cEnd) {
+#pragma omp for collapse(2) nowait
+                for (int j = cStart; j < cEnd; j++) {
+                    for (int i = rStart; i < rEnd; i++) {
+                        double sum = 0.0, sumSq = 0.0;
+                        // for borders, we cannot slide, so we do the full O(p^2) sum
+                        for (int jj = -pad; jj <= pad; jj++) {
+                            for (int ii = -pad; ii <= pad; ii++) {
+                                const float val = clampedValue(image, i + ii, j + jj, baseRows, baseCols);
+                                computeCustomMaskSums<Op::ADD>(val, sum, sumSq);
+                            }
+                        }
+                        computeCustomMaskPixel(sum, sumSq, i, j);
+                    }
                 }
-        };
-        computeMaskBorders(startRow, endRow, startCol, endCol, hasCenterRegion, processBorder);
+            };
+            // feed the 4 border strips to the active thread team
+            if (startRow > 0)
+                processRect(0, startRow, 0, baseCols);
+            if (endRow < baseRows)
+                processRect(endRow, baseRows, 0, baseCols);
+            if (startCol > 0 && hasCenterRegion)
+                processRect(startRow, endRow, 0, startCol);
+            if (endCol < baseCols && hasCenterRegion)
+                processRect(startRow, endRow, endCol, baseCols);
+        }
     }
 
     // helper method to process the border pixels (clamp if out of bounds)
-    // by using a supplied function (used in prediction error correlation and error sequence calculation)
-    template <typename BorderFunc> inline void processPredictionErrorBorder(const ArrayXXf& image, const int startRow, const int endRow, const int startCol, const int endCol, BorderFunc&& func) {
+    // by using a supplied function
+    template <typename Processor> void processBorder(const ArrayXXf& image, Processor&& processor) {
 #pragma omp parallel
         {
             const int threadId = omp_get_thread_num();
-            LocalVector neighbors;
-#pragma omp for collapse(2)
-            for (int j = startCol; j < endCol; j++)
-                for (int i = startRow; i < endRow; i++) {
-                    int k = 0;
-                    for (int dj = 0; dj < p; dj++)
-                        for (int di = 0; di < p; di++) {
-                            if (di == center && dj == center)
-                                continue;
-                            neighbors(k++) = clampedValue(image, i + di - center, j + dj - center, baseRows, baseCols);
+            LocalVector neighbors; // per thread
+
+            auto processRect = [&](int rStart, int rEnd, int cStart, int cEnd) {
+            // nowait: threads jump between borders immediately
+            // collapse(2): handles thin strips efficiently
+#pragma omp for collapse(2) nowait
+                for (int j = cStart; j < cEnd; j++) {
+                    for (int i = rStart; i < rEnd; i++) {
+                        // collect neighbors (clamped to avoid out of bounds)
+                        int k = 0;
+                        for (int dj = 0; dj < p; dj++) {
+                            for (int di = 0; di < p; di++) {
+                                if (di == center && dj == center)
+                                    continue;
+                                neighbors(k++) = clampedValue(image, i + di - center, j + dj - center, baseRows, baseCols);
+                            }
                         }
-                    func(i, j, neighbors, threadId);
+                        // execute the processing function
+                        processor(i, j, neighbors, threadId);
+                    }
                 }
+            };
+            // feed the 4 border strips
+            if (startRow > 0)
+                processRect(0, startRow, 0, baseCols);
+            if (endRow < baseRows)
+                processRect(endRow, baseRows, 0, baseCols);
+            if (startCol > 0 && hasCenterRegion)
+                processRect(startRow, endRow, 0, startCol);
+            if (endCol < baseCols && hasCenterRegion)
+                processRect(startRow, endRow, endCol, baseCols);
         }
     }
 
@@ -245,12 +266,10 @@ template <int p> class WatermarkEigen final : public WatermarkBase {
                 }
             }
         }
-        // process BORDER regions
-        auto processBorder = [&](const int startRow, const int endRow, const int startCol, const int endCol) {
-            processPredictionErrorBorder(image, startRow, endRow, startCol, endCol,
-                                         [&](int i, int j, const LocalVector& neighbors, const int threadId) { meMatrixData.computePredictionErrorMatrices(neighbors, image(i, j), threadId); });
-        };
-        computeMaskBorders(startRow, endRow, startCol, endCol, hasCenterRegion, processBorder);
+        // border regions parallel handling
+        processBorder(image, [&](const int i, const int j, const LocalVector& neighbors, const int threadId) { 
+            meMatrixData.computePredictionErrorMatrices(neighbors, image(i, j), threadId); 
+        });
 
         // solve system and coefficients
         if (!meMatrixData.computeCoefficients())
@@ -305,10 +324,8 @@ template <int p> class WatermarkEigen final : public WatermarkBase {
             }
         }
         // process BORDER regions
-        auto processBorder = [&](const int startRow, const int endRow, const int startCol, const int endCol) {
-            processPredictionErrorBorder(image, startRow, endRow, startCol, endCol,
-                                         [&](int i, int j, const LocalVector& neighbors, const int) { outputErrorSequence(i, j) = image(i, j) - neighbors.dot(coefficients); });
-        };
-        computeMaskBorders(startRow, endRow, startCol, endCol, hasCenterRegion, processBorder);
+        processBorder(image, [&](const int i, const int j, const LocalVector& neighbors, const int) { 
+            outputErrorSequence(i, j) = image(i, j) - neighbors.dot(coefficients); 
+        });
     }
 };
