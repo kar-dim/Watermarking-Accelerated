@@ -183,12 +183,25 @@ __kernel void me(__global const float* restrict input,
     if (y >= height)
         return;
 
-    for (int i = localId; i < 3 * 258; i += get_local_size(0)) {
-        const int tileCol = i / 3;
-        const int tileRow = i % 3;
-        const int globalX = clamp((int)(get_group_id(0) * get_local_size(0)) + tileCol - 1, 0, (int) width - 1);
-        const int globalY = clamp((int)(get_group_id(1) * get_local_size(1)) + tileRow - 1, 0, (int) height - 1);
-        vstore_half(input[globalX * height + globalY] * halfScaleFactor, 0, &blockValues[tileRow][tileCol]);
+    const int totalPixels = 3 * 258;
+    const int colStep = 85;
+    const int rowStep = 1;
+    const int baseGlobalCol = (get_group_id(0) * 256) - 1; 
+    const int baseGlobalRow = get_group_id(1) - 1;
+    int r = localId % 3;
+    int c = localId / 3;
+    int idx = localId;
+    while (idx < totalPixels) {
+        int gCol = clamp(baseGlobalCol + c, 0, (int)width - 1);
+        int gRow = clamp(baseGlobalRow + r, 0, (int)height - 1);
+        vstore_half(input[gCol * height + gRow] * halfScaleFactor, 0, &blockValues[r][c]);
+        idx += 256;
+        c += colStep;
+        r += rowStep;
+        if (r >= 3) {
+            r -= 3;
+            c += 1;
+        }
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
@@ -277,27 +290,37 @@ __kernel void me(
 ) {
     const int gx = get_group_id(0);
     const int gy = get_group_id(1);
-    const int tid = get_local_id(0);
+    const int localId = get_local_id(0);
     const float halfScaleFactor = 0.00392156862f;
 
     __local half blockValues[5][260]; 
 
-    int baseGlobalCol = (gx * 256) - 2;
-    int baseGlobalRow = gy - 2;
-
-    for (int i = tid; i < 5 * 260; i += 256) {
-        const int r = i / 260; 
-        const int c = i % 260; 
-        const int gRow = clamp(baseGlobalRow + r, 0, (int)height - 1);
-        const int gCol = clamp(baseGlobalCol + c, 0, (int)width - 1);
+    const int totalPixels = 5 * 260;
+    const int colStep = 51;
+    const int rowStep = 1;
+    const int baseGlobalCol = (gx * 256) - 2; 
+    const int baseGlobalRow = gy - 2;
+    int r = localId % 5;
+    int c = localId / 5;
+    int idx = localId;
+    while (idx < totalPixels) {
+        int gCol = clamp(baseGlobalCol + c, 0, (int)width - 1);
+        int gRow = clamp(baseGlobalRow + r, 0, (int)height - 1);
         vstore_half(input[gCol * height + gRow] * halfScaleFactor, 0, &blockValues[r][c]);
+        idx += 256;
+        c += colStep;
+        r += rowStep;
+        if (r >= 5) {
+            r -= 5;
+            c += 1;
+        }
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
     // calculate Rx and rx coefficients
     // for p=5 we work differently than p=3 because of massive shared memory requirements
     // we process 324 total tasks (300 for Rx, 24 for rx)
-    for (int k = tid; k < 324; k += 256) {
+    for (int k = localId; k < 324; k += 256) {
         float coeffSum = 0.0f;
         if (k < 300) {
             // which coefficient (r, c) we are calculating
@@ -346,24 +369,34 @@ __kernel void me(
 ) {
     const int gx = get_group_id(0);
     const int gy = get_group_id(1);
-    const int tid = get_local_id(0);
+    const int localId = get_local_id(0);
     const float halfScaleFactor = 0.00392156862f;
 
     __local half blockValues[7][262]; 
 
-    int baseGlobalCol = (gx * 256) - 3;
-    int baseGlobalRow = gy - 3;
-
-    for (int i = tid; i < 7 * 262; i += 256) {
-        const int r = i / 262; 
-        const int c = i % 262; 
-        const int gRow = clamp(baseGlobalRow + r, 0, (int)height - 1);
-        const int gCol = clamp(baseGlobalCol + c, 0, (int)width - 1);
+    const int totalPixels = 7 * 262;
+    const int colStep = 36;
+    const int rowStep = 4;
+    const int baseGlobalCol = (gx * 256) - 3; 
+    const int baseGlobalRow = gy - 3;
+    int r = localId % 7;
+    int c = localId / 7;
+    int idx = localId;
+    while (idx < totalPixels) {
+        int gCol = clamp(baseGlobalCol + c, 0, (int)width - 1);
+        int gRow = clamp(baseGlobalRow + r, 0, (int)height - 1);
         vstore_half(input[gCol * height + gRow] * halfScaleFactor, 0, &blockValues[r][c]);
+        idx += 256;
+        c += colStep;
+        r += rowStep;
+        if (r >= 7) {
+            r -= 7;
+            c += 1;
+        }
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    for (int k = tid; k < 1224; k += 256) {
+    for (int k = localId; k < 1224; k += 256) {
         float coeffSum = 0.0f;
         if (k < 1176) {
             const int2 coords = getPackedCoords(k);
@@ -402,24 +435,34 @@ __kernel void me(
 ) {
     const int gx = get_group_id(0);
     const int gy = get_group_id(1);
-    const int tid = get_local_id(0);
+    const int localId = get_local_id(0);
     const float halfScaleFactor = 0.00392156862f;
 
     __local half blockValues[9][264]; 
 
-    int baseGlobalCol = (gx * 256) - 4;
-    int baseGlobalRow = gy - 4;
-
-    for (int i = tid; i < 9 * 264; i += 256) {
-        const int r = i / 264; 
-        const int c = i % 264; 
-        const int gRow = clamp(baseGlobalRow + r, 0, (int)height - 1);
-        const int gCol = clamp(baseGlobalCol + c, 0, (int)width - 1);
+    const int totalPixels = 9 * 264;
+    const int colStep = 28;
+    const int rowStep = 4;
+    const int baseGlobalCol = (gx * 256) - 4; 
+    const int baseGlobalRow = gy - 4;
+    int r = localId % 9;
+    int c = localId / 9;
+    int idx = localId;
+    while (idx < totalPixels) {
+        int gCol = clamp(baseGlobalCol + c, 0, (int)width - 1);
+        int gRow = clamp(baseGlobalRow + r, 0, (int)height - 1);
         vstore_half(input[gCol * height + gRow] * halfScaleFactor, 0, &blockValues[r][c]);
+        idx += 256;
+        c += colStep;
+        r += rowStep;
+        if (r >= 9) {
+            r -= 9;
+            c += 1;
+        }
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    for (int k = tid; k < 3320; k += 256) {
+    for (int k = localId; k < 3320; k += 256) {
         float coeffSum = 0.0f;
         if (k < 3240) {
             const int2 coords = getPackedCoords(k);

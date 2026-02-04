@@ -54,16 +54,28 @@ template <int p> __device__ void fillBlock(const float* __restrict__ inputA, con
 // the shared memory is a wide "strip" on the x-axis
 template <int p, int stripWidth = 256 + p - 1, int radius = (p - 1) / 2>
 __device__ inline void fillBlockStrip(half blockValues[p][stripWidth], const float* __restrict__ input, const int width, const int height) {
-    const float scaleFactor = 0.00392156862f;
+    constexpr float scaleFactor = 0.00392156862f;
+    constexpr int totalPixels = p * stripWidth;
+    constexpr int colStep = 256 / p;
+    constexpr int rowStep = 256 % p;
+    const int tid = threadIdx.x;
     const int baseGlobalCol = (int)(blockIdx.x * 256) - radius;
     const int baseGlobalRow = (int)(blockIdx.y * 1) - radius;
-    // grid-Stride Loop
-    for (int i = threadIdx.x; i < p * stripWidth; i += 256) {
-        const int r = i % p; // tileRow
-        const int c = i / p; // tileCol
-        const int globalCol = clamp(baseGlobalCol + c, 0, width - 1);
-        const int globalRow = clamp(baseGlobalRow + r, 0, height - 1);
+    int r = tid % p;
+    int c = tid / p;
+    int idx = tid;
+    while (idx < totalPixels) {
+        const int globalCol = max(0, min(width - 1, baseGlobalCol + c));
+        const int globalRow = max(0, min(height - 1, baseGlobalRow + r));
         blockValues[r][c] = __float2half(input[globalCol * height + globalRow] * scaleFactor);
+        idx += 256;
+        c += colStep;
+        r += rowStep;
+        // if r exceeds p-1, we wrap it (and carry 1 to column)
+        if (r >= p) {
+            r -= p;
+            c += 1;
+        }
     }
 }
 

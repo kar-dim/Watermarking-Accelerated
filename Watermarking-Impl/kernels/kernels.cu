@@ -554,15 +554,27 @@ __global__ void me_p9(const float* __restrict__ input, float* __restrict__ Rx, f
     __shared__ alignas(16) half blockValues[9][136];
 
     // custom fillBlockStrip only for p=9 version
+    constexpr int totalPixels = 9 * 136;
+    constexpr int colStep = 14;
+    constexpr int rowStep = 2;
     const int baseGlobalCol = (int)(blockIdx.x * 128) - 4;
     const int baseGlobalRow = (int)(blockIdx.y * 1) - 4;
-    constexpr int totalLoad = 9 * 136;
-    for (int i = tid; i < totalLoad; i += 128) {
-        const int r = i / 136;
-        const int c = i % 136;
-        const int globalCol = clamp(baseGlobalCol + c, 0, (int)width - 1);
-        const int globalRow = clamp(baseGlobalRow + r, 0, (int)height - 1);
-        blockValues[r][c] = __float2half(input[globalCol * height + globalRow] * 0.00392156862f);
+    int r = tid % 9;
+    int c = tid / 9;
+    int idx = tid;
+    while (idx < totalPixels) {
+        if (c < 136) {
+            const int globalCol = clamp(baseGlobalCol + c, 0, (int)width - 1);
+            const int globalRow = clamp(baseGlobalRow + r, 0, (int)height - 1);
+            blockValues[r][c] = __float2half(input[globalCol * height + globalRow] * 0.00392156862f);
+        }
+        idx += 128;
+        c += colStep;
+        r += rowStep;
+        if (r >= 9) {
+            r -= 9;
+            c += 1;
+        }
     }
     __syncthreads();
 
