@@ -280,7 +280,7 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
     const int tid = threadIdx.x;
     const int x = blockIdx.x * 256 + tid;
     const int y = blockIdx.y * blockDim.y + threadIdx.y;
-    const int warpId = tid > 5;
+    const int warpId = tid >> 5;
     const int startRow = warpId * 32;
 
     // shared memory for Rx, rx, scratch and all pixels utilized by the whole block
