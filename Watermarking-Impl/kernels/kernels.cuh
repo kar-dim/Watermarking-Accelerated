@@ -29,8 +29,8 @@ __device__ void fillBlockMain(const float* __restrict__ inputA, const float* __r
     for (int i = threadIdx.y * blockDim.x + threadIdx.x; i < sharedSize * sharedSize; i += blockDim.x * blockDim.y) {
         const int tileRow = i % sharedSize;
         const int tileCol = i / sharedSize;
-        const int globalX = clamp<int>(baseGlobalX + tileCol, 0, width - 1);
-        const int globalY = clamp<int>(baseGlobalY + tileRow, 0, height - 1);
+        const int globalX = clamp(baseGlobalX + tileCol, 0, width - 1);
+        const int globalY = clamp(baseGlobalY + tileRow, 0, height - 1);
         const int idx = globalX * height + globalY;
         float val = inputA[idx];
         // if we need to fuse (A*B), do it here, branch-free because it its known at compile time
@@ -65,8 +65,8 @@ __device__ inline void fillBlockStrip(half blockValues[p][stripWidth], const flo
     int c = tid / p;
     int idx = tid;
     while (idx < totalPixels) {
-        const int globalCol = max(0, min(width - 1, baseGlobalCol + c));
-        const int globalRow = max(0, min(height - 1, baseGlobalRow + r));
+        const int globalCol = clamp(baseGlobalCol + c, 0, width - 1);
+        const int globalRow = clamp(baseGlobalRow + r, 0, height - 1);
         blockValues[r][c] = __float2half(input[globalCol * height + globalRow] * scaleFactor);
         idx += 256;
         c += colStep;
