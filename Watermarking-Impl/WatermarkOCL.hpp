@@ -42,7 +42,7 @@ template <int p> class WatermarkOCL final : public WatermarkGPU<p> {
     unsigned int corrFinalLocalSize = maxPow2WorkGroupSize(device);
     cl::Program programs;
 
-    af::array computeCustomMask(const af::array& image) const {
+    af::array computeCustomMask(const af::array& image) const override {
         const af::array customMask(this->baseRows, this->baseCols);
         const clMemPtr imageMem(image.device<cl_mem>());
         const clMemPtr outputMem(customMask.device<cl_mem>());
@@ -57,7 +57,7 @@ template <int p> class WatermarkOCL final : public WatermarkGPU<p> {
         return customMask;
     }
 
-    af::array computeErrorSequence(const af::array& image, const bool calculateAbs) const {
+    af::array computeErrorSequence(const af::array& image, const bool calculateAbs) const override {
         const af::array errorSequence(this->baseRows, this->baseCols);
         const clMemPtr imageMem(image.device<cl_mem>());
         const clMemPtr coeffsMem(this->coefficients.template device<cl_mem>());
@@ -77,7 +77,7 @@ template <int p> class WatermarkOCL final : public WatermarkGPU<p> {
         return errorSequence;
     }
 
-    af::array computeErrorSequence(const af::array& inputA, const af::array& inputB) const {
+    af::array computeErrorSequence(const af::array& inputA, const af::array& inputB) const override {
         const af::array errorSequence(this->baseRows, this->baseCols);
         const clMemPtr inputAmem(inputA.device<cl_mem>());
         const clMemPtr inputBmem(inputB.device<cl_mem>());
@@ -98,7 +98,7 @@ template <int p> class WatermarkOCL final : public WatermarkGPU<p> {
         return errorSequence;
     }
 
-    af::array computePredictionErrorData(const af::array& image, const bool calculateAbs) const {
+    af::array computePredictionErrorData(const af::array& image, const bool calculateAbs) const override {
         const auto meArraysBaseWidth = meKernelDims.cols / meLocalSize;
         const clMemPtr imageMem(image.device<cl_mem>());
         af::array RxPartial, rxPartial;
@@ -142,7 +142,7 @@ template <int p> class WatermarkOCL final : public WatermarkGPU<p> {
             "me");
     }
 
-    float computeCorrelation(const af::array& e_u, const af::array& e_z) const {
+    float computeCorrelation(const af::array& e_u, const af::array& e_z) const override {
         const int N = static_cast<int>(e_u.elements());
         const int neededBlocks = (N + corrPartialLocalSize - 1) / corrPartialLocalSize;
         const int blocks = std::min(neededBlocks, 2560);

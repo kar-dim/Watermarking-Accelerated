@@ -6,6 +6,7 @@
 #include "WatermarkGpu.hpp"
 #include <algorithm>
 #include <arrayfire.h>
+#include <cmath>
 #include <cuda_runtime.h>
 #include <string>
 
@@ -20,11 +21,33 @@ template <int p> class WatermarkCuda final : public WatermarkGPU<p> {
 
   private:
     static constexpr dim3 windowBlockSize{16, 16}, meBlockSize{p == 9 ? 128 : 256, 1};
-    static constexpr unsigned int corrPartialBlockSize = 768, corrFinalBlockSize = 1024;
+    static constexpr unsigned int corrPartialBlockSize = 768, corrFinalBlockSize = 1024, strWatermarkBlockSize = 768, applyWatermarkBlockSize = 768;
     dim3 meKernelDims;
     cudaStream_t afStream;
 
-    af::array computeCustomMask(const af::array& inputImage) const {
+    af::array computeStrengthenedWatermark(const af::array& inputGrayImage, const af::array& inputImage, float& watermarkStrength, const MASK_TYPE maskType) const override {
+        // compute mask
+        const af::array mask = maskType == ME ? this->template computePredictionErrorMask<false>(computePredictionErrorData(inputGrayImage, true)) : computeCustomMask(inputGrayImage);
+        // compute strengthened watermark and sum of squares in one kernel to save bandwidth
+        const int N = static_cast<int>(mask.elements());
+        const int blocks = std::min<int>((N + strWatermarkBlockSize - 1) / strWatermarkBlockSize, 2560);
+        const af::array u(mask.dims(), f32);
+        const af::array sumSq = af::constant(0.0f, 1, f32);
+        float* uPtr = u.device<float>();
+        float* sumSqPtr = sumSq.device<float>();
+        compute_u_and_sumsq<<<blocks, strWatermarkBlockSize, 0, afStream>>>(mask.device<float>(), this->randomMatrix.template device<float>(), uPtr, sumSqPtr, N);
+        // compute and apply watermark
+        const float sqrtN = this->strengthFactor * std::sqrt(static_cast<float>(inputGrayImage.elements()));
+        af::array output(inputImage.dims(), u8);
+        const int totalElements = static_cast<int>(inputImage.elements()); // note: may be larger than N due to multiple channels
+        const int numChannels = static_cast<int>(inputImage.dims(2));
+        const int blocksApply = std::min<int>((N + applyWatermarkBlockSize - 1) / applyWatermarkBlockSize, 2560);
+        apply_watermark_fused<<<blocksApply, applyWatermarkBlockSize, 0, afStream>>>(inputImage.device<float>(), uPtr, sumSqPtr, output.device<unsigned char>(), sqrtN, N, numChannels);
+        this->unlockArrays(inputImage, u, sumSq, output, mask, this->randomMatrix);
+        return output;
+    }
+
+    af::array computeCustomMask(const af::array& inputImage) const override {
         // transposed grid dimensions because of column-major order in arrayfire
         const dim3 gridSize = cuda_utils::gridSizeCalculate(windowBlockSize, this->baseCols, this->baseRows);
         const af::array customMask(this->baseRows, this->baseCols);
@@ -35,7 +58,7 @@ template <int p> class WatermarkCuda final : public WatermarkGPU<p> {
         return customMask;
     }
 
-    af::array computeErrorSequence(const af::array& image, const bool calculateAbs) const {
+    af::array computeErrorSequence(const af::array& image, const bool calculateAbs) const override {
         // transposed grid dimensions because of column-major order in arrayfire
         const dim3 gridSize = cuda_utils::gridSizeCalculate(windowBlockSize, this->baseCols, this->baseRows);
         const af::array errorSequence(this->baseRows, this->baseCols);
@@ -47,7 +70,7 @@ template <int p> class WatermarkCuda final : public WatermarkGPU<p> {
         return errorSequence;
     }
 
-    af::array computeErrorSequence(const af::array& inputA, const af::array& inputB) const {
+    af::array computeErrorSequence(const af::array& inputA, const af::array& inputB) const override {
         // transposed grid dimensions because of column-major order in arrayfire
         const dim3 gridSize = cuda_utils::gridSizeCalculate(windowBlockSize, this->baseCols, this->baseRows);
         const af::array errorSequence(this->baseRows, this->baseCols);
@@ -60,7 +83,7 @@ template <int p> class WatermarkCuda final : public WatermarkGPU<p> {
         return errorSequence;
     }
 
-    af::array computePredictionErrorData(const af::array& image, const bool calculateAbs) const {
+    af::array computePredictionErrorData(const af::array& image, const bool calculateAbs) const override {
         const int blocksX = meKernelDims.x / meBlockSize.x;
         const dim3 gridSize = cuda_utils::gridSizeCalculate(meBlockSize, meKernelDims.y, meKernelDims.x);
 
@@ -99,7 +122,7 @@ template <int p> class WatermarkCuda final : public WatermarkGPU<p> {
         return computeErrorSequence(image, calculateAbs);
     }
 
-    float computeCorrelation(const af::array& e_u, const af::array& e_z) const {
+    float computeCorrelation(const af::array& e_u, const af::array& e_z) const override {
         const int N = static_cast<int>(e_u.elements());
         const int blocks = std::min<int>((N + corrPartialBlockSize - 1) / corrPartialBlockSize, 2560);
         const af::array dotPartial(blocks);

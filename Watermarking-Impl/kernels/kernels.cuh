@@ -457,7 +457,7 @@ __device__ void rxStreamPass(const int tid, const int warpWindowStart, half (*__
     for (int k = startIdx + tid; k < startIdx + count; k += 128) {
         float sum = 0.0f;
         const int localK = k - startIdx; // map global K to window index [0,31]
-        // sum across the 4 warps (rows 0, 32, 64, 96)
+                                         // sum across the 4 warps (rows 0, 32, 64, 96)
 #pragma unroll
         for (int w = 0; w < 4; w++)
             sum += __half2float(RxLocal[w * 32 + localK][80]);
@@ -491,11 +491,18 @@ __device__ void load_neighbor_vec_p5(half8* dst, const half blockValues[5][260],
 __device__ void load_neighbor_vec_p7(half8* dst, const half blockValues[7][262], half& center);
 __device__ void load_neighbor_vec_p9(half8* dst, const half blockValues[9][136], half& center);
 
-// Prediction Error kernels (ME) for p = 3, p = 5 and p = 7
+// Prediction Error kernels (ME) for p = 3, p = 5, p = 7 and p = 9
 __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height);
 __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height);
 __global__ void me_p7(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height);
 __global__ void me_p9(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height);
+
+// fused calculation of u and sum of squares
+__global__ void compute_u_and_sumsq(const float* __restrict__ mask, const float* __restrict__ w, float* __restrict__ u, float* __restrict__ globalSumSq, int N);
+
+// fused application of watermark: applies the watermark and calculates the output in one pass, using the precomputed u and sum of squares for normalization
+__global__ void apply_watermark_fused(const float* __restrict__ input, const float* __restrict__ u, const float* __restrict__ sumSqPtr, unsigned char* __restrict__ output, const float sqrtN,
+                                      const int planeElements, const int numChannels);
 
 // main kernels for correlation calculation. used in detection.
 __global__ void calculate_partial_correlation(const float* __restrict__ e_u, const float* __restrict__ e_z, float* __restrict__ partialDots, float* __restrict__ partialNormU,
