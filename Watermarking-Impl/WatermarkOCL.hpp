@@ -4,6 +4,7 @@
 #include "WatermarkBase.hpp"
 #include "WatermarkGpu.hpp"
 #include <af/opencl.h>
+#include <algorithm>
 #include <arrayfire.h>
 #include <memory>
 #include <string>
@@ -143,8 +144,9 @@ template <int p> class WatermarkOCL final : public WatermarkGPU<p> {
 
     float computeCorrelation(const af::array& e_u, const af::array& e_z) const {
         const int N = static_cast<int>(e_u.elements());
-        const int globalSizePartials = align<corrPartialLocalSize>(N);
-        const int blocks = globalSizePartials / corrPartialLocalSize;
+        const int neededBlocks = (N + corrPartialLocalSize - 1) / corrPartialLocalSize;
+        const int blocks = std::min(neededBlocks, 2560);
+        const int globalSizePartials = blocks * corrPartialLocalSize;
         const af::array dotPartial(blocks);
         const af::array uNormPartial(blocks);
         const af::array zNormPartial(blocks);

@@ -140,7 +140,7 @@ __kernel void error_sequence_fused(
 }
 
 )CLC"
-R"CLC(
+                                   R"CLC(
 
 inline void me_p3_rxCalculate(__local half RxLocal[256][40], const int localId, const half x_0, const half x_1, const half x_2, const half x_3, const half x_4, const half x_5, const half x_6, const half x_7, const half x_8)
 {
@@ -357,7 +357,7 @@ __kernel void me(
 }
 
 )CLC"
-R"CLC(
+                                   R"CLC(
 
 #elif WINDOW_SIZE == 7
 __kernel void me(
@@ -503,20 +503,29 @@ __kernel void calculate_partial_correlation(
     const int tid = get_local_id(0);
     const int gid = get_global_id(0);
     const int groupId = get_group_id(0);
+    const int stride = get_global_size(0);
 
     __local float dotCache[256];
     __local float normUCache[256];
     __local float normZCache[256];
 
-    float a = 0.0f, b = 0.0f;
-    if (gid < size) {
-        a = e_u[gid];
-        b = e_z[gid];
+    float sumDot = 0.0f;
+    float sumNormU = 0.0f;
+    float sumNormZ = 0.0f;
+
+    int idx = gid;
+    while (idx < size) {
+        float a = e_u[idx];
+        float b = e_z[idx];
+        sumDot += a * b;
+        sumNormU += a * a;
+        sumNormZ += b * b;
+        idx += stride;
     }
 
-    dotCache[tid] = a * b;
-    normUCache[tid] = a * a;
-    normZCache[tid] = b * b;
+    dotCache[tid] = sumDot;
+    normUCache[tid] = sumNormU;
+    normZCache[tid] = sumNormZ;
     barrier(CLK_LOCAL_MEM_FENCE);
 
     for (int s = 128; s > 0; s >>= 1) {
@@ -606,7 +615,7 @@ __kernel void calculate_final_correlation(
 }
 
 )CLC"
-R"CLC(
+                                   R"CLC(
 
 // naive very low latency 1-thread solver
 // define this kernel ONLY for p=3 and p=5

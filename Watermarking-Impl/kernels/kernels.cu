@@ -718,23 +718,33 @@ __global__ void me_p9(const float* __restrict__ input, float* __restrict__ Rx, f
 __global__ void calculate_partial_correlation(const float* __restrict__ e_u, const float* __restrict__ e_z, float* __restrict__ partialDots, float* __restrict__ partialNormU,
                                               float* __restrict__ partialNormZ, const unsigned int size) {
     const int tid = threadIdx.x;
-    const int idx = blockIdx.x * blockDim.x + tid;
+    const int stride = blockDim.x * gridDim.x;
     const int warpId = tid / 32;
 
-    // support for up to 1024/32 = 32 warps per block
-    __shared__ float dotCache[32];
-    __shared__ float normUCache[32];
-    __shared__ float normZCache[32];
+    // 768 threads -> 24 warps
+    __shared__ float dotCache[24];
+    __shared__ float normUCache[24];
+    __shared__ float normZCache[24];
 
-    float a = 0.0f, b = 0.0f;
-    if (idx < size) {
-        a = e_u[idx];
-        b = e_z[idx];
+    int idx = blockIdx.x * blockDim.x + tid;
+
+    float sumDot = 0.0f;
+    float sumNormU = 0.0f;
+    float sumNormZ = 0.0f;
+
+    //strided load
+    while (idx < size) {
+        const float a = e_u[idx];
+        const float b = e_z[idx];
+        sumDot += a * b;
+        sumNormU += a * a;
+        sumNormZ += b * b;
+        idx += stride;
     }
 
-    float dotVal = a * b;
-    float normUVal = a * a;
-    float normZVal = b * b;
+    float dotVal = sumDot;
+    float normUVal = sumNormU;
+    float normZVal = sumNormZ;
 
     // intra-warp reduction
     for (int offset = 16; offset > 0; offset >>= 1) {
@@ -752,8 +762,8 @@ __global__ void calculate_partial_correlation(const float* __restrict__ e_u, con
     __syncthreads();
 
     // final reduction by first warp
-    if (tid < 32) {
-        const bool validTid = tid < (blockDim.x + warpSize - 1) / 32;
+    if (warpId == 0) {
+        const bool validTid = tid < (blockDim.x >> 5);
         dotVal = validTid ? dotCache[tid] : 0.0f;
         normUVal = validTid ? normUCache[tid] : 0.0f;
         normZVal = validTid ? normZCache[tid] : 0.0f;

@@ -4,6 +4,7 @@
 #include "kernels/kernels.cuh"
 #include "WatermarkBase.hpp"
 #include "WatermarkGpu.hpp"
+#include <algorithm>
 #include <arrayfire.h>
 #include <cuda_runtime.h>
 #include <string>
@@ -19,7 +20,7 @@ template <int p> class WatermarkCuda final : public WatermarkGPU<p> {
 
   private:
     static constexpr dim3 windowBlockSize{16, 16}, meBlockSize{p == 9 ? 128 : 256, 1};
-    static constexpr unsigned int corrPartialBlockSize = 256, corrFinalBlockSize = 1024;
+    static constexpr unsigned int corrPartialBlockSize = 768, corrFinalBlockSize = 1024;
     dim3 meKernelDims;
     cudaStream_t afStream;
 
@@ -100,7 +101,7 @@ template <int p> class WatermarkCuda final : public WatermarkGPU<p> {
 
     float computeCorrelation(const af::array& e_u, const af::array& e_z) const {
         const int N = static_cast<int>(e_u.elements());
-        const int blocks = (N + corrPartialBlockSize - 1) / corrPartialBlockSize;
+        const int blocks = std::min<int>((N + corrPartialBlockSize - 1) / corrPartialBlockSize, 2560);
         const af::array dotPartial(blocks);
         const af::array uNormPartial(blocks);
         const af::array zNormPartial(blocks);
