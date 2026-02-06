@@ -203,7 +203,7 @@ Tests were executed with a loop count of 1000 iterations to ensure statistical s
 
 ## Observations
 
-- CUDA: Consistently delivers the highest throughput, peaking at over 8,000 FPS for p=3 at 480p. It is the ideal choice for realtime applications.
+- CUDA: Consistently delivers the highest throughput and it is the ideal choice for realtime applications.
 - OpenCL: Serves as a good middle ground, offering significant acceleration over the CPU (often 5x-10x faster) while maintaining portability across non-NVIDIA hardware (AMD, Intel, etc.).
 - CPU: Functions as the fallback implementation. While slower, it is very optimized for CPU architecture, and also eensures compatibility on systems without dedicated GPUs.
 
@@ -213,9 +213,8 @@ Tests were executed with a loop count of 1000 iterations to ensure statistical s
 
 - Resolution Scaling: Performance scales inversely with pixel count. However, even at 4K resolution, the GPU implementations remain viable for interactive framerates, whereas the CPU implementation becomes a bottleneck.
 
-
 p = 3            |  p = 5
 :-------------------------:|:-------------------------:
- ![p3](https://github.com/user-attachments/assets/e23073d8-3c94-4464-a35d-db87fcdeb448) | ![p5](https://github.com/user-attachments/assets/61b4bf55-bd6b-46ff-9fbf-931e87315a2d)
+ ![p3](https://github.com/user-attachments/assets/4a38de3a-757a-4761-84ae-1c2249476c44) | ![p5](https://github.com/user-attachments/assets/53e29e6f-224e-402d-891f-16ef6147f513)
 p = 7            |  p = 9
- ![p3](https://github.com/user-attachments/assets/25c869ab-91e5-44ab-a394-552da104d0c5) | ![p5](https://github.com/user-attachments/assets/0bcac365-ebf4-4c73-9052-a4c29aaeee11)
+ ![p7](https://github.com/user-attachments/assets/205a1f5d-97ce-479e-9664-9de5b142f73f) | ![p9](https://github.com/user-attachments/assets/ce08ed59-f0ee-4d8d-be60-c09929043d8f)
