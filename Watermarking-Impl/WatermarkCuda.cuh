@@ -4,8 +4,8 @@
 #include "kernels/kernels.cuh"
 #include "WatermarkBase.hpp"
 #include "WatermarkGpu.hpp"
-#include <algorithm>
 #include <arrayfire.h>
+#include <cmath>
 #include <cuda_runtime.h>
 #include <string>
 
@@ -20,11 +20,30 @@ template <int p> class WatermarkCuda final : public WatermarkGPU<p> {
 
   private:
     static constexpr dim3 windowBlockSize{16, 16}, meBlockSize{p == 9 ? 128 : 256, 1};
-    static constexpr unsigned int corrPartialBlockSize = 768, corrFinalBlockSize = 1024;
+    static constexpr unsigned int corrPartialBlockSize = 768, corrFinalBlockSize = 1024, strWatermarkBlockSize = 768, applyWatermarkBlockSize = 768;
     dim3 meKernelDims;
     cudaStream_t afStream;
 
-    af::array computeCustomMask(const af::array& inputImage) const {
+    af::array computeStrengthenedWatermark(const af::array& inputGrayImage, const af::array& inputImage, float& watermarkStrength, const MASK_TYPE maskType) const override {
+        const af::array u(inputGrayImage.dims(), f32);
+        const af::array output(inputImage.dims(), u8);
+        const af::array sumSq = af::constant(0.0f, 1, f32);
+        // compute mask
+        const af::array mask = maskType == ME ? this->template computePredictionErrorMask<false>(computePredictionErrorData(inputGrayImage, true)) : computeCustomMask(inputGrayImage);
+        // compute strengthened watermark and sum of squares in one kernel to save bandwidth
+        const int blocksComputeU = cuda_utils::gridSize1DStridedCalculate(this->totalPixels, strWatermarkBlockSize);
+        float* uPtr = u.device<float>();
+        float* sumSqPtr = sumSq.device<float>();
+        compute_u_and_sumsq<<<blocksComputeU, strWatermarkBlockSize, 0, afStream>>>(mask.device<float>(), this->randomMatrix.template device<float>(), uPtr, sumSqPtr, this->totalPixels);
+        // compute and apply watermark
+        const int blocksApply = cuda_utils::gridSize1DStridedCalculate(this->totalPixels, applyWatermarkBlockSize);
+        apply_watermark_fused<<<blocksApply, applyWatermarkBlockSize, 0, afStream>>>(inputImage.device<float>(), uPtr, sumSqPtr, output.device<unsigned char>(), this->strengthNumerator, this->totalPixels,
+                                                                                     static_cast<int>(inputImage.dims(2)));
+        this->unlockArrays(inputImage, u, sumSq, output, mask, this->randomMatrix);
+        return output;
+    }
+
+    af::array computeCustomMask(const af::array& inputImage) const override {
         // transposed grid dimensions because of column-major order in arrayfire
         const dim3 gridSize = cuda_utils::gridSizeCalculate(windowBlockSize, this->baseCols, this->baseRows);
         const af::array customMask(this->baseRows, this->baseCols);
@@ -35,7 +54,7 @@ template <int p> class WatermarkCuda final : public WatermarkGPU<p> {
         return customMask;
     }
 
-    af::array computeErrorSequence(const af::array& image, const bool calculateAbs) const {
+    af::array computeErrorSequence(const af::array& image, const bool calculateAbs) const override {
         // transposed grid dimensions because of column-major order in arrayfire
         const dim3 gridSize = cuda_utils::gridSizeCalculate(windowBlockSize, this->baseCols, this->baseRows);
         const af::array errorSequence(this->baseRows, this->baseCols);
@@ -47,7 +66,7 @@ template <int p> class WatermarkCuda final : public WatermarkGPU<p> {
         return errorSequence;
     }
 
-    af::array computeErrorSequence(const af::array& inputA, const af::array& inputB) const {
+    af::array computeErrorSequence(const af::array& inputA, const af::array& inputB) const override {
         // transposed grid dimensions because of column-major order in arrayfire
         const dim3 gridSize = cuda_utils::gridSizeCalculate(windowBlockSize, this->baseCols, this->baseRows);
         const af::array errorSequence(this->baseRows, this->baseCols);
@@ -60,10 +79,9 @@ template <int p> class WatermarkCuda final : public WatermarkGPU<p> {
         return errorSequence;
     }
 
-    af::array computePredictionErrorData(const af::array& image, const bool calculateAbs) const {
+    af::array computePredictionErrorData(const af::array& image, const bool calculateAbs) const override {
         const int blocksX = meKernelDims.x / meBlockSize.x;
         const dim3 gridSize = cuda_utils::gridSizeCalculate(meBlockSize, meKernelDims.y, meKernelDims.x);
-
         af::array RxPartial, rxPartial;
         // call prediction error Rx/rx partials calculation kernel
         if constexpr (p == 3) {
@@ -95,13 +113,12 @@ template <int p> class WatermarkCuda final : public WatermarkGPU<p> {
         else
             cholesky_solver_parallel<p><<<1, 32, 0, afStream>>>(Rx.device<float>(), rx.device<float>(), this->coefficients.template device<float>(), this->stopFlag.template device<int>());
         this->unlockArrays(Rx, rx, this->coefficients, this->stopFlag);
-        this->unlockArrays(Rx, rx, this->coefficients, this->stopFlag);
         return computeErrorSequence(image, calculateAbs);
     }
 
-    float computeCorrelation(const af::array& e_u, const af::array& e_z) const {
+    float computeCorrelation(const af::array& e_u, const af::array& e_z) const override {
         const int N = static_cast<int>(e_u.elements());
-        const int blocks = std::min<int>((N + corrPartialBlockSize - 1) / corrPartialBlockSize, 2560);
+        const int blocks = cuda_utils::gridSize1DStridedCalculate(N, corrPartialBlockSize);
         const af::array dotPartial(blocks);
         const af::array uNormPartial(blocks);
         const af::array zNormPartial(blocks);
@@ -109,7 +126,6 @@ template <int p> class WatermarkCuda final : public WatermarkGPU<p> {
         float* dotPartialPtr = dotPartial.device<float>();
         float* uNormPartialPtr = uNormPartial.device<float>();
         float* zNormPartialPtr = zNormPartial.device<float>();
-
         // calculate partial dot products and norms
         calculate_partial_correlation<<<blocks, corrPartialBlockSize, 0, afStream>>>(e_u.device<float>(), e_z.device<float>(), dotPartialPtr, uNormPartialPtr, zNormPartialPtr, N);
         // reduce partials and compute correlation

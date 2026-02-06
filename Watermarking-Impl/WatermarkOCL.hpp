@@ -4,7 +4,6 @@
 #include "WatermarkBase.hpp"
 #include "WatermarkGpu.hpp"
 #include <af/opencl.h>
-#include <algorithm>
 #include <arrayfire.h>
 #include <memory>
 #include <string>
@@ -14,8 +13,6 @@ struct dim2 {
     dim_t cols;
 };
 
-using namespace cl_utils;
-
 /*!
  *  \brief  Functions for watermark computation and detection, OpenCL implementation.
  *  \author Dimitris Karatzas
@@ -24,7 +21,7 @@ template <int p> class WatermarkOCL final : public WatermarkGPU<p> {
   public:
     WatermarkOCL<p>(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr)
         : WatermarkGPU<p>(rows, cols, randomMatrixPath, psnr), texKernelDims{align<windowLocalSize>(rows), align<windowLocalSize>(cols)}, meKernelDims{rows, align<meLocalSize>(cols)},
-          programs(buildKernels(p)) {}
+          programs(cl_utils::buildKernels(p)) {}
 
   private:
     using WatermarkBase::align;
@@ -33,16 +30,58 @@ template <int p> class WatermarkOCL final : public WatermarkGPU<p> {
     static constexpr unsigned int corrPartialLocalSize = 256;
     static constexpr unsigned int windowLocalSize = 16;
     static constexpr unsigned int meLocalSize = 256;
+    static constexpr unsigned int applyWatermarkLocalSize = 256;      // safe universal local size for OpenCL, used in apply watermark kernel and in compute_u_and_sumsq kernel
     static constexpr unsigned int choleskyLocalSize = p < 7 ? 1 : 64; // for p >= 7 we use 64-thread cholesky solver, for p < 7 single thread (faster for small p)
 
     cl::Context context{afcl::getContext(true)};
     cl::CommandQueue queue{afcl::getQueue(true)};
     cl::Device device{afcl::getDeviceId(), true};
     dim2 texKernelDims, meKernelDims;
-    unsigned int corrFinalLocalSize = maxPow2WorkGroupSize(device);
+    unsigned int corrFinalLocalSize = cl_utils::maxPow2WorkGroupSize(device); // we could use the safe universal of 256, but the kernel that uses this benefits from larger local sizes
     cl::Program programs;
 
-    af::array computeCustomMask(const af::array& image) const {
+    af::array computeStrengthenedWatermark(const af::array& inputGrayImage, const af::array& inputImage, float& watermarkStrength, const MASK_TYPE maskType) const override {
+        using namespace cl_utils;
+        const af::array u(inputGrayImage.dims(), f32);
+        const af::array output(inputImage.dims(), u8);
+        const af::array sumSq = af::constant(0.0f, 1, f32);
+        // compute mask
+        const af::array mask = maskType == ME ? this->template computePredictionErrorMask<false>(computePredictionErrorData(inputGrayImage, true)) : computeCustomMask(inputGrayImage);
+        // compute strengthened watermark and sum of squares in one kernel to save bandwidth (extra kernel to sum the partial sums)
+        const int blocks = calculateLocalGroupsNumber(this->totalPixels, applyWatermarkLocalSize);
+        const int globalSize = blocks * applyWatermarkLocalSize;
+        const af::array partials(blocks, f32);
+        const clMemPtr uMem(u.device<cl_mem>());
+        const clMemPtr outputMem(output.device<cl_mem>());
+        const clMemPtr sumSqMem(sumSq.device<cl_mem>());
+        const clMemPtr maskMem(mask.device<cl_mem>());
+        const clMemPtr randMem(this->randomMatrix.template device<cl_mem>());
+        const clMemPtr inputMem(inputImage.device<cl_mem>());
+        const clMemPtr partialsMem(partials.device<cl_mem>());
+
+        executeKernel(
+            [&]() {
+                queue.enqueueNDRangeKernel(
+                    KernelBuilder(programs, "compute_u_and_partial_sumsq").args(wrap(maskMem.get()), wrap(randMem.get()), wrap(uMem.get()), wrap(partialsMem.get()), this->totalPixels).build(),
+                    cl::NDRange(), cl::NDRange(globalSize), cl::NDRange(applyWatermarkLocalSize));
+
+                queue.enqueueNDRangeKernel(KernelBuilder(programs, "reduce_sumsq_partials").args(wrap(partialsMem.get()), wrap(sumSqMem.get()), blocks).build(), cl::NDRange(),
+                                           cl::NDRange(applyWatermarkLocalSize), cl::NDRange(applyWatermarkLocalSize));
+
+                queue.enqueueNDRangeKernel(
+                    KernelBuilder(programs, "apply_watermark_fused")
+                        .args(wrap(inputMem.get()), wrap(uMem.get()), wrap(sumSqMem.get()), wrap(outputMem.get()), this->strengthNumerator, this->totalPixels, static_cast<int>(inputImage.dims(2)))
+                        .build(),
+                    cl::NDRange(), cl::NDRange(globalSize), cl::NDRange(applyWatermarkLocalSize));
+
+                this->unlockArrays(inputImage, u, sumSq, output, mask, partials, this->randomMatrix);
+            },
+            "computeStrengthenedWatermark");
+        return output;
+    }
+
+    af::array computeCustomMask(const af::array& image) const override {
+        using namespace cl_utils;
         const af::array customMask(this->baseRows, this->baseCols);
         const clMemPtr imageMem(image.device<cl_mem>());
         const clMemPtr outputMem(customMask.device<cl_mem>());
@@ -57,7 +96,8 @@ template <int p> class WatermarkOCL final : public WatermarkGPU<p> {
         return customMask;
     }
 
-    af::array computeErrorSequence(const af::array& image, const bool calculateAbs) const {
+    af::array computeErrorSequence(const af::array& image, const bool calculateAbs) const override {
+        using namespace cl_utils;
         const af::array errorSequence(this->baseRows, this->baseCols);
         const clMemPtr imageMem(image.device<cl_mem>());
         const clMemPtr coeffsMem(this->coefficients.template device<cl_mem>());
@@ -77,7 +117,8 @@ template <int p> class WatermarkOCL final : public WatermarkGPU<p> {
         return errorSequence;
     }
 
-    af::array computeErrorSequence(const af::array& inputA, const af::array& inputB) const {
+    af::array computeErrorSequence(const af::array& inputA, const af::array& inputB) const override {
+        using namespace cl_utils;
         const af::array errorSequence(this->baseRows, this->baseCols);
         const clMemPtr inputAmem(inputA.device<cl_mem>());
         const clMemPtr inputBmem(inputB.device<cl_mem>());
@@ -98,7 +139,8 @@ template <int p> class WatermarkOCL final : public WatermarkGPU<p> {
         return errorSequence;
     }
 
-    af::array computePredictionErrorData(const af::array& image, const bool calculateAbs) const {
+    af::array computePredictionErrorData(const af::array& image, const bool calculateAbs) const override {
+        using namespace cl_utils;
         const auto meArraysBaseWidth = meKernelDims.cols / meLocalSize;
         const clMemPtr imageMem(image.device<cl_mem>());
         af::array RxPartial, rxPartial;
@@ -142,10 +184,10 @@ template <int p> class WatermarkOCL final : public WatermarkGPU<p> {
             "me");
     }
 
-    float computeCorrelation(const af::array& e_u, const af::array& e_z) const {
+    float computeCorrelation(const af::array& e_u, const af::array& e_z) const override {
+        using namespace cl_utils;
         const int N = static_cast<int>(e_u.elements());
-        const int neededBlocks = (N + corrPartialLocalSize - 1) / corrPartialLocalSize;
-        const int blocks = std::min(neededBlocks, 2560);
+        const int blocks = calculateLocalGroupsNumber(N, corrPartialLocalSize);
         const int globalSizePartials = blocks * corrPartialLocalSize;
         const af::array dotPartial(blocks);
         const af::array uNormPartial(blocks);

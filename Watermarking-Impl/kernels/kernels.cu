@@ -184,7 +184,7 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
     const int tid = threadIdx.x;
     const int x = blockIdx.x * 256 + tid;
     const int y = blockIdx.y * blockDim.y + threadIdx.y;
-    const int warpId = tid / 32;
+    const int warpId = tid >> 5;
     const int startRow = warpId * 32;
 
     // shared memory for Rx, rx, scratch and all pixels utilized by the whole block
@@ -280,7 +280,7 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
     const int tid = threadIdx.x;
     const int x = blockIdx.x * 256 + tid;
     const int y = blockIdx.y * blockDim.y + threadIdx.y;
-    const int warpId = tid / 32;
+    const int warpId = tid >> 5;
     const int startRow = warpId * 32;
 
     // shared memory for Rx, rx, scratch and all pixels utilized by the whole block
@@ -411,7 +411,7 @@ __global__ void me_p7(const float* __restrict__ input, float* __restrict__ Rx, f
     const int tid = threadIdx.x;
     const int x = blockIdx.x * 256 + tid;
     const int y = blockIdx.y * blockDim.y + threadIdx.y;
-    const int warpId = tid / 32;
+    const int warpId = tid >> 5;
     const int startRow = warpId * 32;
 
     // shared memory for Rx, rx, scratch and all pixels utilized by the whole block
@@ -546,7 +546,7 @@ __global__ void me_p9(const float* __restrict__ input, float* __restrict__ Rx, f
     const int tid = threadIdx.x;
     const int x = blockIdx.x * 128 + tid;
     const int y = blockIdx.y * blockDim.y + threadIdx.y;
-    const int warpId = tid / 32;
+    const int warpId = tid >> 5;
     const int startRow = warpId * 32;
 
     // shared memory for Rx, rx, scratch and all pixels utilized by the whole block
@@ -715,6 +715,67 @@ __global__ void me_p9(const float* __restrict__ input, float* __restrict__ Rx, f
     rxStreamPass<64, 16>(tid, warpWindowStart, RxLocal, rxVec, rx, rxBaseIndex);
 }
 
+__global__ void compute_u_and_sumsq(const float* __restrict__ mask, const float* __restrict__ w, float* __restrict__ u, float* __restrict__ globalSumSq, int N) {
+
+    const int tid = threadIdx.x;
+    const int gridSize = blockDim.x * gridDim.x;
+    const int laneId = tid & 31;
+    const int warpId = tid >> 5;
+    int idx = blockIdx.x * blockDim.x + tid;
+
+    // block size is 768 -> 24 warps
+    __shared__ float warpLevelSums[24];
+
+    // fuse calculation of u and local sum of squares
+    float localSumSq = 0.0f;
+    while (idx < N) {
+        const float uVal = mask[idx] * w[idx];
+        u[idx] = uVal;
+        localSumSq += uVal * uVal;
+        idx += gridSize;
+    }
+    // warp level reduction
+#pragma unroll
+    for (int offset = 16; offset > 0; offset >>= 1)
+        localSumSq += __shfl_down_sync(0xFFFFFFFF, localSumSq, offset);
+
+    // block level reduction, leader of each warp (lane 0) holds the sum for that warp
+    if (laneId == 0)
+        warpLevelSums[warpId] = localSumSq;
+    __syncthreads();
+
+    // final block sum by first warp
+    if (warpId == 0) {
+        float blockSum = (tid < (blockDim.x >> 5)) ? warpLevelSums[laneId] : 0.0f;
+#pragma unroll
+        for (int offset = 16; offset > 0; offset >>= 1)
+            blockSum += __shfl_down_sync(0xFFFFFFFF, blockSum, offset);
+
+        // final global atomic add, only thread 0 of the block does this, we want to minimize atomics as much as possible
+        if (tid == 0)
+            atomicAdd(globalSumSq, blockSum);
+    }
+}
+
+__global__ void apply_watermark_fused(const float* __restrict__ input, const float* __restrict__ u, const float* __restrict__ sumSqPtr, uint8_t* __restrict__ output, const float strengthNumerator,
+                                      const int planeElements, const int numChannels) {
+    const float uSumSquared = *sumSqPtr; // read the precomputed sum of squares from global memory (all threads read the same value, it is cached)
+    const float strength = uSumSquared > 1e-12f ? strengthNumerator * rsqrtf(uSumSquared) : 0.0f;
+    // grid stride loop over the PLANE (HxW) only (if 1 channel then it's the whole image)
+    const int gridSize = blockDim.x * gridDim.x;
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    while (idx < planeElements) {
+        const float uStr = u[idx] * strength;
+        // channel loop, for grayscale it runs once, for RGB it runs 3 times
+        for (int c = 0; c < numChannels; c++) {
+            const int pixelIdx = idx + (c * planeElements);
+            const float outputVal = clamp(input[pixelIdx] + uStr + 0.5f, 0.0f, 255.0f); // round (trick + 0.5 for truncation) + clamp
+            output[pixelIdx] = (uint8_t)outputVal;                                      // cast to uint8
+        }
+        idx += gridSize;
+    }
+}
+
 __global__ void calculate_partial_correlation(const float* __restrict__ e_u, const float* __restrict__ e_z, float* __restrict__ partialDots, float* __restrict__ partialNormU,
                                               float* __restrict__ partialNormZ, const unsigned int size) {
     const int tid = threadIdx.x;
@@ -732,7 +793,7 @@ __global__ void calculate_partial_correlation(const float* __restrict__ e_u, con
     float sumNormU = 0.0f;
     float sumNormZ = 0.0f;
 
-    //strided load
+    // strided load
     while (idx < size) {
         const float a = e_u[idx];
         const float b = e_z[idx];

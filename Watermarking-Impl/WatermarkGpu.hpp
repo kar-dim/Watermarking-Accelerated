@@ -14,24 +14,16 @@
  */
 template <int p> class WatermarkGPU : public WatermarkBase {
   public:
-    WatermarkGPU<p>(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr) : WatermarkBase(rows, cols, randomMatrixPath, psnr) {}
+    WatermarkGPU<p>(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr)
+        : WatermarkBase(rows, cols, randomMatrixPath, psnr), strengthNumerator(strengthFactor * std::sqrt(static_cast<float>(this->totalPixels))) {}
 
-    WatermarkGPU<p>(const unsigned int rows, const unsigned int cols, const ImageBuffer& randomMatrix, const float strengthFactor) : WatermarkBase(rows, cols, randomMatrix, strengthFactor) {}
+    WatermarkGPU<p>(const unsigned int rows, const unsigned int cols, const ImageBuffer& randomMatrix, const float strengthFactor)
+        : WatermarkBase(rows, cols, randomMatrix, strengthFactor), strengthNumerator(strengthFactor * std::sqrt(static_cast<float>(this->totalPixels))) {}
 
     ~WatermarkGPU<p>() override = default;
 
     void makeWatermark(const ImageBuffer& inputGrayImage, const ImageBuffer& inputImage, ImageOutputBuffer& output, float& watermarkStrength, const MASK_TYPE maskType) override {
-        const af::array mask = maskType == ME ? computePredictionErrorMask<false>(computePredictionErrorData(inputGrayImage, true)) : computeCustomMask(inputGrayImage);
-        const af::array u = mask * randomMatrix;
-        u.eval(); // critical to eval, help arrayfire fuse!
-        const af::array sumSq = af::sum(af::flat(u * u));
-        const af::array watermarkStrengthDevice = af::select(sumSq > 1e-12f, strengthFactor * std::sqrt(static_cast<float>(inputGrayImage.elements())) * af::rsqrt(sumSq), 0.0f);
-        // for debug builds only, copy watermark strength to host
-#if defined(_DEBUG)
-        watermarkStrength = watermarkStrengthDevice.scalar<float>();
-#endif
-        // always write as u8 output to save bandwidth
-        output = af::round(af::clamp(inputImage + (u * watermarkStrengthDevice), 0, 255)).as(u8);
+        output = computeStrengthenedWatermark(inputGrayImage, inputImage, watermarkStrength, maskType);
     }
 
     float detectWatermark(const ImageBuffer& inputImage, const MASK_TYPE maskType) override {
@@ -57,8 +49,12 @@ template <int p> class WatermarkGPU : public WatermarkBase {
     static constexpr int localSize = pSquared - 1;
     static constexpr int localSizeSq = localSize * localSize;
 
+    float strengthNumerator;
+
     af::array coefficients = af::array(localSize, f32);
     af::array stopFlag = af::constant(0, 1, s32);
+
+    virtual af::array computeStrengthenedWatermark(const ImageBuffer& inputGrayImage, const ImageBuffer& inputImage, float& watermarkStrength, const MASK_TYPE maskType) const = 0;
 
     // computes custom Mask
     virtual af::array computeCustomMask(const af::array& image) const = 0;

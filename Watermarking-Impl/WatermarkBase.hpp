@@ -21,10 +21,10 @@ class WatermarkBase {
 
   public:
     WatermarkBase(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr)
-        : baseRows(rows), baseCols(cols), randomMatrix(loadRandomMatrix(randomMatrixPath)), strengthFactor(computeStrengthFactor(psnr)) {}
+        : baseRows(rows), baseCols(cols), totalPixels(baseRows * baseCols), randomMatrix(loadRandomMatrix(randomMatrixPath)), strengthFactor(computeStrengthFactor(psnr)) {}
 
     WatermarkBase(const unsigned int rows, const unsigned int cols, const ImageBuffer& randomMatrix, const float strengthFactor)
-        : baseRows(rows), baseCols(cols), randomMatrix(randomMatrix), strengthFactor(strengthFactor) {}
+        : baseRows(rows), baseCols(cols), totalPixels(baseRows * baseCols), randomMatrix(randomMatrix), strengthFactor(strengthFactor) {}
 
     //delete copy and move operations we don't wannt them
     WatermarkBase(const WatermarkBase&) = delete;
@@ -46,7 +46,7 @@ class WatermarkBase {
     template <unsigned int ALIGN> static constexpr unsigned int align(const unsigned int x) { return (x + (ALIGN - 1)) & ~(ALIGN - 1); }
     static constexpr bool maskCalcRequired = true;
     static constexpr bool maskCalcNotRequired = false;
-    unsigned int baseRows, baseCols;
+    unsigned int baseRows, baseCols, totalPixels;
     ImageBuffer randomMatrix;
     float strengthFactor;
 

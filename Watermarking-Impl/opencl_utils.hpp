@@ -1,5 +1,6 @@
 #pragma once
 #include "opencl_init.h"
+#include <algorithm>
 #include <stdexcept>
 #include <string>
 
@@ -34,6 +35,9 @@ inline cl::Buffer wrap(const cl_mem* mem) { return cl::Buffer(*mem, true); }
 
 // calculate the maximum power of two work group size for a device
 unsigned int maxPow2WorkGroupSize(const cl::Device& device);
+
+// helper method to calculate the number of local groups needed for a specific number of elements and local size, with a maximum of 2560 blocks (used for grid-stride kernels only)
+inline int calculateLocalGroupsNumber(const int N, const int localSize) { return std::min((N + localSize - 1) / localSize, 2560); }
 
 // helper method to execute an OpenCL kernel and throw detailed error on failure
 template <typename Func> auto executeKernel(const Func& kernelFunc, const std::string& context) {
