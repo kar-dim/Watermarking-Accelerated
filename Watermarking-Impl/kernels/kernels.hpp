@@ -310,13 +310,13 @@ __kernel void me(__global const float* restrict input,
     barrier(CLK_LOCAL_MEM_FENCE);
 
     //OpenCL optimized rx summation
-    const int col = localId % 8;
-    const int rowStart = (localId / 8) * 8; 
+    const int col = localId & 7;
+    const int rowStart = (localId >> 3) * 8; 
     half psum = 0.0h;
 #pragma unroll
     for (int r = 0; r < 8; r++)
         psum += RxLocal[rowStart + r][col];
-    rxPartial[localId / 8][col] = (float)psum;
+    rxPartial[localId >> 3][col] = (float)psum;
     barrier(CLK_LOCAL_MEM_FENCE);
     if (localId < 8) {
         float sum = 0.0f;

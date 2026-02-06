@@ -780,7 +780,7 @@ __global__ void calculate_partial_correlation(const float* __restrict__ e_u, con
                                               float* __restrict__ partialNormZ, const unsigned int size) {
     const int tid = threadIdx.x;
     const int stride = blockDim.x * gridDim.x;
-    const int warpId = tid / 32;
+    const int warpId = tid >> 5;
 
     // 768 threads -> 24 warps
     __shared__ float dotCache[24];

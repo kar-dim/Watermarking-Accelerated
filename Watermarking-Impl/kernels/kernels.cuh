@@ -180,7 +180,7 @@ template <int p, int N = (p * p) - 1> __global__ void cholesky_solver(const floa
         const float4* vecB = reinterpret_cast<const float4*>(B);
 
         // load A (Rx)
-        const int vecLimitA = SIZE / 4;
+        constexpr int vecLimitA = SIZE / 4;
 #pragma unroll
         for (int k = 0; k < vecLimitA; k++) {
             const float4 v = vecA[k];
@@ -194,7 +194,7 @@ template <int p, int N = (p * p) - 1> __global__ void cholesky_solver(const floa
             packed[k] = A[k];
 
         // load B (rx)
-        const int vecLimitB = N / 4;
+        constexpr int vecLimitB = N / 4;
 #pragma unroll
         for (int i = 0; i < vecLimitB; i++) {
             const float4 v = vecB[i];
@@ -445,8 +445,8 @@ __device__ void rxStreamPass(const int tid, const int warpWindowStart, half (*__
     if ((tid & 31) == 0) {
         // process 8 elements per iteration (one half8 vector)
 #pragma unroll
-        for (int v = 0; v < count / 8; v++) {
-            const int absVecIdx = (startIdx / 8) + v;
+        for (int v = 0; v < count >> 3; v++) {
+            const int absVecIdx = (startIdx >> 3) + v;
             half8* sharedVec = reinterpret_cast<half8*>(&RxLocal[warpWindowStart + v][80]);
             // STS.128
             *sharedVec = rxVec[absVecIdx];
@@ -456,8 +456,8 @@ __device__ void rxStreamPass(const int tid, const int warpWindowStart, half (*__
     for (int k = startIdx + tid; k < startIdx + count; k += 128) {
         float sum = 0.0f;
         const int localK = k - startIdx; // map global K to window index [0,31]
-        const int rowInWarp = localK / 8;
-        const int colInRow = 80 + (localK % 8);
+        const int rowInWarp = localK >> 3;
+        const int colInRow = 80 + (localK & 7);
         // sum across the 4 warps
 #pragma unroll
         for (int w = 0; w < 4; w++)
