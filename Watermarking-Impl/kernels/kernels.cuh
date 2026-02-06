@@ -443,24 +443,25 @@ template <int startIdx, int count>
 __device__ void rxStreamPass(const int tid, const int warpWindowStart, half (*__restrict__ RxLocal)[88], const half8* __restrict__ rxVec, float* __restrict__ rxGlobal, const int rxBaseIndex) {
     // warp leaders flush registers to shared memory window
     if ((tid & 31) == 0) {
+        // process 8 elements per iteration (one half8 vector)
 #pragma unroll
-        for (int k = 0; k < count; k++) {
-            // calculate absolute index to find the right half8 vector
-            const int absK = startIdx + k;
-            const int vecIdx = absK / 8;
-            const int elemIdx = absK % 8;
-            // write to column 80 of the window
-            RxLocal[warpWindowStart + k][80] = reinterpret_cast<const half*>(&rxVec[vecIdx])[elemIdx];
+        for (int v = 0; v < count / 8; v++) {
+            const int absVecIdx = (startIdx / 8) + v;
+            half8* sharedVec = reinterpret_cast<half8*>(&RxLocal[warpWindowStart + v][80]);
+            // STS.128
+            *sharedVec = rxVec[absVecIdx];
         }
     }
-    __syncthreads(); // wait for leaders to write to Shared Mem
+    __syncthreads(); // wait for leaders to write
     for (int k = startIdx + tid; k < startIdx + count; k += 128) {
         float sum = 0.0f;
         const int localK = k - startIdx; // map global K to window index [0,31]
-                                         // sum across the 4 warps (rows 0, 32, 64, 96)
+        const int rowInWarp = localK / 8;
+        const int colInRow = 80 + (localK % 8);
+        // sum across the 4 warps
 #pragma unroll
         for (int w = 0; w < 4; w++)
-            sum += __half2float(RxLocal[w * 32 + localK][80]);
+            sum += __half2float(RxLocal[w * 32 + rowInWarp][colInRow]);
         rxGlobal[rxBaseIndex + k] = sum;
     }
     __syncthreads(); // wait for readers before next pass overwrites the window
