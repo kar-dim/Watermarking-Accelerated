@@ -498,13 +498,13 @@ __global__ void me_p7(const float* __restrict__ input, float* __restrict__ Rx, f
 __global__ void me_p9(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height);
 
 // fused calculation of u and sum of squares
-__global__ void compute_u_and_sumsq(const float* __restrict__ mask, const float* __restrict__ w, float* __restrict__ u, float* __restrict__ globalSumSq, int N);
+__global__ void compute_u_and_sumsq(const float* __restrict__ mask, const float* __restrict__ w, float* __restrict__ u, float* __restrict__ globalSumSq, const int N);
 
 // fused application of watermark: applies the watermark and calculates the output in one pass, using the precomputed u and sum of squares for normalization
 __global__ void apply_watermark_fused(const float* __restrict__ input, const float* __restrict__ u, const float* __restrict__ sumSqPtr, uint8_t* __restrict__ output, const float strengthNumerator,
                                       const int planeElements, const int numChannels);
 
-// main kernels for correlation calculation. used in detection.
+// main kernels for correlation calculation, used in detection.
 __global__ void calculate_partial_correlation(const float* __restrict__ e_u, const float* __restrict__ e_z, float* __restrict__ partialDots, float* __restrict__ partialNormU,
                                               float* __restrict__ partialNormZ, const unsigned int size);
 __global__ void calculate_final_correlation(const float* __restrict__ partialDots, const float* __restrict__ partialNormU, const float* __restrict__ partialNormZ, float* __restrict__ result,

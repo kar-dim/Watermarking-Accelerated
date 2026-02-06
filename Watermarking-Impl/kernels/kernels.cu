@@ -715,7 +715,7 @@ __global__ void me_p9(const float* __restrict__ input, float* __restrict__ Rx, f
     rxStreamPass<64, 16>(tid, warpWindowStart, RxLocal, rxVec, rx, rxBaseIndex);
 }
 
-__global__ void compute_u_and_sumsq(const float* __restrict__ mask, const float* __restrict__ w, float* __restrict__ u, float* __restrict__ globalSumSq, int N) {
+__global__ void compute_u_and_sumsq(const float* __restrict__ mask, const float* __restrict__ w, float* __restrict__ u, float* __restrict__ globalSumSq, const int N) {
 
     const int tid = threadIdx.x;
     const int gridSize = blockDim.x * gridDim.x;
