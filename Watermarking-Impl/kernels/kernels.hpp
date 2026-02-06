@@ -139,8 +139,93 @@ __kernel void error_sequence_fused(
     }
 }
 
+__kernel void compute_u_and_partial_sumsq(
+    __global const float* restrict mask,
+    __global const float* restrict w,
+    __global float* restrict u,
+    __global float* restrict partials,
+    const int N) 
+{
+    const int tid = get_local_id(0);
+    const int stride = get_global_size(0);
+    const int gid = get_group_id(0);
+    int idx = get_global_id(0);
+    
+    __local float sums[256];
+
+    float localSumSq = 0.0f;
+    while (idx < N) {
+        const float uVal = mask[idx] * w[idx];
+        u[idx] = uVal;
+        localSumSq += uVal * uVal;
+        idx += stride;
+    }
+    sums[tid] = localSumSq;
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    for (int s = 128; s > 0; s >>= 1) {
+        if (tid < s)
+            sums[tid] += sums[tid + s];
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+
+    if (tid == 0)
+        partials[gid] = sums[0];
+}
+
+__kernel void reduce_sumsq_partials(
+    __global const float* restrict partials,
+    __global float* restrict globalSumSq,
+    const int numPartials)
+{
+    const int tid = get_local_id(0);
+    __local float sums[256];
+
+    float localSum = 0.0f;
+    int idx = tid;
+    while (idx < numPartials) {
+        localSum += partials[idx];
+        idx += 256;
+    }
+    sums[tid] = localSum;
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    for (int s = 128; s > 0; s >>= 1) {
+        if (tid < s)
+            sums[tid] += sums[tid + s];
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+
+    if (tid == 0)
+        *globalSumSq = sums[0];
+}
+
+__kernel void apply_watermark_fused(
+    __global const float* restrict input,
+    __global const float* restrict u,
+    __constant float* restrict sumSqPtr,
+    __global unsigned char* restrict output,
+    const float strengthNumerator,
+    const int planeElements,
+    const int numChannels) 
+{
+    const float uSumSquared = *sumSqPtr;
+    float strength = (uSumSquared > 1e-12f) ? (strengthNumerator * rsqrt(uSumSquared)) : 0.0f;
+    const int stride = get_global_size(0);
+    int idx = get_global_id(0);
+    while (idx < planeElements) {
+        const float uStr = u[idx] * strength;
+        for (int c = 0; c < numChannels; c++) {
+            const int pixelIdx = idx + (c * planeElements);
+            const float outputVal = clamp(input[pixelIdx] + uStr + 0.5f, 0.0f, 255.0f);
+            output[pixelIdx] = (unsigned char)outputVal;
+        }
+        idx += stride;
+    }
+}
+
 )CLC"
-                                   R"CLC(
+R"CLC(
 
 inline void me_p3_rxCalculate(__local half RxLocal[256][40], const int localId, const half x_0, const half x_1, const half x_2, const half x_3, const half x_4, const half x_5, const half x_6, const half x_7, const half x_8)
 {

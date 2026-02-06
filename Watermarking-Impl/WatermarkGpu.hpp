@@ -14,9 +14,11 @@
  */
 template <int p> class WatermarkGPU : public WatermarkBase {
   public:
-    WatermarkGPU<p>(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr) : WatermarkBase(rows, cols, randomMatrixPath, psnr) {}
+    WatermarkGPU<p>(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr)
+        : WatermarkBase(rows, cols, randomMatrixPath, psnr), strengthNumerator(strengthFactor * std::sqrt(static_cast<float>(this->totalPixels))) {}
 
-    WatermarkGPU<p>(const unsigned int rows, const unsigned int cols, const ImageBuffer& randomMatrix, const float strengthFactor) : WatermarkBase(rows, cols, randomMatrix, strengthFactor) {}
+    WatermarkGPU<p>(const unsigned int rows, const unsigned int cols, const ImageBuffer& randomMatrix, const float strengthFactor)
+        : WatermarkBase(rows, cols, randomMatrix, strengthFactor), strengthNumerator(strengthFactor * std::sqrt(static_cast<float>(this->totalPixels))) {}
 
     ~WatermarkGPU<p>() override = default;
 
@@ -46,6 +48,8 @@ template <int p> class WatermarkGPU : public WatermarkBase {
     static constexpr int pad = p / 2;
     static constexpr int localSize = pSquared - 1;
     static constexpr int localSizeSq = localSize * localSize;
+
+    float strengthNumerator;
 
     af::array coefficients = af::array(localSize, f32);
     af::array stopFlag = af::constant(0, 1, s32);

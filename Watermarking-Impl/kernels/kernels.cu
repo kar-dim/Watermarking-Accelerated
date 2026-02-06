@@ -757,22 +757,20 @@ __global__ void compute_u_and_sumsq(const float* __restrict__ mask, const float*
     }
 }
 
-__global__ void apply_watermark_fused(const float* __restrict__ input, const float* __restrict__ u, const float* __restrict__ sumSqPtr, unsigned char* __restrict__ output, const float sqrtN,
-                                      int planeElements, const int numChannels) {
-    float sSq = *sumSqPtr;
-    float strength = 0.0f;
-    if (sSq > 1e-12f)
-        strength = sqrtN * rsqrtf(sSq);
-    // grid stride loop over the PLANE (HxW) only (if 1 channel then it's the whole image
+__global__ void apply_watermark_fused(const float* __restrict__ input, const float* __restrict__ u, const float* __restrict__ sumSqPtr, uint8_t* __restrict__ output, const float strengthNumerator,
+                                      const int planeElements, const int numChannels) {
+    const float uSumSquared = *sumSqPtr; // read the precomputed sum of squares from global memory (all threads read the same value, it is cached)
+    const float strength = uSumSquared > 1e-12f ? strengthNumerator * rsqrtf(uSumSquared) : 0.0f;
+    // grid stride loop over the PLANE (HxW) only (if 1 channel then it's the whole image)
     const int gridSize = blockDim.x * gridDim.x;
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     while (idx < planeElements) {
-        float uStr = u[idx] * strength;
+        const float uStr = u[idx] * strength;
         // channel loop, for grayscale it runs once, for RGB it runs 3 times
         for (int c = 0; c < numChannels; c++) {
             const int pixelIdx = idx + (c * planeElements);
-            const float outputVal = clamp(input[pixelIdx] + uStr + 0.5f, 0.0f, 255.0f); // round + clamp
-            output[pixelIdx] = (unsigned char)outputVal;                                // cast to uint8
+            const float outputVal = clamp(input[pixelIdx] + uStr + 0.5f, 0.0f, 255.0f); // round (trick + 0.5 for truncation) + clamp
+            output[pixelIdx] = (uint8_t)outputVal;                                      // cast to uint8
         }
         idx += gridSize;
     }

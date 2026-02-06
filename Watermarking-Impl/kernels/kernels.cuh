@@ -501,7 +501,7 @@ __global__ void me_p9(const float* __restrict__ input, float* __restrict__ Rx, f
 __global__ void compute_u_and_sumsq(const float* __restrict__ mask, const float* __restrict__ w, float* __restrict__ u, float* __restrict__ globalSumSq, int N);
 
 // fused application of watermark: applies the watermark and calculates the output in one pass, using the precomputed u and sum of squares for normalization
-__global__ void apply_watermark_fused(const float* __restrict__ input, const float* __restrict__ u, const float* __restrict__ sumSqPtr, unsigned char* __restrict__ output, const float sqrtN,
+__global__ void apply_watermark_fused(const float* __restrict__ input, const float* __restrict__ u, const float* __restrict__ sumSqPtr, uint8_t* __restrict__ output, const float strengthNumerator,
                                       const int planeElements, const int numChannels);
 
 // main kernels for correlation calculation. used in detection.

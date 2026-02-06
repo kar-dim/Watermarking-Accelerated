@@ -4,7 +4,6 @@
 #include "kernels/kernels.cuh"
 #include "WatermarkBase.hpp"
 #include "WatermarkGpu.hpp"
-#include <algorithm>
 #include <arrayfire.h>
 #include <cmath>
 #include <cuda_runtime.h>
@@ -26,23 +25,20 @@ template <int p> class WatermarkCuda final : public WatermarkGPU<p> {
     cudaStream_t afStream;
 
     af::array computeStrengthenedWatermark(const af::array& inputGrayImage, const af::array& inputImage, float& watermarkStrength, const MASK_TYPE maskType) const override {
+        const af::array u(inputGrayImage.dims(), f32);
+        const af::array output(inputImage.dims(), u8);
+        const af::array sumSq = af::constant(0.0f, 1, f32);
         // compute mask
         const af::array mask = maskType == ME ? this->template computePredictionErrorMask<false>(computePredictionErrorData(inputGrayImage, true)) : computeCustomMask(inputGrayImage);
         // compute strengthened watermark and sum of squares in one kernel to save bandwidth
-        const int N = static_cast<int>(mask.elements());
-        const int blocks = std::min<int>((N + strWatermarkBlockSize - 1) / strWatermarkBlockSize, 2560);
-        const af::array u(mask.dims(), f32);
-        const af::array sumSq = af::constant(0.0f, 1, f32);
+        const int blocksComputeU = cuda_utils::gridSize1DStridedCalculate(this->totalPixels, strWatermarkBlockSize);
         float* uPtr = u.device<float>();
         float* sumSqPtr = sumSq.device<float>();
-        compute_u_and_sumsq<<<blocks, strWatermarkBlockSize, 0, afStream>>>(mask.device<float>(), this->randomMatrix.template device<float>(), uPtr, sumSqPtr, N);
+        compute_u_and_sumsq<<<blocksComputeU, strWatermarkBlockSize, 0, afStream>>>(mask.device<float>(), this->randomMatrix.template device<float>(), uPtr, sumSqPtr, this->totalPixels);
         // compute and apply watermark
-        const float sqrtN = this->strengthFactor * std::sqrt(static_cast<float>(inputGrayImage.elements()));
-        af::array output(inputImage.dims(), u8);
-        const int totalElements = static_cast<int>(inputImage.elements()); // note: may be larger than N due to multiple channels
-        const int numChannels = static_cast<int>(inputImage.dims(2));
-        const int blocksApply = std::min<int>((N + applyWatermarkBlockSize - 1) / applyWatermarkBlockSize, 2560);
-        apply_watermark_fused<<<blocksApply, applyWatermarkBlockSize, 0, afStream>>>(inputImage.device<float>(), uPtr, sumSqPtr, output.device<unsigned char>(), sqrtN, N, numChannels);
+        const int blocksApply = cuda_utils::gridSize1DStridedCalculate(this->totalPixels, applyWatermarkBlockSize);
+        apply_watermark_fused<<<blocksApply, applyWatermarkBlockSize, 0, afStream>>>(inputImage.device<float>(), uPtr, sumSqPtr, output.device<unsigned char>(), this->strengthNumerator, this->totalPixels,
+                                                                                     static_cast<int>(inputImage.dims(2)));
         this->unlockArrays(inputImage, u, sumSq, output, mask, this->randomMatrix);
         return output;
     }
@@ -86,7 +82,6 @@ template <int p> class WatermarkCuda final : public WatermarkGPU<p> {
     af::array computePredictionErrorData(const af::array& image, const bool calculateAbs) const override {
         const int blocksX = meKernelDims.x / meBlockSize.x;
         const dim3 gridSize = cuda_utils::gridSizeCalculate(meBlockSize, meKernelDims.y, meKernelDims.x);
-
         af::array RxPartial, rxPartial;
         // call prediction error Rx/rx partials calculation kernel
         if constexpr (p == 3) {
@@ -118,13 +113,12 @@ template <int p> class WatermarkCuda final : public WatermarkGPU<p> {
         else
             cholesky_solver_parallel<p><<<1, 32, 0, afStream>>>(Rx.device<float>(), rx.device<float>(), this->coefficients.template device<float>(), this->stopFlag.template device<int>());
         this->unlockArrays(Rx, rx, this->coefficients, this->stopFlag);
-        this->unlockArrays(Rx, rx, this->coefficients, this->stopFlag);
         return computeErrorSequence(image, calculateAbs);
     }
 
     float computeCorrelation(const af::array& e_u, const af::array& e_z) const override {
         const int N = static_cast<int>(e_u.elements());
-        const int blocks = std::min<int>((N + corrPartialBlockSize - 1) / corrPartialBlockSize, 2560);
+        const int blocks = cuda_utils::gridSize1DStridedCalculate(N, corrPartialBlockSize);
         const af::array dotPartial(blocks);
         const af::array uNormPartial(blocks);
         const af::array zNormPartial(blocks);
@@ -132,7 +126,6 @@ template <int p> class WatermarkCuda final : public WatermarkGPU<p> {
         float* dotPartialPtr = dotPartial.device<float>();
         float* uNormPartialPtr = uNormPartial.device<float>();
         float* zNormPartialPtr = zNormPartial.device<float>();
-
         // calculate partial dot products and norms
         calculate_partial_correlation<<<blocks, corrPartialBlockSize, 0, afStream>>>(e_u.device<float>(), e_z.device<float>(), dotPartialPtr, uNormPartialPtr, zNormPartialPtr, N);
         // reduce partials and compute correlation
