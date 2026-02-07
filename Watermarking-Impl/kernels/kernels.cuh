@@ -330,7 +330,7 @@ template <int p, int N = (p * p) - 1> __global__ void cholesky_solver_parallel(c
         // scalar path
     } else {
         for (int k = laneId; k < packedSize; k += 32) {
-            int2 c = getPackedCoords(k);
+            const int2 c = getPackedCoords(k);
             sA[c.x][c.y] = A[k];
         }
     }
@@ -359,7 +359,7 @@ template <int p, int N = (p * p) - 1> __global__ void cholesky_solver_parallel(c
     // in-place Cholesky Decomposition
     for (int k = 0; k < N; k++) {
         // check diagonal and calculate sqrt
-        float diag = sA[k][k];
+        const float diag = sA[k][k];
         int abortFlag = 0;
         float invDiag = 0.0f;
         if (laneId == 0) {
@@ -373,12 +373,12 @@ template <int p, int N = (p * p) - 1> __global__ void cholesky_solver_parallel(c
         }
 
         // broadcast abort
-        int abort_warp = __shfl_sync(0xFFFFFFFF, abortFlag, 0);
-        if (abort_warp)
+        const int abortWarp = __shfl_sync(0xFFFFFFFF, abortFlag, 0);
+        if (abortWarp)
             return;
 
         // broadcast L_kk
-        float L_kk_inv = __shfl_sync(0xFFFFFFFF, invDiag, 0);
+        const float L_kk_inv = __shfl_sync(0xFFFFFFFF, invDiag, 0);
 
         for (int i = k + 1 + laneId; i < N; i += 32)
             sA[i][k] = sA[i][k] * L_kk_inv;
@@ -386,10 +386,10 @@ template <int p, int N = (p * p) - 1> __global__ void cholesky_solver_parallel(c
 
         // update trailing matrix
         for (int j = k + 1; j < N; j += 2) {
-            float L_jk0 = sA[j][k];
-            float L_jk1 = (j + 1 < N) ? sA[j + 1][k] : 0.0f;
+            const float L_jk0 = sA[j][k];
+            const float L_jk1 = (j + 1 < N) ? sA[j + 1][k] : 0.0f;
             for (int i = j + laneId; i < N; i += 32) {
-                float Lik = sA[i][k];
+                const float Lik = sA[i][k];
                 sA[i][j] = sA[i][j] - (Lik * L_jk0);
                 if (j + 1 < N && i >= j + 1)
                     sA[i][j + 1] = sA[i][j + 1] - (Lik * L_jk1);
@@ -405,7 +405,7 @@ template <int p, int N = (p * p) - 1> __global__ void cholesky_solver_parallel(c
             val *= sA[k][k];
             sB[k] = val;
         }
-        float y_k = __shfl_sync(0xFFFFFFFF, val, 0);
+        const float y_k = __shfl_sync(0xFFFFFFFF, val, 0);
         for (int i = k + 1 + laneId; i < N; i += 32)
             sB[i] = sB[i] - (sA[i][k] * y_k);
         __syncwarp();
@@ -419,7 +419,7 @@ template <int p, int N = (p * p) - 1> __global__ void cholesky_solver_parallel(c
             val *= sA[k][k];
             sB[k] = val;
         }
-        float x_k = __shfl_sync(0xFFFFFFFF, val, 0);
+        const float x_k = __shfl_sync(0xFFFFFFFF, val, 0);
         for (int i = laneId; i < k; i += 32)
             sB[i] = sB[i] - (sA[k][i] * x_k);
         __syncwarp();
