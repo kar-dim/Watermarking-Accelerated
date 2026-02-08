@@ -111,7 +111,7 @@ template <int p, int pad = p / 2, int sharedSize = 16 + (2 * pad)> __global__ vo
     // calculate NVF with optimized math (avoid divisions)
     const float numerator = (nPixels * sumSq) - (sum * sum);
     const float output = __fdividef(numerator, nPixelsSq + numerator);
-    nvf[x * height + y] = clamp(output, 0.0f, 255.0f);
+    nvf[x * height + y] = clamp(output, 0.0f, 1.0f);
 }
 
 // helper method for error sequence calculation with p = 3

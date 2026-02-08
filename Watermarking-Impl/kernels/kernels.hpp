@@ -55,7 +55,7 @@ __kernel void nvf(__global const float* restrict input, __global float* restrict
 	}
 	const float numerator = (N_PIXELS * sumSq) - (sum * sum);
     const float output = native_divide(numerator, N_PIXELS_SQ + numerator);
-	nvf[(x * height) + y] = clamp(output, 0.0f, 255.0f);
+	nvf[(x * height) + y] = clamp(output, 0.0f, 1.0f);
 }
 
 //use pointer arithmetic for dot product to help compilers optimize address calculations fast
