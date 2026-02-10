@@ -204,17 +204,17 @@ Tests were executed with a loop count of 1000 iterations to ensure statistical s
 ## Observations
 
 - CUDA: Consistently delivers the highest throughput and it is the ideal choice for realtime applications.
-- OpenCL: Serves as a good middle ground, offering significant acceleration over the CPU (often 5x-10x faster) while maintaining portability across non-NVIDIA hardware (AMD, Intel, etc.).
+- OpenCL: Serves as a middle ground, offering some healthy acceleration over the CPU, while maintaining portability across non-NVIDIA hardware (AMD, Intel, etc). Its main purpose is to offload work from CPU to GPU in order to free the CPU for other tasks (like video encoding).
 - CPU: Functions as the fallback implementation. While slower, it is very optimized for CPU architecture, and also eensures compatibility on systems without dedicated GPUs.
 
 - Impact of Window Size (p): As the window size increases, the computational complexity grows quadratically.
-     - p=3 (Small Window): Extremely high throughput (CUDA > 8000 FPS).
-     - p=9 (Large Window): Throughput naturally decreases due to the heavier matrix construction and solving steps (80×80 linear systems), but the CUDA implementation still maintains real-time performance thanks to the Tensor Cores.
+     - p=3 (Small Window): Extremely high throughput.
+     - p=9 (Large Window): Throughput naturally decreases due to the heavier matrix construction and solving steps (80×80 linear systems), but the CUDA implementation still maintains real-time performance thanks to the Tensor Cores and exclusive features (warp shuffles, fast atomics)
 
 - Resolution Scaling: Performance scales inversely with pixel count. However, even at 4K resolution, the GPU implementations remain viable for interactive framerates, whereas the CPU implementation becomes a bottleneck.
 
 p = 3            |  p = 5
 :-------------------------:|:-------------------------:
- ![p3](https://github.com/user-attachments/assets/4a38de3a-757a-4761-84ae-1c2249476c44) | ![p5](https://github.com/user-attachments/assets/53e29e6f-224e-402d-891f-16ef6147f513)
+ ![p3](https://github.com/user-attachments/assets/51618201-1187-4500-b938-0ece143ee5e2) | ![p5](https://github.com/user-attachments/assets/17566f0e-9065-4ef9-876b-b56f0211f39d)
 p = 7            |  p = 9
- ![p7](https://github.com/user-attachments/assets/205a1f5d-97ce-479e-9664-9de5b142f73f) | ![p9](https://github.com/user-attachments/assets/ce08ed59-f0ee-4d8d-be60-c09929043d8f)
+ ![p7](https://github.com/user-attachments/assets/ea648617-0c15-48c6-826b-70a4be05b864) | ![p9](https://github.com/user-attachments/assets/0200d80f-ed48-46ea-9438-99951c7e113a)
