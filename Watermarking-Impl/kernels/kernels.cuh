@@ -17,20 +17,20 @@ __device__ inline int2 getPackedCoords(const int k) {
 }
 
 // helper method to clamp a value between two limits
-template <typename T> __device__ inline T clamp(const T& val, const T& lo, const T& hi) { return (val < lo) ? lo : (val > hi) ? hi : val; }
+template <typename T> __device__ inline T clamp(const T val, const T lo, const T hi) { return (val < lo) ? lo : (val > hi) ? hi : val; }
 
 // helper method to fill block-wide shared memory cooperatively for error sequence and NVF kernels
 // sharedMem must be of size: [sharedSize][sharedSize + 1] to avoid bank conflicts
 template <bool FUSED, int p, int pad = p / 2, int sharedSize = 16 + (2 * pad)>
-__device__ void fillBlockMain(const float* __restrict__ inputA, const float* __restrict__ inputB, float* __restrict__ sharedMem, const int width, const int height) {
+__device__ __forceinline__ void fillBlockMain(const float* __restrict__ inputA, const float* __restrict__ inputB, float* __restrict__ sharedMem, const int width, const int height) {
     const int baseGlobalX = (int)(blockIdx.y * blockDim.y) - pad;
     const int baseGlobalY = (int)(blockIdx.x * blockDim.x) - pad;
     // cooperatively fill 2D shared memory
     for (int i = threadIdx.y * blockDim.x + threadIdx.x; i < sharedSize * sharedSize; i += blockDim.x * blockDim.y) {
         const int tileRow = i % sharedSize;
         const int tileCol = i / sharedSize;
-        const int globalX = clamp(baseGlobalX + tileCol, 0, width - 1);
-        const int globalY = clamp(baseGlobalY + tileRow, 0, height - 1);
+        const int globalX = max(0, min(width - 1, baseGlobalX + tileCol));
+        const int globalY = max(0, min(height - 1, baseGlobalY + tileRow));
         const int idx = globalX * height + globalY;
         float val = inputA[idx];
         // if we need to fuse (A*B), do it here, branch-free because it its known at compile time
@@ -52,26 +52,31 @@ template <int p> __device__ void fillBlock(const float* __restrict__ inputA, con
 
 // helper method to fill block-wide shared memory cooperatively for prediction error kernels where
 // the shared memory is a wide "strip" on the x-axis
-template <int p, int stripWidth = 256 + p - 1, int radius = (p - 1) / 2>
-__device__ inline void fillBlockStrip(half blockValues[p][stripWidth], const float* __restrict__ input, const int width, const int height) {
+template <int p, int BlockSize, int StripWidth = BlockSize + p - 1>
+__device__ __forceinline__ void fillBlockStrip(half blockValues[p][StripWidth], const float* __restrict__ input, const int width, const int height, const int bx, const int by) {
     constexpr float scaleFactor = 0.00392156862f;
-    constexpr int totalPixels = p * stripWidth;
-    constexpr int colStep = 256 / p;
-    constexpr int rowStep = 256 % p;
+    constexpr int radius = (p - 1) / 2;
+    constexpr int totalPixels = p * StripWidth;
+    constexpr int colStep = BlockSize / p;
+    constexpr int rowStep = BlockSize % p;
+
     const int tid = threadIdx.x;
-    const int baseGlobalCol = (int)(blockIdx.x * 256) - radius;
-    const int baseGlobalRow = (int)(blockIdx.y * 1) - radius;
+    const int baseGlobalCol = (bx * BlockSize) - radius;
+    const int baseGlobalRow = (by * 1) - radius;
+
     int r = tid % p;
     int c = tid / p;
     int idx = tid;
     while (idx < totalPixels) {
-        const int globalCol = clamp(baseGlobalCol + c, 0, width - 1);
-        const int globalRow = clamp(baseGlobalRow + r, 0, height - 1);
-        blockValues[r][c] = __float2half(input[globalCol * height + globalRow] * scaleFactor);
-        idx += 256;
+        if (c < StripWidth) {
+            const int globalCol = max(0, min((int)width - 1, baseGlobalCol + c));
+            const int globalRow = max(0, min((int)height - 1, baseGlobalRow + r));
+            blockValues[r][c] = __float2half(input[globalCol * height + globalRow] * scaleFactor);
+        }
+        idx += BlockSize;
         c += colStep;
         r += rowStep;
-        // if r exceeds p-1, we wrap it (and carry 1 to column)
+        // handle row wrap-around
         if (r >= p) {
             r -= p;
             c += 1;
@@ -437,48 +442,16 @@ template <int p, int N = (p * p) - 1> __global__ void cholesky_solver_parallel(c
     }
 }
 
-// helper method to perform a streaming reduction of rx values from registers to global memory
-// used ONLY in the ME kernels for p = 9 specifically
-template <int startIdx, int count>
-__device__ void rxStreamPass(const int tid, const int warpWindowStart, half (*__restrict__ RxLocal)[88], const half8* __restrict__ rxVec, float* __restrict__ rxGlobal, const int rxBaseIndex) {
-    // warp leaders flush registers to shared memory window
-    if ((tid & 31) == 0) {
-        // process 8 elements per iteration (one half8 vector)
-#pragma unroll
-        for (int v = 0; v < count >> 3; v++) {
-            const int absVecIdx = (startIdx >> 3) + v;
-            half8* sharedVec = reinterpret_cast<half8*>(&RxLocal[warpWindowStart + v][80]);
-            // STS.128
-            *sharedVec = rxVec[absVecIdx];
-        }
-    }
-    __syncthreads(); // wait for leaders to write
-    for (int k = startIdx + tid; k < startIdx + count; k += 128) {
-        float sum = 0.0f;
-        const int localK = k - startIdx; // map global K to window index [0,31]
-        const int rowInWarp = localK >> 3;
-        const int colInRow = 80 + (localK & 7);
-        // sum across the 4 warps
-#pragma unroll
-        for (int w = 0; w < 4; w++)
-            sum += __half2float(RxLocal[w * 32 + rowInWarp][colInRow]);
-        rxGlobal[rxBaseIndex + k] = sum;
-    }
-    __syncthreads(); // wait for readers before next pass overwrites the window
-}
-
 // helper method to perform a streaming reduction of Rx values from shared window to global memory
-// Templates allow the compiler to hardcode constants for each specific chunk
-template <int startIdx, int endIdx, int rowOffset> __device__ void RxStreamPass(const int tid, half (*__restrict__ RxLocal)[88], float* __restrict__ Rx, const int RxBaseIndex) {
+template <int startIdx, int endIdx, int rowOffset> __device__ void RxStreamPass(const int tid, float (*__restrict__ RxLocal)[88], float* __restrict__ Rx) {
     for (int k = startIdx + tid; k < endIdx; k += 128) {
         const int2 coords = getPackedCoords(k);
         const int rowInWindow = coords.x - rowOffset;
         float sum = 0.0f;
-        // sum across the 4 warps (stacked vertically in shared mem at offsets 0, 32, 64, 96)
 #pragma unroll
         for (int w = 0; w < 4; w++)
-            sum += __half2float(RxLocal[w * 32 + rowInWindow][coords.y]);
-        Rx[RxBaseIndex + k] = sum;
+            sum += RxLocal[w * 32 + rowInWindow][coords.y];
+        atomicAdd(&Rx[k], sum);
     }
 }
 
@@ -493,10 +466,10 @@ __device__ void load_neighbor_vec_p7(half8* dst, const half blockValues[7][262],
 __device__ void load_neighbor_vec_p9(half8* dst, const half blockValues[9][136], half& center);
 
 // Prediction Error kernels (ME) for p = 3, p = 5, p = 7 and p = 9
-__global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height);
-__global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height);
-__global__ void me_p7(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height);
-__global__ void me_p9(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height);
+__global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height, const int totalBlocksX);
+__global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height, const int totalBlocksX);
+__global__ void me_p7(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height, const int totalBlocksX);
+__global__ void me_p9(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height, const int totalBlocksX);
 
 // fused calculation of u and sum of squares
 __global__ void compute_u_and_sumsq(const float* __restrict__ mask, const float* __restrict__ w, float* __restrict__ u, float* __restrict__ globalSumSq, const int N);

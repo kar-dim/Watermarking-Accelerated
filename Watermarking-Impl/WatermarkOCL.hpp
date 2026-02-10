@@ -7,6 +7,7 @@
 #include <arrayfire.h>
 #include <memory>
 #include <string>
+#include <utility>
 
 struct dim2 {
     dim_t rows;
@@ -218,5 +219,18 @@ template <int p> class WatermarkOCL final : public WatermarkGPU<p> {
             },
             "compute correlation kernels");
         return correlation;
+    }
+
+    // helper method to sum the incomplete RxPartial and rxPartial arrays which were produced from the custom "me" kernel
+    // and to transform them to the correct size, so that they can be used by the system solver
+    std::pair<af::array, af::array> transformCorrelationArrays(const af::array& RxPartial, const af::array& rxPartial) const {
+        // reduction sum of blocks
+        // all [p^2-1,1] blocks will be summed in rx
+        // all [((p^2-1)(p^2))/2] vector blocks will be summed in Rx
+        const auto totalBlocks = rxPartial.elements() / this->localSize;
+        const auto RxStride = RxPartial.elements() / totalBlocks;
+        const af::array rx = af::sum(af::moddims(rxPartial, this->localSize, totalBlocks), 1);
+        const af::array Rx = af::sum(af::moddims(RxPartial, RxStride, totalBlocks), 1);
+        return std::make_pair(Rx, rx);
     }
 };

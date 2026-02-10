@@ -5,7 +5,6 @@
 #include <cmath>
 #include <concepts>
 #include <string>
-#include <utility>
 
 /*!
  *  \brief  Functions for watermark computation and detection, Base GPU class.
@@ -76,18 +75,5 @@ template <int p> class WatermarkGPU : public WatermarkBase {
     template <bool CALC_ABS> af::array computePredictionErrorMask(const af::array& errorSequence) const {
         const af::array& input = CALC_ABS ? af::abs(errorSequence) : errorSequence;
         return input / (af::max(af::flat(input)) + 1.0e-6f);
-    }
-
-    // helper method to sum the incomplete RxPartial and rxPartial arrays which were produced from the custom "me" kernel
-    // and to transform them to the correct size, so that they can be used by the system solver
-    std::pair<af::array, af::array> transformCorrelationArrays(const af::array& RxPartial, const af::array& rxPartial) const {
-        // reduction sum of blocks
-        // all [p^2-1,1] blocks will be summed in rx
-        // all [((p^2-1)(p^2))/2] vector blocks will be summed in Rx
-        const auto totalBlocks = rxPartial.elements() / localSize;
-        const auto RxStride = RxPartial.elements() / totalBlocks;
-        const af::array rx = af::sum(af::moddims(rxPartial, localSize, totalBlocks), 1);
-        const af::array Rx = af::sum(af::moddims(RxPartial, RxStride, totalBlocks), 1);
-        return std::make_pair(Rx, rx);
     }
 };

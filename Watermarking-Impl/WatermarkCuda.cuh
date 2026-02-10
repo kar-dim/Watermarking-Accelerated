@@ -5,7 +5,6 @@
 #include "WatermarkBase.hpp"
 #include "WatermarkGpu.hpp"
 #include <arrayfire.h>
-#include <cmath>
 #include <cuda_runtime.h>
 #include <string>
 
@@ -16,13 +15,15 @@
 template <int p> class WatermarkCuda final : public WatermarkGPU<p> {
   public:
     WatermarkCuda<p>(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr)
-        : WatermarkGPU<p>(rows, cols, randomMatrixPath, psnr), meKernelDims{WatermarkBase::align<meBlockSize.x>(cols), rows}, afStream(CudaStreamManager::getInstance().getAfStream()) {}
+        : WatermarkGPU<p>(rows, cols, randomMatrixPath, psnr), meKernelDims{WatermarkBase::align<meBlockSize.x>(cols), rows}, afStream(CudaStreamManager::getInstance().getAfStream()),
+          gridOptimalMe(cuda_utils::gridSize1DMeStridedCalculate()) {}
 
   private:
-    static constexpr dim3 windowBlockSize{16, 16}, meBlockSize{p == 9 ? 128 : 256, 1};
+    static constexpr dim3 windowBlockSize{16, 16}, meBlockSize{p >= 7 ? 128 : 256, 1};
     static constexpr unsigned int corrPartialBlockSize = 768, corrFinalBlockSize = 1024, strWatermarkBlockSize = 768, applyWatermarkBlockSize = 768;
     dim3 meKernelDims;
     cudaStream_t afStream;
+    unsigned int gridOptimalMe;
 
     af::array computeStrengthenedWatermark(const af::array& inputGrayImage, const af::array& inputImage, float& watermarkStrength, const MASK_TYPE maskType) const override {
         const af::array u(inputGrayImage.dims(), f32);
@@ -37,8 +38,8 @@ template <int p> class WatermarkCuda final : public WatermarkGPU<p> {
         compute_u_and_sumsq<<<blocksComputeU, strWatermarkBlockSize, 0, afStream>>>(mask.device<float>(), this->randomMatrix.template device<float>(), uPtr, sumSqPtr, this->totalPixels);
         // compute and apply watermark
         const int blocksApply = cuda_utils::gridSize1DStridedCalculate(this->totalPixels, applyWatermarkBlockSize);
-        apply_watermark_fused<<<blocksApply, applyWatermarkBlockSize, 0, afStream>>>(inputImage.device<float>(), uPtr, sumSqPtr, output.device<unsigned char>(), this->strengthNumerator, this->totalPixels,
-                                                                                     static_cast<int>(inputImage.dims(2)));
+        apply_watermark_fused<<<blocksApply, applyWatermarkBlockSize, 0, afStream>>>(inputImage.device<float>(), uPtr, sumSqPtr, output.device<unsigned char>(), this->strengthNumerator,
+                                                                                     this->totalPixels, static_cast<int>(inputImage.dims(2)));
         this->unlockArrays(inputImage, u, sumSq, output, mask, this->randomMatrix);
         return output;
     }
@@ -80,39 +81,34 @@ template <int p> class WatermarkCuda final : public WatermarkGPU<p> {
     }
 
     af::array computePredictionErrorData(const af::array& image, const bool calculateAbs) const override {
-        const int blocksX = meKernelDims.x / meBlockSize.x;
-        const dim3 gridSize = cuda_utils::gridSizeCalculate(meBlockSize, meKernelDims.y, meKernelDims.x);
-        af::array RxPartial, rxPartial;
-        // call prediction error Rx/rx partials calculation kernel
-        if constexpr (p == 3) {
-            RxPartial = af::array(this->baseRows, blocksX * 36);
-            rxPartial = af::array(this->baseRows, blocksX * 8);
-            me_p3<<<gridSize, meBlockSize, 0, afStream>>>(image.device<float>(), RxPartial.device<float>(), rxPartial.device<float>(), this->baseCols, this->baseRows);
-        } else if (p == 5) {
-            RxPartial = af::array(this->baseRows, blocksX * 300);
-            rxPartial = af::array(this->baseRows, blocksX * 24);
-            me_p5<<<gridSize, meBlockSize, 0, afStream>>>(image.device<float>(), RxPartial.device<float>(), rxPartial.device<float>(), this->baseCols, this->baseRows);
-        } else if (p == 7) {
-            RxPartial = af::array(this->baseRows, blocksX * 1176);
-            rxPartial = af::array(this->baseRows, blocksX * 48);
-            me_p7<<<gridSize, meBlockSize, 0, afStream>>>(image.device<float>(), RxPartial.device<float>(), rxPartial.device<float>(), this->baseCols, this->baseRows);
-        } else {
-            RxPartial = af::array(this->baseRows, blocksX * 3240);
-            rxPartial = af::array(this->baseRows, blocksX * 80);
-            me_p9<<<gridSize, meBlockSize, 0, afStream>>>(image.device<float>(), RxPartial.device<float>(), rxPartial.device<float>(), this->baseCols, this->baseRows);
-        }
-        this->unlockArrays(image, RxPartial, rxPartial);
-        // calculation of coefficients and error sequence
-        const auto correlationArrays = this->transformCorrelationArrays(RxPartial, rxPartial);
-        const af::array& Rx = correlationArrays.first;
-        const af::array& rx = correlationArrays.second;
-        // very low latency solver for p = 3 and p = 5
-        if constexpr (p == 3 || p == 5)
-            cholesky_solver<p><<<1, 1, 0, afStream>>>(Rx.device<float>(), rx.device<float>(), this->coefficients.template device<float>(), this->stopFlag.template device<int>());
-        // parallel solver for p >= 7 (one warp)
+        constexpr int RxSize = (this->localSize * (this->localSize + 1)) / 2;
+        constexpr int rxSize = this->localSize;
+        constexpr int threadsPerBlock = (p >= 7) ? 128 : 256;
+
+        const int blocksX = meKernelDims.x / threadsPerBlock;
+
+        const af::array Rx = af::constant(0.0f, RxSize, 1, f32);
+        const af::array rx = af::constant(0.0f, rxSize, 1, f32);
+        float* RxPtr = Rx.device<float>();
+        float* rxPtr = rx.device<float>();
+
+        // compute autocorrelation matrix Rx and vector rx for the ME coefficients using grid-stride kernels optimized for the number of SMs on the GPU
+        if constexpr (p == 3)
+            me_p3<<<gridOptimalMe, threadsPerBlock, 0, afStream>>>(image.device<float>(), RxPtr, rxPtr, this->baseCols, this->baseRows, blocksX);
+        else if constexpr (p == 5)
+            me_p5<<<gridOptimalMe, threadsPerBlock, 0, afStream>>>(image.device<float>(), RxPtr, rxPtr, this->baseCols, this->baseRows, blocksX);
+        else if constexpr (p == 7)
+            me_p7<<<gridOptimalMe, threadsPerBlock, 0, afStream>>>(image.device<float>(), RxPtr, rxPtr, this->baseCols, this->baseRows, blocksX);
         else
-            cholesky_solver_parallel<p><<<1, 32, 0, afStream>>>(Rx.device<float>(), rx.device<float>(), this->coefficients.template device<float>(), this->stopFlag.template device<int>());
-        this->unlockArrays(Rx, rx, this->coefficients, this->stopFlag);
+            me_p9<<<gridOptimalMe, threadsPerBlock, 0, afStream>>>(image.device<float>(), RxPtr, rxPtr, this->baseCols, this->baseRows, blocksX);
+        // solve for coefficients using Cholesky solver, single thread for small p and parallel for larger p
+        if constexpr (p <= 5)
+            cholesky_solver<p><<<1, 1, 0, afStream>>>(RxPtr, rxPtr, this->coefficients.template device<float>(), this->stopFlag.template device<int>());
+        else
+            cholesky_solver_parallel<p><<<1, 32, 0, afStream>>>(RxPtr, rxPtr, this->coefficients.template device<float>(), this->stopFlag.template device<int>());
+
+        // calculate error sequence
+        this->unlockArrays(image, Rx, rx, this->coefficients, this->stopFlag);
         return computeErrorSequence(image, calculateAbs);
     }
 

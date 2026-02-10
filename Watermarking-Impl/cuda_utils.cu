@@ -1,5 +1,5 @@
-﻿#include "CudaStreamManager.hpp"
-#include "cuda_utils.hpp"
+﻿#include "cuda_utils.hpp"
+#include "CudaStreamManager.hpp"
 #include "kernels/kernels.cuh"
 #include <cstdint>
 #include <cuda_runtime.h>
@@ -18,5 +18,10 @@ void launchPitchedToFloatKernel(const uint8_t* ySrc, float* yDst, const int widt
     constexpr dim3 blockSize(16, 16);
     const dim3 gridSize = cuda_utils::gridSizeCalculate(blockSize, height, width);
     pitchedToFloat<<<gridSize, blockSize, 0, stream>>>(ySrc, yDst, width, height, pitch);
+}
+unsigned int gridSize1DMeStridedCalculate() {
+    int numSMs;
+    cudaDeviceGetAttribute(&numSMs, cudaDevAttrMultiProcessorCount, 0);
+    return numSMs * 4;
 }
 } // namespace cuda_utils
