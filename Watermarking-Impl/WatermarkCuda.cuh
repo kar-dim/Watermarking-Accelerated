@@ -113,8 +113,7 @@ template <int p> class WatermarkCuda final : public WatermarkGPU<p> {
     }
 
     float computeCorrelation(const af::array& e_u, const af::array& e_z) const override {
-        const int N = static_cast<int>(e_u.elements());
-        const int blocks = cuda_utils::gridSize1DStridedCalculate(N, corrPartialBlockSize);
+        const int blocks = cuda_utils::gridSize1DStridedCalculate(this->totalPixels, corrPartialBlockSize);
         const af::array dotPartial(blocks);
         const af::array uNormPartial(blocks);
         const af::array zNormPartial(blocks);
@@ -123,7 +122,7 @@ template <int p> class WatermarkCuda final : public WatermarkGPU<p> {
         float* uNormPartialPtr = uNormPartial.device<float>();
         float* zNormPartialPtr = zNormPartial.device<float>();
         // calculate partial dot products and norms
-        calculate_partial_correlation<<<blocks, corrPartialBlockSize, 0, afStream>>>(e_u.device<float>(), e_z.device<float>(), dotPartialPtr, uNormPartialPtr, zNormPartialPtr, N);
+        calculate_partial_correlation<<<blocks, corrPartialBlockSize, 0, afStream>>>(e_u.device<float>(), e_z.device<float>(), dotPartialPtr, uNormPartialPtr, zNormPartialPtr, this->totalPixels);
         // reduce partials and compute correlation
         calculate_final_correlation<<<1, corrFinalBlockSize, 0, afStream>>>(dotPartialPtr, uNormPartialPtr, zNormPartialPtr, correlationResult.device<float>(), blocks);
         // transfer ownership to arrayfire and return output correlation scalar to host
