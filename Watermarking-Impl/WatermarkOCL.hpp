@@ -49,9 +49,9 @@ template <int p> class WatermarkOCL final : public WatermarkGPU<p> {
         // compute mask
         const af::array mask = maskType == ME ? this->template computePredictionErrorMask<false>(computePredictionErrorData(inputGrayImage, true)) : computeCustomMask(inputGrayImage);
         // compute strengthened watermark and sum of squares in one kernel to save bandwidth (extra kernel to sum the partial sums)
-        const int blocks = calculateLocalGroupsNumber(this->totalPixels, applyWatermarkLocalSize);
-        const int globalSize = blocks * applyWatermarkLocalSize;
-        const af::array partials(blocks, f32);
+        const int workGroups = calculateLocalGroupsNumber(this->totalPixels, applyWatermarkLocalSize);
+        const int globalSize = workGroups * applyWatermarkLocalSize;
+        const af::array partials(workGroups, f32);
         const clMemPtr uMem(u.device<cl_mem>());
         const clMemPtr outputMem(output.device<cl_mem>());
         const clMemPtr sumSqMem(sumSq.device<cl_mem>());
@@ -66,7 +66,7 @@ template <int p> class WatermarkOCL final : public WatermarkGPU<p> {
                     KernelBuilder(programs, "compute_u_and_partial_sumsq").args(wrap(maskMem.get()), wrap(randMem.get()), wrap(uMem.get()), wrap(partialsMem.get()), this->totalPixels).build(),
                     cl::NDRange(), cl::NDRange(globalSize), cl::NDRange(applyWatermarkLocalSize));
 
-                queue.enqueueNDRangeKernel(KernelBuilder(programs, "reduce_sumsq_partials").args(wrap(partialsMem.get()), wrap(sumSqMem.get()), blocks).build(), cl::NDRange(),
+                queue.enqueueNDRangeKernel(KernelBuilder(programs, "reduce_sumsq_partials").args(wrap(partialsMem.get()), wrap(sumSqMem.get()), workGroups).build(), cl::NDRange(),
                                            cl::NDRange(applyWatermarkLocalSize), cl::NDRange(applyWatermarkLocalSize));
 
                 queue.enqueueNDRangeKernel(
@@ -179,12 +179,11 @@ template <int p> class WatermarkOCL final : public WatermarkGPU<p> {
 
     float computeCorrelation(const af::array& e_u, const af::array& e_z) const override {
         using namespace cl_utils;
-        const int N = static_cast<int>(e_u.elements());
-        const int blocks = calculateLocalGroupsNumber(N, corrPartialLocalSize);
-        const int globalSizePartials = blocks * corrPartialLocalSize;
-        const af::array dotPartial(blocks);
-        const af::array uNormPartial(blocks);
-        const af::array zNormPartial(blocks);
+        const int workGroups = calculateLocalGroupsNumber(this->totalPixels, corrPartialLocalSize);
+        const int globalSizePartials = workGroups * corrPartialLocalSize;
+        const af::array dotPartial(workGroups);
+        const af::array uNormPartial(workGroups);
+        const af::array zNormPartial(workGroups);
         const af::array correlationResult(1);
         const clMemPtr euMem(e_u.device<cl_mem>());
         const clMemPtr ezMem(e_z.device<cl_mem>());
@@ -197,12 +196,12 @@ template <int p> class WatermarkOCL final : public WatermarkGPU<p> {
             [&]() {
                 // calculate partial dot products and norms
                 queue.enqueueNDRangeKernel(KernelBuilder(programs, "calculate_partial_correlation")
-                                               .args(wrap(euMem.get()), wrap(ezMem.get()), wrap(dotPartialMem.get()), wrap(uNormPartialMem.get()), wrap(zNormPartialMem.get()), N)
+                                               .args(wrap(euMem.get()), wrap(ezMem.get()), wrap(dotPartialMem.get()), wrap(uNormPartialMem.get()), wrap(zNormPartialMem.get()), this->totalPixels)
                                                .build(),
                                            cl::NDRange(), cl::NDRange(globalSizePartials), cl::NDRange(corrPartialLocalSize));
                 // reduce partials and compute correlation
                 queue.enqueueNDRangeKernel(KernelBuilder(programs, "calculate_final_correlation")
-                                               .args(wrap(dotPartialMem.get()), wrap(uNormPartialMem.get()), wrap(zNormPartialMem.get()), wrap(correlationResultMem.get()), blocks)
+                                               .args(wrap(dotPartialMem.get()), wrap(uNormPartialMem.get()), wrap(zNormPartialMem.get()), wrap(correlationResultMem.get()), workGroups)
                                                .build(),
                                            cl::NDRange(), cl::NDRange(corrFinalLocalSize), cl::NDRange(corrFinalLocalSize));
                 // retrieve the correlation result
