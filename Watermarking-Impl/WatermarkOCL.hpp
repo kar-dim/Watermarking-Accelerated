@@ -142,26 +142,18 @@ template <int p> class WatermarkOCL final : public WatermarkGPU<p> {
 
     af::array computePredictionErrorData(const af::array& image, const bool calculateAbs) const override {
         using namespace cl_utils;
-        const auto meArraysBaseWidth = meKernelDims.cols / meLocalSize;
-        const clMemPtr imageMem(image.device<cl_mem>());
-        af::array RxPartial, rxPartial;
+        constexpr int RxSize = (this->localSize * (this->localSize + 1)) / 2;
+        constexpr int rxSize = this->localSize;
+
         return executeKernel(
             [&]() -> af::array {
-                if constexpr (p == 3) {
-                    RxPartial = af::array(this->baseRows, meArraysBaseWidth * 36);
-                    rxPartial = af::array(this->baseRows, meArraysBaseWidth * 8);
-                } else if (p == 5) {
-                    RxPartial = af::array(this->baseRows, meArraysBaseWidth * 300);
-                    rxPartial = af::array(this->baseRows, meArraysBaseWidth * 24);
-                } else if (p == 7) {
-                    RxPartial = af::array(this->baseRows, meArraysBaseWidth * 1176);
-                    rxPartial = af::array(this->baseRows, meArraysBaseWidth * 48);
-                } else {
-                    RxPartial = af::array(this->baseRows, meArraysBaseWidth * 3240);
-                    rxPartial = af::array(this->baseRows, meArraysBaseWidth * 80);
-                }
+                const auto meArraysBaseWidth = meKernelDims.cols / meLocalSize;
+                const af::array RxPartial(this->baseRows, meArraysBaseWidth * RxSize);
+                const af::array rxPartial(this->baseRows, meArraysBaseWidth * rxSize);
                 const clMemPtr RxPartialMem(RxPartial.device<cl_mem>());
                 const clMemPtr rxPartialMem(rxPartial.device<cl_mem>());
+                const clMemPtr imageMem(image.device<cl_mem>());
+
                 // call prediction error Rx/rx partials calculation kernel
                 queue.enqueueNDRangeKernel(KernelBuilder(programs, "me").args(wrap(imageMem.get()), wrap(RxPartialMem.get()), wrap(rxPartialMem.get()), this->baseCols, this->baseRows).build(),
                                            cl::NDRange(), cl::NDRange(meKernelDims.cols, meKernelDims.rows), cl::NDRange(meLocalSize, 1));
