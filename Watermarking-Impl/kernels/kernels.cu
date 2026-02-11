@@ -359,36 +359,38 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
         __syncthreads();
     }
 
-    // write to global memory
     float* warpOutput = &RxLocal[warpId * 32][0];
-
     wmma::store_matrix_sync(warpOutput, acc_C00, outputStride, wmma::mem_row_major);
     wmma::store_matrix_sync(warpOutput + 16 * outputStride, acc_C10, outputStride, wmma::mem_row_major);
     wmma::store_matrix_sync(warpOutput + 16 * outputStride + 16, acc_C11, outputStride, wmma::mem_row_major);
     __syncthreads();
 
-    // write Rx
-    // pass 1: [0, 255]
+    // write to global memory
+    // write rx (cub) first to allow for better latency hiding of the atomics in the Rx write
+    writeRxVec<24>(rx, rxPersistent, temp_storage[warpId]);
+
+    // calculate the "Rx" sums in interleaved mode
+    // sum 1: By everyone (256 threads)
     const int2 coords = getPackedCoords(tid);
-    float sum = 0.0f;
+    float sum1 = 0.0f;
 #pragma unroll
     for (int w = 0; w < 8; w++)
-        sum += RxLocal[w * 32 + coords.x][coords.y];
-    atomicAdd(&Rx[tid], sum);
+        sum1 += RxLocal[w * 32 + coords.x][coords.y];
 
-    // pass 2: [256, 299]
-    if (tid < 44) {
-        const int i = tid + 256;
-        const int2 coords = getPackedCoords(i);
-        float sum = 0.0f;
+    // calculate leftover sum 2 (threads 0-43)
+    // it is done before issuing the first atomicAdd to keep the gpu working
+    float sum2 = 0.0f;
+    const bool hasTail = (tid < 44);
+    if (hasTail) {
+        const int2 coords2 = getPackedCoords(tid + 256);
 #pragma unroll
         for (int w = 0; w < 8; w++)
-            sum += RxLocal[w * 32 + coords.x][coords.y];
-        atomicAdd(&Rx[i], sum);
+            sum2 += RxLocal[w * 32 + coords2.x][coords2.y];
     }
-
-    // write rx (cub)
-    writeRxVec<24>(rx, rxPersistent, temp_storage[warpId]);
+    // do the atomic adds together to allow for better interleaving of the work
+    atomicAdd(&Rx[tid], sum1);
+    if (hasTail)
+        atomicAdd(&Rx[tid + 256], sum2);
 }
 
 __global__ void me_p7(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height, const int totalBlocksX) {
