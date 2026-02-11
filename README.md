@@ -217,4 +217,4 @@ p = 3            |  p = 5
 :-------------------------:|:-------------------------:
  ![p3](https://github.com/user-attachments/assets/51618201-1187-4500-b938-0ece143ee5e2) | ![p5](https://github.com/user-attachments/assets/17566f0e-9065-4ef9-876b-b56f0211f39d)
 p = 7            |  p = 9
- ![p7](https://github.com/user-attachments/assets/ea648617-0c15-48c6-826b-70a4be05b864) | ![p9](https://github.com/user-attachments/assets/0200d80f-ed48-46ea-9438-99951c7e113a)
+ ![p7](https://github.com/user-attachments/assets/ea648617-0c15-48c6-826b-70a4be05b864) | ![p9](https://github.com/user-attachments/assets/ced2a54f-7a37-4554-bc4a-4f4d62bfadde)
