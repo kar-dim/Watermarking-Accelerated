@@ -1,10 +1,10 @@
 ﻿#include "kernels.cuh"
 #include <cstdint>
+#include <cub/cub.cuh>
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include <mma.h>
-#include <cub/cub.cuh>
 
 using namespace nvcuda;
 
@@ -192,14 +192,15 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
 
     __shared__ alignas(16) float RxLocal[256][20];
     __shared__ alignas(16) half blockValues[3][258];
+    __shared__ typename cub::WarpReduce<rxVecData<8>>::TempStorage temp_storage[8]; // 8 Warps (256 threads / 32)
+    rxVecData<8> rxPersistent;
 
     wmma::fragment<wmma::accumulator, 16, 16, 16, float> acc_C;
     wmma::fill_fragment(acc_C, 0.0f);
 
-    float rxPersistent[8];
 #pragma unroll
     for (int i = 0; i < 8; i++)
-        rxPersistent[i] = 0.0f;
+        rxPersistent.vals[i] = 0.0f;
 
     // grid stride loop
     for (int taskIdx = blockLinear; taskIdx < taskTotal; taskIdx += gridTotal) {
@@ -229,8 +230,8 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
 #pragma unroll
         for (int j = 0; j < 4; j++) {
             const float2 res = __half22float2(__hmul2(inPtr[j], center2));
-            rxPersistent[j * 2 + 0] += res.x;
-            rxPersistent[j * 2 + 1] += res.y;
+            rxPersistent.vals[j * 2 + 0] += res.x;
+            rxPersistent.vals[j * 2 + 1] += res.y;
         }
 
         // Rx accumulation (Tensor Cores)
@@ -268,17 +269,8 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
         atomicAdd(&Rx[tid], sum);
     }
 
-    // write rx
-#pragma unroll
-    for (int i = 0; i < 8; ++i) {
-        float val = rxPersistent[i];
-#pragma unroll
-        for (int offset = 16; offset > 0; offset >>= 1)
-            val += __shfl_down_sync(0xFFFFFFFF, val, offset);
-        // atomic add the value to global
-        if ((tid & 31) == 0)
-            atomicAdd(&rx[i], val);
-    }
+    // write rx (cub)
+    writeRxVec<8>(rx, rxPersistent, temp_storage[warpId]);
 }
 
 __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height, const int totalBlocksX) {
@@ -294,16 +286,17 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
 
     __shared__ alignas(16) float RxLocal[256][36];
     __shared__ alignas(16) half blockValues[5][260];
+    __shared__ typename cub::WarpReduce<rxVecData<24>>::TempStorage temp_storage[8];
+    rxVecData<24> rxPersistent;
 
     wmma::fragment<wmma::accumulator, 16, 16, 16, float> acc_C00, acc_C10, acc_C11;
     wmma::fill_fragment(acc_C00, 0.0f);
     wmma::fill_fragment(acc_C10, 0.0f);
     wmma::fill_fragment(acc_C11, 0.0f);
 
-    float rxPersistent[24];
 #pragma unroll
     for (int i = 0; i < 24; i++)
-        rxPersistent[i] = 0.0f;
+        rxPersistent.vals[i] = 0.0f;
 
     // grid stride loop
     for (int taskIdx = blockLinear; taskIdx < taskTotal; taskIdx += gridTotal) {
@@ -335,8 +328,8 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
 #pragma unroll
             for (int j = 0; j < 4; j++) {
                 const float2 res = __half22float2(__hmul2(inPtr[j], center));
-                rxPersistent[i * 8 + j * 2 + 0] += res.x;
-                rxPersistent[i * 8 + j * 2 + 1] += res.y;
+                rxPersistent.vals[i * 8 + j * 2 + 0] += res.x;
+                rxPersistent.vals[i * 8 + j * 2 + 1] += res.y;
             }
         }
         half* rowPtr = (half*)&RxLocal[tid][0];
@@ -376,15 +369,12 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
 
     // write Rx
     // pass 1: [0, 255]
-    {
-        const int i = tid;
-        const int2 coords = getPackedCoords(i);
-        float sum = 0.0f;
+    const int2 coords = getPackedCoords(tid);
+    float sum = 0.0f;
 #pragma unroll
-        for (int w = 0; w < 8; w++)
-            sum += RxLocal[w * 32 + coords.x][coords.y];
-        atomicAdd(&Rx[i], sum);
-    }
+    for (int w = 0; w < 8; w++)
+        sum += RxLocal[w * 32 + coords.x][coords.y];
+    atomicAdd(&Rx[tid], sum);
 
     // pass 2: [256, 299]
     if (tid < 44) {
@@ -397,16 +387,8 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
         atomicAdd(&Rx[i], sum);
     }
 
-    // write rx
-#pragma unroll
-    for (int i = 0; i < 24; i++) {
-        float val = rxPersistent[i];
-#pragma unroll
-        for (int offset = 16; offset > 0; offset >>= 1)
-            val += __shfl_down_sync(0xFFFFFFFF, val, offset);
-        if ((tid & 31) == 0)
-            atomicAdd(&rx[i], val);
-    }
+    // write rx (cub)
+    writeRxVec<24>(rx, rxPersistent, temp_storage[warpId]);
 }
 
 __global__ void me_p7(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height, const int totalBlocksX) {
@@ -422,16 +404,17 @@ __global__ void me_p7(const float* __restrict__ input, float* __restrict__ Rx, f
 
     __shared__ alignas(16) float RxLocal[192][56];
     __shared__ alignas(16) half blockValues[7][134];
+    __shared__ typename cub::WarpReduce<rxVecData<48>>::TempStorage temp_storage[4];
+    rxVecData<48> rxPersistent;
 
     wmma::fragment<wmma::accumulator, 16, 16, 16, float> acc_Rx[6];
 #pragma unroll
     for (int i = 0; i < 6; i++)
         wmma::fill_fragment(acc_Rx[i], 0.0f);
 
-    float rxPersistent[48];
 #pragma unroll
     for (int i = 0; i < 48; ++i)
-        rxPersistent[i] = 0.0f;
+        rxPersistent.vals[i] = 0.0f;
 
     // grid stride loop
     for (int taskIdx = blockLinear; taskIdx < taskTotal; taskIdx += gridTotal) {
@@ -464,8 +447,8 @@ __global__ void me_p7(const float* __restrict__ input, float* __restrict__ Rx, f
 #pragma unroll
             for (int j = 0; j < 4; j++) {
                 const float2 res = __half22float2(__hmul2(inPtr[j], center));
-                rxPersistent[i * 8 + j * 2 + 0] += res.x;
-                rxPersistent[i * 8 + j * 2 + 1] += res.y;
+                rxPersistent.vals[i * 8 + j * 2 + 0] += res.x;
+                rxPersistent.vals[i * 8 + j * 2 + 1] += res.y;
             }
         }
 
@@ -518,26 +501,16 @@ __global__ void me_p7(const float* __restrict__ input, float* __restrict__ Rx, f
         atomicAdd(&Rx[k], sum);
     }
 
-    // write rx
-#pragma unroll
-    for (int i = 0; i < 48; i++) {
-        float val = rxPersistent[i];
-#pragma unroll
-        for (int offset = 16; offset > 0; offset >>= 1)
-            val += __shfl_down_sync(0xFFFFFFFF, val, offset);
-        if ((tid & 31) == 0)
-            atomicAdd(&rx[i], val);
-    }
+    // write rx (cub)
+    writeRxVec<48>(rx, rxPersistent, temp_storage[warpId]);
 }
 
 __global__ void me_p9(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height, const int totalBlocksX) {
-
     constexpr int INPUT_STRIDE = 176; // WMMA stride is 176 (halves)
     constexpr int outputStride = 88;
 
     const int tid = threadIdx.x;
     const int warpId = tid >> 5;
-    const int laneId = tid & 31;
     const int startRow = warpId * 32;
     const int gridTotal = gridDim.x * gridDim.y;
     const int taskTotal = totalBlocksX * height;
@@ -545,6 +518,8 @@ __global__ void me_p9(const float* __restrict__ input, float* __restrict__ Rx, f
 
     __shared__ alignas(16) float RxLocal[128][88];
     __shared__ alignas(16) half blockValues[9][136];
+    __shared__ typename cub::WarpReduce<rxVecData<80>>::TempStorage temp_storage[4];
+    rxVecData<80> rxPersistent;
 
     // Init Accumulators (Float)
     wmma::fragment<wmma::accumulator, 16, 16, 16, float> acc_Rx[15];
@@ -552,10 +527,9 @@ __global__ void me_p9(const float* __restrict__ input, float* __restrict__ Rx, f
     for (int i = 0; i < 15; i++)
         wmma::fill_fragment(acc_Rx[i], 0.0f);
 
-    float rx_persistent[80];
 #pragma unroll
     for (int i = 0; i < 80; i++)
-        rx_persistent[i] = 0.0f;
+        rxPersistent.vals[i] = 0.0f;
 
     // grid stride loop
     for (int taskIdx = blockLinear; taskIdx < taskTotal; taskIdx += gridTotal) {
@@ -587,8 +561,8 @@ __global__ void me_p9(const float* __restrict__ input, float* __restrict__ Rx, f
 #pragma unroll
             for (int j = 0; j < 4; j++) {
                 const float2 res = __half22float2(__hmul2(inPtr[j], center));
-                rx_persistent[i * 8 + j * 2 + 0] += res.x;
-                rx_persistent[i * 8 + j * 2 + 1] += res.y;
+                rxPersistent.vals[i * 8 + j * 2 + 0] += res.x;
+                rxPersistent.vals[i * 8 + j * 2 + 1] += res.y;
             }
         }
 
@@ -668,20 +642,11 @@ __global__ void me_p9(const float* __restrict__ input, float* __restrict__ Rx, f
     __syncthreads();
     RxStreamPass<2080, 3240, 64>(tid, RxLocal, Rx);
 
-    // write rx
-#pragma unroll
-    for (int i = 0; i < 80; i++) {
-        float val = rx_persistent[i];
-#pragma unroll
-        for (int offset = 16; offset > 0; offset >>= 1)
-            val += __shfl_down_sync(0xFFFFFFFF, val, offset);
-        if (laneId == 0)
-            atomicAdd(&rx[i], val);
-    }
+    // write rx (cub)
+    writeRxVec<80>(rx, rxPersistent, temp_storage[warpId]);
 }
 
 __global__ void compute_u_and_sumsq(const float* __restrict__ mask, const float* __restrict__ w, float* __restrict__ u, float* __restrict__ globalSumSq, const int N) {
-
     constexpr int blockSize = 768;
 
     // setup CUB for block reduction
@@ -705,11 +670,9 @@ __global__ void compute_u_and_sumsq(const float* __restrict__ mask, const float*
 
     // cub block reduction of the sum of squares
     const float blockTotalSq = BlockReduceT(temp_storage).Sum(threadSumSq);
-
     // final global atomic add, only thread 0 of the block does this, we want to minimize atomics as much as possible
-    if (tid == 0) {
+    if (tid == 0)
         atomicAdd(globalSumSq, blockTotalSq);
-    }
 }
 
 __global__ void apply_watermark_fused(const float* __restrict__ input, const float* __restrict__ u, const float* __restrict__ sumSqPtr, uint8_t* __restrict__ output, const float strengthNumerator,

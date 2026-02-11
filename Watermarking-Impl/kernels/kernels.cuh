@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include <cub/cub.cuh>
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -13,6 +14,17 @@ struct CorrelationData {
     float normU;
     float normZ;
     __device__ __forceinline__ CorrelationData operator+(const CorrelationData& other) const { return {dot + other.dot, normU + other.normU, normZ + other.normZ}; }
+};
+
+template <int N> struct rxVecData {
+    float vals[N];
+    __device__ __forceinline__ rxVecData operator+(const rxVecData& other) const {
+        rxVecData res;
+#pragma unroll
+        for (int i = 0; i < N; i++)
+            res.vals[i] = vals[i] + other.vals[i];
+        return res;
+    }
 };
 
 // maps a linear index k to(row, col) coordinates for a packed lower triangular matrix
@@ -168,6 +180,16 @@ __global__ void calculate_error_sequence(const float* __restrict__ inputA, const
         }
         const float output = error_sequence_coeffs_filter<p>(&region[0][0], sCoeffs, threadIdx.x, threadIdx.y);
         x_[(x * height + y)] = calculateAbs ? fabsf(output) : output;
+    }
+}
+
+// helper method used to reduce "rx" vector values and atomic add them (first thread of all warps)
+template <int SIZE, typename StorageT> __device__ __forceinline__ void writeRxVec(float* __restrict__ rx, const rxVecData<SIZE>& rxData, StorageT& temp_storage) {
+    const rxVecData<SIZE> warpSum = cub::WarpReduce<rxVecData<SIZE>>(temp_storage).Sum(rxData);
+    if ((threadIdx.x & 31) == 0) {
+#pragma unroll
+        for (int i = 0; i < SIZE; i++)
+            atomicAdd(&rx[i], warpSum.vals[i]);
     }
 }
 
