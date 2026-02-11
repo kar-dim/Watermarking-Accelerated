@@ -8,6 +8,13 @@ struct alignas(16) half8 {
     half a, b, c, d, e, f, g, h;
 };
 
+struct CorrelationData {
+    float dot;
+    float normU;
+    float normZ;
+    __device__ __forceinline__ CorrelationData operator+(const CorrelationData& other) const { return {dot + other.dot, normU + other.normU, normZ + other.normZ}; }
+};
+
 // maps a linear index k to(row, col) coordinates for a packed lower triangular matrix
 __device__ inline int2 getPackedCoords(const int k) {
     // inverse triangular number formula: r = floor((sqrt(1 + 8k) - 1) / 2)
@@ -462,7 +469,7 @@ __device__ void load_neighbor_row_funnel_p5(half& p0, half& p1, half& p2, half& 
 __device__ void load_neighbor_row_funnel_p7(half* dst, const half* rowBase);
 __device__ void load_neighbor_row_funnel_p9(half* dst, const half* rowBase);
 __device__ void load_neighbor_vec_p5(half8* dst, const half blockValues[5][260], half& center);
-__device__ void load_neighbor_vec_p7(half8* dst, const half blockValues[7][262], half& center);
+__device__ void load_neighbor_vec_p7(half8* dst, const half blockValues[7][134], half& center);
 __device__ void load_neighbor_vec_p9(half8* dst, const half blockValues[9][136], half& center);
 
 // Prediction Error kernels (ME) for p = 3, p = 5, p = 7 and p = 9

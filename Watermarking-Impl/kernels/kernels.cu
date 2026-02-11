@@ -4,6 +4,7 @@
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 #include <mma.h>
+#include <cub/cub.cuh>
 
 using namespace nvcuda;
 
@@ -681,43 +682,33 @@ __global__ void me_p9(const float* __restrict__ input, float* __restrict__ Rx, f
 
 __global__ void compute_u_and_sumsq(const float* __restrict__ mask, const float* __restrict__ w, float* __restrict__ u, float* __restrict__ globalSumSq, const int N) {
 
+    constexpr int blockSize = 768;
+
+    // setup CUB for block reduction
+    using BlockReduceT = cub::BlockReduce<float, blockSize>;
+    __shared__ typename BlockReduceT::TempStorage temp_storage;
+
     const int tid = threadIdx.x;
     const int gridSize = blockDim.x * gridDim.x;
-    const int laneId = tid & 31;
-    const int warpId = tid >> 5;
-    int idx = blockIdx.x * blockDim.x + tid;
-
-    // block size is 768 -> 24 warps
-    __shared__ float warpLevelSums[24];
 
     // fuse calculation of u and local sum of squares
-    float localSumSq = 0.0f;
+    float threadSumSq = 0.0f;
+    int idx = blockIdx.x * blockDim.x + tid;
+
+    // grid stride loop
     while (idx < N) {
         const float uVal = mask[idx] * w[idx];
         u[idx] = uVal;
-        localSumSq += uVal * uVal;
+        threadSumSq += uVal * uVal;
         idx += gridSize;
     }
-    // warp level reduction
-#pragma unroll
-    for (int offset = 16; offset > 0; offset >>= 1)
-        localSumSq += __shfl_down_sync(0xFFFFFFFF, localSumSq, offset);
 
-    // block level reduction, leader of each warp (lane 0) holds the sum for that warp
-    if (laneId == 0)
-        warpLevelSums[warpId] = localSumSq;
-    __syncthreads();
+    // cub block reduction of the sum of squares
+    const float blockTotalSq = BlockReduceT(temp_storage).Sum(threadSumSq);
 
-    // final block sum by first warp
-    if (warpId == 0) {
-        float blockSum = (tid < (blockDim.x >> 5)) ? warpLevelSums[laneId] : 0.0f;
-#pragma unroll
-        for (int offset = 16; offset > 0; offset >>= 1)
-            blockSum += __shfl_down_sync(0xFFFFFFFF, blockSum, offset);
-
-        // final global atomic add, only thread 0 of the block does this, we want to minimize atomics as much as possible
-        if (tid == 0)
-            atomicAdd(globalSumSq, blockSum);
+    // final global atomic add, only thread 0 of the block does this, we want to minimize atomics as much as possible
+    if (tid == 0) {
+        atomicAdd(globalSumSq, blockTotalSq);
     }
 }
 
@@ -742,22 +733,21 @@ __global__ void apply_watermark_fused(const float* __restrict__ input, const flo
 
 __global__ void calculate_partial_correlation(const float* __restrict__ e_u, const float* __restrict__ e_z, float* __restrict__ partialDots, float* __restrict__ partialNormU,
                                               float* __restrict__ partialNormZ, const unsigned int size) {
+    constexpr int blockSize = 768;
+
+    // we can use CUB to reduce with warp shuffles and reduce the boilerplate
+    using BlockReduceT = cub::BlockReduce<CorrelationData, blockSize>;
+    __shared__ typename BlockReduceT::TempStorage temp_storage;
+
     const int tid = threadIdx.x;
     const int stride = blockDim.x * gridDim.x;
-    const int warpId = tid >> 5;
-
-    // 768 threads -> 24 warps
-    __shared__ float dotCache[24];
-    __shared__ float normUCache[24];
-    __shared__ float normZCache[24];
-
-    int idx = blockIdx.x * blockDim.x + tid;
 
     float sumDot = 0.0f;
     float sumNormU = 0.0f;
     float sumNormZ = 0.0f;
 
-    // strided load
+    // grid stride loop
+    int idx = blockIdx.x * blockDim.x + tid;
     while (idx < size) {
         const float a = e_u[idx];
         const float b = e_z[idx];
@@ -767,57 +757,27 @@ __global__ void calculate_partial_correlation(const float* __restrict__ e_u, con
         idx += stride;
     }
 
-    float dotVal = sumDot;
-    float normUVal = sumNormU;
-    float normZVal = sumNormZ;
+    // use CUB to reduce the sums within the block, each thread contributes its local sum and we get a block level sum at the end
+    const CorrelationData threadData = {sumDot, sumNormU, sumNormZ};
+    const CorrelationData blockSum = BlockReduceT(temp_storage).Sum(threadData);
 
-    // intra-warp reduction
-    for (int offset = 16; offset > 0; offset >>= 1) {
-        dotVal += __shfl_down_sync(0xFFFFFFFF, dotVal, offset);
-        normUVal += __shfl_down_sync(0xFFFFFFFF, normUVal, offset);
-        normZVal += __shfl_down_sync(0xFFFFFFFF, normZVal, offset);
-    }
-
-    // warp leaders write to shared memory
-    if ((tid & 31) == 0) {
-        dotCache[warpId] = dotVal;
-        normUCache[warpId] = normUVal;
-        normZCache[warpId] = normZVal;
-    }
-    __syncthreads();
-
-    // final reduction by first warp
-    if (warpId == 0) {
-        const bool validTid = tid < (blockDim.x >> 5);
-        dotVal = validTid ? dotCache[tid] : 0.0f;
-        normUVal = validTid ? normUCache[tid] : 0.0f;
-        normZVal = validTid ? normZCache[tid] : 0.0f;
-
-        for (int offset = 16; offset > 0; offset >>= 1) {
-            dotVal += __shfl_down_sync(0xFFFFFFFF, dotVal, offset);
-            normUVal += __shfl_down_sync(0xFFFFFFFF, normUVal, offset);
-            normZVal += __shfl_down_sync(0xFFFFFFFF, normZVal, offset);
-        }
-
-        if (tid == 0) {
-            partialDots[blockIdx.x] = dotVal;
-            partialNormU[blockIdx.x] = normUVal;
-            partialNormZ[blockIdx.x] = normZVal;
-        }
+    // thread 0 writes the result
+    if (tid == 0) {
+        partialDots[blockIdx.x] = blockSum.dot;
+        partialNormU[blockIdx.x] = blockSum.normU;
+        partialNormZ[blockIdx.x] = blockSum.normZ;
     }
 }
 
 __global__ void calculate_final_correlation(const float* __restrict__ partialDots, const float* __restrict__ partialNormU, const float* __restrict__ partialNormZ, float* __restrict__ result,
                                             const unsigned int numBlocks) {
-    const int tid = threadIdx.x;
-    const int lane = tid & 31;
-    const int warpId = tid >> 5;
-    const int numWarps = (blockDim.x + 31) >> 5;
+    constexpr int blockSize = 1024;
 
-    // shared memory must match number of warps
-    __shared__ float warpDot[32];
-    __shared__ float warpU[32];
-    __shared__ float warpZ[32];
+    // we can use CUB to reduce with warp shuffles and reduce the boilerplate
+    using BlockReduceT = cub::BlockReduce<CorrelationData, blockSize>;
+    __shared__ typename BlockReduceT::TempStorage temp_storage;
+
+    const int tid = threadIdx.x;
 
     float localDot = 0.0f;
     float localU = 0.0f;
@@ -848,10 +808,8 @@ __global__ void calculate_final_correlation(const float* __restrict__ partialDot
             localU += partialNormU[i];
             localZ += partialNormZ[i];
         }
-    }
-
-    // non vectorized path (alignment not met), fallback to scalar loads
-    else {
+    } else {
+        // non vectorized path (alignment not met), fallback to scalar loads
         for (int i = tid; i < numBlocks; i += blockDim.x) {
             localDot += partialDots[i];
             localU += partialNormU[i];
@@ -859,37 +817,15 @@ __global__ void calculate_final_correlation(const float* __restrict__ partialDot
         }
     }
 
-    // intra-warp reduction
-#pragma unroll
-    for (int offset = 16; offset > 0; offset >>= 1) {
-        localDot += __shfl_down_sync(0xFFFFFFFF, localDot, offset);
-        localU += __shfl_down_sync(0xFFFFFFFF, localU, offset);
-        localZ += __shfl_down_sync(0xFFFFFFFF, localZ, offset);
-    }
-    if (lane == 0) {
-        warpDot[warpId] = localDot;
-        warpU[warpId] = localU;
-        warpZ[warpId] = localZ;
-    }
-    __syncthreads();
+    // use cub to reduce the block sums
+    const CorrelationData threadData = {localDot, localU, localZ};
+    const CorrelationData blockSum = BlockReduceT(temp_storage).Sum(threadData);
 
-    // final warp reduces
-    if (warpId == 0) {
-        const bool validTid = tid < numWarps;
-        localDot = validTid ? warpDot[lane] : 0.0f;
-        localU = validTid ? warpU[lane] : 0.0f;
-        localZ = validTid ? warpZ[lane] : 0.0f;
-#pragma unroll
-        for (int offset = 16; offset > 0; offset >>= 1) {
-            localDot += __shfl_down_sync(0xFFFFFFFF, localDot, offset);
-            localU += __shfl_down_sync(0xFFFFFFFF, localU, offset);
-            localZ += __shfl_down_sync(0xFFFFFFFF, localZ, offset);
-        }
-        if (lane == 0) {
-            const float normU = sqrtf(localU);
-            const float normZ = sqrtf(localZ);
-            result[0] = (normU > 1e-12f && normZ > 1e-12f) ? (localDot / (normU * normZ)) : 0.0f;
-        }
+    // final math and write by first thread
+    if (tid == 0) {
+        const float normU = sqrtf(blockSum.normU);
+        const float normZ = sqrtf(blockSum.normZ);
+        result[0] = (normU > 1e-12f && normZ > 1e-12f) ? (blockSum.dot / (normU * normZ)) : 0.0f;
     }
 }
 
