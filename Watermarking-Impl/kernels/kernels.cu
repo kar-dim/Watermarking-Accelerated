@@ -192,15 +192,13 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
 
     __shared__ alignas(16) float RxLocal[256][20];
     __shared__ alignas(16) half blockValues[3][258];
-    __shared__ typename cub::WarpReduce<rxVecData<8>>::TempStorage temp_storage[8]; // 8 Warps (256 threads / 32)
+    __shared__ float rxStaging[8][8];
+    __shared__ typename cub::WarpReduce<rxVecData<8>>::TempStorage temp_storage[8];
     rxVecData<8> rxPersistent;
 
     wmma::fragment<wmma::accumulator, 16, 16, 16, float> acc_C;
     wmma::fill_fragment(acc_C, 0.0f);
-
-#pragma unroll
-    for (int i = 0; i < 8; i++)
-        rxPersistent.vals[i] = 0.0f;
+    rxPersistent.zero();
 
     // grid stride loop
     for (int taskIdx = blockLinear; taskIdx < taskTotal; taskIdx += gridTotal) {
@@ -256,6 +254,8 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
     // write to global memory
     float* warpOutput = &RxLocal[warpId * 32][0];
     wmma::store_matrix_sync(warpOutput, acc_C, outputStride, wmma::mem_row_major);
+    // write rx (cub) before the barrier to hide latency
+    writeRxVec<8>(rx, rxPersistent, temp_storage[warpId], &rxStaging[warpId][0]);
     __syncthreads();
 
     // write Rx
@@ -268,9 +268,6 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
         // atomic add the value to global
         atomicAdd(&Rx[tid], sum);
     }
-
-    // write rx (cub)
-    writeRxVec<8>(rx, rxPersistent, temp_storage[warpId]);
 }
 
 __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height, const int totalBlocksX) {
@@ -286,6 +283,7 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
 
     __shared__ alignas(16) float RxLocal[256][36];
     __shared__ alignas(16) half blockValues[5][260];
+    __shared__ float rxStaging[8][24];
     __shared__ typename cub::WarpReduce<rxVecData<24>>::TempStorage temp_storage[8];
     rxVecData<24> rxPersistent;
 
@@ -293,10 +291,7 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
     wmma::fill_fragment(acc_C00, 0.0f);
     wmma::fill_fragment(acc_C10, 0.0f);
     wmma::fill_fragment(acc_C11, 0.0f);
-
-#pragma unroll
-    for (int i = 0; i < 24; i++)
-        rxPersistent.vals[i] = 0.0f;
+    rxPersistent.zero();
 
     // grid stride loop
     for (int taskIdx = blockLinear; taskIdx < taskTotal; taskIdx += gridTotal) {
@@ -359,38 +354,34 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
         __syncthreads();
     }
 
+    // write to global memory
     float* warpOutput = &RxLocal[warpId * 32][0];
     wmma::store_matrix_sync(warpOutput, acc_C00, outputStride, wmma::mem_row_major);
     wmma::store_matrix_sync(warpOutput + 16 * outputStride, acc_C10, outputStride, wmma::mem_row_major);
     wmma::store_matrix_sync(warpOutput + 16 * outputStride + 16, acc_C11, outputStride, wmma::mem_row_major);
+    // write rx (cub) before the barrier to hide latency
+    writeRxVec<24>(rx, rxPersistent, temp_storage[warpId], &rxStaging[warpId][0]);
     __syncthreads();
 
-    // write to global memory
-    // write rx (cub) first to allow for better latency hiding of the atomics in the Rx write
-    writeRxVec<24>(rx, rxPersistent, temp_storage[warpId]);
-
-    // calculate the "Rx" sums in interleaved mode
-    // sum 1: By everyone (256 threads)
+    // write Rx
+    // pass 1: [0, 255]
     const int2 coords = getPackedCoords(tid);
-    float sum1 = 0.0f;
+    float sum = 0.0f;
 #pragma unroll
     for (int w = 0; w < 8; w++)
-        sum1 += RxLocal[w * 32 + coords.x][coords.y];
+        sum += RxLocal[w * 32 + coords.x][coords.y];
+    atomicAdd(&Rx[tid], sum);
 
-    // calculate leftover sum 2 (threads 0-43)
-    // it is done before issuing the first atomicAdd to keep the gpu working
-    float sum2 = 0.0f;
-    const bool hasTail = (tid < 44);
-    if (hasTail) {
-        const int2 coords2 = getPackedCoords(tid + 256);
+    // pass 2: [256, 299]
+    if (tid < 44) {
+        const int i = tid + 256;
+        const int2 coords = getPackedCoords(i);
+        float sum = 0.0f;
 #pragma unroll
         for (int w = 0; w < 8; w++)
-            sum2 += RxLocal[w * 32 + coords2.x][coords2.y];
+            sum += RxLocal[w * 32 + coords.x][coords.y];
+        atomicAdd(&Rx[i], sum);
     }
-    // do the atomic adds together to allow for better interleaving of the work
-    atomicAdd(&Rx[tid], sum1);
-    if (hasTail)
-        atomicAdd(&Rx[tid + 256], sum2);
 }
 
 __global__ void me_p7(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height, const int totalBlocksX) {
@@ -406,6 +397,7 @@ __global__ void me_p7(const float* __restrict__ input, float* __restrict__ Rx, f
 
     __shared__ alignas(16) float RxLocal[192][56];
     __shared__ alignas(16) half blockValues[7][134];
+    __shared__ float rxStaging[4][48];
     __shared__ typename cub::WarpReduce<rxVecData<48>>::TempStorage temp_storage[4];
     rxVecData<48> rxPersistent;
 
@@ -413,10 +405,7 @@ __global__ void me_p7(const float* __restrict__ input, float* __restrict__ Rx, f
 #pragma unroll
     for (int i = 0; i < 6; i++)
         wmma::fill_fragment(acc_Rx[i], 0.0f);
-
-#pragma unroll
-    for (int i = 0; i < 48; ++i)
-        rxPersistent.vals[i] = 0.0f;
+    rxPersistent.zero();
 
     // grid stride loop
     for (int taskIdx = blockLinear; taskIdx < taskTotal; taskIdx += gridTotal) {
@@ -491,6 +480,8 @@ __global__ void me_p7(const float* __restrict__ input, float* __restrict__ Rx, f
     wmma::store_matrix_sync(warpOutput + 32 * outputStride, acc_Rx[3], outputStride, wmma::mem_row_major);
     wmma::store_matrix_sync(warpOutput + 32 * outputStride + 16, acc_Rx[4], outputStride, wmma::mem_row_major);
     wmma::store_matrix_sync(warpOutput + 32 * outputStride + 32, acc_Rx[5], outputStride, wmma::mem_row_major);
+    // write rx (cub) before the barrier to hide latency
+    writeRxVec<48>(rx, rxPersistent, temp_storage[warpId], &rxStaging[warpId][0]);
     __syncthreads();
 
     // write Rx, loop stride 128, sum over 4 warps
@@ -502,9 +493,6 @@ __global__ void me_p7(const float* __restrict__ input, float* __restrict__ Rx, f
             sum += RxLocal[w * 48 + coords.x][coords.y];
         atomicAdd(&Rx[k], sum);
     }
-
-    // write rx (cub)
-    writeRxVec<48>(rx, rxPersistent, temp_storage[warpId]);
 }
 
 __global__ void me_p9(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height, const int totalBlocksX) {
@@ -516,7 +504,7 @@ __global__ void me_p9(const float* __restrict__ input, float* __restrict__ Rx, f
     const int startRow = warpId * 32;
     const int gridTotal = gridDim.x * gridDim.y;
     const int taskTotal = totalBlocksX * height;
-    int blockLinear = blockIdx.y * gridDim.x + blockIdx.x;
+    const int blockLinear = blockIdx.y * gridDim.x + blockIdx.x;
 
     __shared__ alignas(16) float RxLocal[128][88];
     __shared__ alignas(16) half blockValues[9][136];
@@ -528,10 +516,7 @@ __global__ void me_p9(const float* __restrict__ input, float* __restrict__ Rx, f
 #pragma unroll
     for (int i = 0; i < 15; i++)
         wmma::fill_fragment(acc_Rx[i], 0.0f);
-
-#pragma unroll
-    for (int i = 0; i < 80; i++)
-        rxPersistent.vals[i] = 0.0f;
+    rxPersistent.zero();
 
     // grid stride loop
     for (int taskIdx = blockLinear; taskIdx < taskTotal; taskIdx += gridTotal) {
@@ -644,8 +629,9 @@ __global__ void me_p9(const float* __restrict__ input, float* __restrict__ Rx, f
     __syncthreads();
     RxStreamPass<2080, 3240, 64>(tid, RxLocal, Rx);
 
-    // write rx (cub)
-    writeRxVec<80>(rx, rxPersistent, temp_storage[warpId]);
+    // write rx (cub) after the barrier, we can't interleave (we are dangerously close to max limit, plus register pressure is already high)
+    __syncthreads();
+    writeRxVec<80>(rx, rxPersistent, temp_storage[warpId], warpOutput);
 }
 
 __global__ void compute_u_and_sumsq(const float* __restrict__ mask, const float* __restrict__ w, float* __restrict__ u, float* __restrict__ globalSumSq, const int N) {

@@ -5,10 +5,12 @@
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 
+// half8 struct for vectorized operations on 8 half values
 struct alignas(16) half8 {
     half a, b, c, d, e, f, g, h;
 };
 
+// struct to hold correlation data for reduction (cub), used in correlation calculation kernels
 struct CorrelationData {
     float dot;
     float normU;
@@ -16,14 +18,29 @@ struct CorrelationData {
     __device__ __forceinline__ CorrelationData operator+(const CorrelationData& other) const { return {dot + other.dot, normU + other.normU, normZ + other.normZ}; }
 };
 
-template <int N>
-struct rxVecData {
+// struct to hold rx vector values for reduction (cub) with vectorized addition with operator+
+template <int N, int NVEC = N / 4>
+struct alignas(16) rxVecData {
     float vals[N];
-    __device__ __forceinline__ rxVecData operator+(const rxVecData& other) const {
-        rxVecData res;
+
+    // it is better to initialize whenever we want instead of constructor
+    __device__ __forceinline__ void zero() {
 #pragma unroll
         for (int i = 0; i < N; i++)
-            res.vals[i] = vals[i] + other.vals[i];
+            vals[i] = 0.0f;
+    }
+
+    __device__ __forceinline__ rxVecData operator+(const rxVecData& other) const {
+        rxVecData res;
+        const float4* a = reinterpret_cast<const float4*>(vals);
+        const float4* b = reinterpret_cast<const float4*>(other.vals);
+        float4* r = reinterpret_cast<float4*>(res.vals);
+#pragma unroll
+        for (int i = 0; i < NVEC; i++) {
+            float4 v1 = a[i];
+            float4 v2 = b[i];
+            r[i] = make_float4(v1.x + v2.x, v1.y + v2.y, v1.z + v2.z, v1.w + v2.w);
+        }
         return res;
     }
 };
@@ -188,15 +205,20 @@ __global__ void calculate_error_sequence(const float* __restrict__ inputA, const
     }
 }
 
-// helper method used to reduce "rx" vector values and atomic add them (first thread of all warps)
+// helper method used to reduce "rx" vector values and atomic add them (all threads cooperate)
 template <int SIZE, typename StorageT>
-__device__ __forceinline__ void writeRxVec(float* __restrict__ rx, const rxVecData<SIZE>& rxData, StorageT& temp_storage) {
+__device__ __forceinline__ void writeRxVec(float* __restrict__ rx, const rxVecData<SIZE>& rxData, StorageT& temp_storage, float* __restrict__ warpStaging) {
     const rxVecData<SIZE> warpSum = cub::WarpReduce<rxVecData<SIZE>>(temp_storage).Sum(rxData);
     if ((threadIdx.x & 31) == 0) {
 #pragma unroll
         for (int i = 0; i < SIZE; i++)
-            atomicAdd(&rx[i], warpSum.vals[i]);
+            warpStaging[i] = warpSum.vals[i];
     }
+    __syncwarp();
+// cooperative Global Atomic (Parallel!)
+#pragma unroll
+    for (int i = threadIdx.x & 31; i < SIZE; i += 32)
+        atomicAdd(&rx[i], warpStaging[i]);
 }
 
 // naive 1-thread Cholesky solver used for its very low latency versus cuSOLVER but useful only for very small systems, p = 3 (N = 8) or p = 5 (N = 24)
