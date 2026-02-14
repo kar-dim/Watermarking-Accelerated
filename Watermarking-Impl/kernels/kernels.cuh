@@ -516,7 +516,6 @@ __device__ void RxStreamPass(const int tid, float (*__restrict__ RxLocal)[88], f
 }
 
 // Prediction Error helper device kernels
-__device__ void me_p3_rxCalculate(half8* RxLocalVec8, const half8& vec, const half& center);
 __device__ void load_neighbor_row_funnel_p3(half& p0, half& p1, half& p2, const half* rowBase);
 __device__ void load_neighbor_row_funnel_p5(half& p0, half& p1, half& p2, half& p3, half& p4, const half* rowBase);
 __device__ void load_neighbor_row_funnel_p7(half* dst, const half* rowBase);

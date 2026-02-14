@@ -8,20 +8,6 @@
 
 using namespace nvcuda;
 
-// STS.128
-__device__ void me_p3_rxCalculate(half8* RxLocalVec8, const half8& vec, const half& center) {
-    half8 tmp;
-    tmp.a = vec.a * center;
-    tmp.b = vec.b * center;
-    tmp.c = vec.c * center;
-    tmp.d = vec.d * center;
-    tmp.e = vec.e * center;
-    tmp.f = vec.f * center;
-    tmp.g = vec.g * center;
-    tmp.h = vec.h * center;
-    *RxLocalVec8 = tmp;
-}
-
 __device__ void load_neighbor_row_funnel_p3(half& p0, half& p1, half& p2, const half* rowBase) {
     // shift Amount (0 or 16 bits), if threadIdx.x is odd, we shift right by 1 half (16 bits)
     const uint32_t shift = (threadIdx.x & 1) * 16;
