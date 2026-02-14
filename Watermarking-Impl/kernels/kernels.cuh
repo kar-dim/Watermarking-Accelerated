@@ -35,8 +35,9 @@ __device__ inline int2 getPackedCoords(const int k) {
     return make_int2(r, c);
 }
 
-// helper method to clamp a value between two limits
-template <typename T> __device__ inline T clamp(const T val, const T lo, const T hi) { return (val < lo) ? lo : (val > hi) ? hi : val; }
+// helper methods to clamp a value between two limits
+inline __device__ float clamp(float f, float a, float b) { return fmaxf(a, fminf(f, b)); }
+inline __device__ int clamp(int f, int a, int b) { return max(a, min(f, b)); }
 
 // helper method to fill block-wide shared memory cooperatively for error sequence and NVF kernels
 // sharedMem must be of size: [sharedSize][sharedSize + 1] to avoid bank conflicts
@@ -48,8 +49,8 @@ __device__ __forceinline__ void fillBlockMain(const float* __restrict__ inputA, 
     for (int i = threadIdx.y * blockDim.x + threadIdx.x; i < sharedSize * sharedSize; i += blockDim.x * blockDim.y) {
         const int tileRow = i % sharedSize;
         const int tileCol = i / sharedSize;
-        const int globalX = max(0, min(width - 1, baseGlobalX + tileCol));
-        const int globalY = max(0, min(height - 1, baseGlobalY + tileRow));
+        const int globalX = clamp(width - 1, 0, baseGlobalX + tileCol);
+        const int globalY = clamp(height - 1, 0, baseGlobalY + tileRow);
         const int idx = globalX * height + globalY;
         float val = inputA[idx];
         // if we need to fuse (A*B), do it here, branch-free because it its known at compile time
@@ -88,8 +89,8 @@ __device__ __forceinline__ void fillBlockStrip(half blockValues[p][StripWidth], 
     int idx = tid;
     while (idx < totalPixels) {
         if (c < StripWidth) {
-            const int globalCol = max(0, min((int)width - 1, baseGlobalCol + c));
-            const int globalRow = max(0, min((int)height - 1, baseGlobalRow + r));
+            const int globalCol = clamp(width - 1, 0, baseGlobalCol + c);
+            const int globalRow = clamp(height - 1, 0, baseGlobalRow + r);
             blockValues[r][c] = __float2half(input[globalCol * height + globalRow] * scaleFactor);
         }
         idx += BlockSize;
