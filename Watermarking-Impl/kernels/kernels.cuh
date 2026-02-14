@@ -215,7 +215,7 @@ __device__ __forceinline__ void writeRxVec(float* __restrict__ rx, const rxVecDa
             warpStaging[i] = warpSum.vals[i];
     }
     __syncwarp();
-// cooperative Global Atomic (Parallel!)
+    // cooperative global atomicAdd
 #pragma unroll
     for (int i = threadIdx.x & 31; i < SIZE; i += 32)
         atomicAdd(&rx[i], warpStaging[i]);
@@ -517,6 +517,8 @@ __device__ void RxStreamPass(const int tid, float (*__restrict__ RxLocal)[88], f
 
 // Prediction Error helper device kernels
 __device__ void load_neighbor_row_funnel_p3(half& p0, half& p1, half& p2, const half* rowBase);
+__device__ void load_neighbor_row_funnel_p3_col(half& a, half& b, half& c, const half* rowBase, const int col);
+__device__ void load_neighbor_vec_p3_col(half8& dst, half& center, const half blockValues[3][258], const int col);
 __device__ void load_neighbor_row_funnel_p5(half& p0, half& p1, half& p2, half& p3, half& p4, const half* rowBase);
 __device__ void load_neighbor_row_funnel_p7(half* dst, const half* rowBase);
 __device__ void load_neighbor_row_funnel_p9(half* dst, const half* rowBase);

@@ -84,9 +84,8 @@ class WatermarkCuda final : public WatermarkGPU<p> {
     af::array computePredictionErrorData(const af::array& image, const bool calculateAbs) const override {
         constexpr int RxSize = (this->localSize * (this->localSize + 1)) / 2;
         constexpr int rxSize = this->localSize;
-        constexpr int threadsPerBlock = (p >= 7) ? 128 : 256;
 
-        const int blocksX = meKernelDims.x / threadsPerBlock;
+        const int blocksX = meKernelDims.x / meBlockSize.x;
 
         const af::array Rx = af::constant(0.0f, RxSize, 1, f32);
         const af::array rx = af::constant(0.0f, rxSize, 1, f32);
@@ -95,13 +94,13 @@ class WatermarkCuda final : public WatermarkGPU<p> {
 
         // compute autocorrelation matrix Rx and vector rx for the ME coefficients using grid-stride kernels optimized for the number of SMs on the GPU
         if constexpr (p == 3)
-            me_p3<<<gridOptimalMe, threadsPerBlock, 0, afStream>>>(image.device<float>(), RxPtr, rxPtr, this->baseCols, this->baseRows, blocksX);
+            me_p3<<<gridOptimalMe, meBlockSize.x, 0, afStream>>>(image.device<float>(), RxPtr, rxPtr, this->baseCols, this->baseRows, blocksX);
         else if constexpr (p == 5)
-            me_p5<<<gridOptimalMe, threadsPerBlock, 0, afStream>>>(image.device<float>(), RxPtr, rxPtr, this->baseCols, this->baseRows, blocksX);
+            me_p5<<<gridOptimalMe, meBlockSize.x, 0, afStream>>>(image.device<float>(), RxPtr, rxPtr, this->baseCols, this->baseRows, blocksX);
         else if constexpr (p == 7)
-            me_p7<<<gridOptimalMe, threadsPerBlock, 0, afStream>>>(image.device<float>(), RxPtr, rxPtr, this->baseCols, this->baseRows, blocksX);
+            me_p7<<<gridOptimalMe, meBlockSize.x, 0, afStream>>>(image.device<float>(), RxPtr, rxPtr, this->baseCols, this->baseRows, blocksX);
         else
-            me_p9<<<gridOptimalMe, threadsPerBlock, 0, afStream>>>(image.device<float>(), RxPtr, rxPtr, this->baseCols, this->baseRows, blocksX);
+            me_p9<<<gridOptimalMe, meBlockSize.x, 0, afStream>>>(image.device<float>(), RxPtr, rxPtr, this->baseCols, this->baseRows, blocksX);
         // solve for coefficients using Cholesky solver, single thread for small p and parallel for larger p
         if constexpr (p <= 5)
             cholesky_solver<p><<<1, 1, 0, afStream>>>(RxPtr, rxPtr, this->coefficients.template device<float>(), this->stopFlag.template device<int>());
