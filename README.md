@@ -215,6 +215,6 @@ Tests were executed with a loop count of 1000 iterations to ensure statistical s
 
 p = 3            |  p = 5
 :-------------------------:|:-------------------------:
- ![p3](https://github.com/user-attachments/assets/51618201-1187-4500-b938-0ece143ee5e2) | ![p5](https://github.com/user-attachments/assets/17566f0e-9065-4ef9-876b-b56f0211f39d)
+ ![p3](https://github.com/user-attachments/assets/23cce634-cd57-4d9b-859b-a5feb760e2a4) | ![p5](https://github.com/user-attachments/assets/fce98179-4d5f-4e0f-97e3-0e58e0856346)
 p = 7            |  p = 9
- ![p7](https://github.com/user-attachments/assets/ea648617-0c15-48c6-826b-70a4be05b864) | ![p9](https://github.com/user-attachments/assets/ced2a54f-7a37-4554-bc4a-4f4d62bfadde)
+ ![p7](https://github.com/user-attachments/assets/0a085ccf-52c2-4f21-a4b3-91856b05cafb) | ![p9](https://github.com/user-attachments/assets/ae8a8270-8327-4a48-beec-a9ab9663a7a0)
