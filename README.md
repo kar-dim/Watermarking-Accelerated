@@ -22,7 +22,7 @@ The repository contains all required source code and dependencies needed to repr
 - Comparative performance analysis between CPU and GPU implementations (check `time_comparisons.zip` on the [Releases](https://github.com/kar-dim/Watermarking-Accelerated/releases) section).
 
 Implementations are optimized for maximum performance:
-- CPU implementation: Uses the ```Eigen``` library for efficient linear algebra operations. The application utilizes all available logical (or physical, specifically on video embedding) CPU cores for maximum performance.
+- CPU implementation: Uses the ```Eigen``` library for linear algebra operations combined with efficient use of ```OpenMP``` multithreading (reductions, parallel loops). The application utilizes all available logical (or physical, specifically on video embedding) CPU cores for maximum performance. The project is configured to use ```clang``` compiler (clang-cl toolset) instead of MSVC, because it optimizes much better the heavily templated Eigen code.
 - GPU implementation: Provides both OpenCL and CUDA backends. The GPU kernels are highly optimized to maximize throughput and minimize latency. CUDA implementation uses Tensor Cores in some of its kernels to maximize performance. The majority of the kernels are custom and tuned for very high performance, whereas we use ```ArrayFire``` library for simple work and its memory manager. Specifically for CUDA, we use warp shuffle techniques, Tensor Cores and Grid-Stride reduction loops with atomics to improve performance wherever possible.
 
 <p align="center">
