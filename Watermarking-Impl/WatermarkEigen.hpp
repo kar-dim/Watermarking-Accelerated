@@ -4,7 +4,6 @@
 #include "Eigen/Core"
 #include "PredictionErrorMatrixData.hpp"
 #include "WatermarkBase.hpp"
-#include <algorithm>
 #include <cmath>
 #include <omp.h>
 #include <string>
