@@ -18,7 +18,8 @@ struct dim2 {
  *  \brief  Functions for watermark computation and detection, OpenCL implementation.
  *  \author Dimitris Karatzas
  */
-template <int p> class WatermarkOCL final : public WatermarkGPU<p> {
+template <int p>
+class WatermarkOCL final : public WatermarkGPU<p> {
   public:
     WatermarkOCL<p>(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr)
         : WatermarkGPU<p>(rows, cols, randomMatrixPath, psnr), texKernelDims{align<windowLocalSize>(rows), align<windowLocalSize>(cols)}, meKernelDims{rows, align<meLocalSize>(cols)},

@@ -1,5 +1,4 @@
 ﻿#include "cuda_utils.hpp"
-#include "CudaStreamManager.hpp"
 #include "kernels/kernels.cuh"
 #include <cstdint>
 #include <cuda_runtime.h>

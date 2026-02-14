@@ -26,7 +26,7 @@ class WatermarkBase {
     WatermarkBase(const unsigned int rows, const unsigned int cols, const ImageBuffer& randomMatrix, const float strengthFactor)
         : baseRows(rows), baseCols(cols), totalPixels(baseRows * baseCols), randomMatrix(randomMatrix), strengthFactor(strengthFactor) {}
 
-    //delete copy and move operations we don't wannt them
+    // delete copy and move operations we don't wannt them
     WatermarkBase(const WatermarkBase&) = delete;
     WatermarkBase(WatermarkBase&&) = delete;
     WatermarkBase& operator=(const WatermarkBase&) = delete;
@@ -43,7 +43,10 @@ class WatermarkBase {
     virtual float detectWatermark(const ImageBuffer& inputImage, const MASK_TYPE maskType) = 0;
 
   protected:
-    template <unsigned int ALIGN> static constexpr unsigned int align(const unsigned int x) { return (x + (ALIGN - 1)) & ~(ALIGN - 1); }
+    template <unsigned int ALIGN>
+    static constexpr unsigned int align(const unsigned int x) {
+        return (x + (ALIGN - 1)) & ~(ALIGN - 1);
+    }
     static constexpr bool maskCalcRequired = true;
     static constexpr bool maskCalcNotRequired = false;
     unsigned int baseRows, baseCols, totalPixels;

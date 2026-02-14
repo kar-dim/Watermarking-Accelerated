@@ -18,7 +18,8 @@ class KernelBuilder {
     KernelBuilder(const cl::Program& program, const char* name);
 
     /*! \brief setArg overload taking a POD type */
-    template <typename... T> KernelBuilder& args(const T&... values) {
+    template <typename... T>
+    KernelBuilder& args(const T&... values) {
         (kernel.setArg<T>(argsCounter++, values), ...);
         return *this;
     }
@@ -40,7 +41,8 @@ unsigned int maxPow2WorkGroupSize(const cl::Device& device);
 inline int calculateLocalGroupsNumber(const int N, const int localSize) { return std::min((N + localSize - 1) / localSize, 2560); }
 
 // helper method to execute an OpenCL kernel and throw detailed error on failure
-template <typename Func> auto executeKernel(const Func& kernelFunc, const std::string& context) {
+template <typename Func>
+auto executeKernel(const Func& kernelFunc, const std::string& context) {
     try {
         return kernelFunc();
     } catch (const cl::Error& ex) { throw std::runtime_error("OpenCL Error in " + context + ": " + std::string(ex.what()) + " Error code: " + std::to_string(ex.err()) + "\n"); }

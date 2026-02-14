@@ -13,8 +13,10 @@ extern "C" {
 }
 
 namespace video_utils::detail {
-template <auto FreeFunc> struct AVDeleter {
-    template <typename T> void operator()(T* p) const noexcept {
+template <auto FreeFunc>
+struct AVDeleter {
+    template <typename T>
+    void operator()(T* p) const noexcept {
         if (p)
             FreeFunc(&p);
     }

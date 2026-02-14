@@ -16,7 +16,8 @@ struct CorrelationData {
     __device__ __forceinline__ CorrelationData operator+(const CorrelationData& other) const { return {dot + other.dot, normU + other.normU, normZ + other.normZ}; }
 };
 
-template <int N> struct rxVecData {
+template <int N>
+struct rxVecData {
     float vals[N];
     __device__ __forceinline__ rxVecData operator+(const rxVecData& other) const {
         rxVecData res;
@@ -61,12 +62,14 @@ __device__ __forceinline__ void fillBlockMain(const float* __restrict__ inputA, 
 }
 
 // non-fused version, one input only
-template <int p> __device__ void fillBlock(const float* __restrict__ input, float* __restrict__ sharedMem, const int width, const int height) {
+template <int p>
+__device__ void fillBlock(const float* __restrict__ input, float* __restrict__ sharedMem, const int width, const int height) {
     fillBlockMain<false, p>(input, nullptr, sharedMem, width, height);
 }
 
 // fused version, two inputs multiplied together
-template <int p> __device__ void fillBlock(const float* __restrict__ inputA, const float* __restrict__ inputB, float* __restrict__ sharedMem, const int width, const int height) {
+template <int p>
+__device__ void fillBlock(const float* __restrict__ inputA, const float* __restrict__ inputB, float* __restrict__ sharedMem, const int width, const int height) {
     fillBlockMain<true, p>(inputA, inputB, sharedMem, width, height);
 }
 
@@ -106,7 +109,8 @@ __device__ __forceinline__ void fillBlockStrip(half blockValues[p][StripWidth], 
 
 // NVF kernel, calculates NVF values for each pixel in the image
 // works for all p values (3,5,7 and 9)
-template <int p, int pad = p / 2, int sharedSize = 16 + (2 * pad)> __global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, const unsigned int width, const unsigned int height) {
+template <int p, int pad = p / 2, int sharedSize = 16 + (2 * pad)>
+__global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, const unsigned int width, const unsigned int height) {
     constexpr float nPixels = static_cast<float>(p * p);
     constexpr float nPixelsSq = nPixels * nPixels;
 
@@ -185,7 +189,8 @@ __global__ void calculate_error_sequence(const float* __restrict__ inputA, const
 }
 
 // helper method used to reduce "rx" vector values and atomic add them (first thread of all warps)
-template <int SIZE, typename StorageT> __device__ __forceinline__ void writeRxVec(float* __restrict__ rx, const rxVecData<SIZE>& rxData, StorageT& temp_storage) {
+template <int SIZE, typename StorageT>
+__device__ __forceinline__ void writeRxVec(float* __restrict__ rx, const rxVecData<SIZE>& rxData, StorageT& temp_storage) {
     const rxVecData<SIZE> warpSum = cub::WarpReduce<rxVecData<SIZE>>(temp_storage).Sum(rxData);
     if ((threadIdx.x & 31) == 0) {
 #pragma unroll
@@ -195,7 +200,8 @@ template <int SIZE, typename StorageT> __device__ __forceinline__ void writeRxVe
 }
 
 // naive 1-thread Cholesky solver used for its very low latency versus cuSOLVER but useful only for very small systems, p = 3 (N = 8) or p = 5 (N = 24)
-template <int p, int N = (p * p) - 1> __global__ void cholesky_solver(const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ X, int* __restrict__ stopFlag) {
+template <int p, int N = (p * p) - 1>
+__global__ void cholesky_solver(const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ X, int* __restrict__ stopFlag) {
 #define IDX(r, c) ((r * (r + 1)) / 2 + c)
 
     if (threadIdx.x > 0 || blockIdx.x > 0)
@@ -329,7 +335,8 @@ exit:
 }
 
 // parallel cholesky solver for p = 7 (N = 48) and p = 9 (N = 80), using one warp (32 threads)
-template <int p, int N = (p * p) - 1> __global__ void cholesky_solver_parallel(const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ X, int* __restrict__ stopFlag) {
+template <int p, int N = (p * p) - 1>
+__global__ void cholesky_solver_parallel(const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ X, int* __restrict__ stopFlag) {
     const int laneId = threadIdx.x;
 
     // constants derived from N
@@ -473,7 +480,8 @@ template <int p, int N = (p * p) - 1> __global__ void cholesky_solver_parallel(c
 }
 
 // helper method to perform a streaming reduction of Rx values from shared window to global memory
-template <int startIdx, int endIdx, int rowOffset> __device__ void RxStreamPass(const int tid, float (*__restrict__ RxLocal)[88], float* __restrict__ Rx) {
+template <int startIdx, int endIdx, int rowOffset>
+__device__ void RxStreamPass(const int tid, float (*__restrict__ RxLocal)[88], float* __restrict__ Rx) {
     for (int k = startIdx + tid; k < endIdx; k += 128) {
         const int2 coords = getPackedCoords(k);
         const int rowInWindow = coords.x - rowOffset;

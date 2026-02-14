@@ -11,7 +11,8 @@
  *			GPU implementations must inherit from this class.
  *  \author Dimitris Karatzas
  */
-template <int p> class WatermarkGPU : public WatermarkBase {
+template <int p>
+class WatermarkGPU : public WatermarkBase {
   public:
     WatermarkGPU<p>(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr)
         : WatermarkBase(rows, cols, randomMatrixPath, psnr), strengthNumerator(strengthFactor * std::sqrt(static_cast<float>(this->totalPixels))) {}
@@ -33,7 +34,10 @@ template <int p> class WatermarkGPU : public WatermarkBase {
     }
 
     // helper method to unlock multiple af::arrays (return memory to ArrayFire)
-    template <std::same_as<af::array>... Args> static void unlockArrays(const Args&... arrays) { (arrays.unlock(), ...); }
+    template <std::same_as<af::array>... Args>
+    static void unlockArrays(const Args&... arrays) {
+        (arrays.unlock(), ...);
+    }
 
     // helper method to display an af::array in a window
     static void displayArray(const af::array& array, const int width = 1600, const int height = 900) {
@@ -72,7 +76,8 @@ template <int p> class WatermarkGPU : public WatermarkBase {
     virtual float computeCorrelation(const af::array& e_u, const af::array& e_z) const = 0;
 
     // compute prediction error mask
-    template <bool CALC_ABS> af::array computePredictionErrorMask(const af::array& errorSequence) const {
+    template <bool CALC_ABS>
+    af::array computePredictionErrorMask(const af::array& errorSequence) const {
         const af::array& input = CALC_ABS ? af::abs(errorSequence) : errorSequence;
         return input / (af::max(af::flat(input)) + 1.0e-6f);
     }

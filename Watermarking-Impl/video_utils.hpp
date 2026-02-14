@@ -59,7 +59,8 @@ int videoDispatcher(VideoProcessingContext& data, const bool useHwDecoder, const
 void filterFrame(AVFramePtr& frame, AVFramePtr& filteredFrame, const FilterGraphContext& filterGraphContext);
 
 // main frames loop logic for video watermark embedding and detection
-template <bool needsFilter, typename Func> int processFrames(const VideoProcessingContext& data, Func&& processFrame) {
+template <bool needsFilter, typename Func>
+int processFrames(const VideoProcessingContext& data, Func&& processFrame) {
     const AVPacketPtr packet(av_packet_alloc());
     AVFramePtr frame(av_frame_alloc());
     AVFramePtr filteredFrame(nullptr);
@@ -100,7 +101,8 @@ template <bool needsFilter, typename Func> int processFrames(const VideoProcessi
     return framesCount;
 }
 
-template <typename TYPE, typename T> void loadInputFrame(VideoProcessingContext& data, T* hostPtr) {
+template <typename TYPE, typename T>
+void loadInputFrame(VideoProcessingContext& data, T* hostPtr) {
 #if defined(_USE_GPU_)
     data.inputFrame = TYPE(data.width, data.height, hostPtr, afHost).T().as(f32);
 #else

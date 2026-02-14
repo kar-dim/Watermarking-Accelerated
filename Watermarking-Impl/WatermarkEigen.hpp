@@ -13,7 +13,8 @@
  *  \brief  Functions for watermark computation and detection, Eigen implementation.
  *  \author Dimitris Karatzas
  */
-template <int p> class WatermarkEigen final : public WatermarkBase {
+template <int p>
+class WatermarkEigen final : public WatermarkBase {
   private:
     enum class Op { ADD, SUB };
     static constexpr int pSquared = p * p;
@@ -27,7 +28,8 @@ template <int p> class WatermarkEigen final : public WatermarkBase {
     using LocalVector = Eigen::Matrix<float, localSize, 1>;
     using ArrayXXf = Eigen::ArrayXXf;
     using VectorXf = Eigen::VectorXf;
-    template <typename T> using Map = Eigen::Map<T>;
+    template <typename T>
+    using Map = Eigen::Map<T>;
 
   public:
     WatermarkEigen<p>(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr)
@@ -94,7 +96,8 @@ template <int p> class WatermarkEigen final : public WatermarkBase {
     inline float clampedValue(const ArrayXXf& img, int r, int c, const int rows, const int cols) { return img(std::clamp(r, 0, rows - 1), std::clamp(c, 0, cols - 1)); }
 
     // helper method for custom mask sums accumulation
-    template <Op OP> inline void computeCustomMaskSums(const float pixelValue, double& sum, double& sumSq) {
+    template <Op OP>
+    inline void computeCustomMaskSums(const float pixelValue, double& sum, double& sumSq) {
         if constexpr (OP == Op::ADD) {
             sum += pixelValue;
             sumSq += pixelValue * pixelValue;
@@ -168,7 +171,8 @@ template <int p> class WatermarkEigen final : public WatermarkBase {
 
     // helper method to process the border pixels (clamp if out of bounds)
     // by using a supplied function
-    template <typename Processor> void processBorder(const ArrayXXf& image, Processor&& processor) {
+    template <typename Processor>
+    void processBorder(const ArrayXXf& image, Processor&& processor) {
 #pragma omp parallel
         {
             const int threadId = omp_get_thread_num();
@@ -233,7 +237,8 @@ template <int p> class WatermarkEigen final : public WatermarkBase {
     }
 
     // compute Prediction error data (coefficients, error sequence), and if needed, prediction error mask
-    template <bool maskNeeded> bool computePredictionErrorData(const ArrayXXf& image) {
+    template <bool maskNeeded>
+    bool computePredictionErrorData(const ArrayXXf& image) {
         meMatrixData.setZero();
         // process CENTER region
         if (hasCenterRegion) {
@@ -267,9 +272,7 @@ template <int p> class WatermarkEigen final : public WatermarkBase {
             }
         }
         // border regions parallel handling
-        processBorder(image, [&](const int i, const int j, const LocalVector& neighbors, const int threadId) { 
-            meMatrixData.computePredictionErrorMatrices(neighbors, image(i, j), threadId); 
-        });
+        processBorder(image, [&](const int i, const int j, const LocalVector& neighbors, const int threadId) { meMatrixData.computePredictionErrorMatrices(neighbors, image(i, j), threadId); });
 
         // solve system and coefficients
         if (!meMatrixData.computeCoefficients())
@@ -324,8 +327,6 @@ template <int p> class WatermarkEigen final : public WatermarkBase {
             }
         }
         // process BORDER regions
-        processBorder(image, [&](const int i, const int j, const LocalVector& neighbors, const int) { 
-            outputErrorSequence(i, j) = image(i, j) - neighbors.dot(coefficients); 
-        });
+        processBorder(image, [&](const int i, const int j, const LocalVector& neighbors, const int) { outputErrorSequence(i, j) = image(i, j) - neighbors.dot(coefficients); });
     }
 };

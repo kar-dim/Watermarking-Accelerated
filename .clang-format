@@ -3,6 +3,7 @@ IndentWidth: 4
 BreakBeforeBraces: Attach
 PointerAlignment: Left
 SortIncludes: false
+AlwaysBreakTemplateDeclarations: Yes
 BreakConstructorInitializers: BeforeColon
 AllowShortCaseLabelsOnASingleLine: true
 AllowShortBlocksOnASingleLine: Always

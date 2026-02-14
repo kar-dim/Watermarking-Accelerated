@@ -12,7 +12,8 @@
  *  \brief  Functions for watermark computation and detection, CUDA implementation.
  *  \author Dimitris Karatzas
  */
-template <int p> class WatermarkCuda final : public WatermarkGPU<p> {
+template <int p>
+class WatermarkCuda final : public WatermarkGPU<p> {
   public:
     WatermarkCuda<p>(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr)
         : WatermarkGPU<p>(rows, cols, randomMatrixPath, psnr), meKernelDims{WatermarkBase::align<meBlockSize.x>(cols), rows}, afStream(CudaStreamManager::getInstance().getAfStream()),
