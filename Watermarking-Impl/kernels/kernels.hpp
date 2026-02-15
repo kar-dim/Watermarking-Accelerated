@@ -74,7 +74,7 @@ inline float error_sequence_coeffs_filter(__local float* centerPtr, __constant f
         }
     }
     return P(0, 0) - dot;
-    #undef P
+#undef P
 }
 
 __kernel void error_sequence(
@@ -227,25 +227,48 @@ __kernel void apply_watermark_fused(
 )CLC"
 R"CLC(
 
-inline void me_p3_rxCalculate(__local half RxLocal[256][40], const int localId, const half x_0, const half x_1, const half x_2, const half x_3, const half x_4, const half x_5, const half x_6, const half x_7, const half x_8)
-{
-    __local half8* rowPtr = (__local half8*) &RxLocal[localId][0];
-    *rowPtr = (half8)(x_0 * x_4, x_1 * x_4, x_2 * x_4, x_3 * x_4, x_5 * x_4, x_6 * x_4, x_7 * x_4, x_8 * x_4);
-}
-
-inline void me_p3_RxCalculate(__local half RxLocal[256][40], const int localId, const half x_0, const half x_1, const half x_2, const half x_3, const half x_5, const half x_6, const half x_7, const half x_8)
-{
-    __local half8* rowPtr = (__local half8*) &RxLocal[localId][0];
-    rowPtr[0] = (half8)(x_0 * x_0, x_0 * x_1, x_0 * x_2, x_0 * x_3, x_0 * x_5, x_0 * x_6, x_0 * x_7, x_0 * x_8);
-    rowPtr[1] = (half8)(x_1 * x_1, x_1 * x_2, x_1 * x_3, x_1 * x_5, x_1 * x_6, x_1 * x_7, x_1 * x_8, x_2 * x_2);
-    rowPtr[2] = (half8)(x_2 * x_3, x_2 * x_5, x_2 * x_6, x_2 * x_7, x_2 * x_8, x_3 * x_3, x_3 * x_5, x_3 * x_6);
-    rowPtr[3] = (half8)(x_3 * x_7, x_3 * x_8, x_5 * x_5, x_5 * x_6, x_5 * x_7, x_5 * x_8, x_6 * x_6, x_6 * x_7);
-    rowPtr[4] = (half8)(x_6 * x_8, x_7 * x_7, x_7 * x_8, x_8 * x_8, 0.0h, 0.0h, 0.0h, 0.0h);
-}
 
 // OpenCL upper packed Indexing:
 // maps Lower diagonal coords (r, c) where r >= c to the corresponding upper diagonal packed index (c, r)
 #define SOLVER_IDX(r, c) ((c * NEIGHB_SIZE) - (c * (c - 1)) / 2 + (r - c))
+
+//compile time constants for me kernels (p=5,7 and 9, p=3 uses a different more optimal kernel)
+#if WINDOW_SIZE == 5
+#define N_ROWS 5
+#define MAT_SIZE 300
+#define ROW_STEP 1
+#define COL_STEP 51
+#define BUFFER_COLS 260
+#define CENTER_IDX 12
+#define ROW_CENTER 2
+#define SHIFT_CENTER 2
+#define TOTAL_TASKS 324
+#define BOUNDARY 300
+
+#elif WINDOW_SIZE == 7
+#define N_ROWS 7
+#define MAT_SIZE 1176
+#define ROW_STEP 4
+#define COL_STEP 36
+#define BUFFER_COLS 262
+#define CENTER_IDX 24
+#define ROW_CENTER 3
+#define SHIFT_CENTER 3
+#define TOTAL_TASKS 1224
+#define BOUNDARY 1176
+
+#elif WINDOW_SIZE == 9
+#define N_ROWS 9
+#define MAT_SIZE 3240
+#define ROW_STEP 4
+#define COL_STEP 28
+#define BUFFER_COLS 264
+#define CENTER_IDX 40
+#define ROW_CENTER 4
+#define SHIFT_CENTER 4
+#define TOTAL_TASKS 3320
+#define BOUNDARY 3240
+#endif
 
 #if WINDOW_SIZE == 3
 __kernel void me(__global const float* restrict input,
@@ -303,7 +326,8 @@ __kernel void me(__global const float* restrict input,
         x_6 = blockValues[2][localX - 1];
         x_7 = blockValues[2][localX];
         x_8 = blockValues[2][localX + 1];
-        me_p3_rxCalculate(RxLocal, localId, x_0, x_1, x_2, x_3, x_4, x_5, x_6, x_7, x_8);
+        __local half8* rowPtr = (__local half8*) &RxLocal[localId][0];
+        *rowPtr = (half8)(x_0 * x_4, x_1 * x_4, x_2 * x_4, x_3 * x_4, x_5 * x_4, x_6 * x_4, x_7 * x_4, x_8 * x_4);
     }
     else
         vstore_half8((float8)(0.0f), 0, (__local half*)&RxLocal[localId][0]);
@@ -327,8 +351,14 @@ __kernel void me(__global const float* restrict input,
         rx[blockOffset + localId] = sum;
     } //no barrier needed here
 
-    if (isValid)
-        me_p3_RxCalculate(RxLocal, localId, x_0, x_1, x_2, x_3, x_5, x_6, x_7, x_8);
+    if (isValid) {
+        __local half8* rowPtr = (__local half8*) &RxLocal[localId][0];
+        rowPtr[0] = (half8)(x_0*x_0, x_0*x_1, x_0*x_2, x_0*x_3, x_0*x_5, x_0*x_6, x_0*x_7, x_0*x_8);
+        rowPtr[1] = (half8)(x_1*x_1, x_1*x_2, x_1*x_3, x_1*x_5, x_1*x_6, x_1*x_7, x_1*x_8, x_2*x_2);
+        rowPtr[2] = (half8)(x_2*x_3, x_2*x_5, x_2*x_6, x_2*x_7, x_2*x_8, x_3*x_3, x_3*x_5, x_3*x_6);
+        rowPtr[3] = (half8)(x_3*x_7, x_3*x_8, x_5*x_5, x_5*x_6, x_5*x_7, x_5*x_8, x_6*x_6, x_6*x_7);
+        rowPtr[4] = (half8)(x_6*x_8, x_7*x_7, x_7*x_8, x_8*x_8, 0.0h,    0.0h,    0.0h,    0.0h);
+    }
     else {
 #pragma unroll
         for(int v=0; v<5; v++)
@@ -364,217 +394,96 @@ __kernel void me(__global const float* restrict input,
         Rx[blockOffset + flatId] = totalSum;
     }
 }
-
-#elif WINDOW_SIZE == 5
+#elif WINDOW_SIZE >= 5
 __kernel void me(
-    __global const float* restrict input,
-    __global float* restrict Rx,
-    __global float* restrict rx,
-    const unsigned int width,
-    const unsigned int height
-) {
+__global const float* restrict input,
+__global float* restrict Rx,
+__global float* restrict rx,
+const unsigned int width,
+const unsigned int height) 
+{
     const int gx = get_group_id(0);
     const int gy = get_group_id(1);
     const int localId = get_local_id(0);
     const float halfScaleFactor = 0.00392156862f;
 
-    __local half blockValues[5][260]; 
+    __local half blockValues[N_ROWS][BUFFER_COLS]; 
 
-    const int totalPixels = 5 * 260;
-    const int colStep = 51;
-    const int rowStep = 1;
-    const int baseGlobalCol = (gx * 256) - 2; 
-    const int baseGlobalRow = gy - 2;
-    int r = localId % 5;
-    int c = localId / 5;
+    // load data
+    const int loadLimit = N_ROWS * BUFFER_COLS; 
+    const int radius = N_ROWS / 2;
+    const int baseGlobalCol = (gx * 256) - radius; 
+    const int baseGlobalRow = gy - radius;
+    
+    int r = localId % N_ROWS;
+    int c = localId / N_ROWS;
     int idx = localId;
-    while (idx < totalPixels) {
-        int gCol = clamp(baseGlobalCol + c, 0, (int)width - 1);
-        int gRow = clamp(baseGlobalRow + r, 0, (int)height - 1);
-        vstore_half(input[gCol * height + gRow] * halfScaleFactor, 0, &blockValues[r][c]);
+    
+    while (idx < loadLimit) { 
+        const int gCol = clamp(baseGlobalCol + c, 0, (int)width - 1);
+        const int gRow = clamp(baseGlobalRow + r, 0, (int)height - 1);
+        blockValues[r][c] = input[gCol * height + gRow] * halfScaleFactor;
         idx += 256;
-        c += colStep;
-        r += rowStep;
-        if (r >= 5) {
-            r -= 5;
+        c += COL_STEP;
+        r += ROW_STEP; 
+        if (r >= N_ROWS) {
+            r -= N_ROWS;
             c += 1;
         }
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    // calculate Rx and rx coefficients
-    // for p=5 we work differently than p=3 because of massive shared memory requirements
-    // we process 324 total tasks (300 for Rx, 24 for rx)
-    for (int k = localId; k < 324; k += 256) {
+    // vectorized compute of Rx and rx
+    for (int k = localId; k < TOTAL_TASKS; k += 256) {
         float coeffSum = 0.0f;
-        if (k < 300) {
-            // which coefficient (r, c) we are calculating
+
+        if (k < BOUNDARY) { 
+            // Rx
             const int2 coords = getPackedCoords(k);
-            const int r = coords.x; 
-            const int c = coords.y; 
-            // accumulate over 256 pixels
-            for (int p = 0; p < 256; p++) {
-                // map neighbor index to cache location (we also skip the center pixel at index 12)
-                const int cacheRow = (r >= 12) ? r + 1 : r;
-                const int cacheCol = (c >= 12) ? c + 1 : c;
-                // get blockValues[neighbor_row][pixel_col + neighbor_col]
-                const float val_a = (float)blockValues[cacheRow / 5][p + (cacheRow % 5)];
-                const float val_b = (float)blockValues[cacheCol / 5][p + (cacheCol % 5)];
-                coeffSum += val_a * val_b;
+            const int r_idx = coords.x; 
+            const int c_idx = coords.y; 
+            const int cacheRow = (r_idx >= CENTER_IDX) ? r_idx + 1 : r_idx;
+            const int cacheCol = (c_idx >= CENTER_IDX) ? c_idx + 1 : c_idx;
+            const int rowA = cacheRow / N_ROWS;
+            const int shiftA = cacheRow % N_ROWS;
+            const int rowB = cacheCol / N_ROWS;
+            const int shiftB = cacheCol % N_ROWS;
+
+#pragma unroll
+            for (int p = 0; p < 256; p += 4) {
+                const float4 fa = vload_half4(0, (__local half*)&blockValues[rowA][p + shiftA]);
+                const float4 fb = vload_half4(0, (__local half*)&blockValues[rowB][p + shiftB]);
+                coeffSum += dot(fa, fb);
             }
-            // write to global memory to the correct index
-            const int outputIndex = (gy * get_num_groups(0) * 300) + (gx * 300) + SOLVER_IDX(r, c);
+            const int outputIndex = (gy * get_num_groups(0) * MAT_SIZE) + (gx * MAT_SIZE) + SOLVER_IDX(r_idx, c_idx);
             Rx[outputIndex] = coeffSum;
             
         } else {
-            // rx calculation
-            const int nIdx = k - 300;
-            const int cacheIdx = (nIdx >= 12) ? nIdx + 1 : nIdx;
-            for (int p = 0; p < 256; p++) {
-                const float val_n = (float)blockValues[cacheIdx / 5][p + (cacheIdx % 5)];
-                // center pixel is always at local coord (2, p+2)
-                coeffSum += val_n * (float)blockValues[2][p + 2];
+            // rx
+            const int nIdx = k - BOUNDARY;
+            const int cacheIdx = (nIdx >= CENTER_IDX) ? nIdx + 1 : nIdx;
+            const int rowN = cacheIdx / N_ROWS;
+            const int shiftN = cacheIdx % N_ROWS;
+#pragma unroll
+            for (int p = 0; p < 256; p += 4) {
+                const float4 fn = vload_half4(0, (__local half*)&blockValues[rowN][p + shiftN]);
+                const float4 fc = vload_half4(0, (__local half*)&blockValues[ROW_CENTER][p + SHIFT_CENTER]);
+                coeffSum += dot(fn, fc);
             }
-            const int outputIndex = (gy * get_num_groups(0) * 24) + (gx * 24) + nIdx;
+            const int outputIndex = (gy * get_num_groups(0) * NEIGHB_SIZE) + (gx * NEIGHB_SIZE) + nIdx;
             rx[outputIndex] = coeffSum;
         }
     }
 }
-
-)CLC"
-                                   R"CLC(
-
-#elif WINDOW_SIZE == 7
-__kernel void me(
-    __global const float* restrict input,
-    __global float* restrict Rx,
-    __global float* restrict rx,
-    const unsigned int width,
-    const unsigned int height
-) {
-    const int gx = get_group_id(0);
-    const int gy = get_group_id(1);
-    const int localId = get_local_id(0);
-    const float halfScaleFactor = 0.00392156862f;
-
-    __local half blockValues[7][262]; 
-
-    const int totalPixels = 7 * 262;
-    const int colStep = 36;
-    const int rowStep = 4;
-    const int baseGlobalCol = (gx * 256) - 3; 
-    const int baseGlobalRow = gy - 3;
-    int r = localId % 7;
-    int c = localId / 7;
-    int idx = localId;
-    while (idx < totalPixels) {
-        int gCol = clamp(baseGlobalCol + c, 0, (int)width - 1);
-        int gRow = clamp(baseGlobalRow + r, 0, (int)height - 1);
-        vstore_half(input[gCol * height + gRow] * halfScaleFactor, 0, &blockValues[r][c]);
-        idx += 256;
-        c += colStep;
-        r += rowStep;
-        if (r >= 7) {
-            r -= 7;
-            c += 1;
-        }
-    }
-    barrier(CLK_LOCAL_MEM_FENCE);
-
-    for (int k = localId; k < 1224; k += 256) {
-        float coeffSum = 0.0f;
-        if (k < 1176) {
-            const int2 coords = getPackedCoords(k);
-            const int r = coords.x; 
-            const int c = coords.y; 
-            for (int p = 0; p < 256; p++) {
-                const int cacheRow = (r >= 24) ? r + 1 : r;
-                const int cacheCol = (c >= 24) ? c + 1 : c;
-                const float val_a = (float)blockValues[cacheRow / 7][p + (cacheRow % 7)];
-                const float val_b = (float)blockValues[cacheCol / 7][p + (cacheCol % 7)];
-                coeffSum += val_a * val_b;
-            }
-            const int outputIndex = (gy * get_num_groups(0) * 1176) + (gx * 1176) + SOLVER_IDX(r, c);
-            Rx[outputIndex] = coeffSum;
-            
-        } else {
-            const int nIdx = k - 1176;
-            const int cacheIdx = (nIdx >= 24) ? nIdx + 1 : nIdx;
-            for (int p = 0; p < 256; p++) {
-                const float val_n = (float)blockValues[cacheIdx / 7][p + (cacheIdx % 7)];
-                coeffSum += val_n * (float)blockValues[3][p + 3];
-            }
-            const int outputIndex = (gy * get_num_groups(0) * 48) + (gx * 48) + nIdx;
-            rx[outputIndex] = coeffSum;
-        }
-    }
-}
-
-#else
-__kernel void me(
-    __global const float* restrict input,
-    __global float* restrict Rx,
-    __global float* restrict rx,
-    const unsigned int width,
-    const unsigned int height
-) {
-    const int gx = get_group_id(0);
-    const int gy = get_group_id(1);
-    const int localId = get_local_id(0);
-    const float halfScaleFactor = 0.00392156862f;
-
-    __local half blockValues[9][264]; 
-
-    const int totalPixels = 9 * 264;
-    const int colStep = 28;
-    const int rowStep = 4;
-    const int baseGlobalCol = (gx * 256) - 4; 
-    const int baseGlobalRow = gy - 4;
-    int r = localId % 9;
-    int c = localId / 9;
-    int idx = localId;
-    while (idx < totalPixels) {
-        int gCol = clamp(baseGlobalCol + c, 0, (int)width - 1);
-        int gRow = clamp(baseGlobalRow + r, 0, (int)height - 1);
-        vstore_half(input[gCol * height + gRow] * halfScaleFactor, 0, &blockValues[r][c]);
-        idx += 256;
-        c += colStep;
-        r += rowStep;
-        if (r >= 9) {
-            r -= 9;
-            c += 1;
-        }
-    }
-    barrier(CLK_LOCAL_MEM_FENCE);
-
-    for (int k = localId; k < 3320; k += 256) {
-        float coeffSum = 0.0f;
-        if (k < 3240) {
-            const int2 coords = getPackedCoords(k);
-            const int r = coords.x; 
-            const int c = coords.y; 
-            for (int p = 0; p < 256; p++) {
-                const int cacheRow = (r >= 40) ? r + 1 : r;
-                const int cacheCol = (c >= 40) ? c + 1 : c;
-                const float val_a = (float)blockValues[cacheRow / 9][p + (cacheRow % 9)];
-                const float val_b = (float)blockValues[cacheCol / 9][p + (cacheCol % 9)];
-                coeffSum += val_a * val_b;
-            }
-            const int outputIndex = (gy * get_num_groups(0) * 3240) + (gx * 3240) + SOLVER_IDX(r, c);
-            Rx[outputIndex] = coeffSum;
-            
-        } else {
-            const int nIdx = k - 3240;
-            const int cacheIdx = (nIdx >= 40) ? nIdx + 1 : nIdx;
-            for (int p = 0; p < 256; p++) {
-                const float val_n = (float)blockValues[cacheIdx / 9][p + (cacheIdx % 9)];
-                coeffSum += val_n * (float)blockValues[4][p + 4];
-            }
-            const int outputIndex = (gy * get_num_groups(0) * 80) + (gx * 80) + nIdx;
-            rx[outputIndex] = coeffSum;
-        }
-    }
-}
+#undef N_ROWS
+#undef MAT_SIZE
+#undef COL_STEP
+#undef BUFFER_COLS
+#undef CENTER_IDX
+#undef ROW_CENTER
+#undef SHIFT_CENTER
+#undef TOTAL_TASKS
+#undef BOUNDARY
 #endif
 
 __kernel void calculate_partial_correlation(
@@ -700,7 +609,7 @@ __kernel void calculate_final_correlation(
 }
 
 )CLC"
-                                   R"CLC(
+R"CLC(
 
 // naive very low latency 1-thread solver
 // define this kernel ONLY for p=3 and p=5
