@@ -20,7 +20,7 @@ class WatermarkCuda final : public WatermarkGPU<p> {
           gridOptimalMe(cuda_utils::gridSize1DMeStridedCalculate()) {}
 
   private:
-    static constexpr dim3 windowBlockSize{16, 16}, meBlockSize{p >= 7 ? 128 : 256, 1};
+    static constexpr dim3 windowBlockSize{32, 8}, meBlockSize{p >= 7 ? 128 : 256, 1};
     static constexpr unsigned int corrPartialBlockSize = 768, corrFinalBlockSize = 1024, strWatermarkBlockSize = 768, applyWatermarkBlockSize = 768;
     dim3 meKernelDims;
     cudaStream_t afStream;

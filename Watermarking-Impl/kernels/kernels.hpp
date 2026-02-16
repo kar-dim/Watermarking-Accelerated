@@ -7,6 +7,9 @@ inline const std::string kernels = R"CLC(
 #define N_PIXELS          (float) (WINDOW_SIZE * WINDOW_SIZE)
 #define N_PIXELS_SQ       (N_PIXELS * N_PIXELS)
 #define SHAREDSIZE        (16 + 2 * PAD)
+#define SH_DIM_FAST       (32 + (2 * PAD))
+#define SH_DIM_SLOW       (8 + (2 * PAD))
+#define RECT_STRIDE       (SH_DIM_SLOW + 1)
 
 #pragma OPENCL EXTENSION cl_khr_fp16 : enable
 
@@ -16,51 +19,86 @@ inline int2 getPackedCoords(int k) {
     return (int2)(r, c);
 }
 
-inline void fillBlock(__global const float* restrict input, __local float* restrict sharedMem, const int width, const int height) {
-    const int groupStartCol = (int)(get_group_id(1) * get_local_size(1));
-    const int groupStartRow = (int)(get_group_id(0) * get_local_size(0));
-    const int maxCol = width - 1;
-    const int maxRow = height - 1;
-    const int stride = (int)(get_local_size(0) * get_local_size(1));
-    for (int i = (int)(get_local_id(1) * get_local_size(0) + get_local_id(0)); i < SHAREDSIZE * SHAREDSIZE; i += stride) {
-        const int tileRow = i % SHAREDSIZE;
-        const int tileCol = i / SHAREDSIZE;
-        const int globalX = clamp(groupStartCol + tileCol - PAD, 0, maxCol);
-        const int globalY = clamp(groupStartRow + tileRow - PAD, 0, maxRow);
-        sharedMem[tileRow * (SHAREDSIZE + 1) + tileCol] = input[globalX * height + globalY];
+inline void fillBlock(
+    const __global float* restrict input,
+    __local float* restrict sharedMem,
+    const int width,
+    const int height) 
+{
+    const int baseGlobalX = (int)(get_group_id(1) * get_local_size(1)) - PAD; 
+    const int baseGlobalY = (int)(get_group_id(0) * get_local_size(0)) - PAD;
+    const int tid = get_local_id(1) * get_local_size(0) + get_local_id(0);
+    const int totalThreads = get_local_size(0) * get_local_size(1); // 256
+    const int totalElements = SH_DIM_FAST * SH_DIM_SLOW;
+    for (int i = tid; i < totalElements; i += totalThreads) {
+        const int r = i % SH_DIM_FAST;
+        const int c = i / SH_DIM_FAST;
+        const int globalX = clamp(baseGlobalX + c, 0, width - 1);
+        const int globalY = clamp(baseGlobalY + r, 0, height - 1);
+        sharedMem[r * RECT_STRIDE + c] = input[globalX * height + globalY];
     }
 }
 
-__kernel void nvf(__global const float* restrict input, __global float* restrict nvf, const unsigned int width, const unsigned int height) {	
-	const int x = get_global_id(1);
-    const int y = get_global_id(0);
-    __local float region[SHAREDSIZE][SHAREDSIZE + 1];
+inline void fillBlockFused(
+    const __global float* restrict inputA,
+    const __global float* restrict inputB,
+    __local float* restrict sharedMem,
+    const int width,
+    const int height) 
+{
+    const int baseGlobalX = (int)(get_group_id(1) * get_local_size(1)) - PAD;
+    const int baseGlobalY = (int)(get_group_id(0) * get_local_size(0)) - PAD;
+    const int tid = get_local_id(1) * get_local_size(0) + get_local_id(0);
+    const int totalThreads = 256; 
+    const int totalElements = SH_DIM_FAST * SH_DIM_SLOW;
+    for (int i = tid; i < totalElements; i += totalThreads) {
+        int r = i % SH_DIM_FAST;
+        int c = i / SH_DIM_FAST;
+        const int globalX = clamp(baseGlobalX + c, 0, width - 1);
+        const int globalY = clamp(baseGlobalY + r, 0, height - 1);
+        const int idx = globalX * height + globalY;
+        sharedMem[r * RECT_STRIDE + c] = inputA[idx] * inputB[idx];
+    }
+}
 
-	fillBlock(input, &region[0][0], width, height);
+__kernel void nvf(
+    const __global float* restrict input, 
+    __global float* restrict nvf, 
+    const unsigned int width, 
+    const unsigned int height) 
+{    
+    const int x = get_global_id(1);
+    const int y = get_global_id(0);
+
+    __local float region[SH_DIM_FAST][RECT_STRIDE];
+
+    fillBlock(input, &region[0][0], width, height);
     barrier(CLK_LOCAL_MEM_FENCE);
 
     if (y >= height || x >= width)
         return;
 
+    const int shY = get_local_id(0) + PAD; 
     const int shX = get_local_id(1) + PAD;
-    const int shY = get_local_id(0) + PAD;
-
-	float sum = 0.0f, sumSq = 0.0f;
-	for (int i = -PAD; i <= PAD; i++) {
-		for (int j = -PAD; j <= PAD; j++) {
-			const float pixelValue = region[shY + i][shX + j];
-			sum += pixelValue;
-			sumSq += pixelValue * pixelValue;
-		}
-	}
-	const float numerator = (N_PIXELS * sumSq) - (sum * sum);
+    float sum = 0.0f, sumSq = 0.0f;
+    
+#pragma unroll
+    for (int i = -PAD; i <= PAD; i++) {
+#pragma unroll
+        for (int j = -PAD; j <= PAD; j++) {
+            const float pixelValue = region[shY + i][shX + j];
+            sum += pixelValue;
+            sumSq += pixelValue * pixelValue;
+        }
+    }
+    const float numerator = (N_PIXELS * sumSq) - (sum * sum);
     const float output = native_divide(numerator, N_PIXELS_SQ + numerator);
-	nvf[(x * height) + y] = clamp(output, 0.0f, 1.0f);
+    nvf[(x * height) + y] = clamp(output, 0.0f, 1.0f);
 }
 
 //use pointer arithmetic for dot product to help compilers optimize address calculations fast
 inline float error_sequence_coeffs_filter(__local float* centerPtr, __constant float* coeffs) {
-    #define P(r, c) centerPtr[(r) * (SHAREDSIZE + 1) + (c)] 
+#define P(r, c) centerPtr[(r) * RECT_STRIDE + (c)] 
     float dot = 0.0f;
     int k = 0;
 #pragma unroll
@@ -84,14 +122,17 @@ __kernel void error_sequence(
     const unsigned int width,
     const unsigned int height,
     const int calculateAbs,
-    __global int* restrict stopFlag) {
-    __local float region[SHAREDSIZE][SHAREDSIZE + 1];
+    __global int* restrict stopFlag) 
+{
+    const int x = get_global_id(1);
+    const int y = get_global_id(0);
+
+    __local float region[SH_DIM_FAST][RECT_STRIDE];
     __local float* centerPtr = &region[get_local_id(0) + PAD][get_local_id(1) + PAD];
+
     fillBlock(input, &region[0][0], width, height);
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    const int x = get_global_id(1);
-    const int y = get_global_id(0);
     if (x < width && y < height) {
         if (*stopFlag) {
             x_[x * height + y] = 0.0f;
@@ -109,27 +150,17 @@ __kernel void error_sequence_fused(
     __constant float* restrict coeffs,
     const int width,
     const int height,
-    __constant int* restrict stopFlag) {
-    __local float region[SHAREDSIZE][SHAREDSIZE + 1];
-    __local float* centerPtr = &region[get_local_id(0) + PAD][get_local_id(1) + PAD];
-   
-    const int groupStartRow = (int)(get_group_id(0) * get_local_size(0));
-    const int groupStartCol = (int)(get_group_id(1) * get_local_size(1));
-    const int maxRow = height - 1;
-    const int maxCol = width - 1;
-    const int stride = (int)(get_local_size(0) * get_local_size(1));
-    for (int i = (int)(get_local_id(1) * get_local_size(0) + get_local_id(0)); i < SHAREDSIZE * SHAREDSIZE; i += stride) {
-        const int tileRow = i % SHAREDSIZE;
-        const int tileCol = i / SHAREDSIZE;
-        const int globalX = clamp(groupStartCol + tileCol - PAD, 0, maxCol);
-        const int globalY = clamp(groupStartRow + tileRow - PAD, 0, maxRow);
-        const int idx = globalX * height + globalY;
-        region[tileRow][tileCol] = inputA[idx] * inputB[idx];
-    }
-    barrier(CLK_LOCAL_MEM_FENCE);
-
+    __constant int* restrict stopFlag) 
+{
     const int x = get_global_id(1);
     const int y = get_global_id(0);
+
+    __local float region[SH_DIM_FAST][RECT_STRIDE];
+    __local float* centerPtr = &region[get_local_id(0) + PAD][get_local_id(1) + PAD];
+    
+    fillBlockFused(inputA, inputB, &region[0][0], width, height);
+    barrier(CLK_LOCAL_MEM_FENCE);
+
     if (x < width && y < height) {
         if (*stopFlag) { 
             x_[x * height + y] = 0.0f; 

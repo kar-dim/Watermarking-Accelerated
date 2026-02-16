@@ -22,7 +22,7 @@ template <int p>
 class WatermarkOCL final : public WatermarkGPU<p> {
   public:
     WatermarkOCL<p>(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr)
-        : WatermarkGPU<p>(rows, cols, randomMatrixPath, psnr), texKernelDims{align<windowLocalSize>(rows), align<windowLocalSize>(cols)}, meKernelDims{rows, align<meLocalSize>(cols)},
+        : WatermarkGPU<p>(rows, cols, randomMatrixPath, psnr), texKernelDims{align<windowLocalSize.rows>(rows), align<windowLocalSize.cols>(cols)}, meKernelDims{rows, align<meLocalSize>(cols)},
           programs(cl_utils::buildKernels(p)) {}
 
   private:
@@ -30,7 +30,7 @@ class WatermarkOCL final : public WatermarkGPU<p> {
     using clMemPtr = std::unique_ptr<cl_mem>;
 
     static constexpr unsigned int corrPartialLocalSize = 256;
-    static constexpr unsigned int windowLocalSize = 16;
+    static constexpr dim2 windowLocalSize = {32, 8};
     static constexpr unsigned int meLocalSize = 256;
     static constexpr unsigned int applyWatermarkLocalSize = 256;      // safe universal local size for OpenCL, used in apply watermark kernel and in compute_u_and_sumsq kernel
     static constexpr unsigned int choleskyLocalSize = p < 7 ? 1 : 64; // for p >= 7 we use 64-thread cholesky solver, for p < 7 single thread (faster for small p)
@@ -91,7 +91,7 @@ class WatermarkOCL final : public WatermarkGPU<p> {
         executeKernel(
             [&]() {
                 queue.enqueueNDRangeKernel(KernelBuilder(programs, "nvf").args(wrap(imageMem.get()), wrap(outputMem.get()), this->baseCols, this->baseRows).build(), cl::NDRange(),
-                                           cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(windowLocalSize, windowLocalSize));
+                                           cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(windowLocalSize.rows, windowLocalSize.cols));
                 this->unlockArrays(image, customMask);
             },
             "nvf");
@@ -112,7 +112,7 @@ class WatermarkOCL final : public WatermarkGPU<p> {
                     KernelBuilder(programs, "error_sequence")
                         .args(wrap(imageMem.get()), wrap(errorSequenceMem.get()), wrap(coeffsMem.get()), this->baseCols, this->baseRows, (int)calculateAbs, wrap(stopFlagMem.get()))
                         .build(),
-                    cl::NDRange(), cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(windowLocalSize, windowLocalSize));
+                    cl::NDRange(), cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(windowLocalSize.rows, windowLocalSize.cols));
                 this->unlockArrays(image, errorSequence, this->coefficients, this->stopFlag);
             },
             "error_sequence");
@@ -134,7 +134,7 @@ class WatermarkOCL final : public WatermarkGPU<p> {
                     KernelBuilder(programs, "error_sequence_fused")
                         .args(wrap(inputAmem.get()), wrap(inputBmem.get()), wrap(errorSequenceMem.get()), wrap(coeffsMem.get()), this->baseCols, this->baseRows, wrap(stopFlagMem.get()))
                         .build(),
-                    cl::NDRange(), cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(windowLocalSize, windowLocalSize));
+                    cl::NDRange(), cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(windowLocalSize.rows, windowLocalSize.cols));
                 this->unlockArrays(inputA, inputB, errorSequence, this->coefficients, this->stopFlag);
             },
             "error_sequence_fused");

@@ -58,36 +58,28 @@ inline __device__ float clamp(float f, float a, float b) { return fmaxf(a, fminf
 inline __device__ int clamp(int f, int a, int b) { return max(a, min(f, b)); }
 
 // helper method to fill block-wide shared memory cooperatively for error sequence and NVF kernels
-// sharedMem must be of size: [sharedSize][sharedSize + 1] to avoid bank conflicts
-template <bool FUSED, int p, int pad = p / 2, int sharedSize = 16 + (2 * pad)>
-__device__ __forceinline__ void fillBlockMain(const float* __restrict__ inputA, const float* __restrict__ inputB, float* __restrict__ sharedMem, const int width, const int height) {
+// sharedMem must be rectangle with dimensions [shDimFast][shDimSlow + 1]
+template <bool FUSED, int p, int shDimFast, int shDimSlow>
+__device__ __forceinline__ void fillBlock(const float* __restrict__ inputA, const float* __restrict__ inputB, float* __restrict__ sharedMem, const int width, const int height) {
+    constexpr int pad = p / 2;
+    constexpr int totalElements = shDimFast * shDimSlow;
+
     const int baseGlobalX = (int)(blockIdx.y * blockDim.y) - pad;
     const int baseGlobalY = (int)(blockIdx.x * blockDim.x) - pad;
+    const int tid = threadIdx.y * blockDim.x + threadIdx.x;
     // cooperatively fill 2D shared memory
-    for (int i = threadIdx.y * blockDim.x + threadIdx.x; i < sharedSize * sharedSize; i += blockDim.x * blockDim.y) {
-        const int tileRow = i % sharedSize;
-        const int tileCol = i / sharedSize;
-        const int globalX = clamp(width - 1, 0, baseGlobalX + tileCol);
-        const int globalY = clamp(height - 1, 0, baseGlobalY + tileRow);
+    for (int i = tid; i < totalElements; i += blockDim.x * blockDim.y) {
+        const int r = i % shDimFast;
+        const int c = i / shDimFast;
+        const int globalX = clamp(width - 1, 0, baseGlobalX + c);
+        const int globalY = clamp(height - 1, 0, baseGlobalY + r);
         const int idx = globalX * height + globalY;
         float val = inputA[idx];
         // if we need to fuse (A*B), do it here, branch-free because it its known at compile time
         if constexpr (FUSED)
             val *= inputB[idx];
-        sharedMem[tileRow * (sharedSize + 1) + tileCol] = val;
+        sharedMem[r * (shDimSlow + 1) + c] = val;
     }
-}
-
-// non-fused version, one input only
-template <int p>
-__device__ void fillBlock(const float* __restrict__ input, float* __restrict__ sharedMem, const int width, const int height) {
-    fillBlockMain<false, p>(input, nullptr, sharedMem, width, height);
-}
-
-// fused version, two inputs multiplied together
-template <int p>
-__device__ void fillBlock(const float* __restrict__ inputA, const float* __restrict__ inputB, float* __restrict__ sharedMem, const int width, const int height) {
-    fillBlockMain<true, p>(inputA, inputB, sharedMem, width, height);
 }
 
 // helper method to fill block-wide shared memory cooperatively for prediction error kernels where
@@ -126,28 +118,31 @@ __device__ __forceinline__ void fillBlockStrip(half blockValues[p][StripWidth], 
 
 // NVF kernel, calculates NVF values for each pixel in the image
 // works for all p values (3,5,7 and 9)
-template <int p, int pad = p / 2, int sharedSize = 16 + (2 * pad)>
+template <int p, int pad = p / 2>
 __global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, const unsigned int width, const unsigned int height) {
     constexpr float nPixels = static_cast<float>(p * p);
     constexpr float nPixelsSq = nPixels * nPixels;
+    constexpr int shDimFast = 32 + (2 * pad);
+    constexpr int shDimSlow = 8 + (2 * pad);
 
     const int x = blockIdx.y * blockDim.y + threadIdx.y;
     const int y = blockIdx.x * blockDim.x + threadIdx.x;
 
-    __shared__ float region[sharedSize][sharedSize + 1]; //+1 for bank conflicts
+    __shared__ float region[shDimFast][shDimSlow + 1]; //+1 to avoid bank conflicts
 
-    fillBlock<p>(input, &region[0][0], width, height);
+    fillBlock<false, p, shDimFast, shDimSlow>(input, nullptr, &region[0][0], width, height);
     __syncthreads();
 
     if (x >= width || y >= height)
         return;
 
-    // local (shared memory) coordinates for center pixel
     const int shX = threadIdx.y + pad;
     const int shY = threadIdx.x + pad;
-
     float sum = 0.0f, sumSq = 0.0f;
+
+#pragma unroll
     for (int i = -pad; i <= pad; i++) {
+#pragma unroll
         for (int j = -pad; j <= pad; j++) {
             const float pixelValue = region[shY + j][shX + i];
             sum += pixelValue;
@@ -161,7 +156,7 @@ __global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, co
 }
 
 // helper method for error sequence calculation with p = 3
-template <int p, int pad = p / 2, int sharedSize = 16 + (2 * pad), int stride = sharedSize + 1, int coeffsSize = (p * p) - 1>
+template <int p, int stride, int pad = p / 2, int coeffsSize = (p * p) - 1>
 __device__ inline float error_sequence_coeffs_filter(const float* __restrict__ region, const float* __restrict__ sCoeffs, const int localRow, const int localCol) {
     const int r = localRow + pad;
     const int c = localCol + pad;
@@ -184,13 +179,17 @@ __device__ inline float error_sequence_coeffs_filter(const float* __restrict__ r
 template <int p, bool FUSED, int pad = p / 2, int sharedSize = 16 + (2 * pad), int coeffsSize = (p * p) - 1>
 __global__ void calculate_error_sequence(const float* __restrict__ inputA, const float* __restrict__ inputB, float* __restrict__ x_, const float* __restrict__ coeffs, const unsigned int width,
                                          const unsigned int height, const bool calculateAbs, const int* __restrict__ stopFlag) {
+    constexpr int shDimFast = 32 + (2 * pad);
+    constexpr int shDimSlow = 8 + (2 * pad);
+
     const int tid = threadIdx.y * blockDim.x + threadIdx.x;
 
-    __shared__ float region[sharedSize][sharedSize + 1]; //+1 for bank conflicts
+    __shared__ float region[shDimFast][shDimSlow + 1]; //+1 for bank conflicts
     __shared__ float sCoeffs[coeffsSize];
+
     if (tid < coeffsSize)
         sCoeffs[tid] = coeffs[tid];
-    fillBlockMain<FUSED, p>(inputA, inputB, &region[0][0], width, height);
+    fillBlock<FUSED, p, shDimFast, shDimSlow>(inputA, inputB, &region[0][0], width, height);
     __syncthreads();
 
     const int y = blockIdx.x * blockDim.x + threadIdx.x;
@@ -200,7 +199,7 @@ __global__ void calculate_error_sequence(const float* __restrict__ inputA, const
             x_[(x * height + y)] = 0.0f;
             return;
         }
-        const float output = error_sequence_coeffs_filter<p>(&region[0][0], sCoeffs, threadIdx.x, threadIdx.y);
+        const float output = error_sequence_coeffs_filter<p, shDimSlow + 1>(&region[0][0], sCoeffs, threadIdx.x, threadIdx.y);
         x_[(x * height + y)] = calculateAbs ? fabsf(output) : output;
     }
 }
