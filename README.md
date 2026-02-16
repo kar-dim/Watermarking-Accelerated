@@ -176,6 +176,16 @@ All backends require FFmpeg which is also copied (most libav* DLLs, not included
 | [NVIDIA Nsight Systems](https://developer.nvidia.com/nsight-systems) | Used to profile overall system-wide CUDA performance | <img width="40" height="40" alt="nvidia-nsight-systems" src="https://github.com/user-attachments/assets/e77b6e42-4ce4-4bc6-aebe-b6802e44be37" /> |
 | [NVIDIA Compute](https://developer.nvidia.com/nsight-compute)  | Used to analyze and profile CUDA kernels |  <img width="40" height="40" alt="nsight-compute" src="https://github.com/user-attachments/assets/674bfdcc-cc5e-44b4-b345-08a3b795584a" /> |
 
+# Comparisons
+
+Below we include some comparisons of the original image (left) versus the final watermarked images based on the NVF mask (middle) and the proposed Prediction error mask (right). Images are zoomed for comparison purposes. <br><br>
+<p>Resolution: 512x152, p=5, PSNR=40dB</p>
+<img width="1536" height="512" alt="512__512W_NVF__512W_ME" src="https://github.com/user-attachments/assets/24fd8825-734f-4a9b-8439-dbc06068f197" /> <br><br><br>
+<p>Resolution: 1280x720, p=5, PSNR=45dB</p>
+<img width="3840" height="720" alt="720p__720pW_NVF__720pW_ME" src="https://github.com/user-attachments/assets/c7d25bcf-7ff4-4a7f-ba19-0d774550917f" /> <br><br><br>
+<p>Resolution: 3840x2160, p=5, PSNR=40dB</p>
+<img width="11520" height="2160" alt="4k__4kW_NVF__4kW_ME" src="https://github.com/user-attachments/assets/9e2ab520-6710-4cbc-9e6e-95805089222b" />
+
 # Benchmarks
 
 This section includes a performance comparison between the three backends: CPU (Eigen), CUDA, and OpenCL. The benchmarks measure the throughput (in Frames Per Second) of the watermarking algorithm across various resolutions (480p to 4K) and window sizes (p=3,5,7,9). The results are also available in the `time_comparisons.zip` file on the [Releases](https://github.com/kar-dim/Watermarking-Accelerated/releases) section.
