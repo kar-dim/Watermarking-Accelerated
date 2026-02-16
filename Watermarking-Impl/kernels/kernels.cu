@@ -263,8 +263,8 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
 
             // Rx accumulation (Tensor Cores) PACKED (2 pixels)
             // rowPtrVec[0] = top, rowPtrVec[1] = bottom
-            half* rowPtr = (half*)&RxLocal[tid][0];
-            half8* rowPtrVec = (half8*)rowPtr;
+            half* rowPtr = reinterpret_cast<half*>(&RxLocal[tid][0]);
+            half8* rowPtrVec = reinterpret_cast<half8*>(rowPtr);
             rowPtrVec[0] = vecTop;
             rowPtrVec[1] = vecBot; // here is our "packing trick" (one fully filled WMMA tile (16)
         }
@@ -276,7 +276,7 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
             wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::row_major> B;
 #pragma unroll
             for (int k0 = 0; k0 < 32; k0 += 16) {
-                const half* tilePtr = (half*)&RxLocal[startRow + k0][0];
+                const half* tilePtr = reinterpret_cast<half*>(&RxLocal[startRow + k0][0]);
                 wmma::load_matrix_sync(A, tilePtr, inputStride);
                 wmma::load_matrix_sync(B, tilePtr, inputStride);
                 wmma::mma_sync(acc_C, A, B, acc_C);
@@ -366,9 +366,9 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
                 rxPersistent.vals[i * 8 + j * 2 + 1] += res.y;
             }
         }
-        half* rowPtr = (half*)&RxLocal[tid][0];
-        half8* rowPtrVec = (half8*)rowPtr;
 
+        half* rowPtr = reinterpret_cast<half*>(&RxLocal[tid][0]);
+        half8* rowPtrVec = reinterpret_cast<half8*>(rowPtr);
         // stride is 36 floats -> 72 halves, we must zero the 4th vector (indices 24-31)
         // else the tile calculation will read garbage
 #pragma unroll
@@ -381,7 +381,7 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
         wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::row_major> B_frag;
 #pragma unroll
         for (int k0 = 0; k0 < 32; k0 += 16) {
-            const half* tilePtr = (half*)&RxLocal[startRow + k0][0];
+            const half* tilePtr = reinterpret_cast<half*>(&RxLocal[startRow + k0][0]);
             wmma::load_matrix_sync(A_frag, tilePtr, inputStride);
             wmma::load_matrix_sync(B_frag, tilePtr, inputStride);
             wmma::mma_sync(acc_C00, A_frag, B_frag, acc_C00);
@@ -483,8 +483,8 @@ __global__ void me_p7(const float* __restrict__ input, float* __restrict__ Rx, f
         }
 
         // accumulate Rx (Tensor Cores)
-        half* rowPtr = (half*)&RxLocal[tid][0];
-        half8* rowPtrVec = (half8*)rowPtr;
+        half* rowPtr = reinterpret_cast<half*>(&RxLocal[tid][0]);
+        half8* rowPtrVec = reinterpret_cast<half8*>(rowPtr);
 #pragma unroll
         for (int i = 0; i < 6; i++)
             rowPtrVec[i] = localVec8[i];
@@ -495,7 +495,7 @@ __global__ void me_p7(const float* __restrict__ input, float* __restrict__ Rx, f
 
 #pragma unroll
         for (int k0 = 0; k0 < 32; k0 += 16) {
-            const half* tilePtr = (half*)&RxLocal[startRow + k0][0];
+            const half* tilePtr = reinterpret_cast<half*>(&RxLocal[startRow + k0][0]);
 #pragma unroll
             for (int i = 0; i < 3; i++) {
                 wmma::load_matrix_sync(A[i], tilePtr + (i * 16), inputStride);
