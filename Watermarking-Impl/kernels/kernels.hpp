@@ -656,8 +656,8 @@ __kernel void cholesky_solver(__global const float* restrict A,
     if (get_local_id(0) > 0 || get_group_id(0) > 0)
         return;
 
-    float packed[PACKED_SIZE]; 
-    float localB[NEIGHB_SIZE];
+    float __attribute__((aligned(16))) packed[PACKED_SIZE]; 
+    float __attribute__((aligned(16))) localB[NEIGHB_SIZE];
 
     const bool isAligned = ((((size_t)A | (size_t)B | (size_t)X) & 0xF) == 0);
     if (isAligned) {
@@ -763,8 +763,8 @@ __kernel void cholesky_solver(__global const float* restrict A,
                               __global float* restrict X,
                               __global int* restrict stopFlag) {
 
-    __local float sA[NEIGHB_SIZE][NEIGHB_SIZE + 1]; // +1 to avoid bank conflicts
-    __local float sB[NEIGHB_SIZE];
+    __local float __attribute__((aligned(16))) sA[NEIGHB_SIZE][NEIGHB_SIZE + 1]; // +1 to avoid bank conflicts
+    __local float __attribute__((aligned(16))) sB[NEIGHB_SIZE];
 
     const int tid = get_local_id(0);
     const int workers = get_local_size(0);

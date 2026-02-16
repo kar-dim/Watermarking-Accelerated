@@ -246,8 +246,8 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
             // rx accumulation (do both pixels)
             const half2 center2Top = __half2half2(centerTop);
             const half2 center2Bot = __half2half2(centerBot);
-            const half2* ptrTop = (half2*)&vecTop;
-            const half2* ptrBot = (half2*)&vecBot;
+            const half2* ptrTop = reinterpret_cast<half2*>(&vecTop);
+            const half2* ptrBot = reinterpret_cast<half2*>(&vecBot);
 
 #pragma unroll
             for (int j = 0; j < 4; j++) {

@@ -232,8 +232,8 @@ __global__ void cholesky_solver(const float* __restrict__ A, const float* __rest
     // p=3 (N=8) -> 36 floats
     // p=5 (N=24) -> 300 floats
     constexpr int SIZE = (N * (N + 1)) / 2;
-    float packed[SIZE];
-    float localB[N];
+    float alignas(16) packed[SIZE];
+    float alignas(16) localB[N];
 
     // check if A, B, and X are 16-byte aligned for vectorized loads
     const bool isAligned = (((reinterpret_cast<uintptr_t>(A) | reinterpret_cast<uintptr_t>(B) | reinterpret_cast<uintptr_t>(X)) & 0xF) == 0);
@@ -365,9 +365,8 @@ __global__ void cholesky_solver_parallel(const float* __restrict__ A, const floa
     constexpr int vecPackedLimit = packedSize / 4;
     constexpr int vecBlimit = N / 4;
 
-    // volatile to ensure visibility (because we use the faster __syncwarp)
-    __shared__ volatile float sA[N][N + 1]; // +1 to avoid bank conflicts
-    __shared__ volatile float sB[N];
+    __shared__ alignas(16) float sA[N][N + 1]; // +1 to avoid bank conflicts
+    __shared__ alignas(16) float sB[N];
 
     // cooperative load (packedSize elements -> NxN Shared)
     // check if A, B, and X are 16-byte aligned for vectorized loads
@@ -491,7 +490,7 @@ __global__ void cholesky_solver_parallel(const float* __restrict__ A, const floa
     // write Result
     if (isAligned) {
         float4* vecX = reinterpret_cast<float4*>(X);
-        const float4* sbVec = (const float4*)((float*)sB);
+        const float4* sbVec = reinterpret_cast<const float4*>(sB);
         if (laneId < vecBlimit)
             vecX[laneId] = sbVec[laneId];
     } else {
