@@ -70,7 +70,7 @@ __kernel void nvf(
     const int x = get_global_id(1);
     const int y = get_global_id(0);
 
-    __local float region[SH_DIM_FAST][RECT_STRIDE];
+    __local __attribute__((aligned(16))) float region[SH_DIM_FAST][RECT_STRIDE];
 
     fillBlock(input, &region[0][0], width, height);
     barrier(CLK_LOCAL_MEM_FENCE);
@@ -127,7 +127,7 @@ __kernel void error_sequence(
     const int x = get_global_id(1);
     const int y = get_global_id(0);
 
-    __local float region[SH_DIM_FAST][RECT_STRIDE];
+    __local __attribute__((aligned(16))) float region[SH_DIM_FAST][RECT_STRIDE];
     __local float* centerPtr = &region[get_local_id(0) + PAD][get_local_id(1) + PAD];
 
     fillBlock(input, &region[0][0], width, height);
@@ -155,7 +155,7 @@ __kernel void error_sequence_fused(
     const int x = get_global_id(1);
     const int y = get_global_id(0);
 
-    __local float region[SH_DIM_FAST][RECT_STRIDE];
+    __local __attribute__((aligned(16))) float region[SH_DIM_FAST][RECT_STRIDE];
     __local float* centerPtr = &region[get_local_id(0) + PAD][get_local_id(1) + PAD];
     
     fillBlockFused(inputA, inputB, &region[0][0], width, height);

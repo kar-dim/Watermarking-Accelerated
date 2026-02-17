@@ -128,7 +128,7 @@ __global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, co
     const int x = blockIdx.y * blockDim.y + threadIdx.y;
     const int y = blockIdx.x * blockDim.x + threadIdx.x;
 
-    __shared__ float region[shDimFast][shDimSlow + 1]; //+1 to avoid bank conflicts
+    __shared__ alignas(16) float region[shDimFast][shDimSlow + 1]; //+1 to avoid bank conflicts
 
     fillBlock<false, p, shDimFast, shDimSlow>(input, nullptr, &region[0][0], width, height);
     __syncthreads();
@@ -155,26 +155,6 @@ __global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, co
     nvf[x * height + y] = clamp(output, 0.0f, 1.0f);
 }
 
-// helper method for error sequence calculation with p = 3
-template <int p, int stride, int pad = p / 2, int coeffsSize = (p * p) - 1>
-__device__ inline float error_sequence_coeffs_filter(const float* __restrict__ region, const float* __restrict__ sCoeffs, const int localRow, const int localCol) {
-    const int r = localRow + pad;
-    const int c = localCol + pad;
-    float dot = 0.0f;
-    int k = 0;
-#pragma unroll
-    for (int i = -pad; i <= pad; i++) {
-#pragma unroll
-        for (int j = -pad; j <= pad; j++) {
-            if (i == 0 && j == 0)
-                continue;
-            dot += sCoeffs[k] * region[(r + i) * stride + (c + j)];
-            k++;
-        }
-    }
-    return region[r * stride + c] - dot;
-}
-
 // main kernel for error sequence calculation
 template <int p, bool FUSED, int pad = p / 2, int sharedSize = 16 + (2 * pad), int coeffsSize = (p * p) - 1>
 __global__ void calculate_error_sequence(const float* __restrict__ inputA, const float* __restrict__ inputB, float* __restrict__ x_, const float* __restrict__ coeffs, const unsigned int width,
@@ -184,8 +164,8 @@ __global__ void calculate_error_sequence(const float* __restrict__ inputA, const
 
     const int tid = threadIdx.y * blockDim.x + threadIdx.x;
 
-    __shared__ float region[shDimFast][shDimSlow + 1]; //+1 for bank conflicts
-    __shared__ float sCoeffs[coeffsSize];
+    __shared__ alignas(16) float region[shDimFast][shDimSlow + 1]; //+1 for bank conflicts
+    __shared__ alignas(16) float sCoeffs[coeffsSize];
 
     if (tid < coeffsSize)
         sCoeffs[tid] = coeffs[tid];
@@ -199,8 +179,22 @@ __global__ void calculate_error_sequence(const float* __restrict__ inputA, const
             x_[(x * height + y)] = 0.0f;
             return;
         }
-        const float output = error_sequence_coeffs_filter<p, shDimSlow + 1>(&region[0][0], sCoeffs, threadIdx.x, threadIdx.y);
-        x_[(x * height + y)] = calculateAbs ? fabsf(output) : output;
+        const int r = threadIdx.x + pad;
+        const int c = threadIdx.y + pad;
+        float dot = 0.0f;
+        int k = 0;
+#pragma unroll
+        for (int i = -pad; i <= pad; i++) {
+#pragma unroll
+            for (int j = -pad; j <= pad; j++) {
+                if (i == 0 && j == 0)
+                    continue; // skip the center pixel (branch is optimized fully at compile time)
+                dot += sCoeffs[k] * region[r + i][c + j];
+                k++;
+            }
+        }
+        const float errorSequence = region[r][c] - dot;
+        x_[(x * height + y)] = calculateAbs ? fabsf(errorSequence) : errorSequence;
     }
 }
 
