@@ -156,7 +156,7 @@ __global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, co
 }
 
 // main kernel for error sequence calculation
-template <int p, bool FUSED, int pad = p / 2, int sharedSize = 16 + (2 * pad), int coeffsSize = (p * p) - 1>
+template <int p, bool FUSED, int pad = p / 2, int coeffsSize = (p * p) - 1>
 __global__ void calculate_error_sequence(const float* __restrict__ inputA, const float* __restrict__ inputB, float* __restrict__ x_, const float* __restrict__ coeffs, const unsigned int width,
                                          const unsigned int height, const bool calculateAbs, const int* __restrict__ stopFlag) {
     constexpr int shDimFast = 32 + (2 * pad);
