@@ -10,8 +10,6 @@
     <ClInclude Include="CudaStreamManager.hpp">
       <Filter>Header Files\cuda</Filter>
     </ClInclude>
-    <CudaCompile Include="utils.cpp" />
-    <CudaCompile Include="video_utils.cpp" />
   </ItemGroup>
   <ItemGroup>
     <CudaCompile Include="video_utils.cpp" Condition="'$(Configuration)|$(Platform)'=='CUDA_Debug|x64' Or '$(Configuration)|$(Platform)'=='CUDA_ReleaseDist|x64 'Or '$(Configuration)|$(Platform)'=='CUDA_Release|x64'">
