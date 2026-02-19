@@ -121,11 +121,12 @@ The solution provides multiple build configurations, each targeting a specific b
 
 | Configuration    | Backend     | Notes                                       |
 |------------------|-------------|---------------------------------------------|
-| `CUDA_Release`   | CUDA        | Recommended for systems with NVIDIA GPUs. Faster than OpenCL backend, adds support for CUDA HW accelerated video decoding    |
-| `CUDA_Debug`     | CUDA        | Use for debugging CUDA-specific code        |
-| `OPENCL_Release` | OpenCL      | Recommended for systems without NVIDIA GPUs. Provides GPU acceleration across a wide range of hardware (NVIDIA, AMD, Intel, etc.) and delivers better performance than the CPU backend, though typically slower than the CUDA implementation |
-| `EIGEN_Release`  | Eigen       | Optimized CPU-based implementation (clang-cl toolset is used for maximum performance). Maximum compatibility        |
-| `EIGEN_Debug`    | Eigen       | Use for debugging CPU implementation (clang-cl)      |
+| `CUDA_Release`     | CUDA        | Recommended for systems with NVIDIA GPUs. Faster than OpenCL backend, adds support for CUDA HW accelerated video decoding    |
+| `CUDA_ReleaseDist` | CUDA        | Release CUDA build which includes SASS for the most common architectures (Fatbin). Specifically: RTX 2000, RTX 3000, RTX 4000 and RTX 5000 SASS is included. Used only when we want to distrubute the executable. In contrast, `CUDA_Release` defines only one architecture for faster builds (RTX 4000).
+| `CUDA_Debug`       | CUDA        | Use for debugging CUDA-specific code        |
+| `OPENCL_Release`   | OpenCL      | Recommended for systems without NVIDIA GPUs. Provides GPU acceleration across a wide range of hardware (NVIDIA, AMD, Intel, etc.) and delivers better performance than the CPU backend, though typically slower than the CUDA implementation |
+| `EIGEN_Release`    | Eigen       | Optimized CPU-based implementation (clang-cl toolset is used for maximum performance). Maximum compatibility        |
+| `EIGEN_Debug`      | Eigen       | Use for debugging CPU implementation (clang-cl)      |
 
 ## Build Instructions
 
