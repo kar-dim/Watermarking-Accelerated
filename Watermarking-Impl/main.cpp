@@ -56,6 +56,7 @@ static inline string success(const string& str) { return "\033[92m" + str + "\03
  *  \author Dimitris Karatzas
  */
 int main(void) {
+    int exitCode = EXIT_SUCCESS;
     try {
         // open parameters file
         const INIReader inir("settings.ini");
@@ -84,13 +85,13 @@ int main(void) {
 
         // test algorithms
         const string videoFile = inir.Get("video", "path", "");
-        const int code = videoFile != "" ? testForVideo(inir, videoFile, p, psnr) : testForImage(inir, p, psnr);
-        return code;
+        exitCode = videoFile != "" ? testForVideo(inir, videoFile, p, psnr) : testForImage(inir, p, psnr);
     } catch (const std::exception& ex) {
         cout << err(string("Fatal error: ") + ex.what() + "\n");
-        return EXIT_FAILURE;
+        exitCode = EXIT_FAILURE;
     }
-    return EXIT_SUCCESS;
+    system("pause");
+    return exitCode;
 }
 
 // embed watermark for static images
