@@ -200,10 +200,10 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
     __shared__ alignas(16) half blockValues[3][258];
     __shared__ float rxStaging[4][8]; // 4 warps (128 threads) instead of 256
     __shared__ typename cub::WarpReduce<rxVecData<8>>::TempStorage temp_storage[4];
-    rxVecData<8> rxPersistent;
 
     wmma::fragment<wmma::accumulator, 16, 16, 16, float> acc_C;
     wmma::fill_fragment(acc_C, 0.0f);
+    rxVecData<8> rxPersistent;
     rxPersistent.zero();
 
     // grid stride loop
@@ -324,12 +324,12 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
     __shared__ alignas(16) half blockValues[5][260];
     __shared__ float rxStaging[8][24];
     __shared__ typename cub::WarpReduce<rxVecData<24>>::TempStorage temp_storage[8];
-    rxVecData<24> rxPersistent;
 
     wmma::fragment<wmma::accumulator, 16, 16, 16, float> acc_C00, acc_C10, acc_C11;
     wmma::fill_fragment(acc_C00, 0.0f);
     wmma::fill_fragment(acc_C10, 0.0f);
     wmma::fill_fragment(acc_C11, 0.0f);
+    rxVecData<24> rxPersistent;
     rxPersistent.zero();
 
     // grid stride loop
@@ -438,12 +438,12 @@ __global__ void me_p7(const float* __restrict__ input, float* __restrict__ Rx, f
     __shared__ alignas(16) half blockValues[7][134];
     __shared__ float rxStaging[4][48];
     __shared__ typename cub::WarpReduce<rxVecData<48>>::TempStorage temp_storage[4];
-    rxVecData<48> rxPersistent;
 
     wmma::fragment<wmma::accumulator, 16, 16, 16, float> acc_Rx[6];
 #pragma unroll
     for (int i = 0; i < 6; i++)
         wmma::fill_fragment(acc_Rx[i], 0.0f);
+    rxVecData<48> rxPersistent;
     rxPersistent.zero();
 
     // grid stride loop
@@ -548,13 +548,13 @@ __global__ void me_p9(const float* __restrict__ input, float* __restrict__ Rx, f
     __shared__ alignas(16) float RxLocal[128][88];
     __shared__ alignas(16) half blockValues[9][136];
     __shared__ typename cub::WarpReduce<rxVecData<80>>::TempStorage temp_storage[4];
-    rxVecData<80> rxPersistent;
 
     // Init Accumulators (Float)
     wmma::fragment<wmma::accumulator, 16, 16, 16, float> acc_Rx[15];
 #pragma unroll
     for (int i = 0; i < 15; i++)
         wmma::fill_fragment(acc_Rx[i], 0.0f);
+    rxVecData<80> rxPersistent;
     rxPersistent.zero();
 
     // grid stride loop

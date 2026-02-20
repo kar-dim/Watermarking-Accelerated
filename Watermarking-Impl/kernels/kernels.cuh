@@ -19,11 +19,12 @@ struct CorrelationData {
 };
 
 // struct to hold rx vector values for reduction (cub) with vectorized addition with operator+
-template <int N, int NVEC = N / 4>
+template <int N>
 struct alignas(16) rxVecData {
     float vals[N];
 
     // it is better to initialize whenever we want instead of constructor
+    // though for now we always initialize and immediately initialize to zero, but this may change in the future
     __device__ __forceinline__ void zero() {
 #pragma unroll
         for (int i = 0; i < N; i++)
@@ -36,7 +37,7 @@ struct alignas(16) rxVecData {
         const float4* b = reinterpret_cast<const float4*>(other.vals);
         float4* r = reinterpret_cast<float4*>(res.vals);
 #pragma unroll
-        for (int i = 0; i < NVEC; i++) {
+        for (int i = 0; i < N / 4; i++) {
             float4 v1 = a[i];
             float4 v2 = b[i];
             r[i] = make_float4(v1.x + v2.x, v1.y + v2.y, v1.z + v2.z, v1.w + v2.w);
@@ -118,8 +119,9 @@ __device__ __forceinline__ void fillBlockStrip(half blockValues[p][StripWidth], 
 
 // NVF kernel, calculates NVF values for each pixel in the image
 // works for all p values (3,5,7 and 9)
-template <int p, int pad = p / 2>
+template <int p>
 __global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, const unsigned int width, const unsigned int height) {
+    constexpr int pad = p / 2;
     constexpr float nPixels = static_cast<float>(p * p);
     constexpr float nPixelsSq = nPixels * nPixels;
     constexpr int shDimFast = 32 + (2 * pad);
@@ -156,9 +158,11 @@ __global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, co
 }
 
 // main kernel for error sequence calculation
-template <int p, bool FUSED, int pad = p / 2, int coeffsSize = (p * p) - 1>
+template <int p, bool FUSED>
 __global__ void calculate_error_sequence(const float* __restrict__ inputA, const float* __restrict__ inputB, float* __restrict__ x_, const float* __restrict__ coeffs, const unsigned int width,
                                          const unsigned int height, const bool calculateAbs, const int* __restrict__ stopFlag) {
+    constexpr int pad = p / 2;
+    constexpr int coeffsSize = (p * p) - 1;
     constexpr int shDimFast = 32 + (2 * pad);
     constexpr int shDimSlow = 8 + (2 * pad);
 
@@ -215,9 +219,11 @@ __device__ __forceinline__ void writeRxVec(float* __restrict__ rx, const rxVecDa
 }
 
 // naive 1-thread Cholesky solver used for its very low latency versus cuSOLVER but useful only for very small systems, p = 3 (N = 8) or p = 5 (N = 24)
-template <int p, int N = (p * p) - 1>
+template <int p>
 __global__ void cholesky_solver(const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ X, int* __restrict__ stopFlag) {
-#define IDX(r, c) ((r * (r + 1)) / 2 + c)
+    constexpr int N = (p * p) - 1;
+
+    auto IDX = [](const int r, const int c) { return (r * (r + 1)) / 2 + c; };
 
     if (threadIdx.x > 0 || blockIdx.x > 0)
         return;
@@ -346,18 +352,17 @@ exit:
         for (int i = 0; i < N; i++)
             X[i] = localB[i];
     }
-#undef IDX
 }
 
 // parallel cholesky solver for p = 7 (N = 48) and p = 9 (N = 80), using one warp (32 threads)
-template <int p, int N = (p * p) - 1>
+template <int p>
 __global__ void cholesky_solver_parallel(const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ X, int* __restrict__ stopFlag) {
-    const int laneId = threadIdx.x;
-
-    // constants derived from N
+    constexpr int N = (p * p) - 1;
     constexpr int packedSize = (N * (N + 1)) / 2;
     constexpr int vecPackedLimit = packedSize / 4;
     constexpr int vecBlimit = N / 4;
+
+    const int laneId = threadIdx.x;
 
     __shared__ alignas(16) float sA[N][N + 1]; // +1 to avoid bank conflicts
     __shared__ alignas(16) float sB[N];
