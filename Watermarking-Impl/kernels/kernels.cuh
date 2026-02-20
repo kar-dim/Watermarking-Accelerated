@@ -58,7 +58,7 @@ __device__ inline int2 getPackedCoords(const int k) {
 inline __device__ float clamp(float f, float a, float b) { return fmaxf(a, fminf(f, b)); }
 inline __device__ int clamp(int f, int a, int b) { return max(a, min(f, b)); }
 
-// helper method to fill block-wide shared memory cooperatively for error sequence and NVF kernels
+// helper function to fill block-wide shared memory cooperatively for error sequence and NVF kernels
 // sharedMem must be rectangle with dimensions [shDimFast][shDimSlow + 1]
 template <bool FUSED, int p, int shDimFast, int shDimSlow>
 __device__ __forceinline__ void fillBlock(const float* __restrict__ inputA, const float* __restrict__ inputB, float* __restrict__ sharedMem, const int width, const int height) {
@@ -83,37 +83,24 @@ __device__ __forceinline__ void fillBlock(const float* __restrict__ inputA, cons
     }
 }
 
-// helper method to fill block-wide shared memory cooperatively for prediction error kernels where
-// the shared memory is a wide "strip" on the x-axis
-template <int p, int BlockSize, int StripWidth = BlockSize + p - 1>
-__device__ __forceinline__ void fillBlockStrip(half blockValues[p][StripWidth], const float* __restrict__ input, const int width, const int height, const int bx, const int by) {
+// helper function to fill block-wide shared memory cooperatively for ME kernels
+// optimized to minimize uncoalesced reads and warp stalls
+template <int p, int BlockSize, int StripHeight = BlockSize + p - 1>
+__device__ __forceinline__ void fillBlockStripVertical(half blockValues[p][StripHeight], const float* __restrict__ input, const int width, const int height, const int bx, const int by) {
     constexpr float scaleFactor = 0.00392156862f;
     constexpr int radius = (p - 1) / 2;
-    constexpr int totalPixels = p * StripWidth;
-    constexpr int colStep = BlockSize / p;
-    constexpr int rowStep = BlockSize % p;
+    constexpr int totalPixels = p * StripHeight;
 
-    const int tid = threadIdx.x;
-    const int baseGlobalCol = (bx * BlockSize) - radius;
-    const int baseGlobalRow = (by * 1) - radius;
-
-    int r = tid % p;
-    int c = tid / p;
-    int idx = tid;
+    const int baseGlobalCol = (bx * 1) - radius;
+    const int baseGlobalRow = (by * BlockSize) - radius;
+    int idx = threadIdx.x;
     while (idx < totalPixels) {
-        if (c < StripWidth) {
-            const int globalCol = clamp(width - 1, 0, baseGlobalCol + c);
-            const int globalRow = clamp(height - 1, 0, baseGlobalRow + r);
-            blockValues[r][c] = __float2half(input[globalCol * height + globalRow] * scaleFactor);
-        }
+        const int r = idx % StripHeight;
+        const int c = idx / StripHeight;
+        const int globalCol = clamp(width - 1, 0, baseGlobalCol + c);
+        const int globalRow = clamp(height - 1, 0, baseGlobalRow + r);
+        blockValues[c][r] = __float2half(input[(globalCol * height) + globalRow] * scaleFactor);
         idx += BlockSize;
-        c += colStep;
-        r += rowStep;
-        // handle row wrap-around
-        if (r >= p) {
-            r -= p;
-            c += 1;
-        }
     }
 }
 
@@ -216,6 +203,20 @@ __device__ __forceinline__ void writeRxVec(float* __restrict__ rx, const rxVecDa
 #pragma unroll
     for (int i = threadIdx.x & 31; i < SIZE; i += 32)
         atomicAdd(&rx[i], warpStaging[i]);
+}
+
+// this function reverts the transpose introduced by the ME kernel. To achieve coalesced VRAM reads the image was loaded as column-major, this transposed
+// the resulting system of equations. Because the Rx matrix is symmetric, the cholesky solver solves this transposed system, but outputs the
+// coefficients in column-major order. Here we re-map this to row-major (we skip the center because it is not part of the predictor!)
+template <int p>
+__device__ __forceinline__ int getMappedVarIndex(const int k) {
+    constexpr int center = (p * p) / 2;
+    constexpr int p2_minus_1 = ((p * p) - 1);
+
+    const int kPixel = k + (k >= center);
+    const int r = kPixel / p;
+    const int originalPixel = (kPixel * p) - (r * p2_minus_1);
+    return originalPixel - (originalPixel > center);
 }
 
 // naive 1-thread Cholesky solver used for its very low latency versus cuSOLVER but useful only for very small systems, p = 3 (N = 8) or p = 5 (N = 24)
@@ -330,28 +331,9 @@ __global__ void cholesky_solver(const float* __restrict__ A, const float* __rest
     *stopFlag = 0;
 exit:
     // write Result
-    if (isAligned) {
-        float4* vecX = reinterpret_cast<float4*>(X);
-        constexpr int vecLimitB = N / 4;
-        // vectorized store
 #pragma unroll
-        for (int i = 0; i < vecLimitB; i++) {
-            float4 v;
-            v.x = localB[i * 4 + 0];
-            v.y = localB[i * 4 + 1];
-            v.z = localB[i * 4 + 2];
-            v.w = localB[i * 4 + 3];
-            vecX[i] = v;
-        }
-        // tail elements
-        for (int i = vecLimitB * 4; i < N; i++)
-            X[i] = localB[i];
-        // scalar store
-    } else {
-#pragma unroll
-        for (int i = 0; i < N; i++)
-            X[i] = localB[i];
-    }
+    for (int i = 0; i < N; i++)
+        X[getMappedVarIndex<p>(i)] = localB[i];
 }
 
 // parallel cholesky solver for p = 7 (N = 48) and p = 9 (N = 80), using one warp (32 threads)
@@ -487,15 +469,8 @@ __global__ void cholesky_solver_parallel(const float* __restrict__ A, const floa
     }
 
     // write Result
-    if (isAligned) {
-        float4* vecX = reinterpret_cast<float4*>(X);
-        const float4* sbVec = reinterpret_cast<const float4*>(sB);
-        if (laneId < vecBlimit)
-            vecX[laneId] = sbVec[laneId];
-    } else {
-        for (int k = laneId; k < N; k += 32)
-            X[k] = sB[k];
-    }
+    for (int k = laneId; k < N; k += 32)
+        X[getMappedVarIndex<p>(k)] = sB[k];
 }
 
 // helper method to perform a streaming reduction of Rx values from shared window to global memory
@@ -524,10 +499,10 @@ __device__ void load_neighbor_vec_p7(half8* dst, const half blockValues[7][134],
 __device__ void load_neighbor_vec_p9(half8* dst, const half blockValues[9][136], half& center);
 
 // Prediction Error kernels (ME) for p = 3, p = 5, p = 7 and p = 9
-__global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height, const int totalBlocksX);
-__global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height, const int totalBlocksX);
-__global__ void me_p7(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height, const int totalBlocksX);
-__global__ void me_p9(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height, const int totalBlocksX);
+__global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const int width, const int height, const int totalBlocksY, const int taskTotal);
+__global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const int width, const int height, const int totalBlocksY, const int taskTotal);
+__global__ void me_p7(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const int width, const int height, const int totalBlocksY, const int taskTotal);
+__global__ void me_p9(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const int width, const int height, const int totalBlocksY, const int taskTotal);
 
 // fused calculation of u and sum of squares
 __global__ void compute_u_and_sumsq(const float* __restrict__ mask, const float* __restrict__ w, float* __restrict__ u, float* __restrict__ globalSumSq, const int N);

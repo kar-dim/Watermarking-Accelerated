@@ -185,7 +185,7 @@ __device__ void load_neighbor_vec_p9(half8* dst, const half blockValues[9][136],
     }
 }
 
-__global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height, const int totalBlocksX) {
+__global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const int width, const int height, const int totalBlocksY, const int taskTotal) {
     constexpr int inputStride = 40; // 20 floats -> 40 halves
     constexpr int outputStride = 20;
 
@@ -193,7 +193,6 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
     const int warpId = tid >> 5;
     const int startRow = warpId * 32;
     const int gridTotal = gridDim.x * gridDim.y;
-    const int taskTotal = totalBlocksX * height;
     const int blockLinear = blockIdx.y * gridDim.x + blockIdx.x;
 
     __shared__ alignas(16) float RxLocal[128][20]; // note: for p=3 we process 256 pixels, but pack them into 128 vectors of size 2
@@ -208,15 +207,15 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
 
     // grid stride loop
     for (int taskIdx = blockLinear; taskIdx < taskTotal; taskIdx += gridTotal) {
-        const int bx = taskIdx % totalBlocksX;
-        const int by = taskIdx / totalBlocksX;
+        const int bx = taskIdx / totalBlocksY;
+        const int by = taskIdx % totalBlocksY;
+
+        if (bx >= width)
+            continue;
 
         // all 256 threads help load the strip
-        fillBlockStrip<3, 256>(blockValues, input, width, height, bx, by);
+        fillBlockStripVertical<3, 256>(blockValues, input, width, height, bx, by);
         __syncthreads();
-
-        if (by * blockDim.y + threadIdx.y >= height)
-            continue;
 
         // load window (p=3 optimized)
         // ONLY for p=3 version: WMMA minimum size is 16x16 tensors, so we pack 2 pixels per thread to fill the tile
@@ -226,7 +225,7 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
             half8 vecTop, vecBot;
             half centerTop, centerBot;
             // load pixel A (tid)
-            if ((bx * 256 + tid) < width) {
+            if ((by * 256 + tid) < height) {
                 load_neighbor_row_funnel_p3(vecTop.a, vecTop.b, vecTop.c, blockValues[0]);
                 load_neighbor_row_funnel_p3(vecTop.d, centerTop, vecTop.e, blockValues[1]);
                 load_neighbor_row_funnel_p3(vecTop.f, vecTop.g, vecTop.h, blockValues[2]);
@@ -309,7 +308,7 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
     }
 }
 
-__global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height, const int totalBlocksX) {
+__global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const int width, const int height, const int totalBlocksY, const int taskTotal) {
     constexpr int inputStride = 72;  // WMMA stride: 36 floats = 72 halves
     constexpr int outputStride = 36; // output stride: match allocation (36) to avoid wrapping rows
 
@@ -317,7 +316,6 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
     const int warpId = tid >> 5;
     const int startRow = warpId * 32;
     const int gridTotal = gridDim.x * gridDim.y;
-    const int taskTotal = totalBlocksX * height;
     const int blockLinear = blockIdx.y * gridDim.x + blockIdx.x;
 
     __shared__ alignas(16) float RxLocal[256][36];
@@ -334,18 +332,21 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
 
     // grid stride loop
     for (int taskIdx = blockLinear; taskIdx < taskTotal; taskIdx += gridTotal) {
-        const int bx = taskIdx % totalBlocksX;
-        const int by = taskIdx / totalBlocksX;
-        fillBlockStrip<5, 256>(blockValues, input, width, height, bx, by);
-        __syncthreads();
+        const int bx = taskIdx / totalBlocksY;
+        const int by = taskIdx % totalBlocksY;
 
-        if (by * blockDim.y + threadIdx.y >= height)
+        if (bx >= width)
             continue;
+
+
+        fillBlockStripVertical<5, 256>(blockValues, input, width, height, bx, by);
+        __syncthreads();
 
         // load window
         half centerVal;
         half8 localVec8[3];
-        if ((bx * 256 + tid) < width) {
+
+        if ((by * 256 + tid) < height) {
             load_neighbor_vec_p5(localVec8, blockValues, centerVal);
         } else {
 #pragma unroll
@@ -402,28 +403,26 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
     writeRxVec<24>(rx, rxPersistent, temp_storage[warpId], &rxStaging[warpId][0]);
     __syncthreads();
 
-    // write Rx
-    // pass 1: [0, 255]
-    const int2 coords = getPackedCoords(tid);
-    float sum = 0.0f;
-#pragma unroll
-    for (int w = 0; w < 8; w++)
-        sum += RxLocal[w * 32 + coords.x][coords.y];
-    atomicAdd(&Rx[tid], sum);
-
-    // pass 2: [256, 299]
-    if (tid < 44) {
-        const int i = tid + 256;
-        const int2 coords = getPackedCoords(i);
+    // write Rx lambda
+    auto writeRx = [&](const int k) {
+        const int2 coords = getPackedCoords(k);
         float sum = 0.0f;
 #pragma unroll
         for (int w = 0; w < 8; w++)
             sum += RxLocal[w * 32 + coords.x][coords.y];
-        atomicAdd(&Rx[i], sum);
+        atomicAdd(&Rx[k], sum);
+    };
+
+    // pass 1: [0, 255]
+    writeRx(tid);
+
+    // pass 2: [256, 299]
+    if (tid < 44) {
+        writeRx(tid + 256);
     }
 }
 
-__global__ void me_p7(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height, const int totalBlocksX) {
+__global__ void me_p7(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const int width, const int height, const int totalBlocksY, const int taskTotal) {
     constexpr int inputStride = 112;
     constexpr int outputStride = 56;
 
@@ -431,7 +430,6 @@ __global__ void me_p7(const float* __restrict__ input, float* __restrict__ Rx, f
     const int warpId = tid >> 5;
     const int startRow = warpId * 32;
     const int gridTotal = gridDim.x * gridDim.y;
-    const int taskTotal = totalBlocksX * height;
     const int blockLinear = blockIdx.y * gridDim.x + blockIdx.x;
 
     __shared__ alignas(16) float RxLocal[192][56];
@@ -448,9 +446,13 @@ __global__ void me_p7(const float* __restrict__ input, float* __restrict__ Rx, f
 
     // grid stride loop
     for (int taskIdx = blockLinear; taskIdx < taskTotal; taskIdx += gridTotal) {
-        const int bx = taskIdx % totalBlocksX;
-        const int by = taskIdx / totalBlocksX;
-        fillBlockStrip<7, 128>(blockValues, input, width, height, bx, by);
+        const int bx = taskIdx / totalBlocksY;
+        const int by = taskIdx % totalBlocksY;
+
+        if (bx >= width)
+            continue;
+
+        fillBlockStripVertical<7, 128>(blockValues, input, width, height, bx, by);
         __syncthreads();
 
         if (by * blockDim.y + threadIdx.y >= height)
@@ -460,7 +462,7 @@ __global__ void me_p7(const float* __restrict__ input, float* __restrict__ Rx, f
         half8 localVec8[6];
 
         // load window
-        if ((bx * 128 + tid) < width) {
+        if ((by * 128 + tid) < height) {
             load_neighbor_vec_p7(localVec8, blockValues, centerVal);
         } else {
 #pragma unroll
@@ -534,7 +536,7 @@ __global__ void me_p7(const float* __restrict__ input, float* __restrict__ Rx, f
     }
 }
 
-__global__ void me_p9(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const unsigned int width, const unsigned int height, const int totalBlocksX) {
+__global__ void me_p9(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const int width, const int height, const int totalBlocksY, const int taskTotal) {
     constexpr int INPUT_STRIDE = 176; // WMMA stride is 176 (halves)
     constexpr int outputStride = 88;
 
@@ -542,7 +544,6 @@ __global__ void me_p9(const float* __restrict__ input, float* __restrict__ Rx, f
     const int warpId = tid >> 5;
     const int startRow = warpId * 32;
     const int gridTotal = gridDim.x * gridDim.y;
-    const int taskTotal = totalBlocksX * height;
     const int blockLinear = blockIdx.y * gridDim.x + blockIdx.x;
 
     __shared__ alignas(16) float RxLocal[128][88];
@@ -559,9 +560,13 @@ __global__ void me_p9(const float* __restrict__ input, float* __restrict__ Rx, f
 
     // grid stride loop
     for (int taskIdx = blockLinear; taskIdx < taskTotal; taskIdx += gridTotal) {
-        const int bx = taskIdx % totalBlocksX;
-        const int by = taskIdx / totalBlocksX;
-        fillBlockStrip<9, 128>(blockValues, input, width, height, bx, by);
+        const int bx = taskIdx / totalBlocksY;
+        const int by = taskIdx % totalBlocksY;
+
+        if (bx >= width)
+            continue;
+
+        fillBlockStripVertical<9, 128>(blockValues, input, width, height, bx, by);
         __syncthreads();
 
         if (by * blockDim.y + threadIdx.y >= height)
@@ -570,7 +575,7 @@ __global__ void me_p9(const float* __restrict__ input, float* __restrict__ Rx, f
         // load window
         half centerVal;
         half8 localVec8[10];
-        if ((bx * 128 + tid) < width) {
+        if ((by * 128 + tid) < height) {
             load_neighbor_vec_p9(localVec8, blockValues, centerVal);
         } else {
 #pragma unroll
