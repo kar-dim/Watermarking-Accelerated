@@ -9,7 +9,6 @@ inline const std::string kernels = R"CLC(
 #define SHAREDSIZE        (16 + 2 * PAD)
 #define SH_DIM_FAST       (32 + (2 * PAD))
 #define SH_DIM_SLOW       (8 + (2 * PAD))
-#define RECT_STRIDE       (SH_DIM_SLOW + 1)
 
 #pragma OPENCL EXTENSION cl_khr_fp16 : enable
 
@@ -28,14 +27,15 @@ inline void fillBlock(
     const int baseGlobalX = (int)(get_group_id(1) * get_local_size(1)) - PAD; 
     const int baseGlobalY = (int)(get_group_id(0) * get_local_size(0)) - PAD;
     const int tid = get_local_id(1) * get_local_size(0) + get_local_id(0);
-    const int totalThreads = get_local_size(0) * get_local_size(1); // 256
+    const int totalThreads = get_local_size(0) * get_local_size(1); 
     const int totalElements = SH_DIM_FAST * SH_DIM_SLOW;
+    
     for (int i = tid; i < totalElements; i += totalThreads) {
         const int r = i % SH_DIM_FAST;
         const int c = i / SH_DIM_FAST;
         const int globalX = clamp(baseGlobalX + c, 0, width - 1);
         const int globalY = clamp(baseGlobalY + r, 0, height - 1);
-        sharedMem[r * RECT_STRIDE + c] = input[globalX * height + globalY];
+        sharedMem[i] = input[globalX * height + globalY];
     }
 }
 
@@ -46,18 +46,19 @@ inline void fillBlockFused(
     const int width,
     const int height) 
 {
-    const int baseGlobalX = (int)(get_group_id(1) * get_local_size(1)) - PAD;
+    const int baseGlobalX = (int)(get_group_id(1) * get_local_size(1)) - PAD; 
     const int baseGlobalY = (int)(get_group_id(0) * get_local_size(0)) - PAD;
     const int tid = get_local_id(1) * get_local_size(0) + get_local_id(0);
-    const int totalThreads = 256; 
+    const int totalThreads = get_local_size(0) * get_local_size(1); 
     const int totalElements = SH_DIM_FAST * SH_DIM_SLOW;
+    
     for (int i = tid; i < totalElements; i += totalThreads) {
-        int r = i % SH_DIM_FAST;
-        int c = i / SH_DIM_FAST;
+        const int r = i % SH_DIM_FAST;
+        const int c = i / SH_DIM_FAST;
         const int globalX = clamp(baseGlobalX + c, 0, width - 1);
         const int globalY = clamp(baseGlobalY + r, 0, height - 1);
         const int idx = globalX * height + globalY;
-        sharedMem[r * RECT_STRIDE + c] = inputA[idx] * inputB[idx];
+        sharedMem[i] = inputA[idx] * inputB[idx];
     }
 }
 
@@ -70,7 +71,7 @@ __kernel void nvf(
     const int x = get_global_id(1);
     const int y = get_global_id(0);
 
-    __local __attribute__((aligned(16))) float region[SH_DIM_FAST][RECT_STRIDE];
+    __local __attribute__((aligned(16))) float region[SH_DIM_SLOW][SH_DIM_FAST];
 
     fillBlock(input, &region[0][0], width, height);
     barrier(CLK_LOCAL_MEM_FENCE);
@@ -78,15 +79,15 @@ __kernel void nvf(
     if (y >= height || x >= width)
         return;
 
-    const int shY = get_local_id(0) + PAD; 
-    const int shX = get_local_id(1) + PAD;
+    const int shSlow = get_local_id(1) + PAD;
+    const int shFast = get_local_id(0) + PAD;
     float sum = 0.0f, sumSq = 0.0f;
     
 #pragma unroll
     for (int i = -PAD; i <= PAD; i++) {
 #pragma unroll
         for (int j = -PAD; j <= PAD; j++) {
-            const float pixelValue = region[shY + i][shX + j];
+            const float pixelValue = region[shSlow + i][shFast + j];
             sum += pixelValue;
             sumSq += pixelValue * pixelValue;
         }
@@ -98,7 +99,7 @@ __kernel void nvf(
 
 //use pointer arithmetic for dot product to help compilers optimize address calculations fast
 inline float error_sequence_coeffs_filter(__local float* centerPtr, __constant float* coeffs) {
-#define P(r, c) centerPtr[(r) * RECT_STRIDE + (c)] 
+#define P(slow, fast) centerPtr[(slow) * SH_DIM_FAST + (fast)]
     float dot = 0.0f;
     int k = 0;
 #pragma unroll
@@ -107,7 +108,7 @@ inline float error_sequence_coeffs_filter(__local float* centerPtr, __constant f
         for (int j = -PAD; j <= PAD; j++) {
             if (i == 0 && j == 0)
                 continue;
-            dot += coeffs[k] * P(i, j);
+            dot += coeffs[k] * P(j, i);
             k++;
         }
     }
@@ -127,8 +128,8 @@ __kernel void error_sequence(
     const int x = get_global_id(1);
     const int y = get_global_id(0);
 
-    __local __attribute__((aligned(16))) float region[SH_DIM_FAST][RECT_STRIDE];
-    __local float* centerPtr = &region[get_local_id(0) + PAD][get_local_id(1) + PAD];
+    __local __attribute__((aligned(16))) float region[SH_DIM_SLOW][SH_DIM_FAST];
+    __local float* centerPtr = &region[get_local_id(1) + PAD][get_local_id(0) + PAD];
 
     fillBlock(input, &region[0][0], width, height);
     barrier(CLK_LOCAL_MEM_FENCE);
@@ -155,8 +156,8 @@ __kernel void error_sequence_fused(
     const int x = get_global_id(1);
     const int y = get_global_id(0);
 
-    __local __attribute__((aligned(16))) float region[SH_DIM_FAST][RECT_STRIDE];
-    __local float* centerPtr = &region[get_local_id(0) + PAD][get_local_id(1) + PAD];
+    __local __attribute__((aligned(16))) float region[SH_DIM_SLOW][SH_DIM_FAST];
+    __local float* centerPtr = &region[get_local_id(1) + PAD][get_local_id(0) + PAD];
     
     fillBlockFused(inputA, inputB, &region[0][0], width, height);
     barrier(CLK_LOCAL_MEM_FENCE);
@@ -256,7 +257,7 @@ __kernel void apply_watermark_fused(
 }
 
 )CLC"
-R"CLC(
+                                   R"CLC(
 
 
 // OpenCL upper packed Indexing:
@@ -640,7 +641,7 @@ __kernel void calculate_final_correlation(
 }
 
 )CLC"
-R"CLC(
+                                   R"CLC(
 
 // naive very low latency 1-thread solver
 // define this kernel ONLY for p=3 and p=5
