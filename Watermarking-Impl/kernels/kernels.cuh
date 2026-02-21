@@ -33,15 +33,9 @@ struct alignas(16) rxVecData {
 
     __device__ __forceinline__ rxVecData operator+(const rxVecData& other) const {
         rxVecData res;
-        const float4* a = reinterpret_cast<const float4*>(vals);
-        const float4* b = reinterpret_cast<const float4*>(other.vals);
-        float4* r = reinterpret_cast<float4*>(res.vals);
 #pragma unroll
-        for (int i = 0; i < N / 4; i++) {
-            float4 v1 = a[i];
-            float4 v2 = b[i];
-            r[i] = make_float4(v1.x + v2.x, v1.y + v2.y, v1.z + v2.z, v1.w + v2.w);
-        }
+        for (int i = 0; i < N; i++)
+            res.vals[i] = vals[i] + other.vals[i];
         return res;
     }
 };

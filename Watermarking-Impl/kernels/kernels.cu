@@ -197,7 +197,7 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
 
     __shared__ alignas(16) float RxLocal[128][OUT_STRIDE]; // note: for p=3 we process 256 pixels, but pack them into 128 vectors of size 2
     __shared__ alignas(16) half blockValues[3][258];
-    __shared__ float rxStaging[4][8]; // 4 warps (128 threads) instead of 256
+    __shared__ alignas(16) float rxStaging[4][8]; // 4 warps (128 threads) instead of 256
     __shared__ typename cub::WarpReduce<rxVecData<8>>::TempStorage temp_storage[4];
 
     wmma::fragment<wmma::accumulator, 16, 16, 16, float> acc_C;
@@ -320,7 +320,7 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
 
     __shared__ alignas(16) float RxLocal[256][OUT_STRIDE];
     __shared__ alignas(16) half blockValues[5][260];
-    __shared__ float rxStaging[8][24];
+    __shared__ alignas(16) float rxStaging[8][24];
     __shared__ typename cub::WarpReduce<rxVecData<24>>::TempStorage temp_storage[8];
 
     wmma::fragment<wmma::accumulator, 16, 16, 16, float> acc_C00, acc_C10, acc_C11;
@@ -432,7 +432,7 @@ __global__ void me_p7(const float* __restrict__ input, float* __restrict__ Rx, f
     const int blockLinear = blockIdx.y * gridDim.x + blockIdx.x;
 
     __shared__ alignas(16) float RxLocal[192][OUT_STRIDE];
-    __shared__ float rxStaging[4][48];
+    __shared__ alignas(16) float rxStaging[4][48];
     __shared__ typename cub::WarpReduce<rxVecData<48>>::TempStorage temp_storage[4];
     half(*blockValues)[134] = reinterpret_cast<half(*)[134]>(&RxLocal[0][0]);  // trick to reuse shared memory
 
