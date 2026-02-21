@@ -186,8 +186,8 @@ __device__ void load_neighbor_vec_p9(half8* dst, const half blockValues[9][136],
 }
 
 __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const int width, const int height, const int totalBlocksY, const int taskTotal) {
-    constexpr int inputStride = 40; // 20 floats -> 40 halves
-    constexpr int outputStride = 20;
+    constexpr int IN_STRIDE = 40; // 20 floats -> 40 halves
+    constexpr int OUT_STRIDE = 20;
 
     const int tid = threadIdx.x;
     const int warpId = tid >> 5;
@@ -195,7 +195,7 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
     const int gridTotal = gridDim.x * gridDim.y;
     const int blockLinear = blockIdx.y * gridDim.x + blockIdx.x;
 
-    __shared__ alignas(16) float RxLocal[128][20]; // note: for p=3 we process 256 pixels, but pack them into 128 vectors of size 2
+    __shared__ alignas(16) float RxLocal[128][OUT_STRIDE]; // note: for p=3 we process 256 pixels, but pack them into 128 vectors of size 2
     __shared__ alignas(16) half blockValues[3][258];
     __shared__ float rxStaging[4][8]; // 4 warps (128 threads) instead of 256
     __shared__ typename cub::WarpReduce<rxVecData<8>>::TempStorage temp_storage[4];
@@ -276,8 +276,8 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
 #pragma unroll
             for (int k0 = 0; k0 < 32; k0 += 16) {
                 const half* tilePtr = reinterpret_cast<half*>(&RxLocal[startRow + k0][0]);
-                wmma::load_matrix_sync(A, tilePtr, inputStride);
-                wmma::load_matrix_sync(B, tilePtr, inputStride);
+                wmma::load_matrix_sync(A, tilePtr, IN_STRIDE);
+                wmma::load_matrix_sync(B, tilePtr, IN_STRIDE);
                 wmma::mma_sync(acc_C, A, B, acc_C);
             }
         }
@@ -287,7 +287,7 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
     // write to global memory
     if (tid < 128) {
         float* warpOutput = &RxLocal[warpId * 32][0];
-        wmma::store_matrix_sync(warpOutput, acc_C, outputStride, wmma::mem_row_major);
+        wmma::store_matrix_sync(warpOutput, acc_C, OUT_STRIDE, wmma::mem_row_major);
         // write rx (cub)
         writeRxVec<8>(rx, rxPersistent, temp_storage[warpId], &rxStaging[warpId][0]);
     }
@@ -309,8 +309,8 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
 }
 
 __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const int width, const int height, const int totalBlocksY, const int taskTotal) {
-    constexpr int inputStride = 72;  // WMMA stride: 36 floats = 72 halves
-    constexpr int outputStride = 36; // output stride: match allocation (36) to avoid wrapping rows
+    constexpr int IN_STRIDE = 72;
+    constexpr int OUT_STRIDE = 36; // 36 + 0, no need to pad for bank conflicts!
 
     const int tid = threadIdx.x;
     const int warpId = tid >> 5;
@@ -318,7 +318,7 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
     const int gridTotal = gridDim.x * gridDim.y;
     const int blockLinear = blockIdx.y * gridDim.x + blockIdx.x;
 
-    __shared__ alignas(16) float RxLocal[256][36];
+    __shared__ alignas(16) float RxLocal[256][OUT_STRIDE];
     __shared__ alignas(16) half blockValues[5][260];
     __shared__ float rxStaging[8][24];
     __shared__ typename cub::WarpReduce<rxVecData<24>>::TempStorage temp_storage[8];
@@ -382,12 +382,12 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
 #pragma unroll
         for (int k0 = 0; k0 < 32; k0 += 16) {
             const half* tilePtr = reinterpret_cast<half*>(&RxLocal[startRow + k0][0]);
-            wmma::load_matrix_sync(A_frag, tilePtr, inputStride);
-            wmma::load_matrix_sync(B_frag, tilePtr, inputStride);
+            wmma::load_matrix_sync(A_frag, tilePtr, IN_STRIDE);
+            wmma::load_matrix_sync(B_frag, tilePtr, IN_STRIDE);
             wmma::mma_sync(acc_C00, A_frag, B_frag, acc_C00);
-            wmma::load_matrix_sync(A_frag, tilePtr + 16, inputStride);
+            wmma::load_matrix_sync(A_frag, tilePtr + 16, IN_STRIDE);
             wmma::mma_sync(acc_C10, A_frag, B_frag, acc_C10);
-            wmma::load_matrix_sync(B_frag, tilePtr + 16, inputStride);
+            wmma::load_matrix_sync(B_frag, tilePtr + 16, IN_STRIDE);
             wmma::mma_sync(acc_C11, A_frag, B_frag, acc_C11);
         }
         __syncthreads();
@@ -395,9 +395,9 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
 
     // write to global memory
     float* warpOutput = &RxLocal[warpId * 32][0];
-    wmma::store_matrix_sync(warpOutput, acc_C00, outputStride, wmma::mem_row_major);
-    wmma::store_matrix_sync(warpOutput + 16 * outputStride, acc_C10, outputStride, wmma::mem_row_major);
-    wmma::store_matrix_sync(warpOutput + 16 * outputStride + 16, acc_C11, outputStride, wmma::mem_row_major);
+    wmma::store_matrix_sync(warpOutput, acc_C00, OUT_STRIDE, wmma::mem_row_major);
+    wmma::store_matrix_sync(warpOutput + 16 * OUT_STRIDE, acc_C10, OUT_STRIDE, wmma::mem_row_major);
+    wmma::store_matrix_sync(warpOutput + 16 * OUT_STRIDE + 16, acc_C11, OUT_STRIDE, wmma::mem_row_major);
     // write rx (cub) before the barrier to hide latency
     writeRxVec<24>(rx, rxPersistent, temp_storage[warpId], &rxStaging[warpId][0]);
     __syncthreads();
@@ -422,8 +422,8 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
 }
 
 __global__ void me_p7(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const int width, const int height, const int totalBlocksY, const int taskTotal) {
-    constexpr int inputStride = 112;
-    constexpr int outputStride = 56;
+    constexpr int IN_STRIDE = 120;
+    constexpr int OUT_STRIDE = 60; // 56 + 4 to avoid bank conflicts
 
     const int tid = threadIdx.x;
     const int warpId = tid >> 5;
@@ -431,10 +431,10 @@ __global__ void me_p7(const float* __restrict__ input, float* __restrict__ Rx, f
     const int gridTotal = gridDim.x * gridDim.y;
     const int blockLinear = blockIdx.y * gridDim.x + blockIdx.x;
 
-    __shared__ alignas(16) float RxLocal[192][56];
-    __shared__ alignas(16) half blockValues[7][134];
+    __shared__ alignas(16) float RxLocal[192][OUT_STRIDE];
     __shared__ float rxStaging[4][48];
     __shared__ typename cub::WarpReduce<rxVecData<48>>::TempStorage temp_storage[4];
+    half(*blockValues)[134] = reinterpret_cast<half(*)[134]>(&RxLocal[0][0]);  // trick to reuse shared memory
 
     wmma::fragment<wmma::accumulator, 16, 16, 16, float> acc_Rx[6];
 #pragma unroll
@@ -482,6 +482,8 @@ __global__ void me_p7(const float* __restrict__ input, float* __restrict__ Rx, f
                 rxPersistent.vals[i * 8 + j * 2 + 1] += res.y;
             }
         }
+        // note: for p=7 because we reuse shared memory we are forced to sync here!
+        __syncthreads();
 
         // accumulate Rx (Tensor Cores)
         half* rowPtr = reinterpret_cast<half*>(&RxLocal[tid][0]);
@@ -499,8 +501,8 @@ __global__ void me_p7(const float* __restrict__ input, float* __restrict__ Rx, f
             const half* tilePtr = reinterpret_cast<half*>(&RxLocal[startRow + k0][0]);
 #pragma unroll
             for (int i = 0; i < 3; i++) {
-                wmma::load_matrix_sync(A[i], tilePtr + (i * 16), inputStride);
-                wmma::load_matrix_sync(B[i], tilePtr + (i * 16), inputStride);
+                wmma::load_matrix_sync(A[i], tilePtr + (i * 16), IN_STRIDE);
+                wmma::load_matrix_sync(B[i], tilePtr + (i * 16), IN_STRIDE);
             }
             wmma::mma_sync(acc_Rx[0], A[0], B[0], acc_Rx[0]);
             wmma::mma_sync(acc_Rx[1], A[1], B[0], acc_Rx[1]);
@@ -514,12 +516,12 @@ __global__ void me_p7(const float* __restrict__ input, float* __restrict__ Rx, f
 
     // write to global memory
     float* warpOutput = &RxLocal[warpId * 48][0];
-    wmma::store_matrix_sync(warpOutput, acc_Rx[0], outputStride, wmma::mem_row_major);
-    wmma::store_matrix_sync(warpOutput + 16 * outputStride, acc_Rx[1], outputStride, wmma::mem_row_major);
-    wmma::store_matrix_sync(warpOutput + 16 * outputStride + 16, acc_Rx[2], outputStride, wmma::mem_row_major);
-    wmma::store_matrix_sync(warpOutput + 32 * outputStride, acc_Rx[3], outputStride, wmma::mem_row_major);
-    wmma::store_matrix_sync(warpOutput + 32 * outputStride + 16, acc_Rx[4], outputStride, wmma::mem_row_major);
-    wmma::store_matrix_sync(warpOutput + 32 * outputStride + 32, acc_Rx[5], outputStride, wmma::mem_row_major);
+    wmma::store_matrix_sync(warpOutput, acc_Rx[0], OUT_STRIDE, wmma::mem_row_major);
+    wmma::store_matrix_sync(warpOutput + 16 * OUT_STRIDE, acc_Rx[1], OUT_STRIDE, wmma::mem_row_major);
+    wmma::store_matrix_sync(warpOutput + 16 * OUT_STRIDE + 16, acc_Rx[2], OUT_STRIDE, wmma::mem_row_major);
+    wmma::store_matrix_sync(warpOutput + 32 * OUT_STRIDE, acc_Rx[3], OUT_STRIDE, wmma::mem_row_major);
+    wmma::store_matrix_sync(warpOutput + 32 * OUT_STRIDE + 16, acc_Rx[4], OUT_STRIDE, wmma::mem_row_major);
+    wmma::store_matrix_sync(warpOutput + 32 * OUT_STRIDE + 32, acc_Rx[5], OUT_STRIDE, wmma::mem_row_major);
     // write rx (cub) before the barrier to hide latency
     writeRxVec<48>(rx, rxPersistent, temp_storage[warpId], &rxStaging[warpId][0]);
     __syncthreads();
@@ -536,8 +538,8 @@ __global__ void me_p7(const float* __restrict__ input, float* __restrict__ Rx, f
 }
 
 __global__ void me_p9(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const int width, const int height, const int totalBlocksY, const int taskTotal) {
-    constexpr int INPUT_STRIDE = 176; // WMMA stride is 176 (halves)
-    constexpr int outputStride = 88;
+    constexpr int INPUT_STRIDE = 184;
+    constexpr int OUT_STRIDE = 92; // 88 + 4 to avoid bank conflicts
 
     const int tid = threadIdx.x;
     const int warpId = tid >> 5;
@@ -545,9 +547,9 @@ __global__ void me_p9(const float* __restrict__ input, float* __restrict__ Rx, f
     const int gridTotal = gridDim.x * gridDim.y;
     const int blockLinear = blockIdx.y * gridDim.x + blockIdx.x;
 
-    __shared__ alignas(16) float RxLocal[128][88];
-    __shared__ alignas(16) half blockValues[9][136];
+    __shared__ alignas(16) float RxLocal[128][OUT_STRIDE];
     __shared__ typename cub::WarpReduce<rxVecData<80>>::TempStorage temp_storage[4];
+    half(*blockValues)[136] = reinterpret_cast<half(*)[136]>(&RxLocal[0][0]); // trick to reuse shared memory
 
     // Init Accumulators (Float)
     wmma::fragment<wmma::accumulator, 16, 16, 16, float> acc_Rx[15];
@@ -595,6 +597,8 @@ __global__ void me_p9(const float* __restrict__ input, float* __restrict__ Rx, f
                 rxPersistent.vals[i * 8 + j * 2 + 1] += res.y;
             }
         }
+        // note: for p=9 because we reuse shared memory we are forced to sync here!
+        __syncthreads();
 
         half8* shmemPtr = reinterpret_cast<half8*>(&RxLocal[tid][0]);
 #pragma unroll
@@ -639,36 +643,36 @@ __global__ void me_p9(const float* __restrict__ input, float* __restrict__ Rx, f
 
     // write Rx chunked
     // chunk 1
-    wmma::store_matrix_sync(warpOutput + (0), acc_Rx[0], outputStride, wmma::mem_row_major);
-    wmma::store_matrix_sync(warpOutput + (16 * outputStride), acc_Rx[1], outputStride, wmma::mem_row_major);
-    wmma::store_matrix_sync(warpOutput + (16 * outputStride) + 16, acc_Rx[2], outputStride, wmma::mem_row_major);
+    wmma::store_matrix_sync(warpOutput + (0), acc_Rx[0], OUT_STRIDE, wmma::mem_row_major);
+    wmma::store_matrix_sync(warpOutput + (16 * OUT_STRIDE), acc_Rx[1], OUT_STRIDE, wmma::mem_row_major);
+    wmma::store_matrix_sync(warpOutput + (16 * OUT_STRIDE) + 16, acc_Rx[2], OUT_STRIDE, wmma::mem_row_major);
     __syncthreads();
     RxStreamPass<0, 528, 0>(tid, RxLocal, Rx);
     __syncthreads();
 
     // chunk 2
-    wmma::store_matrix_sync(warpOutput, acc_Rx[3], outputStride, wmma::mem_row_major);
-    wmma::store_matrix_sync(warpOutput + 16, acc_Rx[4], outputStride, wmma::mem_row_major);
-    wmma::store_matrix_sync(warpOutput + 32, acc_Rx[5], outputStride, wmma::mem_row_major);
+    wmma::store_matrix_sync(warpOutput, acc_Rx[3], OUT_STRIDE, wmma::mem_row_major);
+    wmma::store_matrix_sync(warpOutput + 16, acc_Rx[4], OUT_STRIDE, wmma::mem_row_major);
+    wmma::store_matrix_sync(warpOutput + 32, acc_Rx[5], OUT_STRIDE, wmma::mem_row_major);
     __syncthreads();
     RxStreamPass<528, 1176, 32>(tid, RxLocal, Rx);
     __syncthreads();
 
     // chunk 3
-    wmma::store_matrix_sync(warpOutput, acc_Rx[6], outputStride, wmma::mem_row_major);
-    wmma::store_matrix_sync(warpOutput + 16, acc_Rx[7], outputStride, wmma::mem_row_major);
-    wmma::store_matrix_sync(warpOutput + 32, acc_Rx[8], outputStride, wmma::mem_row_major);
-    wmma::store_matrix_sync(warpOutput + 48, acc_Rx[9], outputStride, wmma::mem_row_major);
+    wmma::store_matrix_sync(warpOutput, acc_Rx[6], OUT_STRIDE, wmma::mem_row_major);
+    wmma::store_matrix_sync(warpOutput + 16, acc_Rx[7], OUT_STRIDE, wmma::mem_row_major);
+    wmma::store_matrix_sync(warpOutput + 32, acc_Rx[8], OUT_STRIDE, wmma::mem_row_major);
+    wmma::store_matrix_sync(warpOutput + 48, acc_Rx[9], OUT_STRIDE, wmma::mem_row_major);
     __syncthreads();
     RxStreamPass<1176, 2080, 48>(tid, RxLocal, Rx);
     __syncthreads();
 
     // chunk 4
-    wmma::store_matrix_sync(warpOutput, acc_Rx[10], outputStride, wmma::mem_row_major);
-    wmma::store_matrix_sync(warpOutput + 16, acc_Rx[11], outputStride, wmma::mem_row_major);
-    wmma::store_matrix_sync(warpOutput + 32, acc_Rx[12], outputStride, wmma::mem_row_major);
-    wmma::store_matrix_sync(warpOutput + 48, acc_Rx[13], outputStride, wmma::mem_row_major);
-    wmma::store_matrix_sync(warpOutput + 64, acc_Rx[14], outputStride, wmma::mem_row_major);
+    wmma::store_matrix_sync(warpOutput, acc_Rx[10], OUT_STRIDE, wmma::mem_row_major);
+    wmma::store_matrix_sync(warpOutput + 16, acc_Rx[11], OUT_STRIDE, wmma::mem_row_major);
+    wmma::store_matrix_sync(warpOutput + 32, acc_Rx[12], OUT_STRIDE, wmma::mem_row_major);
+    wmma::store_matrix_sync(warpOutput + 48, acc_Rx[13], OUT_STRIDE, wmma::mem_row_major);
+    wmma::store_matrix_sync(warpOutput + 64, acc_Rx[14], OUT_STRIDE, wmma::mem_row_major);
     __syncthreads();
     RxStreamPass<2080, 3240, 64>(tid, RxLocal, Rx);
 

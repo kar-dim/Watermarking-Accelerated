@@ -475,7 +475,7 @@ __global__ void cholesky_solver_parallel(const float* __restrict__ A, const floa
 
 // helper method to perform a streaming reduction of Rx values from shared window to global memory
 template <int startIdx, int endIdx, int rowOffset>
-__device__ void RxStreamPass(const int tid, float (*__restrict__ RxLocal)[88], float* __restrict__ Rx) {
+__device__ void RxStreamPass(const int tid, float (*__restrict__ RxLocal)[92], float* __restrict__ Rx) {
     for (int k = startIdx + tid; k < endIdx; k += 128) {
         const int2 coords = getPackedCoords(k);
         const int rowInWindow = coords.x - rowOffset;
