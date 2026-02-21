@@ -338,7 +338,6 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
         if (bx >= width)
             continue;
 
-
         fillBlockStripVertical<5, 256>(blockValues, input, width, height, bx, by);
         __syncthreads();
 
