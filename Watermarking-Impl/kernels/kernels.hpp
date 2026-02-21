@@ -65,8 +65,8 @@ inline void fillBlockFused(
 __kernel void nvf(
     const __global float* restrict input, 
     __global float* restrict nvf, 
-    const unsigned int width, 
-    const unsigned int height) 
+    const int width, 
+    const int height) 
 {    
     const int x = get_global_id(1);
     const int y = get_global_id(0);
@@ -120,8 +120,8 @@ __kernel void error_sequence(
     __global const float* restrict input, 
     __global float* restrict x_,
     __constant float* restrict coeffs,
-    const unsigned int width,
-    const unsigned int height,
+    const int width,
+    const int height,
     const int calculateAbs,
     __global int* restrict stopFlag) 
 {
@@ -306,8 +306,8 @@ R"CLC(
 __kernel void me(__global const float* restrict input,
     __global float* restrict Rx,
     __global float* restrict rx,
-    const unsigned int width,
-    const unsigned int height)
+    const int width,
+    const int height)
 
 {
     const int x = get_global_id(0);
@@ -431,8 +431,8 @@ __kernel void me(
 __global const float* restrict input,
 __global float* restrict Rx,
 __global float* restrict rx,
-const unsigned int width,
-const unsigned int height) 
+const int width,
+const int height) 
 {
     const int gx = get_group_id(0);
     const int gy = get_group_id(1);
@@ -524,7 +524,7 @@ __kernel void calculate_partial_correlation(
     __global float* restrict partialDots,
     __global float* restrict partialNormU,
     __global float* restrict partialNormZ,
-    const unsigned int size) {
+    const int size) {
 
     const int tid = get_local_id(0);
     const int gid = get_global_id(0);
@@ -575,7 +575,7 @@ __kernel void calculate_final_correlation(
     __global const float* restrict partialNormU,
     __global const float* restrict partialNormZ,
     __global float* restrict result,
-    const unsigned int numBlocks) {
+    const int numBlocks) {
 
     const int tid = get_local_id(0);
     const int localSize = get_local_size(0);

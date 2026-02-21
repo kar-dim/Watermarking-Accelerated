@@ -434,7 +434,7 @@ __global__ void me_p7(const float* __restrict__ input, float* __restrict__ Rx, f
     __shared__ alignas(16) float RxLocal[192][OUT_STRIDE];
     __shared__ alignas(16) float rxStaging[4][48];
     __shared__ typename cub::WarpReduce<rxVecData<48>>::TempStorage temp_storage[4];
-    half(*blockValues)[134] = reinterpret_cast<half(*)[134]>(&RxLocal[0][0]);  // trick to reuse shared memory
+    half(*blockValues)[134] = reinterpret_cast<half(*)[134]>(&RxLocal[0][0]); // trick to reuse shared memory
 
     wmma::fragment<wmma::accumulator, 16, 16, 16, float> acc_Rx[6];
 #pragma unroll
@@ -730,7 +730,7 @@ __global__ void apply_watermark_fused(const float* __restrict__ input, const flo
 }
 
 __global__ void calculate_partial_correlation(const float* __restrict__ e_u, const float* __restrict__ e_z, float* __restrict__ partialDots, float* __restrict__ partialNormU,
-                                              float* __restrict__ partialNormZ, const unsigned int size) {
+                                              float* __restrict__ partialNormZ, const int size) {
     constexpr int blockSize = 768;
 
     // we can use CUB to reduce with warp shuffles and reduce the boilerplate
@@ -768,7 +768,7 @@ __global__ void calculate_partial_correlation(const float* __restrict__ e_u, con
 }
 
 __global__ void calculate_final_correlation(const float* __restrict__ partialDots, const float* __restrict__ partialNormU, const float* __restrict__ partialNormZ, float* __restrict__ result,
-                                            const unsigned int numBlocks) {
+                                            const int numBlocks) {
     constexpr int blockSize = 1024;
 
     // we can use CUB to reduce with warp shuffles and reduce the boilerplate

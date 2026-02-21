@@ -101,7 +101,7 @@ __device__ __forceinline__ void fillBlockStripVertical(half blockValues[p][Strip
 // NVF kernel, calculates NVF mask values for each pixel in the image
 // works for all p values (3,5,7 and 9)
 template <int p>
-__global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, const unsigned int width, const unsigned int height) {
+__global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, const int width, const int height) {
     constexpr int pad = p / 2;
     constexpr float nPixels = static_cast<float>(p * p);
     constexpr float nPixelsSq = nPixels * nPixels;
@@ -140,8 +140,8 @@ __global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, co
 
 // main kernel for error sequence calculation
 template <int p, bool FUSED>
-__global__ void calculate_error_sequence(const float* __restrict__ inputA, const float* __restrict__ inputB, float* __restrict__ x_, const float* __restrict__ coeffs, const unsigned int width,
-                                         const unsigned int height, const bool calculateAbs, const int* __restrict__ stopFlag) {
+__global__ void calculate_error_sequence(const float* __restrict__ inputA, const float* __restrict__ inputB, float* __restrict__ x_, const float* __restrict__ coeffs, const int width,
+                                         const int height, const bool calculateAbs, const int* __restrict__ stopFlag) {
     constexpr int pad = p / 2;
     constexpr int coeffsSize = (p * p) - 1;
     constexpr int shDimFast = 32 + (2 * pad);
@@ -507,9 +507,9 @@ __global__ void apply_watermark_fused(const float* __restrict__ input, const flo
 
 // main kernels for correlation calculation, used in detection.
 __global__ void calculate_partial_correlation(const float* __restrict__ e_u, const float* __restrict__ e_z, float* __restrict__ partialDots, float* __restrict__ partialNormU,
-                                              float* __restrict__ partialNormZ, const unsigned int size);
+                                              float* __restrict__ partialNormZ, const int size);
 __global__ void calculate_final_correlation(const float* __restrict__ partialDots, const float* __restrict__ partialNormU, const float* __restrict__ partialNormZ, float* __restrict__ result,
-                                            const unsigned int numBlocks);
+                                            const int numBlocks);
 
 // used for converting NV12 to YUV420p format, used in HW accelerated video decoding
 __global__ void nV12ToYUV420p(const uint8_t* __restrict__ uvSrc, const int uvPitch, uint8_t* __restrict__ uvDst, const int uvWidth, const int uvHeight);
