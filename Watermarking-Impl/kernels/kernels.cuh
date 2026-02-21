@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <cstdint>
 #include <cub/cub.cuh>
 #include <cuda_fp16.h>
@@ -66,14 +66,14 @@ __device__ __forceinline__ void fillBlock(const float* __restrict__ inputA, cons
     for (int i = tid; i < totalElements; i += blockDim.x * blockDim.y) {
         const int r = i % shDimFast;
         const int c = i / shDimFast;
-        const int globalX = clamp(width - 1, 0, baseGlobalX + c);
-        const int globalY = clamp(height - 1, 0, baseGlobalY + r);
+        const int globalX = clamp(baseGlobalX + c, 0, width - 1);
+        const int globalY = clamp(baseGlobalY + r, 0, height - 1);
         const int idx = globalX * height + globalY;
         float val = inputA[idx];
         // if we need to fuse (A*B), do it here, branch-free because it its known at compile time
         if constexpr (FUSED)
             val *= inputB[idx];
-        sharedMem[r * (shDimSlow + 1) + c] = val;
+        sharedMem[i] = val;
     }
 }
 
@@ -111,7 +111,7 @@ __global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, co
     const int x = blockIdx.y * blockDim.y + threadIdx.y;
     const int y = blockIdx.x * blockDim.x + threadIdx.x;
 
-    __shared__ alignas(16) float region[shDimFast][shDimSlow + 1]; //+1 to avoid bank conflicts
+    __shared__ alignas(16) float region[shDimSlow][shDimFast];
 
     fillBlock<false, p, shDimFast, shDimSlow>(input, nullptr, &region[0][0], width, height);
     __syncthreads();
@@ -119,15 +119,16 @@ __global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, co
     if (x >= width || y >= height)
         return;
 
-    const int shX = threadIdx.y + pad;
-    const int shY = threadIdx.x + pad;
+    const int shSlow = threadIdx.y + pad;
+    const int shFast = threadIdx.x + pad;
     float sum = 0.0f, sumSq = 0.0f;
 
 #pragma unroll
-    for (int i = -pad; i <= pad; i++) {
+    for (int i = -pad; i <= pad; i++) { // Slow offset
 #pragma unroll
-        for (int j = -pad; j <= pad; j++) {
-            const float pixelValue = region[shY + j][shX + i];
+        for (int j = -pad; j <= pad; j++) { // Fast offset
+            // 🔥 Perfectly Coalesced Stride-1 Read!
+            const float pixelValue = region[shSlow + i][shFast + j];
             sum += pixelValue;
             sumSq += pixelValue * pixelValue;
         }
@@ -149,7 +150,7 @@ __global__ void calculate_error_sequence(const float* __restrict__ inputA, const
 
     const int tid = threadIdx.y * blockDim.x + threadIdx.x;
 
-    __shared__ alignas(16) float region[shDimFast][shDimSlow + 1]; //+1 for bank conflicts
+    __shared__ alignas(16) float region[shDimSlow][shDimFast];
     __shared__ alignas(16) float sCoeffs[coeffsSize];
 
     if (tid < coeffsSize)
@@ -164,8 +165,8 @@ __global__ void calculate_error_sequence(const float* __restrict__ inputA, const
             x_[(x * height + y)] = 0.0f;
             return;
         }
-        const int r = threadIdx.x + pad;
-        const int c = threadIdx.y + pad;
+        const int shFast = threadIdx.x + pad;
+        const int shSlow = threadIdx.y + pad;
         float dot = 0.0f;
         int k = 0;
 #pragma unroll
@@ -174,11 +175,11 @@ __global__ void calculate_error_sequence(const float* __restrict__ inputA, const
             for (int j = -pad; j <= pad; j++) {
                 if (i == 0 && j == 0)
                     continue; // skip the center pixel (branch is optimized fully at compile time)
-                dot += sCoeffs[k] * region[r + i][c + j];
+                dot += sCoeffs[k] * region[shSlow + i][shFast + j];
                 k++;
             }
         }
-        const float errorSequence = region[r][c] - dot;
+        const float errorSequence = region[shSlow][shFast] - dot;
         x_[(x * height + y)] = calculateAbs ? fabsf(errorSequence) : errorSequence;
     }
 }
