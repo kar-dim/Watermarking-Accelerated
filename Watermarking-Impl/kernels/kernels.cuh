@@ -124,10 +124,9 @@ __global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, co
     float sum = 0.0f, sumSq = 0.0f;
 
 #pragma unroll
-    for (int i = -pad; i <= pad; i++) { // Slow offset
+    for (int i = -pad; i <= pad; i++) {
 #pragma unroll
-        for (int j = -pad; j <= pad; j++) { // Fast offset
-            // 🔥 Perfectly Coalesced Stride-1 Read!
+        for (int j = -pad; j <= pad; j++) {
             const float pixelValue = region[shSlow + i][shFast + j];
             sum += pixelValue;
             sumSq += pixelValue * pixelValue;

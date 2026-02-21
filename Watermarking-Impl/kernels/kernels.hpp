@@ -257,7 +257,7 @@ __kernel void apply_watermark_fused(
 }
 
 )CLC"
-                                   R"CLC(
+R"CLC(
 
 
 // OpenCL upper packed Indexing:
@@ -641,7 +641,7 @@ __kernel void calculate_final_correlation(
 }
 
 )CLC"
-                                   R"CLC(
+R"CLC(
 
 // naive very low latency 1-thread solver
 // define this kernel ONLY for p=3 and p=5
