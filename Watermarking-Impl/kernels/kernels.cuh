@@ -98,7 +98,7 @@ __device__ __forceinline__ void fillBlockStripVertical(half blockValues[p][Strip
     }
 }
 
-// NVF kernel, calculates NVF values for each pixel in the image
+// NVF kernel, calculates NVF mask values for each pixel in the image
 // works for all p values (3,5,7 and 9)
 template <int p>
 __global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, const unsigned int width, const unsigned int height) {
