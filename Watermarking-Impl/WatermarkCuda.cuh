@@ -5,8 +5,10 @@
 #include "WatermarkBase.hpp"
 #include "WatermarkGpu.hpp"
 #include <arrayfire.h>
+#include <cub/cub.cuh>
 #include <cuda_runtime.h>
 #include <string>
+#include <thrust/iterator/transform_iterator.h>
 
 /*!
  *  \brief  Functions for watermark computation and detection, CUDA implementation.
@@ -19,14 +21,28 @@ class WatermarkCuda final : public WatermarkGPU<p> {
         : WatermarkGPU<p>(rows, cols, randomMatrixPath, psnr), afStream(CudaStreamManager::getInstance().getAfStream()), gridOptimalMe(cuda_utils::gridSize1DMeStridedCalculate()) {
         const unsigned int totalBlocksY = WatermarkBase::align<meBlockSize.x>(this->baseRows) / meBlockSize.x;
         meParams = {totalBlocksY, totalBlocksY * this->baseCols};
+        // initialize cub scratch memory (for ME mask calculation used in detector) once
+        AbsTransformOp op;
+        auto dummy_iter = thrust::make_transform_iterator((const float*)nullptr, op);
+        size_t tmpStorageBytes = 0;
+        // ask CUB for required size of the temporary storage and allocate it permantently so we won't ask all the time
+        cub::DeviceReduce::Max(nullptr, tmpStorageBytes, dummy_iter, (float*)nullptr, this->totalPixels, 0);
+        cubTempStorage = af::array(tmpStorageBytes, u8);
     }
 
   private:
-    static constexpr dim3 windowBlockSize{32, 8}, meBlockSize{p >= 7 ? 128 : 256, 1};
-    static constexpr unsigned int corrPartialBlockSize = 768, corrFinalBlockSize = 1024, strWatermarkBlockSize = 768, applyWatermarkBlockSize = 768;
+    static constexpr dim3 windowBlockSize{32, 8};
+    static constexpr dim3 meBlockSize{p >= 7 ? 128 : 256, 1};
+    static constexpr unsigned int corrPartialBlockSize = 768;
+    static constexpr unsigned int corrFinalBlockSize = 1024;
+    static constexpr unsigned int strWatermarkBlockSize = 768;
+    static constexpr unsigned int applyWatermarkBlockSize = 768;
+    static constexpr unsigned int maskNormalizationBlockSize = 768;
+
     dim3 meParams; // used to store ME kernel parameters (total blocks in Y dimension and total tasks) for optimal configuration
     cudaStream_t afStream;
     unsigned int gridOptimalMe;
+    af::array cubTempStorage;
 
     af::array computeStrengthenedWatermark(const af::array& inputGrayImage, const af::array& inputImage, float& watermarkStrength, const MASK_TYPE maskType) const override {
         const af::array u(inputGrayImage.dims(), f32);
@@ -121,6 +137,25 @@ class WatermarkCuda final : public WatermarkGPU<p> {
         // calculate error sequence
         this->unlockArrays(image, Rx, rx, this->coefficients, this->stopFlag);
         return computeErrorSequence(image, calculateAbs);
+    }
+
+    af::array computePredictionErrorMask(const af::array& errorSequence) const override {
+        const af::array mask(errorSequence.dims(), f32);
+        const af::array maxVal(1, f32);
+        const float* errSeqPtr = errorSequence.device<float>();
+        float* maskPtr = mask.device<float>();
+        float* maxValPtr = maxVal.device<float>();
+        // use cub to find max of absolute values in error sequence, we use a transform iterator to apply abs on the fly, this way we avoid creating an intermediate array for absolute values
+        AbsTransformOp absOp;
+        auto absIter = thrust::make_transform_iterator(errSeqPtr, absOp);
+        void* tmpStorage = (void*)this->cubTempStorage.device<unsigned char>();
+        size_t tmpStorageBytes = this->cubTempStorage.bytes();
+        cub::DeviceReduce::Max(tmpStorage, tmpStorageBytes, absIter, maxValPtr, this->totalPixels, afStream);
+        // launch the normalization kernel to compute the mask, dividing each element of the error sequence with the max value we just computed
+        const int gridSize = cuda_utils::gridSize1DStridedCalculate(this->totalPixels, maskNormalizationBlockSize);
+        compute_abs_normalized_mask<<<gridSize, maskNormalizationBlockSize, 0, afStream>>>(errSeqPtr, maskPtr, maxValPtr, this->totalPixels);
+        this->unlockArrays(errorSequence, mask, maxVal, cubTempStorage);
+        return mask;
     }
 
     float computeCorrelation(const af::array& e_u, const af::array& mask) const override {

@@ -76,9 +76,6 @@ class WatermarkGPU : public WatermarkBase {
     // helper method used in detectors
     virtual float computeCorrelation(const af::array& e_u, const af::array& e_z) const = 0;
 
-    // compute prediction error mask
-    af::array computePredictionErrorMask(const af::array& errorSequence) const {
-        const af::array absErrorSeq = af::abs(errorSequence);
-        return absErrorSeq / (af::max(af::flat(absErrorSeq)) + 1.0e-6f);
-    }
+    // compute prediction error mask as: abs(e) / max(abs(e)) where e is the error sequence. Used in ME mask type detector
+    virtual af::array computePredictionErrorMask(const af::array& errorSequence) const = 0;
 };

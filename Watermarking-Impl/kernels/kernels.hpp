@@ -607,6 +607,82 @@ const int height)
 #undef BOUNDARY
 #endif
 
+__kernel void reduce_abs_max_partials(
+    __global const float* restrict errorSeq,
+    __global float* restrict partialMax,
+    const int N)
+{
+    const int tid = get_local_id(0);
+    const int stride = get_global_size(0);
+    int idx = get_global_id(0);
+
+    __local float maxCache[256];
+
+    float localMax = 0.0f;
+    while (idx < N) {
+        localMax = fmax(localMax, fabs(errorSeq[idx]));
+        idx += stride;
+    }
+    maxCache[tid] = localMax;
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    for (int s = 128; s > 0; s >>= 1) {
+        if (tid < s)
+            maxCache[tid] = fmax(maxCache[tid], maxCache[tid + s]);
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+
+    if (tid == 0)
+        partialMax[get_group_id(0)] = maxCache[0];
+}
+
+__kernel void reduce_abs_max_final(
+    __global const float* restrict partialMax,
+    __global float* restrict globalMax,
+    const int numPartials)
+{
+    const int tid = get_local_id(0);
+
+    __local float maxCache[256];
+
+    float localMax = 0.0f;
+    int idx = tid;
+    while (idx < numPartials) {
+        localMax = fmax(localMax, partialMax[idx]);
+        idx += 256;
+    }
+    
+    maxCache[tid] = localMax;
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    for (int s = 128; s > 0; s >>= 1) {
+        if (tid < s)
+            maxCache[tid] = fmax(maxCache[tid], maxCache[tid + s]);
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+
+    if (tid == 0)
+        *globalMax = maxCache[0];
+}
+
+__kernel void compute_abs_normalized_mask(
+    __global const float* restrict errorSeq,
+    __global float* restrict mask,
+    __constant float* restrict maxVal,
+    const int N)
+{
+    const int stride = get_global_size(0);
+    int idx = get_global_id(0);
+    const float denom = *maxVal + 1.0e-6f;
+    while (idx < N) {
+        mask[idx] = fabs(errorSeq[idx]) / denom;
+        idx += stride;
+    }
+}
+
+)CLC"
+R"CLC(
+
 __kernel void calculate_error_sequence_and_partial_corr_fused(
     __global const float* restrict mask,
     __global const float* restrict w,
@@ -738,9 +814,6 @@ __kernel void calculate_final_correlation(
         result[0] = (final_norm_u > 0.0f && final_norm_z > 0.0f) ? (final_dot / (final_norm_u * final_norm_z)) : 0.0f;
     }
 }
-
-)CLC"
-R"CLC(
 
 // naive very low latency 1-thread solver
 // define this kernel ONLY for p=3 and p=5

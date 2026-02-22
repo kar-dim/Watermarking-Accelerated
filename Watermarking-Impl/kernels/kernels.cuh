@@ -40,6 +40,11 @@ struct alignas(16) rxVecData {
     }
 };
 
+// CUB Transform Functor for absolute value, used in error sequence calculation when we want absolute error sequence (for detection)
+struct AbsTransformOp {
+    __device__ __forceinline__ float operator()(const float& val) const { return fabsf(val); }
+};
+
 // maps a linear index k to(row, col) coordinates for a packed lower triangular matrix
 __device__ inline int2 getPackedCoords(const int k) {
     // inverse triangular number formula: r = floor((sqrt(1 + 8k) - 1) / 2)
@@ -617,6 +622,9 @@ __global__ void me_u_and_sumsq_fused(const float* __restrict__ errorSeq, const f
 // fused application of watermark: applies the watermark and calculates the output in one pass, using the precomputed u and sum of squares for normalization
 __global__ void apply_watermark_fused(const float* __restrict__ input, const float* __restrict__ u, const float* __restrict__ sumSqPtr, uint8_t* __restrict__ output, const float strengthNumerator,
                                       const int planeElements, const int numChannels);
+
+// calculation of the absolute value of the error sequence normalized by its max value, used in detection of ME mask
+__global__ void compute_abs_normalized_mask(const float* __restrict__ errorSeq, float* __restrict__ mask, const float* __restrict__ maxVal, const int N);
 
 // main kernel for correlation calculation, used in detection
 __global__ void calculate_final_correlation(const float* __restrict__ partialDots, const float* __restrict__ partialNormU, const float* __restrict__ partialNormZ, float* __restrict__ result,

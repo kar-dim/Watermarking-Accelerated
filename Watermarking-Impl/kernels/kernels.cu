@@ -730,6 +730,17 @@ __global__ void apply_watermark_fused(const float* __restrict__ input, const flo
     }
 }
 
+__global__ void compute_abs_normalized_mask(const float* __restrict__ errorSeq, float* __restrict__ mask, const float* __restrict__ maxVal, const int N) {
+    const int stride = blockDim.x * gridDim.x;
+    const float denom = (*maxVal) + 1.0e-6f; // cached
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    while (idx < N) {
+        // read, absolute, divide, and write value in one fused pass
+        mask[idx] = fabsf(errorSeq[idx]) / denom;
+        idx += stride;
+    }
+}
+
 __global__ void calculate_final_correlation(const float* __restrict__ partialDots, const float* __restrict__ partialNormU, const float* __restrict__ partialNormZ, float* __restrict__ result,
                                             const int numBlocks) {
     constexpr int blockSize = 1024;

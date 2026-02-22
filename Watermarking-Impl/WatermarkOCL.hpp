@@ -9,11 +9,6 @@
 #include <string>
 #include <utility>
 
-struct dim2 {
-    dim_t rows;
-    dim_t cols;
-};
-
 /*!
  *  \brief  Functions for watermark computation and detection, OpenCL implementation.
  *  \author Dimitris Karatzas
@@ -22,23 +17,21 @@ template <int p>
 class WatermarkOCL final : public WatermarkGPU<p> {
   public:
     WatermarkOCL<p>(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr)
-        : WatermarkGPU<p>(rows, cols, randomMatrixPath, psnr), texKernelDims{align<windowLocalSize.rows>(rows), align<windowLocalSize.cols>(cols)}, meKernelDims{rows, align<meLocalSize>(cols)},
+        : WatermarkGPU<p>(rows, cols, randomMatrixPath, psnr), texKernelDims{align<windowLocalSize.first>(rows), align<windowLocalSize.second>(cols)}, meKernelDims{rows, align<optimalLocalSize>(cols)},
           programs(cl_utils::buildKernels(p)) {}
 
   private:
     using WatermarkBase::align;
     using clMemPtr = std::unique_ptr<cl_mem>;
 
-    static constexpr unsigned int corrPartialLocalSize = 256;
-    static constexpr dim2 windowLocalSize = {32, 8};
-    static constexpr unsigned int meLocalSize = 256;
-    static constexpr unsigned int applyWatermarkLocalSize = 256;      // safe universal local size for OpenCL, used in apply watermark kernel and in compute_u_and_sumsq kernel
+    static constexpr unsigned int optimalLocalSize = 256; // safe universal local size for OpenCL, used almost anywhere
+    static constexpr std::pair windowLocalSize = {32, 8};
     static constexpr unsigned int choleskyLocalSize = p < 7 ? 1 : 64; // for p >= 7 we use 64-thread cholesky solver, for p < 7 single thread (faster for small p)
 
     cl::Context context{afcl::getContext(true)};
     cl::CommandQueue queue{afcl::getQueue(true)};
     cl::Device device{afcl::getDeviceId(), true};
-    dim2 texKernelDims, meKernelDims;
+    std::pair<int, int> texKernelDims, meKernelDims;
     unsigned int corrFinalLocalSize = cl_utils::maxPow2WorkGroupSize(device); // we could use the safe universal of 256, but the kernel that uses this benefits from larger local sizes
     cl::Program programs;
 
@@ -56,7 +49,7 @@ class WatermarkOCL final : public WatermarkGPU<p> {
         const clMemPtr inputGrayMem(inputGrayImage.device<cl_mem>());
 
         if (maskType == NVF) {
-            const int workGroups = static_cast<int>((this->texKernelDims.rows / windowLocalSize.rows) * (this->texKernelDims.cols / windowLocalSize.cols));
+            const int workGroups = static_cast<int>((this->texKernelDims.first / windowLocalSize.first) * (this->texKernelDims.second / windowLocalSize.second));
             const af::array partials(workGroups, f32);
             const clMemPtr partialsMem(partials.device<cl_mem>());
 
@@ -66,21 +59,21 @@ class WatermarkOCL final : public WatermarkGPU<p> {
                     queue.enqueueNDRangeKernel(KernelBuilder(programs, "nvf_u_and_partial_sumsq_fused")
                                                    .args(wrap(inputGrayMem.get()), wrap(randMem.get()), wrap(uMem.get()), wrap(partialsMem.get()), this->baseCols, this->baseRows)
                                                    .build(),
-                                               cl::NDRange(), cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(windowLocalSize.rows, windowLocalSize.cols));
+                                               cl::NDRange(), cl::NDRange(texKernelDims.first, texKernelDims.second), cl::NDRange(windowLocalSize.first, windowLocalSize.second));
 
                     // reduce the partial sums (single workgroup)
                     queue.enqueueNDRangeKernel(KernelBuilder(programs, "reduce_sumsq_partials").args(wrap(partialsMem.get()), wrap(sumSqMem.get()), workGroups).build(), cl::NDRange(),
-                                               cl::NDRange(applyWatermarkLocalSize), cl::NDRange(applyWatermarkLocalSize));
+                                               cl::NDRange(optimalLocalSize), cl::NDRange(optimalLocalSize));
 
                     // apply watermark
-                    const int workGroupsApply = calculateLocalGroupsNumber(this->totalPixels, applyWatermarkLocalSize);
-                    const int globalSizeApply = workGroupsApply * applyWatermarkLocalSize;
+                    const int workGroupsApply = calculateLocalGroupsNumber(this->totalPixels, optimalLocalSize);
+                    const int globalSizeApply = workGroupsApply * optimalLocalSize;
 
                     queue.enqueueNDRangeKernel(
                         KernelBuilder(programs, "apply_watermark_fused")
                             .args(wrap(inputMem.get()), wrap(uMem.get()), wrap(sumSqMem.get()), wrap(outputMem.get()), this->strengthNumerator, this->totalPixels, static_cast<int>(inputImage.dims(2)))
                             .build(),
-                        cl::NDRange(), cl::NDRange(globalSizeApply), cl::NDRange(applyWatermarkLocalSize));
+                        cl::NDRange(), cl::NDRange(globalSizeApply), cl::NDRange(optimalLocalSize));
 
                     this->unlockArrays(inputGrayImage, partials);
                 },
@@ -92,8 +85,8 @@ class WatermarkOCL final : public WatermarkGPU<p> {
             const af::array errorSeqMax = af::max(af::flat(errorSeq));
 
             // fused kernel to compute ME mask, strengthened watermark (u) and sum of squares of u
-            const int workGroups = calculateLocalGroupsNumber(this->totalPixels, applyWatermarkLocalSize);
-            const int globalSize = workGroups * applyWatermarkLocalSize;
+            const int workGroups = calculateLocalGroupsNumber(this->totalPixels, optimalLocalSize);
+            const int globalSize = workGroups * optimalLocalSize;
 
             const af::array partials(workGroups, f32);
             const clMemPtr partialsMem(partials.device<cl_mem>());
@@ -105,17 +98,17 @@ class WatermarkOCL final : public WatermarkGPU<p> {
                     queue.enqueueNDRangeKernel(KernelBuilder(programs, "me_u_and_partial_sumsq_fused")
                                                    .args(wrap(errorSeqMem.get()), wrap(randMem.get()), wrap(uMem.get()), wrap(partialsMem.get()), wrap(errorSeqMaxMem.get()), this->totalPixels)
                                                    .build(),
-                                               cl::NDRange(), cl::NDRange(globalSize), cl::NDRange(applyWatermarkLocalSize));
+                                               cl::NDRange(), cl::NDRange(globalSize), cl::NDRange(optimalLocalSize));
 
                     queue.enqueueNDRangeKernel(KernelBuilder(programs, "reduce_sumsq_partials").args(wrap(partialsMem.get()), wrap(sumSqMem.get()), workGroups).build(), cl::NDRange(),
-                                               cl::NDRange(applyWatermarkLocalSize), cl::NDRange(applyWatermarkLocalSize));
+                                               cl::NDRange(optimalLocalSize), cl::NDRange(optimalLocalSize));
 
                     // apply watermark
                     queue.enqueueNDRangeKernel(
                         KernelBuilder(programs, "apply_watermark_fused")
                             .args(wrap(inputMem.get()), wrap(uMem.get()), wrap(sumSqMem.get()), wrap(outputMem.get()), this->strengthNumerator, this->totalPixels, static_cast<int>(inputImage.dims(2)))
                             .build(),
-                        cl::NDRange(), cl::NDRange(globalSize), cl::NDRange(applyWatermarkLocalSize));
+                        cl::NDRange(), cl::NDRange(globalSize), cl::NDRange(optimalLocalSize));
 
                     this->unlockArrays(errorSeq, errorSeqMax, partials);
                 },
@@ -135,7 +128,7 @@ class WatermarkOCL final : public WatermarkGPU<p> {
         executeKernel(
             [&]() {
                 queue.enqueueNDRangeKernel(KernelBuilder(programs, "nvf").args(wrap(imageMem.get()), wrap(outputMem.get()), this->baseCols, this->baseRows).build(), cl::NDRange(),
-                                           cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(windowLocalSize.rows, windowLocalSize.cols));
+                                           cl::NDRange(texKernelDims.first, texKernelDims.second), cl::NDRange(windowLocalSize.first, windowLocalSize.second));
                 this->unlockArrays(image, customMask);
             },
             "nvf");
@@ -156,7 +149,7 @@ class WatermarkOCL final : public WatermarkGPU<p> {
                     KernelBuilder(programs, "error_sequence")
                         .args(wrap(imageMem.get()), wrap(errorSequenceMem.get()), wrap(coeffsMem.get()), this->baseCols, this->baseRows, (int)calculateAbs, wrap(stopFlagMem.get()))
                         .build(),
-                    cl::NDRange(), cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(windowLocalSize.rows, windowLocalSize.cols));
+                    cl::NDRange(), cl::NDRange(texKernelDims.first, texKernelDims.second), cl::NDRange(windowLocalSize.first, windowLocalSize.second));
                 this->unlockArrays(image, errorSequence, this->coefficients, this->stopFlag);
             },
             "error_sequence");
@@ -178,7 +171,7 @@ class WatermarkOCL final : public WatermarkGPU<p> {
                     KernelBuilder(programs, "error_sequence_fused")
                         .args(wrap(inputAmem.get()), wrap(inputBmem.get()), wrap(errorSequenceMem.get()), wrap(coeffsMem.get()), this->baseCols, this->baseRows, wrap(stopFlagMem.get()))
                         .build(),
-                    cl::NDRange(), cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(windowLocalSize.rows, windowLocalSize.cols));
+                    cl::NDRange(), cl::NDRange(texKernelDims.first, texKernelDims.second), cl::NDRange(windowLocalSize.first, windowLocalSize.second));
                 this->unlockArrays(inputA, inputB, errorSequence, this->coefficients, this->stopFlag);
             },
             "error_sequence_fused");
@@ -192,7 +185,7 @@ class WatermarkOCL final : public WatermarkGPU<p> {
 
         return executeKernel(
             [&]() -> af::array {
-                const auto meArraysBaseWidth = meKernelDims.cols / meLocalSize;
+                const auto meArraysBaseWidth = meKernelDims.second / optimalLocalSize;
                 const af::array RxPartial(this->baseRows, meArraysBaseWidth * RxSize);
                 const af::array rxPartial(this->baseRows, meArraysBaseWidth * rxSize);
                 const clMemPtr RxPartialMem(RxPartial.device<cl_mem>());
@@ -201,7 +194,7 @@ class WatermarkOCL final : public WatermarkGPU<p> {
 
                 // call prediction error Rx/rx partials calculation kernel
                 queue.enqueueNDRangeKernel(KernelBuilder(programs, "me").args(wrap(imageMem.get()), wrap(RxPartialMem.get()), wrap(rxPartialMem.get()), this->baseCols, this->baseRows).build(),
-                                           cl::NDRange(), cl::NDRange(meKernelDims.cols, meKernelDims.rows), cl::NDRange(meLocalSize, 1));
+                                           cl::NDRange(), cl::NDRange(meKernelDims.second, meKernelDims.first), cl::NDRange(optimalLocalSize, 1));
                 // return memory to arrayfire
                 this->unlockArrays(image, RxPartial, rxPartial);
 
@@ -222,9 +215,39 @@ class WatermarkOCL final : public WatermarkGPU<p> {
             "me");
     }
 
+    af::array computePredictionErrorMask(const af::array& errorSequence) const {
+        using namespace cl_utils;
+        const int workGroups = calculateLocalGroupsNumber(this->totalPixels, optimalLocalSize);
+        const int globalSize = workGroups * optimalLocalSize;
+        const af::array mask(errorSequence.dims(), f32);
+        const af::array maxVal(1, f32);
+        const af::array partialMax(workGroups, f32);
+        const clMemPtr errMem(errorSequence.device<cl_mem>());
+        const clMemPtr maskMem(mask.device<cl_mem>());
+        const clMemPtr maxValMem(maxVal.device<cl_mem>());
+        const clMemPtr partialMaxMem(partialMax.device<cl_mem>());
+
+        executeKernel(
+            [&]() {
+                // transform to abs and find "partial maxes"
+                queue.enqueueNDRangeKernel(KernelBuilder(programs, "reduce_abs_max_partials").args(wrap(errMem.get()), wrap(partialMaxMem.get()), this->totalPixels).build(), cl::NDRange(),
+                                           cl::NDRange(globalSize), cl::NDRange(optimalLocalSize));
+                // final max reduction
+                queue.enqueueNDRangeKernel(KernelBuilder(programs, "reduce_abs_max_final").args(wrap(partialMaxMem.get()), wrap(maxValMem.get()), workGroups).build(), cl::NDRange(),
+                                           cl::NDRange(optimalLocalSize), cl::NDRange(optimalLocalSize));
+                // normalize mask
+                queue.enqueueNDRangeKernel(KernelBuilder(programs, "compute_abs_normalized_mask").args(wrap(errMem.get()), wrap(maskMem.get()), wrap(maxValMem.get()), this->totalPixels).build(),
+                                           cl::NDRange(), cl::NDRange(globalSize), cl::NDRange(optimalLocalSize));
+                this->unlockArrays(errorSequence, mask, maxVal, partialMax);
+            },
+            "compute_prediction_error_mask_fused");
+
+        return mask;
+    }
+
     float computeCorrelation(const af::array& e_u, const af::array& mask) const override {
         using namespace cl_utils;
-        const int workGroups = static_cast<int>((texKernelDims.rows / windowLocalSize.rows) * (texKernelDims.cols / windowLocalSize.cols));
+        const int workGroups = static_cast<int>((texKernelDims.first / windowLocalSize.first) * (texKernelDims.second / windowLocalSize.second));
         const af::array dotPartial(workGroups, f32);
         const af::array uNormPartial(workGroups, f32);
         const af::array zNormPartial(workGroups, f32);
@@ -246,7 +269,7 @@ class WatermarkOCL final : public WatermarkGPU<p> {
                                                .args(wrap(maskMem.get()), wrap(randMem.get()), wrap(euMem.get()), wrap(coeffsMem.get()), wrap(dotPartialMem.get()), wrap(uNormPartialMem.get()),
                                                      wrap(zNormPartialMem.get()), this->baseCols, this->baseRows, 0 /* calculateAbs = false */, wrap(stopFlagMem.get()))
                                                .build(),
-                                           cl::NDRange(), cl::NDRange(this->texKernelDims.rows, this->texKernelDims.cols), cl::NDRange(windowLocalSize.rows, windowLocalSize.cols));
+                                           cl::NDRange(), cl::NDRange(this->texKernelDims.first, this->texKernelDims.second), cl::NDRange(windowLocalSize.first, windowLocalSize.second));
                 // reduce partials and compute correlation
                 queue.enqueueNDRangeKernel(KernelBuilder(programs, "calculate_final_correlation")
                                                .args(wrap(dotPartialMem.get()), wrap(uNormPartialMem.get()), wrap(zNormPartialMem.get()), wrap(correlationResultMem.get()), workGroups)
