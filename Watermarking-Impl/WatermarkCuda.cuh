@@ -19,8 +19,9 @@ class WatermarkCuda final : public WatermarkGPU<p> {
   public:
     WatermarkCuda<p>(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr)
         : WatermarkGPU<p>(rows, cols, randomMatrixPath, psnr), afStream(CudaStreamManager::getInstance().getAfStream()), gridOptimalMe(cuda_utils::gridSize1DMeStridedCalculate()) {
-        const unsigned int totalBlocksY = WatermarkBase::align<meBlockSize.x>(this->baseRows) / meBlockSize.x;
-        meParams = {totalBlocksY, totalBlocksY * this->baseCols};
+        // initialize ME kernel parameters based on image dims, we calculate total blocks in Y dimension and total tasks for optimal configuration
+        const unsigned int meTotalBlocksY = WatermarkBase::align<meBlockSize.x>(this->baseRows) / meBlockSize.x;
+        meParams = {meTotalBlocksY, meTotalBlocksY * this->baseCols};
         // initialize cub scratch memory (for ME mask calculation used in detector) once
         AbsTransformOp op;
         auto dummy_iter = thrust::make_transform_iterator((const float*)nullptr, op);

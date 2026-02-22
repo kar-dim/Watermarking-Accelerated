@@ -48,16 +48,13 @@ class WatermarkGPU : public WatermarkBase {
     }
 
   protected:
-    static constexpr int pSquared = p * p;
-    static constexpr int pad = p / 2;
-    static constexpr int localSize = pSquared - 1;
-    static constexpr int localSizeSq = localSize * localSize;
+    static constexpr int localSize = (p * p) - 1;
 
     float strengthNumerator;
-
     af::array coefficients = af::array(localSize, f32);
     af::array stopFlag = af::constant(0, 1, s32);
 
+    // computes u = a * (M * W) where a=strength, M=mask calculated and W is the random noise matrix
     virtual af::array computeStrengthenedWatermark(const ImageBuffer& inputGrayImage, const ImageBuffer& inputImage, float& watermarkStrength, const MASK_TYPE maskType) const = 0;
 
     // computes custom Mask
@@ -69,8 +66,8 @@ class WatermarkGPU : public WatermarkBase {
     // computes error sequence between two inputs, used in correlation calculation. calculateAbs is always false
     virtual af::array computeErrorSequence(const af::array& inputA, const af::array& inputB) const = 0;
 
-    // Used in both creation and detection of the watermark.
-    // Calculates error sequence and prediction error filter (coefficients)
+    // Used in both creation and detection of the watermark,
+    // calculates error sequence and prediction error filter (coefficients)
     virtual af::array computePredictionErrorData(const af::array& image, const bool calculateAbs) const = 0;
 
     // helper method used in detectors
