@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include "cuda_utils.hpp"
 #include "CudaStreamManager.hpp"
 #include "kernels/kernels.cuh"
@@ -123,21 +123,22 @@ class WatermarkCuda final : public WatermarkGPU<p> {
         return computeErrorSequence(image, calculateAbs);
     }
 
-    float computeCorrelation(const af::array& e_u, const af::array& e_z) const override {
-        const int blocks = cuda_utils::gridSize1DStridedCalculate(this->totalPixels, corrPartialBlockSize);
-        const af::array dotPartial(blocks);
-        const af::array uNormPartial(blocks);
-        const af::array zNormPartial(blocks);
-        const af::array correlationResult(1);
-        float* dotPartialPtr = dotPartial.device<float>();
-        float* uNormPartialPtr = uNormPartial.device<float>();
-        float* zNormPartialPtr = zNormPartial.device<float>();
-        // calculate partial dot products and norms
-        calculate_partial_correlation<<<blocks, corrPartialBlockSize, 0, afStream>>>(e_u.device<float>(), e_z.device<float>(), dotPartialPtr, uNormPartialPtr, zNormPartialPtr, this->totalPixels);
+    float computeCorrelation(const af::array& e_u, const af::array& mask) const override {
+        const dim3 gridSize = cuda_utils::gridSizeCalculate(windowBlockSize, this->baseCols, this->baseRows);
+        const int numBlocks = gridSize.x * gridSize.y;
+        const af::array dotPartial(numBlocks, f32);
+        const af::array uNormPartial(numBlocks, f32);
+        const af::array zNormPartial(numBlocks, f32);
+        // launch fused error sequence + partial correlation
+        calculate_error_sequence_and_partial_corr_fused<p><<<gridSize, windowBlockSize, 0, afStream>>>(
+            mask.device<float>(), this->randomMatrix.template device<float>(), e_u.device<float>(), this->coefficients.template device<float>(), dotPartial.device<float>(),
+            uNormPartial.device<float>(), zNormPartial.device<float>(), this->baseCols, this->baseRows, false, this->stopFlag.template device<int>());
         // reduce partials and compute correlation
-        calculate_final_correlation<<<1, corrFinalBlockSize, 0, afStream>>>(dotPartialPtr, uNormPartialPtr, zNormPartialPtr, correlationResult.device<float>(), blocks);
+        const af::array correlationResult(1, f32);
+        calculate_final_correlation<<<1, corrFinalBlockSize, 0, afStream>>>(dotPartial.device<float>(), uNormPartial.device<float>(), zNormPartial.device<float>(), correlationResult.device<float>(),
+                                                                            numBlocks);
         // transfer ownership to arrayfire and return output correlation scalar to host
-        this->unlockArrays(e_u, e_z, dotPartial, uNormPartial, zNormPartial, correlationResult);
+        this->unlockArrays(mask, e_u, dotPartial, uNormPartial, zNormPartial, correlationResult, this->coefficients, this->stopFlag, this->randomMatrix);
         return correlationResult.scalar<float>();
     }
 };

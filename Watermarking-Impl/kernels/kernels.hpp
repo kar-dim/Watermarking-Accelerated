@@ -197,7 +197,7 @@ inline float error_sequence_coeffs_filter(__local float* centerPtr, __constant f
         for (int j = -PAD; j <= PAD; j++) {
             if (i == 0 && j == 0)
                 continue;
-            dot += coeffs[k] * P(j, i);
+            dot += coeffs[k] * P(i, j);
             k++;
         }
     }
@@ -212,7 +212,7 @@ __kernel void error_sequence(
     const int width,
     const int height,
     const int calculateAbs,
-    __global int* restrict stopFlag) 
+    __constant int* restrict stopFlag) 
 {
     const int x = get_global_id(1);
     const int y = get_global_id(0);
@@ -607,55 +607,65 @@ const int height)
 #undef BOUNDARY
 #endif
 
-__kernel void calculate_partial_correlation(
+__kernel void calculate_error_sequence_and_partial_corr_fused(
+    __global const float* restrict mask,
+    __global const float* restrict w,
     __global const float* restrict e_u,
-    __global const float* restrict e_z,
+    __constant float* restrict coeffs,
     __global float* restrict partialDots,
     __global float* restrict partialNormU,
     __global float* restrict partialNormZ,
-    const int size) {
+    const int width, const int height,
+    const int calculateAbs,
+    __constant int* restrict stopFlag)
+{
+    const int x = get_global_id(1);
+    const int y = get_global_id(0);
+    const int linearTid = get_local_id(1) * get_local_size(0) + get_local_id(0);
 
-    const int tid = get_local_id(0);
-    const int gid = get_global_id(0);
-    const int groupId = get_group_id(0);
-    const int stride = get_global_size(0);
-
+    __local __attribute__((aligned(16))) float region[SH_DIM_SLOW][SH_DIM_FAST];
+    
+    // Create the pointer directly to the center pixel of this thread's window
+    __local float* centerPtr = &region[get_local_id(1) + PAD][get_local_id(0) + PAD];
+    
     __local float dotCache[256];
     __local float normUCache[256];
     __local float normZCache[256];
 
-    float sumDot = 0.0f;
-    float sumNormU = 0.0f;
-    float sumNormZ = 0.0f;
+    fillBlockFused(mask, w, &region[0][0], width, height);
+    barrier(CLK_LOCAL_MEM_FENCE);
 
-    int idx = gid;
-    while (idx < size) {
-        float a = e_u[idx];
-        float b = e_z[idx];
-        sumDot += a * b;
-        sumNormU += a * a;
-        sumNormZ += b * b;
-        idx += stride;
+    float threadDot = 0.0f;
+    float threadNormU = 0.0f;
+    float threadNormZ = 0.0f;
+
+    if (x < width && y < height && *stopFlag == 0) {
+        const float errorSeq = error_sequence_coeffs_filter(centerPtr, coeffs);
+        const float ez = calculateAbs ? fabs(errorSeq) : errorSeq;
+        const float eu = e_u[(x * height) + y];
+        threadDot = eu * ez;
+        threadNormU = eu * eu;
+        threadNormZ = ez * ez;
     }
-
-    dotCache[tid] = sumDot;
-    normUCache[tid] = sumNormU;
-    normZCache[tid] = sumNormZ;
+    dotCache[linearTid] = threadDot;
+    normUCache[linearTid] = threadNormU;
+    normZCache[linearTid] = threadNormZ;
     barrier(CLK_LOCAL_MEM_FENCE);
 
     for (int s = 128; s > 0; s >>= 1) {
-        if (tid < s) {
-            dotCache[tid] += dotCache[tid + s];
-            normUCache[tid] += normUCache[tid + s];
-            normZCache[tid] += normZCache[tid + s];
+        if (linearTid < s) {
+            dotCache[linearTid] += dotCache[linearTid + s];
+            normUCache[linearTid] += normUCache[linearTid + s];
+            normZCache[linearTid] += normZCache[linearTid + s];
         }
         barrier(CLK_LOCAL_MEM_FENCE);
     }
 
-    if (tid == 0) {
-        partialDots[groupId] = dotCache[0];
-        partialNormU[groupId] = normUCache[0];
-        partialNormZ[groupId] = normZCache[0];
+    if (linearTid == 0) {
+        const int groupId1D = get_group_id(1) * get_num_groups(0) + get_group_id(0);
+        partialDots[groupId1D] = dotCache[0];
+        partialNormU[groupId1D] = normUCache[0];
+        partialNormZ[groupId1D] = normZCache[0];
     }
 }
 

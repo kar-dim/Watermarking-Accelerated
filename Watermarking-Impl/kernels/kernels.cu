@@ -730,44 +730,6 @@ __global__ void apply_watermark_fused(const float* __restrict__ input, const flo
     }
 }
 
-__global__ void calculate_partial_correlation(const float* __restrict__ e_u, const float* __restrict__ e_z, float* __restrict__ partialDots, float* __restrict__ partialNormU,
-                                              float* __restrict__ partialNormZ, const int size) {
-    constexpr int blockSize = 768;
-
-    // we can use CUB to reduce with warp shuffles and reduce the boilerplate
-    using BlockReduceT = cub::BlockReduce<CorrelationData, blockSize>;
-    __shared__ typename BlockReduceT::TempStorage temp_storage;
-
-    const int tid = threadIdx.x;
-    const int stride = blockDim.x * gridDim.x;
-
-    float sumDot = 0.0f;
-    float sumNormU = 0.0f;
-    float sumNormZ = 0.0f;
-
-    // grid stride loop
-    int idx = blockIdx.x * blockDim.x + tid;
-    while (idx < size) {
-        const float a = e_u[idx];
-        const float b = e_z[idx];
-        sumDot += a * b;
-        sumNormU += a * a;
-        sumNormZ += b * b;
-        idx += stride;
-    }
-
-    // use CUB to reduce the sums within the block, each thread contributes its local sum and we get a block level sum at the end
-    const CorrelationData threadData = {sumDot, sumNormU, sumNormZ};
-    const CorrelationData blockSum = BlockReduceT(temp_storage).Sum(threadData);
-
-    // thread 0 writes the result
-    if (tid == 0) {
-        partialDots[blockIdx.x] = blockSum.dot;
-        partialNormU[blockIdx.x] = blockSum.normU;
-        partialNormZ[blockIdx.x] = blockSum.normZ;
-    }
-}
-
 __global__ void calculate_final_correlation(const float* __restrict__ partialDots, const float* __restrict__ partialNormU, const float* __restrict__ partialNormZ, float* __restrict__ result,
                                             const int numBlocks) {
     constexpr int blockSize = 1024;

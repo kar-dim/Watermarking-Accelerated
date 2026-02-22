@@ -230,6 +230,71 @@ __global__ void calculate_error_sequence(const float* __restrict__ inputA, const
     }
 }
 
+// main fused kernel for correlation calculation (error sequence and partial correlation), used in detection
+template <int p>
+__global__ void calculate_error_sequence_and_partial_corr_fused(const float* __restrict__ mask, const float* __restrict__ w, const float* __restrict__ e_u, const float* __restrict__ coeffs,
+                                                                float* __restrict__ partialDots, float* __restrict__ partialNormU, float* __restrict__ partialNormZ, const int width, const int height,
+                                                                const bool calculateAbs, const int* __restrict__ stopFlag) {
+    constexpr int pad = p / 2;
+    constexpr int coeffsSize = (p * p) - 1;
+    constexpr int shDimFast = 32 + (2 * pad);
+    constexpr int shDimSlow = 8 + (2 * pad);
+
+    const int linearTid = threadIdx.y * blockDim.x + threadIdx.x;
+
+    using BlockReduceT = cub::BlockReduce<CorrelationData, 32, cub::BLOCK_REDUCE_WARP_REDUCTIONS, 8>;
+    __shared__ typename BlockReduceT::TempStorage temp_storage;
+    __shared__ alignas(16) float region[shDimSlow][shDimFast];
+    __shared__ alignas(16) float sCoeffs[coeffsSize];
+
+    if (linearTid < coeffsSize)
+        sCoeffs[linearTid] = coeffs[linearTid];
+
+    fillBlock<true, p, shDimFast, shDimSlow>(mask, w, &region[0][0], width, height);
+    __syncthreads();
+
+    const int y = blockIdx.x * blockDim.x + threadIdx.x;
+    const int x = blockIdx.y * blockDim.y + threadIdx.y;
+
+    // default to zero for threads out of bounds (or if stopFlag says so)
+    CorrelationData threadData = {0.0f, 0.0f, 0.0f};
+
+    if (x < width && y < height && !(*stopFlag)) {
+        const int shFast = threadIdx.x + pad;
+        const int shSlow = threadIdx.y + pad;
+        float dot = 0.0f;
+        int k = 0;
+
+#pragma unroll
+        for (int i = -pad; i <= pad; i++) {
+#pragma unroll
+            for (int j = -pad; j <= pad; j++) {
+                if (i == 0 && j == 0)
+                    continue;
+                dot += sCoeffs[k] * region[shSlow + i][shFast + j];
+                k++;
+            }
+        }
+        // calculate the e_z pixel
+        const float errorSeq = region[shSlow][shFast] - dot;
+        const float ez = calculateAbs ? fabsf(errorSeq) : errorSeq;
+        // fused read of e_u and compute of correlation values
+        const float eu = e_u[x * height + y];
+        threadData.dot = eu * ez;
+        threadData.normU = eu * eu;
+        threadData.normZ = ez * ez;
+    }
+
+    // CUB block reduce, thread 0 writes the partials for this block
+    const CorrelationData blockSum = BlockReduceT(temp_storage).Sum(threadData);
+    if (linearTid == 0) {
+        const int blockIdxFlat = blockIdx.y * gridDim.x + blockIdx.x;
+        partialDots[blockIdxFlat] = blockSum.dot;
+        partialNormU[blockIdxFlat] = blockSum.normU;
+        partialNormZ[blockIdxFlat] = blockSum.normZ;
+    }
+}
+
 // helper method used to reduce "rx" vector values and atomic add them (all threads cooperate)
 template <int SIZE, typename StorageT>
 __device__ __forceinline__ void writeRxVec(float* __restrict__ rx, const rxVecData<SIZE>& rxData, StorageT& temp_storage, float* __restrict__ warpStaging) {
@@ -553,9 +618,7 @@ __global__ void me_u_and_sumsq_fused(const float* __restrict__ errorSeq, const f
 __global__ void apply_watermark_fused(const float* __restrict__ input, const float* __restrict__ u, const float* __restrict__ sumSqPtr, uint8_t* __restrict__ output, const float strengthNumerator,
                                       const int planeElements, const int numChannels);
 
-// main kernels for correlation calculation, used in detection.
-__global__ void calculate_partial_correlation(const float* __restrict__ e_u, const float* __restrict__ e_z, float* __restrict__ partialDots, float* __restrict__ partialNormU,
-                                              float* __restrict__ partialNormZ, const int size);
+// main kernel for correlation calculation, used in detection
 __global__ void calculate_final_correlation(const float* __restrict__ partialDots, const float* __restrict__ partialNormU, const float* __restrict__ partialNormZ, float* __restrict__ result,
                                             const int numBlocks);
 

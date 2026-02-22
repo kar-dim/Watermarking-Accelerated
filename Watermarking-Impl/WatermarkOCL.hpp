@@ -222,16 +222,18 @@ class WatermarkOCL final : public WatermarkGPU<p> {
             "me");
     }
 
-    float computeCorrelation(const af::array& e_u, const af::array& e_z) const override {
+    float computeCorrelation(const af::array& e_u, const af::array& mask) const override {
         using namespace cl_utils;
-        const int workGroups = calculateLocalGroupsNumber(this->totalPixels, corrPartialLocalSize);
-        const int globalSizePartials = workGroups * corrPartialLocalSize;
-        const af::array dotPartial(workGroups);
-        const af::array uNormPartial(workGroups);
-        const af::array zNormPartial(workGroups);
-        const af::array correlationResult(1);
+        const int workGroups = static_cast<int>((texKernelDims.rows / windowLocalSize.rows) * (texKernelDims.cols / windowLocalSize.cols));
+        const af::array dotPartial(workGroups, f32);
+        const af::array uNormPartial(workGroups, f32);
+        const af::array zNormPartial(workGroups, f32);
+        const af::array correlationResult(1, f32);
+        const clMemPtr maskMem(mask.device<cl_mem>());
+        const clMemPtr randMem(this->randomMatrix.template device<cl_mem>());
         const clMemPtr euMem(e_u.device<cl_mem>());
-        const clMemPtr ezMem(e_z.device<cl_mem>());
+        const clMemPtr coeffsMem(this->coefficients.template device<cl_mem>());
+        const clMemPtr stopFlagMem(this->stopFlag.template device<cl_mem>());
         const clMemPtr dotPartialMem(dotPartial.device<cl_mem>());
         const clMemPtr uNormPartialMem(uNormPartial.device<cl_mem>());
         const clMemPtr zNormPartialMem(zNormPartial.device<cl_mem>());
@@ -239,18 +241,19 @@ class WatermarkOCL final : public WatermarkGPU<p> {
         float correlation = 0.0f;
         executeKernel(
             [&]() {
-                // calculate partial dot products and norms
-                queue.enqueueNDRangeKernel(KernelBuilder(programs, "calculate_partial_correlation")
-                                               .args(wrap(euMem.get()), wrap(ezMem.get()), wrap(dotPartialMem.get()), wrap(uNormPartialMem.get()), wrap(zNormPartialMem.get()), this->totalPixels)
+                // launch fused rrror sequence + partial correlation
+                queue.enqueueNDRangeKernel(KernelBuilder(programs, "calculate_error_sequence_and_partial_corr_fused")
+                                               .args(wrap(maskMem.get()), wrap(randMem.get()), wrap(euMem.get()), wrap(coeffsMem.get()), wrap(dotPartialMem.get()), wrap(uNormPartialMem.get()),
+                                                     wrap(zNormPartialMem.get()), this->baseCols, this->baseRows, 0 /* calculateAbs = false */, wrap(stopFlagMem.get()))
                                                .build(),
-                                           cl::NDRange(), cl::NDRange(globalSizePartials), cl::NDRange(corrPartialLocalSize));
+                                           cl::NDRange(), cl::NDRange(this->texKernelDims.rows, this->texKernelDims.cols), cl::NDRange(windowLocalSize.rows, windowLocalSize.cols));
                 // reduce partials and compute correlation
                 queue.enqueueNDRangeKernel(KernelBuilder(programs, "calculate_final_correlation")
                                                .args(wrap(dotPartialMem.get()), wrap(uNormPartialMem.get()), wrap(zNormPartialMem.get()), wrap(correlationResultMem.get()), workGroups)
                                                .build(),
                                            cl::NDRange(), cl::NDRange(corrFinalLocalSize), cl::NDRange(corrFinalLocalSize));
                 // retrieve the correlation result
-                this->unlockArrays(e_u, e_z, dotPartial, uNormPartial, zNormPartial, correlationResult);
+                this->unlockArrays(mask, e_u, dotPartial, uNormPartial, zNormPartial, correlationResult, this->coefficients, this->stopFlag, this->randomMatrix);
                 correlation = correlationResult.scalar<float>();
             },
             "compute correlation kernels");
