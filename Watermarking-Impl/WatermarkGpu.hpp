@@ -28,7 +28,7 @@ class WatermarkGPU : public WatermarkBase {
 
     float detectWatermark(const ImageBuffer& inputImage, const MASK_TYPE maskType) override {
         const af::array errorSequenceW = computePredictionErrorData(inputImage, false);
-        const af::array mask = maskType == ME ? computePredictionErrorMask<true>(errorSequenceW) : computeCustomMask(inputImage);
+        const af::array mask = maskType == ME ? computePredictionErrorMask(errorSequenceW) : computeCustomMask(inputImage);
         mask.eval(); // we make sure mask is calculated, else arrayfire panics and deep copies!
         const float correlation = computeCorrelation(errorSequenceW, mask);
         return std::isfinite(correlation) ? correlation : 0.0f;
@@ -77,9 +77,8 @@ class WatermarkGPU : public WatermarkBase {
     virtual float computeCorrelation(const af::array& e_u, const af::array& e_z) const = 0;
 
     // compute prediction error mask
-    template <bool CALC_ABS>
     af::array computePredictionErrorMask(const af::array& errorSequence) const {
-        const af::array& input = CALC_ABS ? af::abs(errorSequence) : errorSequence;
-        return input / (af::max(af::flat(input)) + 1.0e-6f);
+        const af::array absErrorSeq = af::abs(errorSequence);
+        return absErrorSeq / (af::max(af::flat(absErrorSeq)) + 1.0e-6f);
     }
 };
