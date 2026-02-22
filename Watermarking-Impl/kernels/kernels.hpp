@@ -197,7 +197,7 @@ inline float error_sequence_coeffs_filter(__local float* centerPtr, __constant f
         for (int j = -PAD; j <= PAD; j++) {
             if (i == 0 && j == 0)
                 continue;
-            dot += coeffs[k] * P(i, j);
+            dot += coeffs[k] * P(j, i);
             k++;
         }
     }
