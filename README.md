@@ -211,12 +211,12 @@ Tests were executed with a loop count of 1000 iterations to ensure statistical s
 
 - Impact of Window Size (p): As the window size increases, the computational complexity grows quadratically.
      - p=3 (Small Window): Extremely high throughput.
-     - p=9 (Large Window): Throughput naturally decreases due to the heavier matrix construction and solving steps (80×80 linear systems), but the CUDA implementation still maintains real-time performance thanks to the Tensor Cores and exclusive features (warp shuffles, fast atomics)
+     - p=9 (Large Window): Throughput naturally decreases due to the heavier matrix construction and solving steps (80×80 linear systems), but the CUDA implementation still maintains real-time performance thanks to the Tensor Cores and exclusive features (warp shuffles, fast atomics).
 
 - Resolution Scaling: Performance scales inversely with pixel count. However, even at 4K resolution, the GPU implementations remain viable for interactive framerates, whereas the CPU implementation becomes a bottleneck.
 
 p = 3            |  p = 5
 :-------------------------:|:-------------------------:
- ![p3](https://github.com/user-attachments/assets/7a41c2f0-6741-4bf5-a922-f1bf43f69c1b) | ![p5](https://github.com/user-attachments/assets/b3bc03ec-5cce-4df5-b229-1baea29f825c)
+ ![p3](https://github.com/user-attachments/assets/326caea6-e296-428a-9a0f-4d6019aae593) | ![p5](https://github.com/user-attachments/assets/945792ec-da40-451c-9e5c-0ec109a12032)
 p = 7            |  p = 9
- ![p7](https://github.com/user-attachments/assets/25570c61-0935-46f3-9b2e-f4b794dc322c) | ![p9](https://github.com/user-attachments/assets/4a6ce15c-8365-4a48-8345-2822f3caebde)
+ ![p7](https://github.com/user-attachments/assets/753619fb-b4aa-47d2-a539-4c0aee426217) | ![p9](https://github.com/user-attachments/assets/dae255e7-7f23-4456-a2ec-86db34a3bcab)
