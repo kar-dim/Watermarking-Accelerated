@@ -62,6 +62,27 @@ inline void fillBlockFused(
     }
 }
 
+inline float compute_nvf_mask(
+    __local float region[SH_DIM_SLOW][SH_DIM_FAST], 
+    const int shSlow, const int shFast) 
+{
+    float sum = 0.0f, sumSq = 0.0f;
+
+    #pragma unroll
+    for (int i = -PAD; i <= PAD; i++) {
+        #pragma unroll
+        for (int j = -PAD; j <= PAD; j++) {
+            const float pixelValue = region[shSlow + i][shFast + j];
+            sum += pixelValue;
+            sumSq += pixelValue * pixelValue;
+        }
+    }
+
+    const float numerator = (N_PIXELS * sumSq) - (sum * sum);
+    const float output = native_divide(numerator, N_PIXELS_SQ + numerator);
+    return clamp(output, 0.0f, 1.0f);
+}
+
 __kernel void nvf(
     const __global float* restrict input, 
     __global float* restrict nvf, 
@@ -81,20 +102,88 @@ __kernel void nvf(
 
     const int shSlow = get_local_id(1) + PAD;
     const int shFast = get_local_id(0) + PAD;
-    float sum = 0.0f, sumSq = 0.0f;
+    nvf[(x * height) + y] = compute_nvf_mask(region, shSlow, shFast);
+}
+
+__kernel void nvf_u_and_partial_sumsq_fused(
+    const __global float* restrict input,
+    const __global float* restrict w,
+    __global float* restrict u,
+    __global float* restrict partials,
+    const int width, const int height)
+{
+    const int x = get_global_id(1);
+    const int y = get_global_id(0);
     
-#pragma unroll
-    for (int i = -PAD; i <= PAD; i++) {
-#pragma unroll
-        for (int j = -PAD; j <= PAD; j++) {
-            const float pixelValue = region[shSlow + i][shFast + j];
-            sum += pixelValue;
-            sumSq += pixelValue * pixelValue;
-        }
+    const int linearTid = get_local_id(1) * get_local_size(0) + get_local_id(0);
+
+    __local __attribute__((aligned(16))) float region[SH_DIM_SLOW][SH_DIM_FAST];
+    __local float sums[256];
+
+    fillBlock(input, &region[0][0], width, height);
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    float threadSumSq = 0.0f;
+
+    if (x < width && y < height) {
+        const int shSlow = get_local_id(1) + PAD;
+        const int shFast = get_local_id(0) + PAD;
+        const float maskVal = compute_nvf_mask(region, shSlow, shFast);
+        const int idx = (x * height) + y;
+        const float uVal = maskVal * w[idx];
+        u[idx] = uVal;
+        threadSumSq = uVal * uVal;
     }
-    const float numerator = (N_PIXELS * sumSq) - (sum * sum);
-    const float output = native_divide(numerator, N_PIXELS_SQ + numerator);
-    nvf[(x * height) + y] = clamp(output, 0.0f, 1.0f);
+    sums[linearTid] = threadSumSq;
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    for (int s = 128; s > 0; s >>= 1) {
+        if (linearTid < s)
+            sums[linearTid] += sums[linearTid + s];
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+
+    if (linearTid == 0)
+        partials[get_group_id(1) * get_num_groups(0) + get_group_id(0)] = sums[0];
+}
+
+__kernel void me_u_and_partial_sumsq_fused(
+    __global const float* restrict errorSeq,
+    __global const float* restrict w,
+    __global float* restrict u,
+    __global float* restrict partials,
+    __global const float* restrict maxVal,
+    const int N)
+{
+    const int tid = get_local_id(0);
+    const int stride = get_global_size(0);
+    const int gid = get_group_id(0);
+    int idx = get_global_id(0);
+
+    __local float sums[256];
+
+    const float denom = (*maxVal) + 1.0e-6f;
+    float localSumSq = 0.0f;
+
+    while (idx < N) {
+        const float maskVal = errorSeq[idx] / denom;
+        const float uVal = maskVal * w[idx];
+        u[idx] = uVal;
+        localSumSq += uVal * uVal;
+        
+        idx += stride;
+    }
+    sums[tid] = localSumSq;
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    for (int s = 128; s > 0; s >>= 1) {
+        if (tid < s)
+            sums[tid] += sums[tid + s];
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+
+    if (tid == 0)
+        partials[gid] = sums[0];
 }
 
 //use pointer arithmetic for dot product to help compilers optimize address calculations fast

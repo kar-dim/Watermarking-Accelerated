@@ -47,38 +47,82 @@ class WatermarkOCL final : public WatermarkGPU<p> {
         const af::array u(inputGrayImage.dims(), f32);
         const af::array output(inputImage.dims(), u8);
         const af::array sumSq = af::constant(0.0f, 1, f32);
-        // compute mask
-        const af::array mask = maskType == ME ? this->template computePredictionErrorMask<false>(computePredictionErrorData(inputGrayImage, true)) : computeCustomMask(inputGrayImage);
-        // compute strengthened watermark and sum of squares in one kernel to save bandwidth (extra kernel to sum the partial sums)
-        const int workGroups = calculateLocalGroupsNumber(this->totalPixels, applyWatermarkLocalSize);
-        const int globalSize = workGroups * applyWatermarkLocalSize;
-        const af::array partials(workGroups, f32);
+
         const clMemPtr uMem(u.device<cl_mem>());
         const clMemPtr outputMem(output.device<cl_mem>());
         const clMemPtr sumSqMem(sumSq.device<cl_mem>());
-        const clMemPtr maskMem(mask.device<cl_mem>());
         const clMemPtr randMem(this->randomMatrix.template device<cl_mem>());
         const clMemPtr inputMem(inputImage.device<cl_mem>());
-        const clMemPtr partialsMem(partials.device<cl_mem>());
+        const clMemPtr inputGrayMem(inputGrayImage.device<cl_mem>());
 
-        executeKernel(
-            [&]() {
-                queue.enqueueNDRangeKernel(
-                    KernelBuilder(programs, "compute_u_and_partial_sumsq").args(wrap(maskMem.get()), wrap(randMem.get()), wrap(uMem.get()), wrap(partialsMem.get()), this->totalPixels).build(),
-                    cl::NDRange(), cl::NDRange(globalSize), cl::NDRange(applyWatermarkLocalSize));
+        if (maskType == NVF) {
+            const int workGroups = static_cast<int>((this->texKernelDims.rows / windowLocalSize.rows) * (this->texKernelDims.cols / windowLocalSize.cols));
+            const af::array partials(workGroups, f32);
+            const clMemPtr partialsMem(partials.device<cl_mem>());
 
-                queue.enqueueNDRangeKernel(KernelBuilder(programs, "reduce_sumsq_partials").args(wrap(partialsMem.get()), wrap(sumSqMem.get()), workGroups).build(), cl::NDRange(),
-                                           cl::NDRange(applyWatermarkLocalSize), cl::NDRange(applyWatermarkLocalSize));
+            executeKernel(
+                [&]() {
+                    // fused kernel to compute NVF mask, strengthened watermark (u) and sum of squares of u
+                    queue.enqueueNDRangeKernel(KernelBuilder(programs, "nvf_u_and_partial_sumsq_fused")
+                                                   .args(wrap(inputGrayMem.get()), wrap(randMem.get()), wrap(uMem.get()), wrap(partialsMem.get()), this->baseCols, this->baseRows)
+                                                   .build(),
+                                               cl::NDRange(), cl::NDRange(texKernelDims.rows, texKernelDims.cols), cl::NDRange(windowLocalSize.rows, windowLocalSize.cols));
 
-                queue.enqueueNDRangeKernel(
-                    KernelBuilder(programs, "apply_watermark_fused")
-                        .args(wrap(inputMem.get()), wrap(uMem.get()), wrap(sumSqMem.get()), wrap(outputMem.get()), this->strengthNumerator, this->totalPixels, static_cast<int>(inputImage.dims(2)))
-                        .build(),
-                    cl::NDRange(), cl::NDRange(globalSize), cl::NDRange(applyWatermarkLocalSize));
+                    // reduce the partial sums (single workgroup)
+                    queue.enqueueNDRangeKernel(KernelBuilder(programs, "reduce_sumsq_partials").args(wrap(partialsMem.get()), wrap(sumSqMem.get()), workGroups).build(), cl::NDRange(),
+                                               cl::NDRange(applyWatermarkLocalSize), cl::NDRange(applyWatermarkLocalSize));
 
-                this->unlockArrays(inputImage, u, sumSq, output, mask, partials, this->randomMatrix);
-            },
-            "computeStrengthenedWatermark");
+                    // apply watermark
+                    const int workGroupsApply = calculateLocalGroupsNumber(this->totalPixels, applyWatermarkLocalSize);
+                    const int globalSizeApply = workGroupsApply * applyWatermarkLocalSize;
+
+                    queue.enqueueNDRangeKernel(
+                        KernelBuilder(programs, "apply_watermark_fused")
+                            .args(wrap(inputMem.get()), wrap(uMem.get()), wrap(sumSqMem.get()), wrap(outputMem.get()), this->strengthNumerator, this->totalPixels, static_cast<int>(inputImage.dims(2)))
+                            .build(),
+                        cl::NDRange(), cl::NDRange(globalSizeApply), cl::NDRange(applyWatermarkLocalSize));
+
+                    this->unlockArrays(inputGrayImage, partials);
+                },
+                "NVF_computeStrengthenedWatermark");
+
+        } else {
+            // find max of error sequence, this cannot be fused because it is a global reduction
+            const af::array errorSeq = computePredictionErrorData(inputGrayImage, true);
+            const af::array errorSeqMax = af::max(af::flat(errorSeq));
+
+            // fused kernel to compute ME mask, strengthened watermark (u) and sum of squares of u
+            const int workGroups = calculateLocalGroupsNumber(this->totalPixels, applyWatermarkLocalSize);
+            const int globalSize = workGroups * applyWatermarkLocalSize;
+
+            const af::array partials(workGroups, f32);
+            const clMemPtr partialsMem(partials.device<cl_mem>());
+            const clMemPtr errorSeqMem(errorSeq.device<cl_mem>());
+            const clMemPtr errorSeqMaxMem(errorSeqMax.device<cl_mem>());
+
+            executeKernel(
+                [&]() {
+                    queue.enqueueNDRangeKernel(KernelBuilder(programs, "me_u_and_partial_sumsq_fused")
+                                                   .args(wrap(errorSeqMem.get()), wrap(randMem.get()), wrap(uMem.get()), wrap(partialsMem.get()), wrap(errorSeqMaxMem.get()), this->totalPixels)
+                                                   .build(),
+                                               cl::NDRange(), cl::NDRange(globalSize), cl::NDRange(applyWatermarkLocalSize));
+
+                    queue.enqueueNDRangeKernel(KernelBuilder(programs, "reduce_sumsq_partials").args(wrap(partialsMem.get()), wrap(sumSqMem.get()), workGroups).build(), cl::NDRange(),
+                                               cl::NDRange(applyWatermarkLocalSize), cl::NDRange(applyWatermarkLocalSize));
+
+                    // apply watermark
+                    queue.enqueueNDRangeKernel(
+                        KernelBuilder(programs, "apply_watermark_fused")
+                            .args(wrap(inputMem.get()), wrap(uMem.get()), wrap(sumSqMem.get()), wrap(outputMem.get()), this->strengthNumerator, this->totalPixels, static_cast<int>(inputImage.dims(2)))
+                            .build(),
+                        cl::NDRange(), cl::NDRange(globalSize), cl::NDRange(applyWatermarkLocalSize));
+
+                    this->unlockArrays(errorSeq, errorSeqMax, partials);
+                },
+                "ME_computeStrengthenedWatermark");
+        }
+
+        this->unlockArrays(inputImage, u, sumSq, output, this->randomMatrix);
         return output;
     }
 

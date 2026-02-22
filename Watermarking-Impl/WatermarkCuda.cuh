@@ -32,18 +32,30 @@ class WatermarkCuda final : public WatermarkGPU<p> {
         const af::array u(inputGrayImage.dims(), f32);
         const af::array output(inputImage.dims(), u8);
         const af::array sumSq = af::constant(0.0f, 1, f32);
-        // compute mask
-        const af::array mask = maskType == ME ? this->template computePredictionErrorMask<false>(computePredictionErrorData(inputGrayImage, true)) : computeCustomMask(inputGrayImage);
-        // compute strengthened watermark and sum of squares in one kernel to save bandwidth
-        const int blocksComputeU = cuda_utils::gridSize1DStridedCalculate(this->totalPixels, strWatermarkBlockSize);
+
         float* uPtr = u.device<float>();
         float* sumSqPtr = sumSq.device<float>();
-        compute_u_and_sumsq<<<blocksComputeU, strWatermarkBlockSize, 0, afStream>>>(mask.device<float>(), this->randomMatrix.template device<float>(), uPtr, sumSqPtr, this->totalPixels);
+        // fused kernel to compute NVF mask, strengthened watermark (u) and sum of squares of u
+        if (maskType == NVF) {
+            const dim3 gridSize = cuda_utils::gridSizeCalculate(windowBlockSize, this->baseCols, this->baseRows);
+            nvf_u_and_sumsq_fused<p>
+                <<<gridSize, windowBlockSize, 0, afStream>>>(inputGrayImage.template device<float>(), this->randomMatrix.template device<float>(), uPtr, sumSqPtr, this->baseCols, this->baseRows);
+            this->unlockArrays(inputGrayImage);
+        } else {
+            // find max of error sequence, this cannot be fused because it is a global reduction
+            const af::array errorSeq = computePredictionErrorData(inputGrayImage, true);
+            const af::array errorSeqMax = af::max(af::flat(errorSeq));
+            // fused kernel to compute ME mask, strengthened watermark (u) and sum of squares of u
+            const int blocksComputeU = cuda_utils::gridSize1DStridedCalculate(this->totalPixels, strWatermarkBlockSize);
+            me_u_and_sumsq_fused<<<blocksComputeU, strWatermarkBlockSize, 0, afStream>>>(errorSeq.device<float>(), this->randomMatrix.template device<float>(), uPtr, sumSqPtr,
+                                                                                         errorSeqMax.device<float>(), this->totalPixels);
+            this->unlockArrays(errorSeqMax, errorSeq);
+        }
         // compute and apply watermark
         const int blocksApply = cuda_utils::gridSize1DStridedCalculate(this->totalPixels, applyWatermarkBlockSize);
         apply_watermark_fused<<<blocksApply, applyWatermarkBlockSize, 0, afStream>>>(inputImage.device<float>(), uPtr, sumSqPtr, output.device<unsigned char>(), this->strengthNumerator,
                                                                                      this->totalPixels, static_cast<int>(inputImage.dims(2)));
-        this->unlockArrays(inputImage, u, sumSq, output, mask, this->randomMatrix);
+        this->unlockArrays(inputImage, u, sumSq, output, this->randomMatrix);
         return output;
     }
 

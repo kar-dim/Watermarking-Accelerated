@@ -681,31 +681,32 @@ __global__ void me_p9(const float* __restrict__ input, float* __restrict__ Rx, f
     writeRxVec<80>(rx, rxPersistent, temp_storage[warpId], warpOutput);
 }
 
-__global__ void compute_u_and_sumsq(const float* __restrict__ mask, const float* __restrict__ w, float* __restrict__ u, float* __restrict__ globalSumSq, const int N) {
+__global__ void me_u_and_sumsq_fused(const float* __restrict__ errorSeq, const float* __restrict__ w, float* __restrict__ u, float* __restrict__ globalSumSq, const float* __restrict__ maxVal,
+                                     const int N) {
     constexpr int blockSize = 768;
 
-    // setup CUB for block reduction
     using BlockReduceT = cub::BlockReduce<float, blockSize>;
     __shared__ typename BlockReduceT::TempStorage temp_storage;
 
     const int tid = threadIdx.x;
     const int gridSize = blockDim.x * gridDim.x;
 
-    // fuse calculation of u and local sum of squares
+    const float denom = (*maxVal) + 1.0e-6f; // cached
     float threadSumSq = 0.0f;
     int idx = blockIdx.x * blockDim.x + tid;
 
     // grid stride loop
     while (idx < N) {
-        const float uVal = mask[idx] * w[idx];
+        // normalize error sequence (mask), calculate u, store globally AND calculate local sum of squares of u in one fused pass
+        const float maskVal = errorSeq[idx] / denom;
+        const float uVal = maskVal * w[idx];
         u[idx] = uVal;
         threadSumSq += uVal * uVal;
         idx += gridSize;
     }
 
-    // cub block reduction of the sum of squares
+    // block reduce with cub and atomic add to global sum by the leader
     const float blockTotalSq = BlockReduceT(temp_storage).Sum(threadSumSq);
-    // final global atomic add, only thread 0 of the block does this, we want to minimize atomics as much as possible
     if (tid == 0)
         atomicAdd(globalSumSq, blockTotalSq);
 }

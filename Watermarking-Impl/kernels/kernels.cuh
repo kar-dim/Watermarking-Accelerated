@@ -98,13 +98,35 @@ __device__ __forceinline__ void fillBlockStripVertical(half blockValues[p][Strip
     }
 }
 
-// NVF kernel, calculates NVF mask values for each pixel in the image
-// works for all p values (3,5,7 and 9)
-template <int p>
-__global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, const int width, const int height) {
+// NVF mask calculation helper for a block
+template <int p, int shDimFast, int shDimSlow>
+__device__ __forceinline__ float compute_nvf_mask(const float (&region)[shDimSlow][shDimFast], const int shSlow, const int shFast) {
     constexpr int pad = p / 2;
     constexpr float nPixels = static_cast<float>(p * p);
     constexpr float nPixelsSq = nPixels * nPixels;
+
+    float sum = 0.0f, sumSq = 0.0f;
+
+#pragma unroll
+    for (int i = -pad; i <= pad; i++) {
+#pragma unroll
+        for (int j = -pad; j <= pad; j++) {
+            const float pixelValue = region[shSlow + i][shFast + j];
+            sum += pixelValue;
+            sumSq += pixelValue * pixelValue;
+        }
+    }
+
+    // calculate NVF with optimized math (avoid divisions)
+    const float numerator = (nPixels * sumSq) - (sum * sum);
+    const float output = __fdividef(numerator, nPixelsSq + numerator);
+    return clamp(output, 0.0f, 1.0f);
+}
+
+// NVF mask calculation and write to global memory, used for detection only
+template <int p>
+__global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, const int width, const int height) {
+    constexpr int pad = p / 2;
     constexpr int shDimFast = 32 + (2 * pad);
     constexpr int shDimSlow = 8 + (2 * pad);
 
@@ -121,21 +143,46 @@ __global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, co
 
     const int shSlow = threadIdx.y + pad;
     const int shFast = threadIdx.x + pad;
-    float sum = 0.0f, sumSq = 0.0f;
+    nvf[x * height + y] = compute_nvf_mask<p, shDimFast, shDimSlow>(region, shSlow, shFast);
+}
 
-#pragma unroll
-    for (int i = -pad; i <= pad; i++) {
-#pragma unroll
-        for (int j = -pad; j <= pad; j++) {
-            const float pixelValue = region[shSlow + i][shFast + j];
-            sum += pixelValue;
-            sumSq += pixelValue * pixelValue;
-        }
+// NVF mask calculation AND u calculation fused in one kernel to save global memory bandwidth and increase speed
+// this is used ONLY for embedding, not for detection, because in detection we need the error sequence of the mask itself
+template <int p>
+__global__ void nvf_u_and_sumsq_fused(const float* __restrict__ input, const float* __restrict__ w, float* __restrict__ u, float* __restrict__ globalSumSq, const int width, const int height) {
+    constexpr int pad = p / 2;
+    constexpr int shDimFast = 32 + (2 * pad);
+    constexpr int shDimSlow = 8 + (2 * pad);
+
+    const int x = blockIdx.y * blockDim.y + threadIdx.y;
+    const int y = blockIdx.x * blockDim.x + threadIdx.x;
+    const int linearTid = threadIdx.y * blockDim.x + threadIdx.x;
+
+    using BlockReduceT = cub::BlockReduce<float, 32, cub::BLOCK_REDUCE_WARP_REDUCTIONS, 8>; // block size is {32, 8}
+    __shared__ alignas(16) float region[shDimSlow][shDimFast];
+    __shared__ typename BlockReduceT::TempStorage temp_storage;
+
+    fillBlock<false, p, shDimFast, shDimSlow>(input, nullptr, &region[0][0], width, height);
+    __syncthreads();
+
+    // default to 0 so out of bounds threads don't corrupt the CUB reduction
+    float threadSumSq = 0.0f;
+    if (x < width && y < height) {
+        const int shSlow = threadIdx.y + pad;
+        const int shFast = threadIdx.x + pad;
+        // calculate the mask value and fuse u calculation with local sum of squares of u
+        const float maskVal = compute_nvf_mask<p, shDimFast, shDimSlow>(region, shSlow, shFast);
+        const int idx = x * height + y;
+        const float uVal = maskVal * w[idx];
+        u[idx] = uVal;
+        // local sum for CUB
+        threadSumSq = uVal * uVal;
     }
-    // calculate NVF with optimized math (avoid divisions)
-    const float numerator = (nPixels * sumSq) - (sum * sum);
-    const float output = __fdividef(numerator, nPixelsSq + numerator);
-    nvf[x * height + y] = clamp(output, 0.0f, 1.0f);
+
+    // block reduce with cub and atomic add to global sum by the leader
+    const float blockTotalSq = BlockReduceT(temp_storage).Sum(threadSumSq);
+    if (linearTid == 0)
+        atomicAdd(globalSumSq, blockTotalSq);
 }
 
 // main kernel for error sequence calculation
@@ -498,8 +545,9 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
 __global__ void me_p7(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const int width, const int height, const int totalBlocksY, const int taskTotal);
 __global__ void me_p9(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const int width, const int height, const int totalBlocksY, const int taskTotal);
 
-// fused calculation of u and sum of squares
-__global__ void compute_u_and_sumsq(const float* __restrict__ mask, const float* __restrict__ w, float* __restrict__ u, float* __restrict__ globalSumSq, const int N);
+// fused calculation of ME mask, u, and sum of squares
+__global__ void me_u_and_sumsq_fused(const float* __restrict__ errorSeq, const float* __restrict__ w, float* __restrict__ u, float* __restrict__ globalSumSq, const float* __restrict__ maxVal,
+                                     const int N);
 
 // fused application of watermark: applies the watermark and calculates the output in one pass, using the precomputed u and sum of squares for normalization
 __global__ void apply_watermark_fused(const float* __restrict__ input, const float* __restrict__ u, const float* __restrict__ sumSqPtr, uint8_t* __restrict__ output, const float strengthNumerator,
