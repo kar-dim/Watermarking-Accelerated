@@ -220,7 +220,9 @@ int testForVideo(const INIReader& inir, const string& videoFile, const int p, co
         eigen_utils::setThreadsToPhysicalCores();
         cout << info("\nUsing " + std::to_string(omp_get_max_threads()) + " parallel threads for Watermark calculations.\n");
 #endif
-        const string ffmpegOptions = inir.Get("video", "encode_codec_options", "-c:v libx265 -preset fast -crf 23");
+        const bool useHwEncoder = inir.GetBoolean("compute", "cuda_hw_encoder", false);
+        const string ffmpegOptions =
+            useHwEncoder ? inir.Get("video", "hw_encode_options", "-c:v hevc_nvenc -preset p6 -tune hq -cq 26 -b:v 0") : inir.Get("video", "encode_codec_options", "-c:v libx265 -preset fast -crf 23");
         // build the FFmpeg command
         std::ostringstream ffmpegCmd;
         ffmpegCmd << "ffmpeg -y -f rawvideo " << getPixFmt(videoStream) << "-s " << width << "x" << height << " -r " << getFrameRate(videoStream) << " -i - -i \"" << videoFile << "\" "
