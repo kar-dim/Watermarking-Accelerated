@@ -15,6 +15,14 @@ The deprecated original Thesis code is in the archived repository <a href="https
 
 # Overview
 
+<p align="center">
+  <img src="https://github.com/user-attachments/assets/670b2932-8c3c-4e6d-88ee-be4f5dae2d28" width="25%">
+&nbsp; &nbsp; &nbsp; &nbsp;
+  <img src="https://github.com/user-attachments/assets/e92fc01d-50cd-4ab0-ba97-b51e57be47a0" width="25%">
+&nbsp; &nbsp; &nbsp; &nbsp;
+  <img src="https://github.com/user-attachments/assets/6a257e34-6481-4a33-b334-fe20e24e02b3" width="25%">
+</p>
+
 This project implements and evaluates the performance (execution speed) of image watermarking algorithms on CPU versus GPU. It provides multiple implementations to enable comparisons between compute backends. Watermarks are generated using normally distributed random values with zero mean and standard deviation of one. Two watermark masks are used: The proposed Prediction Error mask, which is the main focus of the Thesis, and the NVF (Noise Visibility Function) mask for comparison purposes. The system supports both embedding and detection of watermarks in disk images and video streams. Video processing is handled via FFmpeg, enabling broad codec and container support, along with advanced features such as GPU-accelerated video decoding and encoding (CUDA only) and 10-bit/HDR (tonemapped) video support.
 
 The repository contains all required source code and dependencies needed to reproduce the benchmarks and experiments.
@@ -26,7 +34,8 @@ Implementations are optimized for maximum performance:
 - GPU implementation: Provides both OpenCL and CUDA backends. The GPU kernels are highly optimized to maximize throughput and minimize latency. The ```ArrayFire``` library is also used for backend abstraction and memory management. Specifically for CUDA, we use warp shuffle techniques, CUB, Tensor Cores and Grid-Stride reduction loops to improve performance wherever possible.
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/c1a3acea-3e4b-4584-9f96-500167f78368" width="50%" height="50%">
+  <img src="https://github.com/user-attachments/assets/c1a3acea-3e4b-4584-9f96-500167f78368" width="50%" height="50%"/>
+  <img width="404" height="244" alt="ffmpeg nvidia" src="https://github.com/user-attachments/assets/6204c67e-6262-4f35-9518-e78d891efd26" />
 </p>
 
 # Run the pre-built binaries
