@@ -4,7 +4,9 @@
 #include <arrayfire.h>
 #include <cmath>
 #include <concepts>
+#include <fstream>
 #include <string>
+#include <vector>
 
 /*!
  *  \brief  Functions for watermark computation and detection, Base GPU class.
@@ -15,10 +17,7 @@ template <int p>
 class WatermarkGPU : public WatermarkBase {
   public:
     WatermarkGPU<p>(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr)
-        : WatermarkBase(rows, cols, randomMatrixPath, psnr), strengthNumerator(strengthFactor * std::sqrt(static_cast<float>(this->totalPixels))) {}
-
-    WatermarkGPU<p>(const unsigned int rows, const unsigned int cols, const ImageBuffer& randomMatrix, const float strengthFactor)
-        : WatermarkBase(rows, cols, randomMatrix, strengthFactor), strengthNumerator(strengthFactor * std::sqrt(static_cast<float>(this->totalPixels))) {}
+        : WatermarkBase(rows, cols, randomMatrixPath, psnr, initializeRandomMatrix), strengthNumerator(strengthFactor * std::sqrt(static_cast<float>(this->totalPixels))) {}
 
     ~WatermarkGPU<p>() override = default;
 
@@ -45,6 +44,14 @@ class WatermarkGPU : public WatermarkBase {
         af::Window window(width, height);
         while (!window.close())
             window.image(array);
+    }
+
+  private:
+    // initialize the watermark random matrix into an arrayfire array (copy from host to GPU VRAM)
+    static af::array initializeRandomMatrix(std::ifstream& stream, const size_t totalBytes, const unsigned int rows, const unsigned int cols) {
+        std::vector<float> randomData(totalBytes / sizeof(float));
+        stream.read(reinterpret_cast<char*>(randomData.data()), totalBytes);
+        return af::array(rows, cols, randomData.data());
     }
 
   protected:

@@ -5,6 +5,7 @@
 #include "PredictionErrorMatrixData.hpp"
 #include "WatermarkBase.hpp"
 #include <cmath>
+#include <fstream>
 #include <omp.h>
 #include <string>
 
@@ -16,14 +17,21 @@ template <int p>
 class WatermarkEigen final : public WatermarkBase {
   private:
     enum class Op { ADD, SUB };
+
+    static constexpr bool maskCalcRequired = true;
+    static constexpr bool maskCalcNotRequired = false;
     static constexpr int pSquared = p * p;
     static constexpr int pad = p / 2;
     static constexpr int localSize = pSquared - 1;
-    static constexpr int startRow = pad, startCol = pad, center = pad;
+    static constexpr int startRow = pad;
+    static constexpr int startCol = pad;
+    static constexpr int center = pad;
+
     const int endRow = baseRows - pad;
     const int endCol = baseCols - pad;
     const int stripHeight = endRow - startRow;
     const bool hasCenterRegion = (endRow > startRow) && (endCol > startCol);
+
     using LocalVector = Eigen::Matrix<float, localSize, 1>;
     using ArrayXXf = Eigen::ArrayXXf;
     using VectorXf = Eigen::VectorXf;
@@ -32,8 +40,8 @@ class WatermarkEigen final : public WatermarkBase {
 
   public:
     WatermarkEigen<p>(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr)
-        : WatermarkBase(rows, cols, randomMatrixPath, psnr), mask(rows, cols), errorSequence(rows, cols), filteredEstimation(rows, cols), u(rows, cols), uStrengthened(rows, cols),
-          meMatrixData(omp_get_max_threads(), rows) {}
+        : WatermarkBase(rows, cols, randomMatrixPath, psnr, initializeRandomMatrix), mask(rows, cols), errorSequence(rows, cols), filteredEstimation(rows, cols), u(rows, cols),
+          uStrengthened(rows, cols), meMatrixData(omp_get_max_threads(), rows) {}
 
     // main watermark embedding method
     void makeWatermark(const ImageBuffer& inputGrayImage, const ImageBuffer& inputImage, ImageOutputBuffer& output, float& watermarkStrength, const MASK_TYPE maskType) override {
@@ -90,6 +98,13 @@ class WatermarkEigen final : public WatermarkBase {
   private:
     ArrayXXf mask, errorSequence, filteredEstimation, u, uStrengthened;
     PredictionErrorMatrixData<p> meMatrixData;
+
+    // initialize the watermark random matrix into an Eigen buffer
+    static ImageBuffer initializeRandomMatrix(std::ifstream& stream, const size_t totalBytes, const unsigned int rows, const unsigned int cols) {
+        Eigen::ArrayXXf watermark(cols, rows);
+        stream.read(reinterpret_cast<char*>(watermark.data()), totalBytes);
+        return ImageBuffer(watermark.transpose());
+    }
 
     // helper method to clamp the pixel value to the image boundaries if out of bounds
     inline float clampedValue(const ArrayXXf& img, int r, int c, const int rows, const int cols) { return img(std::clamp(r, 0, rows - 1), std::clamp(c, 0, cols - 1)); }
