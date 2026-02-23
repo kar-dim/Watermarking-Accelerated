@@ -17,9 +17,10 @@ class WatermarkBase {
   protected:
     using WatermarkLoader = std::function<ImageBuffer(std::ifstream&, const size_t, const unsigned int, const unsigned int)>;
 
-    template <unsigned int ALIGN>
-    static constexpr unsigned int align(const unsigned int x) {
-        return (x + (ALIGN - 1)) & ~(ALIGN - 1);
+    template <unsigned int ALIGNMENT>
+    static constexpr unsigned int alignUp(const unsigned int x) {
+        static_assert(ALIGNMENT > 0 && (ALIGNMENT & (ALIGNMENT - 1)) == 0, "ALIGNMENT must be a power of 2");
+        return (x + (ALIGNMENT - 1)) & ~(ALIGNMENT - 1);
     }
     unsigned int baseRows, baseCols, totalPixels;
     ImageBuffer randomMatrix;

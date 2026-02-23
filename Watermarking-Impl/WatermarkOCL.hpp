@@ -17,11 +17,11 @@ template <int p>
 class WatermarkOCL final : public WatermarkGPU<p> {
   public:
     WatermarkOCL<p>(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr)
-        : WatermarkGPU<p>(rows, cols, randomMatrixPath, psnr), texKernelDims{align<windowLocalSize.first>(rows), align<windowLocalSize.second>(cols)}, meKernelDims{rows, align<optimalLocalSize>(cols)},
+        : WatermarkGPU<p>(rows, cols, randomMatrixPath, psnr), texKernelDims{alignUp<windowLocalSize.first>(rows), alignUp<windowLocalSize.second>(cols)}, meKernelDims{rows, alignUp<optimalLocalSize>(cols)},
           programs(cl_utils::buildKernels(p)) {}
 
   private:
-    using WatermarkBase::align;
+    using WatermarkBase::alignUp;
     using clMemPtr = std::unique_ptr<cl_mem>;
 
     static constexpr unsigned int optimalLocalSize = 256; // safe universal local size for OpenCL, used almost anywhere
