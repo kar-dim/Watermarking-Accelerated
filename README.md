@@ -1,4 +1,4 @@
-# ICSD thesis / Efficient Image and Video Watermarking
+# Efficient Image and Video Watermarking
 
 ![512](https://github.com/user-attachments/assets/6544f178-4f99-43ff-850c-9f40db478f35)
 
