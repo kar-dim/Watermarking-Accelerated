@@ -36,25 +36,25 @@ int testForImage(const INIReader& inir, int p, float psnr) {
     std::cout << "Each test will be executed " << loops << " times.\n";
 
     // load watermarking session
-    ImageHandle session{nullptr};
-    const double loadTime = executionTime([&]() { session = initImage(imageFile, watermarkSeed, p, psnr); });
+    auto s = createImageSession(watermarkSeed, p, psnr);
+    const double loadTime = executionTime([&]() { loadImage(s.get(), imageFile); });
     std::cout << "Time to load image data from disk: " << loadTime << " seconds\n\n";
 
     // helper lambda for embedding and detection benchmarks
     auto runWatermarkingProcess = [&](MaskMethod method, const std::string& name) {
         // embed
-        const double embedTime = executionTime([&]() { embedImage(session.get(), method); }, loops);
+        const double embedTime = executionTime([&]() { embedImage(s.get(), method); }, loops);
         std::cout << std::format("Calculation of {} mask (p = {}, PSNR = {}dB)\n{}\n\n", name, p, psnr, formatExecutionTime(showFps, embedTime / loops));
         // prepare buffer for detection (convert to float)
-        prepareDetectionImage(session.get(), method);
+        prepareDetectionImage(s.get(), method);
         // detect
         float corr = 0;
-        const double detectTime = executionTime([&]() { corr = detectEmbeddedBuffer(session.get(), method); }, loops);
+        const double detectTime = executionTime([&]() { corr = detectEmbeddedBuffer(s.get(), method); }, loops);
         std::cout << std::format("Calculation of {} correlation:\n{}\n\n", name, formatExecutionTime(showFps, detectTime / loops));
         // optionally save to disk
         if (saveToDisk) {
             std::cout << "Writing to disk... ";
-            saveImage(session.get(), imageFile, method);
+            saveImage(s.get(), imageFile, method);
             std::cout << success("Successfully saved to disk\n\n");
         }
         return corr;

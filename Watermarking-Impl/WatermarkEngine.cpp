@@ -54,6 +54,11 @@ void initializeEnvironment(const int openclDevice) {
 }
 
 struct ImageSession {
+    uint32_t seed;
+    int p;
+    float psnr;
+    int currentRows = 0;
+    int currentCols = 0;
     ImageFileBuffer imgBuffer;
     std::unique_ptr<WatermarkBase> watermarkObj;
     ImageOutputBuffer watermarkBuffer;
@@ -62,15 +67,26 @@ struct ImageSession {
 
 void ImageSessionDeleter::operator()(ImageSession* s) const { delete s; }
 
-ImageHandle initImage(const std::string& imagePath, const uint32_t watermarkSeed, const int p, const float psnr) {
+ImageHandle createImageSession(const uint32_t watermarkSeed, const int p, const float psnr) {
     auto* session = new ImageSession();
-    loadImage(session->imgBuffer, imagePath);
-    auto& [rgb, img, alpha, rows, cols, isRGB] = session->imgBuffer;
-    session->watermarkObj = createWatermarkObject(rows, cols, watermarkSeed, p, psnr);
-#if defined(_USE_EIGEN_)
-    session->watermarkBuffer = isRGB ? ImageOutputBuffer(eigen_utils::makeEigenRGBu8(rows, cols)) : ImageOutputBuffer(Gray8Buffer(rows, cols));
-#endif
+    session->seed = watermarkSeed;
+    session->p = p;
+    session->psnr = psnr;
     return ImageHandle(session);
+}
+
+void loadImage(ImageSession* s, const std::string& imagePath) {
+    InternalUtils::loadImage(s->imgBuffer, imagePath);
+    auto& [rgb, img, alpha, rows, cols, isRGB] = s->imgBuffer;
+    // lazy initialization of the watermark object and buffers, only if dimensions change or not initialized yet
+    if (!s->watermarkObj || s->currentRows != rows || s->currentCols != cols) {
+        s->watermarkObj = createWatermarkObject(rows, cols, s->seed, s->p, s->psnr);
+        s->currentRows = rows;
+        s->currentCols = cols;
+#if defined(_USE_EIGEN_)
+        s->watermarkBuffer = isRGB ? ImageOutputBuffer(eigen_utils::makeEigenRGBu8(rows, cols)) : ImageOutputBuffer(Gray8Buffer(rows, cols));
+#endif
+    }
 }
 
 void embedImage(ImageSession* s, MaskMethod method) {

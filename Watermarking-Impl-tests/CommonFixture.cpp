@@ -20,7 +20,8 @@ class WatermarkTest : public ::testing::Test {
 
     void SetUp() override {
         initializeEnvironment(0);
-        session = initImage(imageFile, watermarkSeed, p, psnr);
+        session = createImageSession(watermarkSeed, p, psnr);
+        loadImage(session.get(), imageFile);
     }
 
     void TearDown() override {
@@ -30,7 +31,7 @@ class WatermarkTest : public ::testing::Test {
 };
 
 // test embedding
- TEST_F(WatermarkTest, EmbedWatermark) {
+TEST_F(WatermarkTest, EmbedWatermark) {
     ASSERT_NE(session, nullptr) << "Session failed to initialize!";
     EXPECT_NO_THROW(embedImage(session.get(), MaskMethod::NVF));
     EXPECT_NO_THROW(embedImage(session.get(), MaskMethod::ME));
@@ -61,7 +62,8 @@ TEST_F(WatermarkTest, SaveToDisk) {
     saveImage(session.get(), imageFile, MaskMethod::ME);
     EXPECT_TRUE(std::filesystem::exists(imageMePath)) << "ME image was not saved to disk!";
     // test if the saved image can be loaded and detected correctly
-    ImageHandle diskSession = initImage(imageMePath, watermarkSeed, p, psnr);
+    ImageHandle diskSession = createImageSession(watermarkSeed, p, psnr);
+    loadImage(diskSession.get(), imageMePath);
     const float diskCorr = detectLoadedImage(diskSession.get(), MaskMethod::ME);
     EXPECT_GT(diskCorr, 0.80f) << "The saved image lost too much watermark data after saving to disk, OR was not embedded correctly!";
 }

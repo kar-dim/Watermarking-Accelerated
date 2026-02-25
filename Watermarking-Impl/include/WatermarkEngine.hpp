@@ -26,7 +26,8 @@ using ImageHandle = std::unique_ptr<ImageSession, ImageSessionDeleter>;
 void initializeEnvironment(const int openclDevice = 0);
 
 // image processing functions
-ImageHandle initImage(const std::string& imagePath, const uint32_t watermarkSeed, const int p, const float psnr);
+ImageHandle createImageSession(const uint32_t watermarkSeed, const int p, const float psnr);
+void loadImage(ImageSession* session, const std::string& imagePath);
 void embedImage(ImageSession* session, MaskMethod method);
 void prepareDetectionImage(ImageSession* session, MaskMethod method);
 float detectLoadedImage(const ImageSession* session, MaskMethod method);
