@@ -7,9 +7,7 @@
 #include "WatermarkBase.hpp"
 #include <cmath>
 #include <cstdint>
-#include <fstream>
 #include <omp.h>
-#include <string>
 
 /*!
  *  \brief  Functions for watermark computation and detection, Eigen implementation.

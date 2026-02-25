@@ -1,5 +1,4 @@
 #include "common_utils.hpp"
-#include "common_utils.hpp"
 #include "libs/inih/INIReader.h"
 #include "WatermarkEngine.hpp"
 #include <algorithm>
