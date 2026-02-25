@@ -62,7 +62,7 @@ struct ImageSession {
 
 void ImageSessionDeleter::operator()(ImageSession* s) const { delete s; }
 
-ImageHandle openImage(const std::string& imagePath, const std::string& watermarkDataPath, const int p, const float psnr) {
+ImageHandle initImage(const std::string& imagePath, const std::string& watermarkDataPath, const int p, const float psnr) {
     auto* session = new ImageSession();
     loadImage(session->imgBuffer, imagePath);
     auto& [rgb, img, alpha, rows, cols, isRGB] = session->imgBuffer;
@@ -101,7 +101,7 @@ void saveImage(const ImageSession* s, const std::string& outPath, MaskMethod met
 
 void VideoSessionDeleter::operator()(VideoSession* s) const { delete s; }
 
-VideoHandle openVideo(const VideoSettings& settings) {
+VideoHandle initVideo(const VideoSettings& settings) {
     av_log_set_level(AV_LOG_INFO);
     auto* session = new VideoSession();
     session->settings = settings;

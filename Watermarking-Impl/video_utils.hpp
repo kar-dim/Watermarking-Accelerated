@@ -36,8 +36,8 @@ inline bool isHDR(const AVCodecContext* codecCtx) { return codecCtx->color_trc =
 
 #if defined(_USE_CUDA_)
 AVCodecContextPtr openDecoderHWAccel(const AVCodecParameters* inputCodecParams, const std::string& userHwDecoder, bool& useHwDecoder);
-void embedWatermarkHWAccel(WatermarkEngine::VideoSession* session, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe);
-void detectWatermarkHWAccel(WatermarkEngine::VideoSession* session, int& framesCount, const AVFrame* frame);
+void embedWatermarkHWAccel(WatermarkEngine::VideoSession* s, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe);
+void detectWatermarkHWAccel(WatermarkEngine::VideoSession* s, int& framesCount, const AVFrame* frame);
 #endif
 std::string getFilterGraphString(const WatermarkEngine::VideoSession* s);
 bool initFilterGraph(WatermarkEngine::VideoSession* s);
@@ -51,12 +51,12 @@ inline std::string getPixFmt(const AVStream* st) { return st->codecpar->color_ra
 inline std::string getColorRange(const AVStream* st) { return st->codecpar->color_range == AVCOL_RANGE_JPEG ? "-color_range:v:0 pc " : "-color_range:v:0 tv "; }
 std::string getStreamRotation(const AVStream* st);
 int findVideoStream(const AVFormatContext* inputFormatCtx);
-void embedWatermark(WatermarkEngine::VideoSession* session, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe);
-void detectWatermark(WatermarkEngine::VideoSession* session, int& framesCount, const AVFrame* frame);
-void embedAndWriteFrame(WatermarkEngine::VideoSession* session, const ImageBuffer& buffer, const int elements, FILE* ffmpegPipe);
-void processAndWriteYPlane(const bool embedWatermark, const AVFrame* frame, WatermarkEngine::VideoSession* session, FILE* ffmpegPipe);
-void writeChromaPlanes(const AVFrame* frame, WatermarkEngine::VideoSession* session, FILE* ffmpegPipe);
-int videoDispatcher(WatermarkEngine::VideoSession* session, VideoMode op, const bool needsFiltert = false, FILE* ffmpegPipe = nullptr);
+void embedWatermark(WatermarkEngine::VideoSession* s, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe);
+void detectWatermark(WatermarkEngine::VideoSession* s, int& framesCount, const AVFrame* frame);
+void embedAndWriteFrame(WatermarkEngine::VideoSession* s, const ImageBuffer& buffer, const int elements, FILE* ffmpegPipe);
+void processAndWriteYPlane(const bool embedWatermark, const AVFrame* frame, WatermarkEngine::VideoSession* s, FILE* ffmpegPipe);
+void writeChromaPlanes(const AVFrame* frame, WatermarkEngine::VideoSession* s, FILE* ffmpegPipe);
+int videoDispatcher(WatermarkEngine::VideoSession* s, VideoMode op, const bool needsFiltert = false, FILE* ffmpegPipe = nullptr);
 void filterFrame(AVFramePtr& frame, AVFramePtr& filteredFrame, const WatermarkEngine::VideoSession* s);
 
 // main frames loop logic for video watermark embedding and detection
@@ -103,13 +103,13 @@ int processFrames(const WatermarkEngine::VideoSession* s, Func&& processFrame) {
 }
 
 template <typename TYPE, typename T>
-void loadInputFrame(WatermarkEngine::VideoSession* session, T* hostPtr) {
-    const int width = session->videoStream->codecpar->width;
-    const int height = session->videoStream->codecpar->height;
+void loadInputFrame(WatermarkEngine::VideoSession* s, T* hostPtr) {
+    const int width = s->videoStream->codecpar->width;
+    const int height = s->videoStream->codecpar->height;
 #if defined(_USE_GPU_)
-    session->inputFrame = TYPE(width, height, hostPtr, afHost).T().as(f32);
+    s->inputFrame = TYPE(width, height, hostPtr, afHost).T().as(f32);
 #else
-    session->inputFrame = Eigen::Map<TYPE>(hostPtr, width, height).transpose().template cast<float>();
+    s->inputFrame = Eigen::Map<TYPE>(hostPtr, width, height).transpose().template cast<float>();
 #endif
 }
 } // namespace video_utils

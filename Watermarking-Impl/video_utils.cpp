@@ -86,49 +86,49 @@ AVCodecContextPtr openDecoderHWAccel(const AVCodecParameters* inputCodecParams, 
 }
 
 // embed watermark in a video frame by using CUDA hardware acceleration
-void embedWatermarkHWAccel(VideoSession* session, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe) {
+void embedWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe) {
     const auto afStream = CudaStreamManager::getInstance().getAfStream();
     const auto videoStream = CudaStreamManager::getInstance().getCustomStream();
-    const int width = session->width();
-    const int height = session->height();
+    const int width = s->width();
+    const int height = s->height();
     const ImageBuffer lumaBuffer(height, width, f32);
     const ImageBuffer chromaBuffer(width, height / 2, u8);
     // launch NV12 to YUV420 kernel (for UV planes)
     cuda_utils::launchNV12ToYUV420pKernel(frame->data[1], frame->linesize[1], chromaBuffer.device<uint8_t>(), width / 2, height / 2, afStream);
     chromaBuffer.unlock();
 
-    if (framesCount % session->settings.watermarkInterval == 0) {
+    if (framesCount % s->settings.watermarkInterval == 0) {
         // overlap kernel and host copy
         cuda_utils::launchPitchedToFloatKernel(frame->data[0], lumaBuffer.device<float>(), width, height, frame->linesize[0], videoStream);
-        chromaBuffer.host(session->hostFrame.get()->get() + (width * height));
+        chromaBuffer.host(s->hostFrame.get()->get() + (width * height));
         cudaStreamSynchronize(videoStream);
         // write Y + UV packed
-        embedAndWriteFrame(session, lumaBuffer, width * height * 3 / 2, ffmpegPipe);
+        embedAndWriteFrame(s, lumaBuffer, width * height * 3 / 2, ffmpegPipe);
     } else {
         // try to overlap the two D2H copies
-        cudaMemcpy2DAsync(session->hostFrame.get()->get(), width, frame->data[0], frame->linesize[0], width, height, cudaMemcpyDeviceToHost, videoStream);
-        chromaBuffer.host(session->hostFrame.get()->get() + (width * height));
+        cudaMemcpy2DAsync(s->hostFrame.get()->get(), width, frame->data[0], frame->linesize[0], width, height, cudaMemcpyDeviceToHost, videoStream);
+        chromaBuffer.host(s->hostFrame.get()->get() + (width * height));
         cudaStreamSynchronize(videoStream);
         // write Y + UV packed
-        fwrite(session->hostFrame.get()->get(), 1, width * height * 3 / 2, ffmpegPipe);
+        fwrite(s->hostFrame.get()->get(), 1, width * height * 3 / 2, ffmpegPipe);
     }
     framesCount++;
 }
 
 // detect a watermark in a video frame using hardware acceleration
 // directly use the GPU memory from the cuda decoder, no need to copy the data to host and back to GPU
-void detectWatermarkHWAccel(VideoSession* session, int& framesCount, const AVFrame* frame) {
+void detectWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* frame) {
     // early exit, check if we should skip detection for this frame
-    if (framesCount % session->settings.watermarkInterval != 0) {
+    if (framesCount % s->settings.watermarkInterval != 0) {
         framesCount++;
         return;
     }
     // detect watermark after watermarkInterval frames
     const auto afStream = CudaStreamManager::getInstance().getAfStream();
-    const ImageBuffer lumaBuffer(session->height(), session->width(), f32);
-    cuda_utils::launchPitchedToFloatKernel(frame->data[0], lumaBuffer.device<float>(), session->width(), session->height(), frame->linesize[0], afStream);
+    const ImageBuffer lumaBuffer(s->height(), s->width(), f32);
+    cuda_utils::launchPitchedToFloatKernel(frame->data[0], lumaBuffer.device<float>(), s->width(), s->height(), frame->linesize[0], afStream);
     lumaBuffer.unlock();
-    float correlation = session->watermarkObj->detectWatermark(lumaBuffer, MaskMethod::ME);
+    float correlation = s->watermarkObj->detectWatermark(lumaBuffer, MaskMethod::ME);
     cout << "Correlation for frame: " << (framesCount + 1) << ": " << correlation << "\n";
     framesCount++;
 }
@@ -267,14 +267,14 @@ bool initFilterGraph(VideoSession* s) {
 }
 
 // helper method to embed the watermark in the video frame and write it to the ffmpeg pipe
-void embedAndWriteFrame(VideoSession* session, const ImageBuffer& buffer, const int elements, FILE* ffmpegPipe) {
-    session->watermarkObj->makeWatermark(buffer, buffer, session->watermarkedFrame, MaskMethod::ME);
+void embedAndWriteFrame(VideoSession* s, const ImageBuffer& buffer, const int elements, FILE* ffmpegPipe) {
+    s->watermarkObj->makeWatermark(buffer, buffer, s->watermarkedFrame, MaskMethod::ME);
 #if defined(_USE_GPU_)
-    session->watermarkedFrame.T().host(session->hostFrame.get()->get());
-    fwrite(session->hostFrame.get()->get(), 1, elements, ffmpegPipe);
+    s->watermarkedFrame.T().host(s->hostFrame.get()->get());
+    fwrite(s->hostFrame.get()->get(), 1, elements, ffmpegPipe);
 #elif defined(_USE_EIGEN_)
-    session->grayFrame = session->watermarkedFrame.getGray().transpose();
-    fwrite(session->grayFrame.data(), 1, elements, ffmpegPipe);
+    s->grayFrame = s->watermarkedFrame.getGray().transpose();
+    fwrite(s->grayFrame.data(), 1, elements, ffmpegPipe);
 #endif
 }
 
@@ -302,32 +302,32 @@ int videoDispatcher(VideoSession* s, VideoMode op, const bool needsFilter, FILE*
 // clang-format on
 
 // embed watermark in a video frame
-void embedWatermark(VideoSession* session, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe) {
-    const bool embedWatermark = framesCount % session->settings.watermarkInterval == 0;
-    processAndWriteYPlane(embedWatermark, frame, session, ffmpegPipe);
-    writeChromaPlanes(frame, session, ffmpegPipe);
+void embedWatermark(VideoSession* s, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe) {
+    const bool embedWatermark = framesCount % s->settings.watermarkInterval == 0;
+    processAndWriteYPlane(embedWatermark, frame, s, ffmpegPipe);
+    writeChromaPlanes(frame, s, ffmpegPipe);
     framesCount++;
 }
 
 // detect the watermark for a video frame
-void detectWatermark(VideoSession* session, int& framesCount, const AVFrame* frame) {
+void detectWatermark(VideoSession* s, int& framesCount, const AVFrame* frame) {
     // early exit, check if we should skip detection for this frame
-    if (framesCount % session->settings.watermarkInterval != 0) {
+    if (framesCount % s->settings.watermarkInterval != 0) {
         framesCount++;
         return;
     }
-    const int width = session->width();
-    const int height = session->height();
+    const int width = s->width();
+    const int height = s->height();
     // detect watermark after watermarkInterval frames, else early return
     uint8_t* srcY = frame->data[0];
     // if there is row padding (for alignment), we must copy the data to a contiguous block!
     if (frame->linesize[0] != width) {
         for (int y = 0; y < height; y++)
-            memcpy(session->hostFrame.get()->get() + y * width, frame->data[0] + y * frame->linesize[0], width);
-        srcY = session->hostFrame.get()->get();
+            memcpy(s->hostFrame.get()->get() + y * width, frame->data[0] + y * frame->linesize[0], width);
+        srcY = s->hostFrame.get()->get();
     }
-    loadInputFrame<Gray8Buffer>(session, srcY);
-    float correlation = session->watermarkObj->detectWatermark(session->inputFrame, MaskMethod::ME);
+    loadInputFrame<Gray8Buffer>(s, srcY);
+    float correlation = s->watermarkObj->detectWatermark(s->inputFrame, MaskMethod::ME);
     cout << "Correlation for frame: " << (framesCount + 1) << ": " << correlation << "\n";
     framesCount++;
 }
@@ -419,27 +419,27 @@ AVRational getTimeBase(const AVStream* st) {
 }
 
 // runs the watermark creation for a video frame and writes the watermarked frame to the ffmpeg pipe
-void processAndWriteYPlane(const bool embedWatermark, const AVFrame* frame, VideoSession* session, FILE* ffmpegPipe) {
-    const int width = session->width();
-    const int height = session->height();
+void processAndWriteYPlane(const bool embedWatermark, const AVFrame* frame, VideoSession* s, FILE* ffmpegPipe) {
+    const int width = s->width();
+    const int height = s->height();
     uint8_t* srcY = frame->data[0];
     // if there is row padding (for alignment), we must copy the data to a contiguous block!
     if (frame->linesize[0] != width) {
         for (int y = 0; y < height; y++)
-            memcpy(session->hostFrame.get()->get() + y * width, srcY + y * frame->linesize[0], width);
-        srcY = session->hostFrame.get()->get();
+            memcpy(s->hostFrame.get()->get() + y * width, srcY + y * frame->linesize[0], width);
+        srcY = s->hostFrame.get()->get();
     }
     if (embedWatermark) {
-        loadInputFrame<Gray8Buffer>(session, srcY);
-        embedAndWriteFrame(session, session->inputFrame, width * height, ffmpegPipe);
+        loadInputFrame<Gray8Buffer>(s, srcY);
+        embedAndWriteFrame(s, s->inputFrame, width * height, ffmpegPipe);
     } else
         fwrite(srcY, 1, width * height, ffmpegPipe);
 }
 
 // writes the chroma planes (U and V) to the ffmpeg pipe, either assuming aligned pointers or not
-void writeChromaPlanes(const AVFrame* frame, VideoSession* session, FILE* ffmpegPipe) {
-    const int width = session->width();
-    const int height = session->height();
+void writeChromaPlanes(const AVFrame* frame, VideoSession* s, FILE* ffmpegPipe) {
+    const int width = s->width();
+    const int height = s->height();
     // lambda to write a single chroma plane
     auto writePlane = [&](const uint8_t* src, const int linesize) {
         if (linesize != width / 2) {

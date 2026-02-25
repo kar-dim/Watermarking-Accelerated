@@ -33,7 +33,7 @@ int testForImage(const INIReader& inir, int p, float psnr) {
 
     // load watermarking session
     ImageHandle session{nullptr};
-    const double loadTime = executionTime([&]() { session = openImage(imageFile, watermarkFile, p, psnr); });
+    const double loadTime = executionTime([&]() { session = initImage(imageFile, watermarkFile, p, psnr); });
     std::cout << "Time to load image data from disk: " << loadTime << " seconds\n\n";
 
     // helper lambda for embedding and detection benchmarks
@@ -81,7 +81,7 @@ int testForVideo(const INIReader& inir, const std::string& videoFile, int p, flo
     settings.encodeOutputPath = inir.Get("video", "encode_output_path", "");
 
     // open video session
-    VideoHandle session = openVideo(settings);
+    VideoHandle session = initVideo(settings);
 
     int framesProcessed = 0;
     double totalTime = 0;

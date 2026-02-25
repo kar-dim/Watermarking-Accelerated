@@ -18,8 +18,8 @@ class WatermarkTest : public ::testing::Test {
     ImageHandle session{nullptr};
 
     void SetUp() override {
-        WatermarkEngine::initializeEnvironment(0);
-        session = WatermarkEngine::openImage(imageFile, watermarkPath, p, psnr);
+        initializeEnvironment(0);
+        session = initImage(imageFile, watermarkPath, p, psnr);
     }
 
     void TearDown() override {
@@ -31,20 +31,20 @@ class WatermarkTest : public ::testing::Test {
 // test embedding
  TEST_F(WatermarkTest, EmbedWatermark) {
     ASSERT_NE(session, nullptr) << "Session failed to initialize!";
-    EXPECT_NO_THROW(WatermarkEngine::embedImage(session.get(), MaskMethod::NVF));
-    EXPECT_NO_THROW(WatermarkEngine::embedImage(session.get(), MaskMethod::ME));
+    EXPECT_NO_THROW(embedImage(session.get(), MaskMethod::NVF));
+    EXPECT_NO_THROW(embedImage(session.get(), MaskMethod::ME));
 }
 
 // test correlation
 TEST_F(WatermarkTest, DetectWatermark) {
     // nvf
-    WatermarkEngine::embedImage(session.get(), MaskMethod::NVF);
-    WatermarkEngine::prepareDetectionImage(session.get(), MaskMethod::NVF);
-    const float corrNvf = WatermarkEngine::detectEmbeddedBuffer(session.get(), MaskMethod::NVF);
+    embedImage(session.get(), MaskMethod::NVF);
+    prepareDetectionImage(session.get(), MaskMethod::NVF);
+    const float corrNvf = detectEmbeddedBuffer(session.get(), MaskMethod::NVF);
     // me
-    WatermarkEngine::embedImage(session.get(), MaskMethod::ME);
-    WatermarkEngine::prepareDetectionImage(session.get(), MaskMethod::ME);
-    const float corrMe = WatermarkEngine::detectEmbeddedBuffer(session.get(), MaskMethod::ME);
+    embedImage(session.get(), MaskMethod::ME);
+    prepareDetectionImage(session.get(), MaskMethod::ME);
+    const float corrMe = detectEmbeddedBuffer(session.get(), MaskMethod::ME);
     // ME algorithm should (generally) have higher or equal correlation
     EXPECT_GE(corrMe, corrNvf);
 }
@@ -52,15 +52,15 @@ TEST_F(WatermarkTest, DetectWatermark) {
 // test saving to disk
 TEST_F(WatermarkTest, SaveToDisk) {
     // nvf
-    WatermarkEngine::embedImage(session.get(), MaskMethod::NVF);
-    WatermarkEngine::saveImage(session.get(), imageFile, MaskMethod::NVF);
+    embedImage(session.get(), MaskMethod::NVF);
+    saveImage(session.get(), imageFile, MaskMethod::NVF);
     EXPECT_TRUE(std::filesystem::exists(imageNvfPath)) << "NVF image was not saved to disk!";
     // me
-    WatermarkEngine::embedImage(session.get(), MaskMethod::ME);
-    WatermarkEngine::saveImage(session.get(), imageFile, MaskMethod::ME);
+    embedImage(session.get(), MaskMethod::ME);
+    saveImage(session.get(), imageFile, MaskMethod::ME);
     EXPECT_TRUE(std::filesystem::exists(imageMePath)) << "ME image was not saved to disk!";
     // test if the saved image can be loaded and detected correctly
-    ImageHandle diskSession = WatermarkEngine::openImage(imageMePath, watermarkPath, p, psnr);
-    const float diskCorr = WatermarkEngine::detectLoadedImage(diskSession.get(), MaskMethod::ME);
+    ImageHandle diskSession = initImage(imageMePath, watermarkPath, p, psnr);
+    const float diskCorr = detectLoadedImage(diskSession.get(), MaskMethod::ME);
     EXPECT_GT(diskCorr, 0.80f) << "The saved image lost too much watermark data after saving to disk, OR was not embedded correctly!";
 }

@@ -25,7 +25,7 @@ using ImageHandle = std::unique_ptr<ImageSession, ImageSessionDeleter>;
 void initializeEnvironment(const int openclDevice = 0);
 
 // image processing functions
-ImageHandle openImage(const std::string& imagePath, const std::string& watermarkDataPath, const int p, const float psnr);
+ImageHandle initImage(const std::string& imagePath, const std::string& watermarkDataPath, const int p, const float psnr);
 void embedImage(ImageSession* session, MaskMethod method);
 void prepareDetectionImage(ImageSession* session, MaskMethod method);
 float detectLoadedImage(const ImageSession* session, MaskMethod method);
@@ -45,7 +45,7 @@ struct VideoSettings {
     std::string encodeOutputPath;
 };
 
-VideoHandle openVideo(const VideoSettings& settings);
+VideoHandle initVideo(const VideoSettings& settings);
 int embedVideo(VideoSession* session);
 int detectVideo(VideoSession* session);
 } // namespace WatermarkEngine

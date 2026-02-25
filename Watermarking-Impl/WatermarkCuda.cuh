@@ -25,10 +25,10 @@ class WatermarkCuda final : public WatermarkGPU<p> {
         meParams = {meTotalBlocksY, meTotalBlocksY * this->baseCols};
         // initialize cub scratch memory (for ME mask calculation used in detector) once
         AbsTransformOp op;
-        auto dummy_iter = thrust::make_transform_iterator((const float*)nullptr, op);
+        auto iter = thrust::make_transform_iterator((const float*)nullptr, op);
         size_t tmpStorageBytes = 0;
         // ask CUB for required size of the temporary storage and allocate it permantently so we won't ask all the time
-        cub::DeviceReduce::Max(nullptr, tmpStorageBytes, dummy_iter, (float*)nullptr, this->totalPixels, 0);
+        cub::DeviceReduce::Max(nullptr, tmpStorageBytes, iter, (float*)nullptr, this->totalPixels, 0);
         cubTempStorage = af::array(tmpStorageBytes, u8);
     }
 

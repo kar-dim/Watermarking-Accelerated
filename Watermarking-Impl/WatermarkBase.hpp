@@ -48,7 +48,7 @@ class WatermarkBase {
   private:
     static inline float computeStrengthFactor(const float psnr) { return 255.0f / std::sqrt(std::pow(10.0f, psnr / 10.0f)); }
 
-    // helper method to load the random noise matrix W from the file specified.
+    // helper method to load the random noise matrix W from the file specified
     ImageBuffer loadRandomMatrix(const std::string& randomMatrixPath, WatermarkLoader loader) const {
         std::ifstream stream(randomMatrixPath.c_str(), std::ios::binary);
         if (!stream.is_open())
