@@ -124,7 +124,11 @@ ffmpeg -y -f rawvideo
 
 # How to Build
 
-This project is built using **Visual Studio** and consists of a **solution with two projects**.
+This project is built using **Visual Studio** and consists of a **solution with various projects**.
+- Watermarking-Impl: The Core of this project, implements the algorithms for each backend. It is built as a **static library**.
+- Watermarking-CLI: The sample command line application that interacts with the Core project to embed and detect watermark in images and video.
+- Watermarking-Generate: A very fast program for fast watermark generation in binary format.
+- Watermarking-Tests: Basic tests for the Core project.
 
 ### Solution Configurations
 
