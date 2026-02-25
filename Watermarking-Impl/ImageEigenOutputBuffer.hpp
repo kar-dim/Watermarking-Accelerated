@@ -15,6 +15,7 @@ class ImageEigenOutputBuffer {
     std::variant<std::monostate, Gray8Buffer, EigenArrayU8RGB> data;
 
   public:
+    ImageEigenOutputBuffer() = default;
     ImageEigenOutputBuffer(const Gray8Buffer& gray) : data(gray) {}
     ImageEigenOutputBuffer(const EigenArrayU8RGB& rgb) : data(rgb) {}
 

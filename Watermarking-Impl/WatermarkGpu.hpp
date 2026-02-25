@@ -1,5 +1,6 @@
 #pragma once
 #include "buffer.hpp"
+#include "include/WatermarkTypes.hpp"
 #include "WatermarkBase.hpp"
 #include <arrayfire.h>
 #include <cmath>
@@ -21,13 +22,13 @@ class WatermarkGPU : public WatermarkBase {
 
     ~WatermarkGPU<p>() override = default;
 
-    void makeWatermark(const ImageBuffer& inputGrayImage, const ImageBuffer& inputImage, ImageOutputBuffer& output, float& watermarkStrength, const MASK_TYPE maskType) override {
-        output = computeStrengthenedWatermark(inputGrayImage, inputImage, watermarkStrength, maskType);
+    void makeWatermark(const ImageBuffer& inputGrayImage, const ImageBuffer& inputImage, ImageOutputBuffer& output, const MaskMethod maskType) override {
+        output = computeStrengthenedWatermark(inputGrayImage, inputImage, maskType);
     }
 
-    float detectWatermark(const ImageBuffer& inputImage, const MASK_TYPE maskType) override {
+    float detectWatermark(const ImageBuffer& inputImage, const MaskMethod maskType) override {
         const af::array errorSequenceW = computePredictionErrorData(inputImage, false);
-        const af::array mask = maskType == ME ? computePredictionErrorMask(errorSequenceW) : computeCustomMask(inputImage);
+        const af::array mask = maskType == MaskMethod::ME ? computePredictionErrorMask(errorSequenceW) : computeCustomMask(inputImage);
         mask.eval(); // we make sure mask is calculated, else arrayfire panics and deep copies!
         const float correlation = computeCorrelation(errorSequenceW, mask);
         return std::isfinite(correlation) ? correlation : 0.0f;
@@ -62,7 +63,7 @@ class WatermarkGPU : public WatermarkBase {
     af::array stopFlag = af::constant(0, 1, s32);
 
     // computes u = a * (M * W) where a=strength, M=mask calculated and W is the random noise matrix
-    virtual af::array computeStrengthenedWatermark(const ImageBuffer& inputGrayImage, const ImageBuffer& inputImage, float& watermarkStrength, const MASK_TYPE maskType) const = 0;
+    virtual af::array computeStrengthenedWatermark(const ImageBuffer& inputGrayImage, const ImageBuffer& inputImage, const MaskMethod maskType) const = 0;
 
     // computes custom Mask
     virtual af::array computeCustomMask(const af::array& image) const = 0;

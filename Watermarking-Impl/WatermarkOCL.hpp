@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include "include/WatermarkTypes.hpp"
 #include "opencl_init.h"
 #include "opencl_utils.hpp"
 #include "WatermarkBase.hpp"
@@ -35,7 +36,7 @@ class WatermarkOCL final : public WatermarkGPU<p> {
     unsigned int corrFinalLocalSize = cl_utils::maxPow2WorkGroupSize(device); // we could use the safe universal of 256, but the kernel that uses this benefits from larger local sizes
     cl::Program programs;
 
-    af::array computeStrengthenedWatermark(const af::array& inputGrayImage, const af::array& inputImage, float& watermarkStrength, const MASK_TYPE maskType) const override {
+    af::array computeStrengthenedWatermark(const af::array& inputGrayImage, const af::array& inputImage, const MaskMethod maskType) const override {
         using namespace cl_utils;
         const af::array u(inputGrayImage.dims(), f32);
         const af::array output(inputImage.dims(), u8);
@@ -48,7 +49,7 @@ class WatermarkOCL final : public WatermarkGPU<p> {
         const clMemPtr inputMem(inputImage.device<cl_mem>());
         const clMemPtr inputGrayMem(inputGrayImage.device<cl_mem>());
 
-        if (maskType == NVF) {
+        if (maskType == MaskMethod::NVF) {
             const int workGroups = static_cast<int>((this->texKernelDims.first / windowLocalSize.first) * (this->texKernelDims.second / windowLocalSize.second));
             const af::array partials(workGroups, f32);
             const clMemPtr partialsMem(partials.device<cl_mem>());

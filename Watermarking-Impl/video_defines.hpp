@@ -10,6 +10,8 @@ extern "C" {
 #include "libavformat/avformat.h"
 #include "libavutil/mem.h"
 #include "libavutil/pixfmt.h"
+#include "libavutil/frame.h"
+#include "libavutil/buffer.h"
 }
 
 namespace video_utils::detail {
@@ -34,8 +36,6 @@ struct AVGenericDeleter {
  *  \author Dimitris Karatzas
  */
 namespace video_utils {
-enum VideoOp { EMBED, DETECT };
-
 using AVPacketPtr = std::unique_ptr<AVPacket, detail::AVDeleter<av_packet_free>>;
 using AVFramePtr = std::unique_ptr<AVFrame, detail::AVDeleter<av_frame_free>>;
 using AVBufferRefPtr = std::unique_ptr<AVBufferRef, detail::AVDeleter<av_buffer_unref>>;

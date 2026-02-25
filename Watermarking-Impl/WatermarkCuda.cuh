@@ -1,6 +1,7 @@
 ﻿#pragma once
 #include "cuda_utils.hpp"
 #include "CudaStreamManager.hpp"
+#include "include/WatermarkTypes.hpp"
 #include "kernels/kernels.cuh"
 #include "WatermarkBase.hpp"
 #include "WatermarkGpu.hpp"
@@ -45,7 +46,7 @@ class WatermarkCuda final : public WatermarkGPU<p> {
     unsigned int gridOptimalMe;
     af::array cubTempStorage;
 
-    af::array computeStrengthenedWatermark(const af::array& inputGrayImage, const af::array& inputImage, float& watermarkStrength, const MASK_TYPE maskType) const override {
+    af::array computeStrengthenedWatermark(const af::array& inputGrayImage, const af::array& inputImage, const MaskMethod maskType) const override {
         const af::array u(inputGrayImage.dims(), f32);
         const af::array output(inputImage.dims(), u8);
         const af::array sumSq = af::constant(0.0f, 1, f32);
@@ -53,7 +54,7 @@ class WatermarkCuda final : public WatermarkGPU<p> {
         float* uPtr = u.device<float>();
         float* sumSqPtr = sumSq.device<float>();
         // fused kernel to compute NVF mask, strengthened watermark (u) and sum of squares of u
-        if (maskType == NVF) {
+        if (maskType == MaskMethod::NVF) {
             const dim3 gridSize = cuda_utils::gridSizeCalculate(windowBlockSize, this->baseCols, this->baseRows);
             nvf_u_and_sumsq_fused<p>
                 <<<gridSize, windowBlockSize, 0, afStream>>>(inputGrayImage.template device<float>(), this->randomMatrix.template device<float>(), uPtr, sumSqPtr, this->baseCols, this->baseRows);

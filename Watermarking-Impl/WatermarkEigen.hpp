@@ -2,6 +2,7 @@
 
 #include "buffer.hpp"
 #include "Eigen/Core"
+#include "include/WatermarkTypes.hpp"
 #include "PredictionErrorMatrixData.hpp"
 #include "WatermarkBase.hpp"
 #include <cmath>
@@ -44,10 +45,9 @@ class WatermarkEigen final : public WatermarkBase {
           uStrengthened(rows, cols), meMatrixData(omp_get_max_threads(), rows) {}
 
     // main watermark embedding method
-    void makeWatermark(const ImageBuffer& inputGrayImage, const ImageBuffer& inputImage, ImageOutputBuffer& output, float& watermarkStrength, const MASK_TYPE maskType) override {
+    void makeWatermark(const ImageBuffer& inputGrayImage, const ImageBuffer& inputImage, ImageOutputBuffer& output, const MaskMethod maskType) override {
         // compute the strengthened watermark, if it fails assign input to output and return
-        if (!computeStrengthenedWatermark(inputGrayImage.getGray(), watermarkStrength, maskType)) {
-            watermarkStrength = 0.0f;
+        if (!computeStrengthenedWatermark(inputGrayImage.getGray(), maskType)) {
             inputImage.assignTo(output);
             return;
         }
@@ -56,9 +56,9 @@ class WatermarkEigen final : public WatermarkBase {
     }
 
     // main watermark detection method
-    float detectWatermark(const ImageBuffer& inputImage, MASK_TYPE maskType) override {
+    float detectWatermark(const ImageBuffer& inputImage, MaskMethod maskType) override {
         const auto& watermarkedBuffer = inputImage.getGray();
-        if (maskType == NVF) {
+        if (maskType == MaskMethod::NVF) {
             if (!computePredictionErrorData<maskCalcNotRequired>(watermarkedBuffer))
                 return 0.0f;
             computeCustomMask(watermarkedBuffer);
@@ -225,8 +225,8 @@ class WatermarkEigen final : public WatermarkBase {
     }
 
     // compute the strengthened watermark, calculated by multiplying the mask with the strengthened watermark (random matrix)
-    bool computeStrengthenedWatermark(const ArrayXXf& inputImage, float& watermarkStrength, MASK_TYPE maskType) {
-        if (maskType == NVF)
+    bool computeStrengthenedWatermark(const ArrayXXf& inputImage, MaskMethod maskType) {
+        if (maskType == MaskMethod::NVF)
             computeCustomMask(inputImage);
         else {
             if (!computePredictionErrorData<maskCalcRequired>(inputImage))
@@ -245,7 +245,7 @@ class WatermarkEigen final : public WatermarkBase {
         if (sumSq <= 1e-3f) // for flat images/frames
             return false;
 
-        watermarkStrength = strengthFactor / std::sqrt(sumSq / (baseRows * baseCols));
+        const float watermarkStrength = strengthFactor / std::sqrt(sumSq / (baseRows * baseCols));
         uStrengthened *= watermarkStrength;
         return true;
     }

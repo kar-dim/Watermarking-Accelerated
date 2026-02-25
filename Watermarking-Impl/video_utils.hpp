@@ -1,6 +1,7 @@
 #pragma once
 
 #include "buffer.hpp"
+#include "include/WatermarkTypes.hpp"
 #include "video_defines.hpp"
 #include "VideoProcessingContext.hpp"
 #include <cerrno>
@@ -35,11 +36,11 @@ inline bool isHDR(const AVCodecContext* codecCtx) { return codecCtx->color_trc =
 
 #if defined(_USE_CUDA_)
 AVCodecContextPtr openDecoderHWAccel(const AVCodecParameters* inputCodecParams, const std::string& userHwDecoder, bool& useHwDecoder);
-void embedWatermarkHWAccel(VideoProcessingContext& data, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe);
-void detectWatermarkHWAccel(VideoProcessingContext& data, int& framesCount, const AVFrame* frame);
+void embedWatermarkHWAccel(WatermarkEngine::VideoSession* session, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe);
+void detectWatermarkHWAccel(WatermarkEngine::VideoSession* session, int& framesCount, const AVFrame* frame);
 #endif
-std::string getFilterGraphString(const AVCodecContext* codecCtx, const AVStream* st, const bool useHwDecoder);
-bool initFilterGraph(const AVCodecContext* inputDecoderCtx, const AVStream* st, const bool useHwDecoder, FilterGraphContext& filterCtx);
+std::string getFilterGraphString(const WatermarkEngine::VideoSession* s);
+bool initFilterGraph(WatermarkEngine::VideoSession* s);
 
 AVCodecContextPtr openDecoder(const AVCodecParameters* inputCodecParams, const std::string& userHwDecoder, bool& useHwDecoder);
 AVCodecContextPtr openSoftwareDecoder(const AVCodecParameters* inputCodecParams);
@@ -50,17 +51,17 @@ inline std::string getPixFmt(const AVStream* st) { return st->codecpar->color_ra
 inline std::string getColorRange(const AVStream* st) { return st->codecpar->color_range == AVCOL_RANGE_JPEG ? "-color_range:v:0 pc " : "-color_range:v:0 tv "; }
 std::string getStreamRotation(const AVStream* st);
 int findVideoStream(const AVFormatContext* inputFormatCtx);
-void embedWatermark(VideoProcessingContext& data, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe);
-void detectWatermark(VideoProcessingContext& data, int& framesCount, const AVFrame* frame);
-void embedAndWriteFrame(VideoProcessingContext& data, const ImageBuffer& buffer, const int elements, FILE* ffmpegPipe);
-void processAndWriteYPlane(const bool embedWatermark, const AVFrame* frame, VideoProcessingContext& data, FILE* ffmpegPipe);
-void writeChromaPlanes(const AVFrame* frame, VideoProcessingContext& data, FILE* ffmpegPipe);
-int videoDispatcher(VideoProcessingContext& data, const bool useHwDecoder, const VideoOp op, const bool needsFiltert = false, FILE* ffmpegPipe = nullptr);
-void filterFrame(AVFramePtr& frame, AVFramePtr& filteredFrame, const FilterGraphContext& filterGraphContext);
+void embedWatermark(WatermarkEngine::VideoSession* session, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe);
+void detectWatermark(WatermarkEngine::VideoSession* session, int& framesCount, const AVFrame* frame);
+void embedAndWriteFrame(WatermarkEngine::VideoSession* session, const ImageBuffer& buffer, const int elements, FILE* ffmpegPipe);
+void processAndWriteYPlane(const bool embedWatermark, const AVFrame* frame, WatermarkEngine::VideoSession* session, FILE* ffmpegPipe);
+void writeChromaPlanes(const AVFrame* frame, WatermarkEngine::VideoSession* session, FILE* ffmpegPipe);
+int videoDispatcher(WatermarkEngine::VideoSession* session, VideoMode op, const bool needsFiltert = false, FILE* ffmpegPipe = nullptr);
+void filterFrame(AVFramePtr& frame, AVFramePtr& filteredFrame, const WatermarkEngine::VideoSession* s);
 
 // main frames loop logic for video watermark embedding and detection
 template <bool needsFilter, typename Func>
-int processFrames(const VideoProcessingContext& data, Func&& processFrame) {
+int processFrames(const WatermarkEngine::VideoSession* s, Func&& processFrame) {
     const AVPacketPtr packet(av_packet_alloc());
     AVFramePtr frame(av_frame_alloc());
     AVFramePtr filteredFrame(nullptr);
@@ -69,13 +70,13 @@ int processFrames(const VideoProcessingContext& data, Func&& processFrame) {
     int framesCount = 0;
 
     // read video frames loop
-    while (av_read_frame(data.inputFormatCtx, packet.get()) >= 0) {
-        if (packet->stream_index != data.videoStreamIndex || avcodec_send_packet(data.inputDecoderCtx, packet.get()) < 0) {
+    while (av_read_frame(s->inputFormatCtx.get(), packet.get()) >= 0) {
+        if (packet->stream_index != s->videoStreamIndex || avcodec_send_packet(s->inputDecoderCtx.get(), packet.get()) < 0) {
             av_packet_unref(packet.get());
             continue;
         }
         while (true) {
-            const int ret = avcodec_receive_frame(data.inputDecoderCtx, frame.get());
+            const int ret = avcodec_receive_frame(s->inputDecoderCtx.get(), frame.get());
             if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
                 break;
             if (ret < 0) {
@@ -86,27 +87,29 @@ int processFrames(const VideoProcessingContext& data, Func&& processFrame) {
             }
             // optionally filter frame (10-bit to 8-bit conversion, HDR to SDR tonemapping)
             if constexpr (needsFilter)
-                filterFrame(frame, filteredFrame, data.filterGraphContext);
+                filterFrame(frame, filteredFrame, s);
             std::forward<Func>(processFrame)(frame.get(), framesCount);
         }
         av_packet_unref(packet.get());
     }
     // ensure all remaining frames are flushed
-    avcodec_send_packet(data.inputDecoderCtx, nullptr);
-    while (avcodec_receive_frame(data.inputDecoderCtx, frame.get()) == 0) {
+    avcodec_send_packet(s->inputDecoderCtx.get(), nullptr);
+    while (avcodec_receive_frame(s->inputDecoderCtx.get(), frame.get()) == 0) {
         if constexpr (needsFilter)
-            filterFrame(frame, filteredFrame, data.filterGraphContext);
+            filterFrame(frame, filteredFrame, s);
         std::forward<Func>(processFrame)(frame.get(), framesCount);
     }
     return framesCount;
 }
 
 template <typename TYPE, typename T>
-void loadInputFrame(VideoProcessingContext& data, T* hostPtr) {
+void loadInputFrame(WatermarkEngine::VideoSession* session, T* hostPtr) {
+    const int width = session->videoStream->codecpar->width;
+    const int height = session->videoStream->codecpar->height;
 #if defined(_USE_GPU_)
-    data.inputFrame = TYPE(data.width, data.height, hostPtr, afHost).T().as(f32);
+    session->inputFrame = TYPE(width, height, hostPtr, afHost).T().as(f32);
 #else
-    data.inputFrame = Eigen::Map<TYPE>(hostPtr, data.width, data.height).transpose().template cast<float>();
+    session->inputFrame = Eigen::Map<TYPE>(hostPtr, width, height).transpose().template cast<float>();
 #endif
 }
 } // namespace video_utils

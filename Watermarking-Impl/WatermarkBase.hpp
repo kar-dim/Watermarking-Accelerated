@@ -1,13 +1,12 @@
 #pragma once
 
 #include "buffer.hpp"
+#include "include/WatermarkTypes.hpp"
 #include <cmath>
 #include <fstream>
 #include <functional>
 #include <stdexcept>
 #include <string>
-
-enum MASK_TYPE { ME, NVF };
 
 /*!
  *  \brief  Functions for watermark computation and detection, Base class.
@@ -41,10 +40,10 @@ class WatermarkBase {
     // main watermark embedding method
     // it embeds the watermark computed from "inputGrayImage" (always grayscale, 2D)
     // into a new array "output" based on "inputImage" (RGB or grayscale always u8)
-    virtual void makeWatermark(const ImageBuffer& inputGrayImage, const ImageBuffer& inputImage, ImageOutputBuffer& output, float& watermarkStrength, const MASK_TYPE maskType) = 0;
+    virtual void makeWatermark(const ImageBuffer& inputGrayImage, const ImageBuffer& inputImage, ImageOutputBuffer& output, const MaskMethod maskType) = 0;
 
     // the main mask detector function
-    virtual float detectWatermark(const ImageBuffer& inputImage, const MASK_TYPE maskType) = 0;
+    virtual float detectWatermark(const ImageBuffer& inputImage, const MaskMethod maskType) = 0;
 
   private:
     static inline float computeStrengthFactor(const float psnr) { return 255.0f / std::sqrt(std::pow(10.0f, psnr / 10.0f)); }

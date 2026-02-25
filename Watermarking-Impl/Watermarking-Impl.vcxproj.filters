@@ -29,9 +29,6 @@
     <Filter Include="Header Files">
       <UniqueIdentifier>{07235656-1379-4c4c-ae06-c286738600a3}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Resource Files">
-      <UniqueIdentifier>{c27495dd-ff38-4903-9be7-ebc55a5a3d0e}</UniqueIdentifier>
-    </Filter>
     <Filter Include="Source Files">
       <UniqueIdentifier>{38385e73-1b9a-4f48-af0e-ed8e7f8b492b}</UniqueIdentifier>
     </Filter>
@@ -59,16 +56,11 @@
     <Filter Include="Source Files\util">
       <UniqueIdentifier>{824aa85b-7456-4226-a324-3d366d21638b}</UniqueIdentifier>
     </Filter>
+    <Filter Include="public">
+      <UniqueIdentifier>{1eab29e0-4e48-43e8-9376-d0682334ab46}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ResourceCompile Include="resources.rc">
-      <Filter>Resource Files</Filter>
-    </ResourceCompile>
-  </ItemGroup>
-  <ItemGroup>
-    <ClCompile Include="main.cpp">
-      <Filter>Source Files</Filter>
-    </ClCompile>
     <ClCompile Include="opencl_utils.cpp">
       <Filter>Source Files\opencl</Filter>
     </ClCompile>
@@ -78,6 +70,11 @@
     <ClCompile Include="TinyEXIF.cpp">
       <Filter>Source Files\util</Filter>
     </ClCompile>
+    <ClCompile Include="WatermarkEngine.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="utils.cpp" />
+    <ClCompile Include="video_utils.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="utils.hpp">
@@ -151,6 +148,15 @@
     </ClInclude>
     <ClInclude Include="TinyEXIF.h">
       <Filter>Header Files\util</Filter>
+    </ClInclude>
+    <ClInclude Include="include\WatermarkEngine.hpp">
+      <Filter>public</Filter>
+    </ClInclude>
+    <ClInclude Include="include\WatermarkTypes.hpp">
+      <Filter>public</Filter>
+    </ClInclude>
+    <ClInclude Include="include\common_utils.hpp">
+      <Filter>public</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

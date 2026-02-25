@@ -1,9 +1,10 @@
+#include "buffer.hpp"
+#include "include/common_utils.hpp"
+#include "include/WatermarkTypes.hpp"
+#include "video_defines.hpp"
 #include "video_utils.hpp"
 #include "VideoProcessingContext.hpp"
 #include "WatermarkBase.hpp"
-#include "buffer.hpp"
-#include "utils.hpp"
-#include "video_defines.hpp"
 #include <algorithm>
 #include <cerrno>
 #include <cmath>
@@ -22,7 +23,6 @@
 #include "cuda_utils.hpp"
 extern "C" {
 #include "libavutil/buffer.h"
-#include "libavutil/hwcontext.h"
 #include "libavutil/hwcontext_cuda.h"
 }
 #endif
@@ -44,12 +44,15 @@ extern "C" {
 #include "libavutil/pixdesc.h"
 #include "libavutil/pixfmt.h"
 #include "libavutil/rational.h"
+#include "libavutil/hwcontext.h"
 }
 
 #if defined(_USE_EIGEN_)
 using namespace Eigen;
 #endif
 
+using namespace CommonUtils;
+using namespace WatermarkEngine;
 using std::cout;
 using std::string;
 
@@ -83,47 +86,49 @@ AVCodecContextPtr openDecoderHWAccel(const AVCodecParameters* inputCodecParams, 
 }
 
 // embed watermark in a video frame by using CUDA hardware acceleration
-void embedWatermarkHWAccel(VideoProcessingContext& data, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe) {
+void embedWatermarkHWAccel(VideoSession* session, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe) {
     const auto afStream = CudaStreamManager::getInstance().getAfStream();
     const auto videoStream = CudaStreamManager::getInstance().getCustomStream();
-    const ImageBuffer lumaBuffer(data.height, data.width, f32);
-    const ImageBuffer chromaBuffer(data.width, data.height / 2, u8);
+    const int width = session->width();
+    const int height = session->height();
+    const ImageBuffer lumaBuffer(height, width, f32);
+    const ImageBuffer chromaBuffer(width, height / 2, u8);
     // launch NV12 to YUV420 kernel (for UV planes)
-    cuda_utils::launchNV12ToYUV420pKernel(frame->data[1], frame->linesize[1], chromaBuffer.device<uint8_t>(), data.width / 2, data.height / 2, afStream);
+    cuda_utils::launchNV12ToYUV420pKernel(frame->data[1], frame->linesize[1], chromaBuffer.device<uint8_t>(), width / 2, height / 2, afStream);
     chromaBuffer.unlock();
 
-    if (framesCount % data.watermarkInterval == 0) {
+    if (framesCount % session->settings.watermarkInterval == 0) {
         // overlap kernel and host copy
-        cuda_utils::launchPitchedToFloatKernel(frame->data[0], lumaBuffer.device<float>(), data.width, data.height, frame->linesize[0], videoStream);
-        chromaBuffer.host(data.hostFramePtr + (data.width * data.height));
+        cuda_utils::launchPitchedToFloatKernel(frame->data[0], lumaBuffer.device<float>(), width, height, frame->linesize[0], videoStream);
+        chromaBuffer.host(session->hostFrame.get()->get() + (width * height));
         cudaStreamSynchronize(videoStream);
         // write Y + UV packed
-        embedAndWriteFrame(data, lumaBuffer, data.width * data.height * 3 / 2, ffmpegPipe);
+        embedAndWriteFrame(session, lumaBuffer, width * height * 3 / 2, ffmpegPipe);
     } else {
         // try to overlap the two D2H copies
-        cudaMemcpy2DAsync(data.hostFramePtr, data.width, frame->data[0], frame->linesize[0], data.width, data.height, cudaMemcpyDeviceToHost, videoStream);
-        chromaBuffer.host(data.hostFramePtr + (data.width * data.height));
+        cudaMemcpy2DAsync(session->hostFrame.get()->get(), width, frame->data[0], frame->linesize[0], width, height, cudaMemcpyDeviceToHost, videoStream);
+        chromaBuffer.host(session->hostFrame.get()->get() + (width * height));
         cudaStreamSynchronize(videoStream);
         // write Y + UV packed
-        fwrite(data.hostFramePtr, 1, data.width * data.height * 3 / 2, ffmpegPipe);
+        fwrite(session->hostFrame.get()->get(), 1, width * height * 3 / 2, ffmpegPipe);
     }
     framesCount++;
 }
 
 // detect a watermark in a video frame using hardware acceleration
 // directly use the GPU memory from the cuda decoder, no need to copy the data to host and back to GPU
-void detectWatermarkHWAccel(VideoProcessingContext& data, int& framesCount, const AVFrame* frame) {
+void detectWatermarkHWAccel(VideoSession* session, int& framesCount, const AVFrame* frame) {
     // early exit, check if we should skip detection for this frame
-    if (framesCount % data.watermarkInterval != 0) {
+    if (framesCount % session->settings.watermarkInterval != 0) {
         framesCount++;
         return;
     }
     // detect watermark after watermarkInterval frames
     const auto afStream = CudaStreamManager::getInstance().getAfStream();
-    const ImageBuffer lumaBuffer(data.height, data.width, f32);
-    cuda_utils::launchPitchedToFloatKernel(frame->data[0], lumaBuffer.device<float>(), data.width, data.height, frame->linesize[0], afStream);
+    const ImageBuffer lumaBuffer(session->height(), session->width(), f32);
+    cuda_utils::launchPitchedToFloatKernel(frame->data[0], lumaBuffer.device<float>(), session->width(), session->height(), frame->linesize[0], afStream);
     lumaBuffer.unlock();
-    float correlation = data.watermarkObj->detectWatermark(lumaBuffer, ME);
+    float correlation = session->watermarkObj->detectWatermark(lumaBuffer, MaskMethod::ME);
     cout << "Correlation for frame: " << (framesCount + 1) << ": " << correlation << "\n";
     framesCount++;
 }
@@ -132,103 +137,103 @@ void detectWatermarkHWAccel(VideoProcessingContext& data, int& framesCount, cons
 // get HDR info from the codec context in order to pass it to the filter graph for correct SDR tonemapping
 // if 10-bit HDR video -> tonemap to SDR with ffmpeg CPU filters and convert to 8-bit
 // if 10-bit SDR video -> convert to 8-bit fast
-string getFilterGraphString(const AVCodecContext* codecCtx, const AVStream* st, const bool useHwDecoder) {
-    if (!is10bit(codecCtx, st))
+string getFilterGraphString(const VideoSession* s) {
+    if (!is10bit(s->inputDecoderCtx.get(), s->videoStream))
         return ""; // 8-bit SDR, no filtering (save processing time)
-    if (!isHDR(codecCtx))
-        return useHwDecoder ? "scale_cuda=format=nv12" : "format=yuv420p"; // 10-bit SDR, fast downscale to 8-bit
+    if (!isHDR(s->inputDecoderCtx.get()))
+        return s->useHwDecoder ? "scale_cuda=format=nv12" : "format=yuv420p"; // 10-bit SDR, fast downscale to 8-bit
     // HDR10 / 10-bit HDR GPU case -> unfortunately no way to tonemap in GPU with cuda filters yet! Should use CPU decoder instead
-    Utils::checkError(useHwDecoder, "Cannot tonemap HDR input to SDR with Hardware Accelerated Decoder yet. Use CPU decoder instead.");
+    checkError(s->useHwDecoder, "Cannot tonemap HDR input to SDR with Hardware Accelerated Decoder yet. Use CPU decoder instead.");
     // HDR10 / 10-bit HDR CPU case -> scaler needs more input info
-    const char* primaries = av_color_primaries_name(codecCtx->color_primaries);
-    const char* matrix = av_color_space_name(codecCtx->colorspace);
+    const char* primaries = av_color_primaries_name(s->inputDecoderCtx.get()->color_primaries);
+    const char* matrix = av_color_space_name(s->inputDecoderCtx.get()->colorspace);
     // fallback to safe HDR10 defaults if any field is unspecified
-    if (!primaries || codecCtx->color_primaries == AVCOL_PRI_UNSPECIFIED)
+    if (!primaries || s->inputDecoderCtx.get()->color_primaries == AVCOL_PRI_UNSPECIFIED)
         primaries = "bt2020";
-    if (!matrix || codecCtx->colorspace == AVCOL_SPC_UNSPECIFIED)
+    if (!matrix || s->inputDecoderCtx.get()->colorspace == AVCOL_SPC_UNSPECIFIED)
         matrix = "bt2020nc";
     return std::format("zscale=primaries={}:transfer=linear:matrix={}:npl=100,tonemap=mobius,zscale=transfer=bt709:primaries=bt709:matrix=bt709,format=yuv420p", primaries, matrix);
 }
 
 // filter a single frame
-void filterFrame(AVFramePtr& frame, AVFramePtr& filteredFrame, const FilterGraphContext& filterGraphContext) {
+void filterFrame(AVFramePtr& frame, AVFramePtr& filteredFrame, const VideoSession* s) {
     av_frame_unref(filteredFrame.get());
-    int ret = av_buffersrc_add_frame_flags(filterGraphContext.buffersrcCtx, frame.get(), AV_BUFFERSRC_FLAG_KEEP_REF);
-    Utils::checkError(ret < 0, "Failed to add frame to filter graph");
-    ret = av_buffersink_get_frame(filterGraphContext.buffersinkCtx, filteredFrame.get());
+    int ret = av_buffersrc_add_frame_flags(s->buffersrcCtx, frame.get(), AV_BUFFERSRC_FLAG_KEEP_REF);
+    checkError(ret < 0, "Failed to add frame to filter graph");
+    ret = av_buffersink_get_frame(s->buffersinkCtx, filteredFrame.get());
     // don't exit if more frames (buffering is used) are needed to produce one output frame, just keep the original
     if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
         return;
-    Utils::checkError(ret < 0, "Failed to get filtered frame: " + std::to_string(ret));
+    checkError(ret < 0, "Failed to get filtered frame: " + std::to_string(ret));
     // replace original frame with filtered one
     av_frame_unref(frame.get());
     av_frame_move_ref(frame.get(), filteredFrame.get());
 }
 
 // initialize the filter graph for 10-bit to 8-bit conversion and HDR to SDR tonemapping
-bool initFilterGraph(const AVCodecContext* inputDecoderCtx, const AVStream* st, const bool useHwDecoder, FilterGraphContext& filterCtx) {
+bool initFilterGraph(VideoSession* s) {
     const string exceptionMessage = "Failed to initialize filter graph in: ";
-    const string filterDesc = getFilterGraphString(inputDecoderCtx, st, useHwDecoder);
+    const string filterDesc = getFilterGraphString(s);
 
     if (filterDesc.empty())
         return false; // no need for filtering
 
     // parse the filter graph description in order to initialize the filter graph later
-    const AVRational timeBase = getTimeBase(st);
-    const char* pixFmtName = av_get_pix_fmt_name((AVPixelFormat)inputDecoderCtx->pix_fmt);
-    string args = std::format("video_size={}x{}:pix_fmt={}:time_base={}/{}:pixel_aspect={}/{}", inputDecoderCtx->width, inputDecoderCtx->height, pixFmtName, timeBase.num, timeBase.den,
-                              inputDecoderCtx->sample_aspect_ratio.num, inputDecoderCtx->sample_aspect_ratio.den);
+    const AVRational timeBase = getTimeBase(s->videoStream);
+    const char* pixFmtName = av_get_pix_fmt_name((AVPixelFormat)s->inputDecoderCtx->pix_fmt);
+    string args = std::format("video_size={}x{}:pix_fmt={}:time_base={}/{}:pixel_aspect={}/{}", s->inputDecoderCtx->width, s->inputDecoderCtx->height, pixFmtName, timeBase.num, timeBase.den,
+                              s->inputDecoderCtx->sample_aspect_ratio.num, s->inputDecoderCtx->sample_aspect_ratio.den);
 
     // allocate filter graph and source/sink filters
     AVFilterGraphPtr graphPtr(avfilter_graph_alloc());
-    Utils::checkError(!graphPtr, exceptionMessage + "avfilter_graph_alloc");
+    checkError(!graphPtr, exceptionMessage + "avfilter_graph_alloc");
 
     const AVFilter* bufferSrc = avfilter_get_by_name("buffer");
     const AVFilter* bufferSink = avfilter_get_by_name("buffersink");
-    Utils::checkError(!bufferSrc || !bufferSink, exceptionMessage + "avfilter_get_by_name");
+    checkError(!bufferSrc || !bufferSink, exceptionMessage + "avfilter_get_by_name");
 
     AVFilterContext* srcCtx = avfilter_graph_alloc_filter(graphPtr.get(), bufferSrc, "in");
-    Utils::checkError(!srcCtx, exceptionMessage + "avfilter_graph_alloc_filter");
+    checkError(!srcCtx, exceptionMessage + "avfilter_graph_alloc_filter");
 
     // if using hardware decoder, need to pass hw_frames_ctx to the source filter
-    if (useHwDecoder) {
+    if (s->useHwDecoder) {
         AVBufferSrcParametersPtr par(av_buffersrc_parameters_alloc());
-        Utils::checkError(!par, exceptionMessage + "av_buffersrc_parameters_alloc");
-        par->format = inputDecoderCtx->pix_fmt;
+        checkError(!par, exceptionMessage + "av_buffersrc_parameters_alloc");
+        par->format = s->inputDecoderCtx->pix_fmt;
         par->time_base = timeBase;
 
         AVBufferRefPtr hwFramesRef;
         // decoder provides a Frames Context (Ideal)
-        if (inputDecoderCtx->hw_frames_ctx)
-            hwFramesRef.reset(av_buffer_ref(inputDecoderCtx->hw_frames_ctx));
+        if (s->inputDecoderCtx->hw_frames_ctx)
+            hwFramesRef.reset(av_buffer_ref(s->inputDecoderCtx->hw_frames_ctx));
         // decoder only provides Device Context (must manually create hw_frames_ctx)
-        else if (inputDecoderCtx->hw_device_ctx) {
-            AVBufferRef* rawFrames = av_hwframe_ctx_alloc(inputDecoderCtx->hw_device_ctx);
-            Utils::checkError(!rawFrames, exceptionMessage + "av_hwframe_ctx_alloc");
+        else if (s->inputDecoderCtx->hw_device_ctx) {
+            AVBufferRef* rawFrames = av_hwframe_ctx_alloc(s->inputDecoderCtx->hw_device_ctx);
+            checkError(!rawFrames, exceptionMessage + "av_hwframe_ctx_alloc");
             hwFramesRef.reset(rawFrames);
             AVHWFramesContext* frames_ctx = (AVHWFramesContext*)hwFramesRef->data;
-            frames_ctx->format = inputDecoderCtx->pix_fmt;       // AV_PIX_FMT_CUDA, etc
-            frames_ctx->sw_format = inputDecoderCtx->sw_pix_fmt; // AV_PIX_FMT_P010, etc
-            frames_ctx->width = inputDecoderCtx->width;
-            frames_ctx->height = inputDecoderCtx->height;
+            frames_ctx->format = s->inputDecoderCtx->pix_fmt;       // AV_PIX_FMT_CUDA, etc
+            frames_ctx->sw_format = s->inputDecoderCtx->sw_pix_fmt; // AV_PIX_FMT_P010, etc
+            frames_ctx->width = s->inputDecoderCtx->width;
+            frames_ctx->height = s->inputDecoderCtx->height;
             // fallback if sw_format is unknown
             if (frames_ctx->sw_format == AV_PIX_FMT_NONE)
                 frames_ctx->sw_format = AV_PIX_FMT_NV12;
-            Utils::checkError(av_hwframe_ctx_init(hwFramesRef.get()) < 0, exceptionMessage + "av_hwframe_ctx_init");
+            checkError(av_hwframe_ctx_init(hwFramesRef.get()) < 0, exceptionMessage + "av_hwframe_ctx_init");
         }
         if (hwFramesRef)
             par->hw_frames_ctx = hwFramesRef.get();
-        Utils::checkError(av_buffersrc_parameters_set(srcCtx, par.get()) < 0, exceptionMessage + "av_buffersrc_parameters_set");
+        checkError(av_buffersrc_parameters_set(srcCtx, par.get()) < 0, exceptionMessage + "av_buffersrc_parameters_set");
     }
-    Utils::checkError(avfilter_init_str(srcCtx, args.c_str()) < 0, exceptionMessage + "avfilter_init_str");
+    checkError(avfilter_init_str(srcCtx, args.c_str()) < 0, exceptionMessage + "avfilter_init_str");
     AVFilterContext* sinkCtx = avfilter_graph_alloc_filter(graphPtr.get(), bufferSink, "out");
-    Utils::checkError(!sinkCtx, exceptionMessage + "avfilter_graph_alloc_filter");
-    Utils::checkError(avfilter_init_str(sinkCtx, nullptr) < 0, exceptionMessage + "avfilter_init_str");
+    checkError(!sinkCtx, exceptionMessage + "avfilter_graph_alloc_filter");
+    checkError(avfilter_init_str(sinkCtx, nullptr) < 0, exceptionMessage + "avfilter_init_str");
 
     // link and config in and out filters with the graph string
     AVFilterInOutPtr outputs(avfilter_inout_alloc());
     AVFilterInOutPtr inputs(avfilter_inout_alloc());
-    Utils::checkError(!outputs || !inputs, exceptionMessage + "avfilter_inout_alloc");
+    checkError(!outputs || !inputs, exceptionMessage + "avfilter_inout_alloc");
 
     // maps to the Source (feeds into the graph)
     outputs->name = av_strdup("in");
@@ -252,71 +257,77 @@ bool initFilterGraph(const AVCodecContext* inputDecoderCtx, const AVStream* st, 
     outputs.reset(outputsRaw);
 
     // since we manually created source/sink, we just config
-    Utils::checkError(avfilter_graph_config(graphPtr.get(), nullptr) < 0, exceptionMessage + "avfilter_graph_config");
+    checkError(avfilter_graph_config(graphPtr.get(), nullptr) < 0, exceptionMessage + "avfilter_graph_config");
     // store the filter graph pointers, give back control of graphPtr, we don't want to automatically delete it yet
-    filterCtx.filterGraph = std::move(graphPtr);
-    filterCtx.buffersrcCtx = srcCtx;
-    filterCtx.buffersinkCtx = sinkCtx;
+    s->filterGraph = std::move(graphPtr);
+    s->buffersrcCtx = srcCtx;
+    s->buffersinkCtx = sinkCtx;
 
     return true;
 }
 
 // helper method to embed the watermark in the video frame and write it to the ffmpeg pipe
-void embedAndWriteFrame(VideoProcessingContext& data, const ImageBuffer& buffer, const int elements, FILE* ffmpegPipe) {
-    float watermarkStrength;
-    data.watermarkObj->makeWatermark(buffer, buffer, data.watermarkedFrame, watermarkStrength, ME);
+void embedAndWriteFrame(VideoSession* session, const ImageBuffer& buffer, const int elements, FILE* ffmpegPipe) {
+    session->watermarkObj->makeWatermark(buffer, buffer, session->watermarkedFrame, MaskMethod::ME);
 #if defined(_USE_GPU_)
-    data.watermarkedFrame.T().host(data.hostFramePtr);
-    fwrite(data.hostFramePtr, 1, elements, ffmpegPipe);
+    session->watermarkedFrame.T().host(session->hostFrame.get()->get());
+    fwrite(session->hostFrame.get()->get(), 1, elements, ffmpegPipe);
 #elif defined(_USE_EIGEN_)
-    data.grayFrame = data.watermarkedFrame.getGray().transpose();
-    fwrite(data.grayFrame.data(), 1, elements, ffmpegPipe);
+    session->grayFrame = session->watermarkedFrame.getGray().transpose();
+    fwrite(session->grayFrame.data(), 1, elements, ffmpegPipe);
 #endif
 }
 
 // helper method to dispatch the correct watermarking or detection method
-int videoDispatcher(VideoProcessingContext& data, const bool useHwDecoder, const VideoOp op, const bool needsFilter, FILE* ffmpegPipe) {
+// clang-format off
+int videoDispatcher(VideoSession* s, VideoMode op, const bool needsFilter, FILE* ffmpegPipe) {
 #if defined(_USE_CUDA_)
-    if (useHwDecoder)
-        return needsFilter
-                   ? processFrames<true>(data, [&](const AVFrame* frame,
-                                                   int& framesCount) { op == EMBED ? embedWatermarkHWAccel(data, framesCount, frame, ffmpegPipe) : detectWatermarkHWAccel(data, framesCount, frame); })
-                   : processFrames<false>(data, [&](const AVFrame* frame, int& framesCount) {
-                         op == EMBED ? embedWatermarkHWAccel(data, framesCount, frame, ffmpegPipe) : detectWatermarkHWAccel(data, framesCount, frame);
-                     });
+    if (s->useHwDecoder)
+        return needsFilter ? 
+            processFrames<true>(s,[&](const AVFrame* frame, int& framesCount) {
+                op == VideoMode::EMBED ? embedWatermarkHWAccel(s, framesCount, frame, ffmpegPipe) : detectWatermarkHWAccel(s, framesCount, frame);
+            }) : 
+            processFrames<false>(s, [&](const AVFrame* frame, int& framesCount) {
+                op == VideoMode::EMBED ? embedWatermarkHWAccel(s, framesCount, frame, ffmpegPipe) : detectWatermarkHWAccel(s, framesCount, frame);
+            });
 #endif
-    return needsFilter
-               ? processFrames<true>(data,
-                                     [&](const AVFrame* frame, int& framesCount) { op == EMBED ? embedWatermark(data, framesCount, frame, ffmpegPipe) : detectWatermark(data, framesCount, frame); })
-               : processFrames<false>(data,
-                                      [&](const AVFrame* frame, int& framesCount) { op == EMBED ? embedWatermark(data, framesCount, frame, ffmpegPipe) : detectWatermark(data, framesCount, frame); });
+    return needsFilter ? 
+        processFrames<true>(s, [&](const AVFrame* frame,int& framesCount) { 
+            op == VideoMode::EMBED ? embedWatermark(s, framesCount, frame, ffmpegPipe) : detectWatermark(s, framesCount, frame);
+        }) : 
+        processFrames<false>(s, [&](const AVFrame* frame, int& framesCount) {
+            op == VideoMode::EMBED ? embedWatermark(s, framesCount, frame, ffmpegPipe) : detectWatermark(s, framesCount, frame);
+        });
 }
+// clang-format on
 
 // embed watermark in a video frame
-void embedWatermark(VideoProcessingContext& data, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe) {
-    const bool embedWatermark = framesCount % data.watermarkInterval == 0;
-    processAndWriteYPlane(embedWatermark, frame, data, ffmpegPipe);
-    writeChromaPlanes(frame, data, ffmpegPipe);
+void embedWatermark(VideoSession* session, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe) {
+    const bool embedWatermark = framesCount % session->settings.watermarkInterval == 0;
+    processAndWriteYPlane(embedWatermark, frame, session, ffmpegPipe);
+    writeChromaPlanes(frame, session, ffmpegPipe);
     framesCount++;
 }
 
 // detect the watermark for a video frame
-void detectWatermark(VideoProcessingContext& data, int& framesCount, const AVFrame* frame) {
+void detectWatermark(VideoSession* session, int& framesCount, const AVFrame* frame) {
     // early exit, check if we should skip detection for this frame
-    if (framesCount % data.watermarkInterval != 0) {
+    if (framesCount % session->settings.watermarkInterval != 0) {
         framesCount++;
         return;
     }
+    const int width = session->width();
+    const int height = session->height();
     // detect watermark after watermarkInterval frames, else early return
     uint8_t* srcY = frame->data[0];
     // if there is row padding (for alignment), we must copy the data to a contiguous block!
-    if (frame->linesize[0] != data.width) {
-        for (int y = 0; y < data.height; y++)
-            memcpy(data.hostFramePtr + y * data.width, frame->data[0] + y * frame->linesize[0], data.width);
-        srcY = data.hostFramePtr;
+    if (frame->linesize[0] != width) {
+        for (int y = 0; y < height; y++)
+            memcpy(session->hostFrame.get()->get() + y * width, frame->data[0] + y * frame->linesize[0], width);
+        srcY = session->hostFrame.get()->get();
     }
-    loadInputFrame<Gray8Buffer>(data, srcY);
-    float correlation = data.watermarkObj->detectWatermark(data.inputFrame, ME);
+    loadInputFrame<Gray8Buffer>(session, srcY);
+    float correlation = session->watermarkObj->detectWatermark(session->inputFrame, MaskMethod::ME);
     cout << "Correlation for frame: " << (framesCount + 1) << ": " << correlation << "\n";
     framesCount++;
 }
@@ -386,7 +397,7 @@ AVCodecContextPtr openSoftwareDecoder(const AVCodecParameters* inputCodecParams)
 // check if the pixel format provided is in the list of provided supported formats
 bool checkPixelFormatSupport(const std::span<const AVPixelFormat> formats, const AVPixelFormat format) {
     const bool isValidFormat = std::ranges::any_of(formats, [&](auto f) { return f == format; });
-    Utils::checkError(!isValidFormat, "Error: Video frame format not supported, aborting");
+    checkError(!isValidFormat, "Error: Video frame format not supported, aborting");
     return isValidFormat;
 }
 
@@ -408,30 +419,34 @@ AVRational getTimeBase(const AVStream* st) {
 }
 
 // runs the watermark creation for a video frame and writes the watermarked frame to the ffmpeg pipe
-void processAndWriteYPlane(const bool embedWatermark, const AVFrame* frame, VideoProcessingContext& data, FILE* ffmpegPipe) {
+void processAndWriteYPlane(const bool embedWatermark, const AVFrame* frame, VideoSession* session, FILE* ffmpegPipe) {
+    const int width = session->width();
+    const int height = session->height();
     uint8_t* srcY = frame->data[0];
     // if there is row padding (for alignment), we must copy the data to a contiguous block!
-    if (frame->linesize[0] != data.width) {
-        for (int y = 0; y < data.height; y++)
-            memcpy(data.hostFramePtr + y * data.width, srcY + y * frame->linesize[0], data.width);
-        srcY = data.hostFramePtr;
+    if (frame->linesize[0] != width) {
+        for (int y = 0; y < height; y++)
+            memcpy(session->hostFrame.get()->get() + y * width, srcY + y * frame->linesize[0], width);
+        srcY = session->hostFrame.get()->get();
     }
     if (embedWatermark) {
-        loadInputFrame<Gray8Buffer>(data, srcY);
-        embedAndWriteFrame(data, data.inputFrame, data.width * data.height, ffmpegPipe);
+        loadInputFrame<Gray8Buffer>(session, srcY);
+        embedAndWriteFrame(session, session->inputFrame, width * height, ffmpegPipe);
     } else
-        fwrite(srcY, 1, data.width * data.height, ffmpegPipe);
+        fwrite(srcY, 1, width * height, ffmpegPipe);
 }
 
 // writes the chroma planes (U and V) to the ffmpeg pipe, either assuming aligned pointers or not
-void writeChromaPlanes(const AVFrame* frame, VideoProcessingContext& data, FILE* ffmpegPipe) {
+void writeChromaPlanes(const AVFrame* frame, VideoSession* session, FILE* ffmpegPipe) {
+    const int width = session->width();
+    const int height = session->height();
     // lambda to write a single chroma plane
     auto writePlane = [&](const uint8_t* src, const int linesize) {
-        if (linesize != data.width / 2) {
-            for (int y = 0; y < data.height / 2; y++)
-                fwrite(src + y * linesize, 1, data.width / 2, ffmpegPipe);
+        if (linesize != width / 2) {
+            for (int y = 0; y < height / 2; y++)
+                fwrite(src + y * linesize, 1, width / 2, ffmpegPipe);
         } else
-            fwrite(src, 1, data.width * data.height / 4, ffmpegPipe);
+            fwrite(src, 1, width * height / 4, ffmpegPipe);
     };
 
     // write U

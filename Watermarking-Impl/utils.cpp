@@ -1,10 +1,10 @@
-#include "ImageFileBuffer.hpp"
-#include "TinyEXIF.h"
-#include "WatermarkBase.hpp"
 #include "buffer.hpp"
+#include "ImageFileBuffer.hpp"
+#include "include/common_utils.hpp"
+#include "TinyEXIF.h"
 #include "utils.hpp"
+#include "WatermarkBase.hpp"
 #include <cstdint>
-#include <format>
 #include <fstream>
 #include <memory>
 #include <optional>
@@ -24,16 +24,11 @@
 #endif
 
 using std::string;
+using namespace CommonUtils;
 
-string Utils::addSuffixBeforeExtension(const string& file, const string& suffix) {
-    const auto dot = file.find_last_of('.');
-    Utils::checkError(dot == string::npos || dot == file.size() - 1, "Filename has no valid extension: " + file);
-    return file.substr(0, dot) + suffix + file.substr(dot);
-}
-
-void Utils::saveImage(const string& imagePath, const string& suffix, const ImageOutputBuffer& watermark, const std::optional<Gray8BufferIO>& alphaChannel) {
+void InternalUtils::saveImage(const string& imagePath, const string& suffix, const ImageOutputBuffer& watermark, const std::optional<Gray8BufferIO>& alphaChannel) {
 #if defined(_USE_EIGEN_)
-    const string watermarkedFile = Utils::addSuffixBeforeExtension(imagePath, suffix);
+    const string watermarkedFile = CommonUtils::addSuffixBeforeExtension(imagePath, suffix);
     string extension = watermarkedFile.substr(watermarkedFile.find_last_of('.') + 1);
     std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
     const auto cimgToSave = watermark.isRGB() ? eigen_utils::eigenRgbToCimg(watermark.getRGB(), alphaChannel) : eigen_utils::eigenGrayToCimg(watermark.getGray());
@@ -51,11 +46,11 @@ void Utils::saveImage(const string& imagePath, const string& suffix, const Image
         throw std::runtime_error("Unsupported image format: " + extension);
 #elif defined(_USE_GPU_)
     const ImageBuffer& arrayToSave = alphaChannel.has_value() ? af::join(2, watermark, *alphaChannel).as(u8) : watermark.as(u8);
-    af::saveImageNative(addSuffixBeforeExtension(imagePath, suffix).c_str(), arrayToSave);
+    af::saveImageNative(CommonUtils::addSuffixBeforeExtension(imagePath, suffix).c_str(), arrayToSave);
 #endif
 }
 
-std::unique_ptr<WatermarkBase> Utils::createWatermarkObject(const unsigned int height, const unsigned int width, const string& randomMatrixPath, const int p, const float psnr) {
+std::unique_ptr<WatermarkBase> InternalUtils::createWatermarkObject(const unsigned int height, const unsigned int width, const string& randomMatrixPath, const int p, const float psnr) {
 #if defined(_USE_OPENCL_)
     switch (p) {
     case 3: return std::make_unique<WatermarkOCL<3>>(height, width, randomMatrixPath, psnr); break;
@@ -79,16 +74,8 @@ std::unique_ptr<WatermarkBase> Utils::createWatermarkObject(const unsigned int h
     }
 }
 
-void Utils::checkError(const bool isError, const string& errorMsg) {
-    if (isError)
-        throw std::runtime_error(errorMsg);
-};
-
-// helper method to calculate execution time in FPS or in seconds
-string Utils::formatExecutionTime(const bool showFps, const double seconds) { return showFps ? std::format("FPS: {:.2f} FPS", 1.0 / seconds) : std::format("{:.6f} seconds", seconds); }
-
 // helper method to rotate an image based on EXIF metadata
-void Utils::rotate(FloatBufferIO& img, const uint16_t orientation) {
+void InternalUtils::rotate(FloatBufferIO& img, const uint16_t orientation) {
 #if defined(_USE_GPU_)
     switch (orientation) {
     case 2: img = af::flip(img, 1); break;
@@ -137,7 +124,7 @@ void Utils::rotate(FloatBufferIO& img, const uint16_t orientation) {
 #endif
 }
 
-void Utils::loadImage(ImageFileBuffer& buf, const string& imageFile) {
+void InternalUtils::loadImage(ImageFileBuffer& buf, const string& imageFile) {
     auto& [rgbImage, image, alphaChannel, rows, cols, isRGB] = buf;
     // read file exif data for orientation
     std::ifstream fileStream(imageFile, std::ifstream::binary);
@@ -145,15 +132,15 @@ void Utils::loadImage(ImageFileBuffer& buf, const string& imageFile) {
 
 #if defined(_USE_GPU_)
     rgbImage = af::loadImageNative(imageFile.c_str()).as(f32);
-    Utils::rotate(rgbImage, exif.Orientation);
+    InternalUtils::rotate(rgbImage, exif.Orientation);
     switch (rgbImage.dims(2)) {
     case 1: image = rgbImage; break;
-    case 3: image = rgb2gray(rgbImage); break;
+    case 3: image = InternalUtils::rgb2gray(rgbImage); break;
     case 4: {
         const af::array alpha = rgbImage(af::span, af::span, 3);
         alphaChannel.emplace(alpha.as(u8)); // we want the alpha channel as 8-bit image later for saving the image with alpha
         rgbImage = rgbImage(af::span, af::span, af::seq(0, 2)) * (af::tile(alpha, 1, 1, 3) != 0);
-        image = rgb2gray(rgbImage);
+        image = InternalUtils::rgb2gray(rgbImage);
         break;
     }
     default: throw std::runtime_error("Invalid image dimensions");
@@ -164,7 +151,7 @@ void Utils::loadImage(ImageFileBuffer& buf, const string& imageFile) {
     af::sync();
 #elif defined(_USE_EIGEN_)
     auto cimgRgb = FloatBufferIO(imageFile.c_str());
-    Utils::rotate(cimgRgb, exif.Orientation);
+    InternalUtils::rotate(cimgRgb, exif.Orientation);
 
     switch (cimgRgb.spectrum()) {
     case 1:
@@ -191,7 +178,10 @@ void Utils::loadImage(ImageFileBuffer& buf, const string& imageFile) {
 #endif
 }
 
-ImageBuffer Utils::rgb2gray(const ImageBuffer& rgbImage) {
+ImageBuffer InternalUtils::rgb2gray(const ImageBuffer& rgbImage) {
+    constexpr float rPercent = 0.299f;
+    constexpr float gPercent = 0.587f;
+    constexpr float bPercent = 0.114f;
 #if defined(_USE_GPU_)
     return af::rgb2gray(rgbImage, rPercent, gPercent, bPercent);
 #elif defined(_USE_EIGEN_)
@@ -200,7 +190,7 @@ ImageBuffer Utils::rgb2gray(const ImageBuffer& rgbImage) {
 #endif
 }
 
-ImageBuffer Utils::castToFloat(const ImageOutputBuffer& buffer) {
+ImageBuffer InternalUtils::castToFloat(const ImageOutputBuffer& buffer) {
 #if defined(_USE_GPU_)
     return buffer.as(f32);
 #else
