@@ -40,15 +40,10 @@ Implementations are optimized for maximum performance:
 
 # Run the pre-built binaries
 
-- Get the latest binaries [here](https://github.com/kar-dim/Watermarking-Accelerated/releases) for Eigen, OpenCL or CUDA platform. The binaries contain the sample application and the embedded CUDA/OpenCL/Eigen implementations of the watermarking algorithms.
-- From the same section, you can also download the archive ```Watermarking-Generate_and_samples``` which includes:
-    - Sample video and image files.
-    - Pre-generated watermark data (A bat file is included which generates the watermarks, with sizes exactly the same as the provided sample images.)
-    - The ```Watermarking-Generate``` binary. This produces pseudo-random values. The archive already includes the sample watermarks, but you can also generate a random watermark for any desired image size (if you want to embed/detect your own image) like this:  
-```Watermarking-Generate.exe [rows] [cols] [seed] [fileName]```  then pass the provided watermark file path in the sample project configuration (```settings.ini``` file).
-To use these samples, simply extract the archive (ideally) to the root directory of the binary you're using. By default, the binaries are configured to load video and image samples from the ```samples``` subdirectory relative to their location. If you'd like to change this behavior, you can do so by editing the ```settings.ini``` file.
+- Get the latest binaries [here](https://github.com/kar-dim/Watermarking-Accelerated/releases) for Eigen, OpenCL or CUDA platform. The binaries contain the sample CLI (command line) application and the embedded CUDA/OpenCL/Eigen implementations of the watermarking algorithms.
+- From the same section, you can also download the archive ```Watermarking_samples``` which includes sample video and image files.
 
-The sample application:
+The CLI application:
    - Embeds the watermark using the NVF and the proposed Prediction-Error mask for a video or image.
    - Detects the watermark using the proposed Prediction-Error based detector for a video or image.
    - For image mode only: (Optionally) Saves the watermarked images on the disk, one file for each mask used.
@@ -63,7 +58,7 @@ The application should be parameterized from the corresponding ```settings.ini``
 | Parameter                         | Description                                                                                                                 |
 |-----------------------------------|-----------------------------------------------------------------------------------------------------------------------------               |
 | \[image\]/path                    | Path to the input image to embed and detect watermark. This will set the sample application to ```image mode``` |
-| watermark_data_file               | Path to the Random Matrix (watermark). This is produced by the ```Watermarking-Generate``` project. Watermark and Image sizes should match exactly. |
+| watermark_seed                    | The watermark seed. Used to generate a deterministic watermark. |
 | save_to_disk                      | ```[true/false]```: (Image mode only) Set to true to save the watermarked NVF and Prediction-Error files to disk.                                                |
 | display_fps                       | ```[true/false]```: Set to true to display execution times in FPS. Else, it will display execution time in seconds.                            |
 | p                                 | Window size for masking algorithms. All implementations support values of ```p=3,5,7``` and ```9```. |
@@ -125,9 +120,8 @@ ffmpeg -y -f rawvideo
 # How to Build
 
 This project is built using **Visual Studio** and consists of a **solution with various projects**.
-- Watermarking-Impl: The Core of this project, implements the algorithms for each backend. It is built as a **static library**.
+- Watermarking-Impl: The Core of this project, implements the algorithms for each backend. It also implements a fast and efficient deterministic watermarking generation with OpenMP. It is built as a **static library**.
 - Watermarking-CLI: The sample command line application that interacts with the Core project to embed and detect watermark in images and video.
-- Watermarking-Generate: A very fast program for fast watermark generation in binary format.
 - Watermarking-Tests: Basic tests for the Core project.
 
 ### Solution Configurations
@@ -175,11 +169,12 @@ All backends require FFmpeg which is also copied (most libav* DLLs, not included
 - [FFmpeg](https://www.ffmpeg.org/): A complete, cross-platform solution to record, convert and stream audio and video.
 - [CImg](https://cimg.eu/): A C++ library for image processing.
 - [inih](https://github.com/jtilly/inih): A lightweight C++ library for parsing .ini configuration files.
+- [cub](https://github.com/NVIDIA/cccl): A lower-level CUDA library designed for speed-of-light parallel algorithms. Used for device-wide, block-wide, and warp-wide reductions.
 
 # Additional Dependencies for Building/Requirements
 
 - OpenCL implementation: The [OpenCL Headers](https://github.com/KhronosGroup/OpenCL-Headers), [OpenCL C++ Bindings](https://github.com/KhronosGroup/OpenCL-CLHPP) and [OpenCL Library file](https://github.com/KhronosGroup/OpenCL-SDK) are already included and configured for this project.
-- CUDA implementation: NVIDIA CUDA Toolkit is required for building. Minimum supported GPUs with Compute Capability 7.0 or newer, CUDA Toolkit 10.0 or newer.
+- CUDA implementation: NVIDIA CUDA Toolkit is required for building. Minimum supported GPUs with Compute Capability 7.0 (sm_75) or newer, CUDA Toolkit 10.0 or newer.
 - CPU Implementation: Image libraries (libjpeg, libpng, libtiff etc) are included and utilized internally by CImg for loading and saving of images.
 - ArrayFire should be installed globally, with default installation options. Environment Variable "AF_PATH" will be defined automatically.
 - FFmpeg must exist on system PATH (Pre-build binaries already include FFmpeg binaries and DLLs).
