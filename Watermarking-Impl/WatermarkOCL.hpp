@@ -6,8 +6,8 @@
 #include "WatermarkGpu.hpp"
 #include <af/opencl.h>
 #include <arrayfire.h>
+#include <cstdint>
 #include <memory>
-#include <string>
 #include <utility>
 
 /*!
@@ -17,9 +17,9 @@
 template <int p>
 class WatermarkOCL final : public WatermarkGPU<p> {
   public:
-    WatermarkOCL<p>(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr)
-        : WatermarkGPU<p>(rows, cols, randomMatrixPath, psnr), texKernelDims{alignUp<windowLocalSize.first>(rows), alignUp<windowLocalSize.second>(cols)}, meKernelDims{rows, alignUp<optimalLocalSize>(cols)},
-          programs(cl_utils::buildKernels(p)) {}
+    WatermarkOCL<p>(const unsigned int rows, const unsigned int cols, const uint32_t watermarkSeed, const float psnr)
+        : WatermarkGPU<p>(rows, cols, watermarkSeed, psnr), texKernelDims{alignUp<windowLocalSize.first>(rows), alignUp<windowLocalSize.second>(cols)},
+          meKernelDims{rows, alignUp<optimalLocalSize>(cols)}, programs(cl_utils::buildKernels(p)) {}
 
   private:
     using WatermarkBase::alignUp;

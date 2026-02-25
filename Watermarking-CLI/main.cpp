@@ -1,7 +1,9 @@
 #include "common_utils.hpp"
+#include "common_utils.hpp"
 #include "libs/inih/INIReader.h"
 #include "WatermarkEngine.hpp"
 #include <algorithm>
+#include <cstdint>
 #include <cstdlib>
 #include <exception>
 #include <format>
@@ -23,7 +25,9 @@ static inline std::string success(const std::string& str) { return "\033[92m" + 
 
 int testForImage(const INIReader& inir, int p, float psnr) {
     const std::string imageFile = inir.Get("image", "path", "NO_IMAGE");
-    const std::string watermarkFile = inir.Get("global", "watermark_data_file", "");
+    checkError(imageFile == "NO_IMAGE", "No valid image file specified!");
+    const uint32_t watermarkSeed = inir.GetInteger("global", "watermark_seed", 0);
+    checkError(watermarkSeed == 0, "No valid watermark seed specified!");
     const bool showFps = inir.GetBoolean("global", "display_fps", true);
     const bool saveToDisk = inir.GetBoolean("image", "save_to_disk", false);
     int loops = inir.GetInteger("image", "benchmark_loops", 5);
@@ -33,7 +37,7 @@ int testForImage(const INIReader& inir, int p, float psnr) {
 
     // load watermarking session
     ImageHandle session{nullptr};
-    const double loadTime = executionTime([&]() { session = initImage(imageFile, watermarkFile, p, psnr); });
+    const double loadTime = executionTime([&]() { session = initImage(imageFile, watermarkSeed, p, psnr); });
     std::cout << "Time to load image data from disk: " << loadTime << " seconds\n\n";
 
     // helper lambda for embedding and detection benchmarks
@@ -70,7 +74,7 @@ int testForVideo(const INIReader& inir, const std::string& videoFile, int p, flo
 
     VideoSettings settings;
     settings.videoFile = videoFile;
-    settings.watermarkDataPath = inir.Get("global", "watermark_data_file", "");
+    settings.watermarkSeed = inir.GetInteger("global", "watermark_seed", 0);
     settings.p = p;
     settings.psnr = psnr;
     settings.watermarkInterval = std::max(1, static_cast<int>(inir.GetInteger("video", "watermark_interval", 1)));

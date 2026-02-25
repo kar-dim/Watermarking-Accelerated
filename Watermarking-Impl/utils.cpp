@@ -50,25 +50,25 @@ void InternalUtils::saveImage(const string& imagePath, const string& suffix, con
 #endif
 }
 
-std::unique_ptr<WatermarkBase> InternalUtils::createWatermarkObject(const unsigned int height, const unsigned int width, const string& randomMatrixPath, const int p, const float psnr) {
+std::unique_ptr<WatermarkBase> InternalUtils::createWatermarkObject(const unsigned int height, const unsigned int width, const uint32_t watermarkSeed, const int p, const float psnr) {
 #if defined(_USE_OPENCL_)
     switch (p) {
-    case 3: return std::make_unique<WatermarkOCL<3>>(height, width, randomMatrixPath, psnr); break;
-    case 5: return std::make_unique<WatermarkOCL<5>>(height, width, randomMatrixPath, psnr); break;
-    case 7: return std::make_unique<WatermarkOCL<7>>(height, width, randomMatrixPath, psnr); break;
-    case 9: return std::make_unique<WatermarkOCL<9>>(height, width, randomMatrixPath, psnr); break;
+    case 3: return std::make_unique<WatermarkOCL<3>>(height, width, watermarkSeed, psnr); break;
+    case 5: return std::make_unique<WatermarkOCL<5>>(height, width, watermarkSeed, psnr); break;
+    case 7: return std::make_unique<WatermarkOCL<7>>(height, width, watermarkSeed, psnr); break;
+    case 9: return std::make_unique<WatermarkOCL<9>>(height, width, watermarkSeed, psnr); break;
 #elif defined(_USE_CUDA_)
     switch (p) {
-    case 3: return std::make_unique<WatermarkCuda<3>>(height, width, randomMatrixPath, psnr); break;
-    case 5: return std::make_unique<WatermarkCuda<5>>(height, width, randomMatrixPath, psnr); break;
-    case 7: return std::make_unique<WatermarkCuda<7>>(height, width, randomMatrixPath, psnr); break;
-    case 9: return std::make_unique<WatermarkCuda<9>>(height, width, randomMatrixPath, psnr); break;
+    case 3: return std::make_unique<WatermarkCuda<3>>(height, width, watermarkSeed, psnr); break;
+    case 5: return std::make_unique<WatermarkCuda<5>>(height, width, watermarkSeed, psnr); break;
+    case 7: return std::make_unique<WatermarkCuda<7>>(height, width, watermarkSeed, psnr); break;
+    case 9: return std::make_unique<WatermarkCuda<9>>(height, width, watermarkSeed, psnr); break;
 #elif defined(_USE_EIGEN_)
     switch (p) {
-    case 3: return std::make_unique<WatermarkEigen<3>>(height, width, randomMatrixPath, psnr); break;
-    case 5: return std::make_unique<WatermarkEigen<5>>(height, width, randomMatrixPath, psnr); break;
-    case 7: return std::make_unique<WatermarkEigen<7>>(height, width, randomMatrixPath, psnr); break;
-    case 9: return std::make_unique<WatermarkEigen<9>>(height, width, randomMatrixPath, psnr); break;
+    case 3: return std::make_unique<WatermarkEigen<3>>(height, width, watermarkSeed, psnr); break;
+    case 5: return std::make_unique<WatermarkEigen<5>>(height, width, watermarkSeed, psnr); break;
+    case 7: return std::make_unique<WatermarkEigen<7>>(height, width, watermarkSeed, psnr); break;
+    case 9: return std::make_unique<WatermarkEigen<9>>(height, width, watermarkSeed, psnr); break;
 #endif
     default: throw std::invalid_argument("Unsupported value for p. Allowed p values: 3, 5, 7, 9");
     }

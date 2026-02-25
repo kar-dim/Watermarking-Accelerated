@@ -62,11 +62,11 @@ struct ImageSession {
 
 void ImageSessionDeleter::operator()(ImageSession* s) const { delete s; }
 
-ImageHandle initImage(const std::string& imagePath, const std::string& watermarkDataPath, const int p, const float psnr) {
+ImageHandle initImage(const std::string& imagePath, const uint32_t watermarkSeed, const int p, const float psnr) {
     auto* session = new ImageSession();
     loadImage(session->imgBuffer, imagePath);
     auto& [rgb, img, alpha, rows, cols, isRGB] = session->imgBuffer;
-    session->watermarkObj = createWatermarkObject(rows, cols, watermarkDataPath, p, psnr);
+    session->watermarkObj = createWatermarkObject(rows, cols, watermarkSeed, p, psnr);
 #if defined(_USE_EIGEN_)
     session->watermarkBuffer = isRGB ? ImageOutputBuffer(eigen_utils::makeEigenRGBu8(rows, cols)) : ImageOutputBuffer(Gray8Buffer(rows, cols));
 #endif
@@ -117,7 +117,7 @@ VideoHandle initVideo(const VideoSettings& settings) {
     checkError(!session->inputDecoderCtx.get(), "Could not open video decoder");
     const int height = session->videoStream->codecpar->height;
     const int width = session->videoStream->codecpar->width;
-    session->watermarkObj = createWatermarkObject(height, width, settings.watermarkDataPath, settings.p, settings.psnr);
+    session->watermarkObj = createWatermarkObject(height, width, settings.watermarkSeed, settings.p, settings.psnr);
     session->hostFrame = std::make_unique<HostMemory<uint8_t>>(session->useHwDecoder ? width * height * 3 / 2 : width * height);
     session->inputFrame = ImageBuffer({height, width});
     session->watermarkedFrame = ImageOutputBuffer({height, width});

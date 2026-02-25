@@ -1,4 +1,5 @@
 #include "WatermarkEngine.hpp"
+#include <cstdint>
 #include <filesystem>
 #include <gtest/gtest.h>
 #include <string>
@@ -9,9 +10,9 @@ using namespace WatermarkEngine;
 class WatermarkTest : public ::testing::Test {
   protected:
     const std::string imageFile = "../../Watermarking-CLI/samples/images/4k.png";
-    const std::string watermarkPath = "../../Watermarking-CLI/samples/w_4k.dat";
     const std::string imageNvfPath = "../../Watermarking-CLI/samples/images/4kW_NVF.png";
     const std::string imageMePath = "../../Watermarking-CLI/samples/images/4kW_ME.png";
+    const uint32_t watermarkSeed = 28390211;
     const int p = 3;
     const float psnr = 40.0f;
 
@@ -19,7 +20,7 @@ class WatermarkTest : public ::testing::Test {
 
     void SetUp() override {
         initializeEnvironment(0);
-        session = initImage(imageFile, watermarkPath, p, psnr);
+        session = initImage(imageFile, watermarkSeed, p, psnr);
     }
 
     void TearDown() override {
@@ -60,7 +61,7 @@ TEST_F(WatermarkTest, SaveToDisk) {
     saveImage(session.get(), imageFile, MaskMethod::ME);
     EXPECT_TRUE(std::filesystem::exists(imageMePath)) << "ME image was not saved to disk!";
     // test if the saved image can be loaded and detected correctly
-    ImageHandle diskSession = initImage(imageMePath, watermarkPath, p, psnr);
+    ImageHandle diskSession = initImage(imageMePath, watermarkSeed, p, psnr);
     const float diskCorr = detectLoadedImage(diskSession.get(), MaskMethod::ME);
     EXPECT_GT(diskCorr, 0.80f) << "The saved image lost too much watermark data after saving to disk, OR was not embedded correctly!";
 }

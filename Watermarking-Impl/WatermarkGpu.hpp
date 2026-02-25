@@ -5,8 +5,7 @@
 #include <arrayfire.h>
 #include <cmath>
 #include <concepts>
-#include <fstream>
-#include <string>
+#include <cstdint>
 #include <vector>
 
 /*!
@@ -17,8 +16,8 @@
 template <int p>
 class WatermarkGPU : public WatermarkBase {
   public:
-    WatermarkGPU<p>(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr)
-        : WatermarkBase(rows, cols, randomMatrixPath, psnr, initializeRandomMatrix), strengthNumerator(strengthFactor * std::sqrt(static_cast<float>(this->totalPixels))) {}
+    WatermarkGPU<p>(const unsigned int rows, const unsigned int cols, const uint32_t watermarkSeed, const float psnr)
+        : WatermarkBase(rows, cols, watermarkSeed, psnr, initializeRandomMatrix), strengthNumerator(strengthFactor * std::sqrt(static_cast<float>(this->totalPixels))) {}
 
     ~WatermarkGPU<p>() override = default;
 
@@ -49,11 +48,11 @@ class WatermarkGPU : public WatermarkBase {
 
   private:
     // initialize the watermark random matrix into an arrayfire array (copy from host to GPU VRAM)
-    static af::array initializeRandomMatrix(std::ifstream& stream, const size_t totalBytes, const unsigned int rows, const unsigned int cols) {
-        std::vector<float> randomData(totalBytes / sizeof(float));
-        stream.read(reinterpret_cast<char*>(randomData.data()), totalBytes);
-        return af::array(rows, cols, randomData.data());
+    // clang-format off
+    static af::array initializeRandomMatrix(const std::vector<float>& watermarkVec, const unsigned int rows, const unsigned int cols) { 
+        return af::transpose(af::array(cols, rows, watermarkVec.data())); 
     }
+    // clang-format on
 
   protected:
     static constexpr int localSize = (p * p) - 1;

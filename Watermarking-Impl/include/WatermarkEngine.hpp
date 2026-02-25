@@ -1,6 +1,7 @@
 #pragma once
 
 #include "WatermarkTypes.hpp"
+#include <cstdint>
 #include <memory>
 #include <string>
 
@@ -25,7 +26,7 @@ using ImageHandle = std::unique_ptr<ImageSession, ImageSessionDeleter>;
 void initializeEnvironment(const int openclDevice = 0);
 
 // image processing functions
-ImageHandle initImage(const std::string& imagePath, const std::string& watermarkDataPath, const int p, const float psnr);
+ImageHandle initImage(const std::string& imagePath, const uint32_t watermarkSeed, const int p, const float psnr);
 void embedImage(ImageSession* session, MaskMethod method);
 void prepareDetectionImage(ImageSession* session, MaskMethod method);
 float detectLoadedImage(const ImageSession* session, MaskMethod method);
@@ -35,7 +36,7 @@ void saveImage(const ImageSession* session, const std::string& outPath, MaskMeth
 // video processing functions
 struct VideoSettings {
     std::string videoFile;
-    std::string watermarkDataPath;
+    uint32_t watermarkSeed;
     int p;
     float psnr;
     int watermarkInterval;

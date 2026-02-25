@@ -5,8 +5,6 @@ VisualStudioVersion = 17.14.36127.28
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Watermarking-Impl", "Watermarking-Impl\Watermarking-Impl.vcxproj", "{C5147F67-DEB5-53D1-0721-708C83F1FD9E}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Watermarking-Generate", "Watermarking-Generate\Watermarking-Generate.vcxproj", "{E9678649-A268-4D5D-AA94-B4A3C5D2A90D}"
-EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Watermarking-Impl-tests", "Watermarking-Impl-tests\Watermarking-Impl-tests.vcxproj", "{C6349974-D48F-4A0C-B8D8-28A4931731D4}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Watermarking-CLI", "Watermarking-CLI\Watermarking-CLI.vcxproj", "{96597CB9-6877-49FE-A6BB-287D5E41D087}"
@@ -33,18 +31,6 @@ Global
 		{C5147F67-DEB5-53D1-0721-708C83F1FD9E}.EIGEN_Release|x64.Build.0 = EIGEN_Release|x64
 		{C5147F67-DEB5-53D1-0721-708C83F1FD9E}.OPENCL_Release|x64.ActiveCfg = OPENCL_Release|x64
 		{C5147F67-DEB5-53D1-0721-708C83F1FD9E}.OPENCL_Release|x64.Build.0 = OPENCL_Release|x64
-		{E9678649-A268-4D5D-AA94-B4A3C5D2A90D}.CUDA_Debug|x64.ActiveCfg = Debug|x64
-		{E9678649-A268-4D5D-AA94-B4A3C5D2A90D}.CUDA_Debug|x64.Build.0 = Debug|x64
-		{E9678649-A268-4D5D-AA94-B4A3C5D2A90D}.CUDA_Release|x64.ActiveCfg = Release|x64
-		{E9678649-A268-4D5D-AA94-B4A3C5D2A90D}.CUDA_Release|x64.Build.0 = Release|x64
-		{E9678649-A268-4D5D-AA94-B4A3C5D2A90D}.CUDA_ReleaseDist|x64.ActiveCfg = Release|x64
-		{E9678649-A268-4D5D-AA94-B4A3C5D2A90D}.CUDA_ReleaseDist|x64.Build.0 = Release|x64
-		{E9678649-A268-4D5D-AA94-B4A3C5D2A90D}.EIGEN_Debug|x64.ActiveCfg = Debug|x64
-		{E9678649-A268-4D5D-AA94-B4A3C5D2A90D}.EIGEN_Debug|x64.Build.0 = Debug|x64
-		{E9678649-A268-4D5D-AA94-B4A3C5D2A90D}.EIGEN_Release|x64.ActiveCfg = Release|x64
-		{E9678649-A268-4D5D-AA94-B4A3C5D2A90D}.EIGEN_Release|x64.Build.0 = Release|x64
-		{E9678649-A268-4D5D-AA94-B4A3C5D2A90D}.OPENCL_Release|x64.ActiveCfg = Release|x64
-		{E9678649-A268-4D5D-AA94-B4A3C5D2A90D}.OPENCL_Release|x64.Build.0 = Release|x64
 		{C6349974-D48F-4A0C-B8D8-28A4931731D4}.CUDA_Debug|x64.ActiveCfg = CUDA_Release|x64
 		{C6349974-D48F-4A0C-B8D8-28A4931731D4}.CUDA_Release|x64.ActiveCfg = CUDA_Release|x64
 		{C6349974-D48F-4A0C-B8D8-28A4931731D4}.CUDA_Release|x64.Build.0 = CUDA_Release|x64

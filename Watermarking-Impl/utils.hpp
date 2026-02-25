@@ -18,5 +18,5 @@ void saveImage(const std::string& imagePath, const std::string& suffix, const Im
 ImageBuffer rgb2gray(const ImageBuffer& rgbImage);
 ImageBuffer castToFloat(const ImageOutputBuffer& buffer);
 void rotate(FloatBufferIO& img, uint16_t orientation);
-std::unique_ptr<WatermarkBase> createWatermarkObject(const unsigned int height, const unsigned int width, const std::string& randomMatrixPath, const int p, const float psnr);
+std::unique_ptr<WatermarkBase> createWatermarkObject(const unsigned int height, const unsigned int width, const uint32_t watermarkSeed, const int p, const float psnr);
 } // namespace InternalUtils

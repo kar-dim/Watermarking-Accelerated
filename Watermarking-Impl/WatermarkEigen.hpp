@@ -6,6 +6,7 @@
 #include "PredictionErrorMatrixData.hpp"
 #include "WatermarkBase.hpp"
 #include <cmath>
+#include <cstdint>
 #include <fstream>
 #include <omp.h>
 #include <string>
@@ -40,9 +41,9 @@ class WatermarkEigen final : public WatermarkBase {
     using Map = Eigen::Map<T>;
 
   public:
-    WatermarkEigen<p>(const unsigned int rows, const unsigned int cols, const std::string& randomMatrixPath, const float psnr)
-        : WatermarkBase(rows, cols, randomMatrixPath, psnr, initializeRandomMatrix), mask(rows, cols), errorSequence(rows, cols), filteredEstimation(rows, cols), u(rows, cols),
-          uStrengthened(rows, cols), meMatrixData(omp_get_max_threads(), rows) {}
+    WatermarkEigen<p>(const unsigned int rows, const unsigned int cols, const uint32_t watermarkSeed, const float psnr)
+        : WatermarkBase(rows, cols, watermarkSeed, psnr, initializeRandomMatrix), mask(rows, cols), errorSequence(rows, cols), filteredEstimation(rows, cols), u(rows, cols), uStrengthened(rows, cols),
+          meMatrixData(omp_get_max_threads(), rows) {}
 
     // main watermark embedding method
     void makeWatermark(const ImageBuffer& inputGrayImage, const ImageBuffer& inputImage, ImageOutputBuffer& output, const MaskMethod maskType) override {
@@ -100,10 +101,8 @@ class WatermarkEigen final : public WatermarkBase {
     PredictionErrorMatrixData<p> meMatrixData;
 
     // initialize the watermark random matrix into an Eigen buffer
-    static ImageBuffer initializeRandomMatrix(std::ifstream& stream, const size_t totalBytes, const unsigned int rows, const unsigned int cols) {
-        Eigen::ArrayXXf watermark(cols, rows);
-        stream.read(reinterpret_cast<char*>(watermark.data()), totalBytes);
-        return ImageBuffer(watermark.transpose());
+    static ImageBuffer initializeRandomMatrix(const std::vector<float>& watermarkVec, const unsigned int rows, const unsigned int cols) {
+        return ImageBuffer(Map<const Eigen::ArrayXXf>(watermarkVec.data(), cols, rows).transpose());
     }
 
     // helper method to clamp the pixel value to the image boundaries if out of bounds
