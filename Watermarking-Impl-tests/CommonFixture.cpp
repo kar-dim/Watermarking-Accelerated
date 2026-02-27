@@ -8,13 +8,15 @@
 using namespace WatermarkEngine;
 
 class WatermarkTest : public ::testing::Test {
+
   protected:
+    static constexpr uint32_t watermarkSeed = 28390211;
+    static constexpr int p = 3;
+    static constexpr float psnr = 40.0f;
+
     const std::string imageFile = "../../Watermarking-CLI/samples/images/4k.png";
     const std::string imageNvfPath = "../../Watermarking-CLI/samples/images/4kW_NVF.png";
     const std::string imageMePath = "../../Watermarking-CLI/samples/images/4kW_ME.png";
-    const uint32_t watermarkSeed = 28390211;
-    const int p = 3;
-    const float psnr = 40.0f;
 
     ImageHandle session{nullptr};
 
