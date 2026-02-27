@@ -124,8 +124,10 @@ void InternalUtils::rotate(FloatBufferIO& img, const uint16_t orientation) {
 #endif
 }
 
-void InternalUtils::loadImage(ImageFileBuffer& buf, const string& imageFile) {
+ImageFileBuffer InternalUtils::loadImage(const string& imageFile) {
+    ImageFileBuffer buf;
     auto& [rgbImage, image, alphaChannel, rows, cols, isRGB] = buf;
+
     // read file exif data for orientation
     std::ifstream fileStream(imageFile, std::ifstream::binary);
     TinyEXIF::EXIFInfo exif(fileStream);
@@ -176,6 +178,7 @@ void InternalUtils::loadImage(ImageFileBuffer& buf, const string& imageFile) {
     cols = image.getGray().cols();
     isRGB = rgbImage.isRGB();
 #endif
+    return buf;
 }
 
 ImageBuffer InternalUtils::rgb2gray(const ImageBuffer& rgbImage) {

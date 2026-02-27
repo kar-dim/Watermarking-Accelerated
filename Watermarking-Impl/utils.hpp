@@ -13,7 +13,7 @@
  *  \author Dimitris Karatzas
  */
 namespace InternalUtils {
-void loadImage(ImageFileBuffer& buf, const std::string& imageFile);
+ImageFileBuffer loadImage(const std::string& imageFile);
 void saveImage(const std::string& imagePath, const std::string& suffix, const ImageOutputBuffer& watermark, const std::optional<Gray8BufferIO>& alphaChannel);
 ImageBuffer rgb2gray(const ImageBuffer& rgbImage);
 ImageBuffer castToFloat(const ImageOutputBuffer& buffer);

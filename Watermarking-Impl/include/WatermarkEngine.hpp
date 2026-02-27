@@ -13,26 +13,34 @@ namespace WatermarkEngine {
 // forward declarations of session structs and their deleters for RAII management
 struct ImageSession;
 struct VideoSession;
-struct VideoSessionDeleter {
-    void operator()(VideoSession* s) const;
-};
-struct ImageSessionDeleter {
-    void operator()(ImageSession* s) const;
-};
+struct PreloadedImage;
+struct ExportedImage;
+// clang-format off
+struct VideoSessionDeleter { void operator()(VideoSession* s) const; };
+struct ImageSessionDeleter { void operator()(ImageSession* s) const; };
+struct PreloadedImageDeleter { void operator()(PreloadedImage* p) const; };
+struct ExportedImageDeleter { void operator()(ExportedImage* p) const;};
+// clang-format on
 using VideoHandle = std::unique_ptr<VideoSession, VideoSessionDeleter>;
 using ImageHandle = std::unique_ptr<ImageSession, ImageSessionDeleter>;
+using PreloadedHandle = std::unique_ptr<PreloadedImage, PreloadedImageDeleter>;
+using ExportHandle = std::unique_ptr<ExportedImage, ExportedImageDeleter>;
 
 // initialize the environment (set OpenCL device, initialize ArrayFire/OpenMP etc)
 void initializeEnvironment(const int openclDevice = 0);
-
 // image processing functions
 ImageHandle createImageSession(const uint32_t watermarkSeed, const int p, const float psnr);
+PreloadedHandle preloadImageFromDisk(const std::string& imagePath);
 void loadImage(ImageSession* session, const std::string& imagePath);
+void bindPreloadedImage(ImageSession* session, PreloadedHandle preloadedData);
 void embedImage(ImageSession* session, MaskMethod method);
 void prepareDetectionImage(ImageSession* session, MaskMethod method);
 float detectLoadedImage(const ImageSession* session, MaskMethod method);
 float detectEmbeddedBuffer(const ImageSession* session, MaskMethod method);
 void saveImage(const ImageSession* session, const std::string& outPath, MaskMethod method);
+ExportHandle createReusableExportBuffer();
+void exportForSave(const ImageSession* session, ExportedImage* reusableBuffer, MaskMethod method);
+void flushToDiskAsync(ExportedImage* handle, const std::string& outPath, MaskMethod method);
 
 // video processing functions
 struct VideoSettings {
