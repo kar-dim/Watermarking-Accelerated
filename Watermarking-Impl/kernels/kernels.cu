@@ -813,19 +813,29 @@ __global__ void nV12ToYUV420p(const uint8_t* __restrict__ uvSrc, const int uvPit
 }
 
 __global__ void pitchedToFloat(const uint8_t* __restrict__ input, float* __restrict__ output, const int width, const int height, const int pitch) {
-    __shared__ float block[16][16 + 1]; //+1 to avoid bank conflicts
-    const int x = blockIdx.x * blockDim.x + threadIdx.x;
-    const int y = blockIdx.y * blockDim.y + threadIdx.y;
-    float convertedValue = 0.0f;
-    if (x < width && y < height)
-        convertedValue = static_cast<float>(input[y * pitch + x]);
+    
+    __shared__ float tile[32][33]; // 32x32 tile, +1 to avoid bank conflicts
 
-    block[threadIdx.y][threadIdx.x] = convertedValue;
+    // x and y are the coordinates in the original input image
+    const int x = blockIdx.x * 32 + threadIdx.x;
+    const int y = blockIdx.y * 32 + threadIdx.y;
+    // loop 4 times to process 32 rows
+#pragma unroll
+    for (int i = 0; i < 32; i += 8) {
+        float val = 0.0f;
+        if (x < width && (y + i) < height)
+            val = static_cast<float>(input[(y + i) * pitch + x]);
+        tile[threadIdx.y + i][threadIdx.x] = val;
+    }
     __syncthreads();
 
-    // write transposed data (coalesced writes to column-major output)
-    const int dstX = blockIdx.y * blockDim.y + threadIdx.x;
-    const int dstY = blockIdx.x * blockDim.x + threadIdx.y;
-    if (dstX < height && dstY < width)
-        output[dstY * height + dstX] = block[threadIdx.x][threadIdx.y];
+    // swap the grid coords to calculate the transposed destination
+    const int dstX = blockIdx.y * 32 + threadIdx.x;
+    const int dstY = blockIdx.x * 32 + threadIdx.y;
+#pragma unroll
+    for (int i = 0; i < 32; i += 8) {
+        // read from transposed shared memory coordinates (+1 in the stride to avoid bank conflicts) and write to global memory transposed
+        if (dstX < height && (dstY + i) < width)
+            output[(dstY + i) * height + dstX] = tile[threadIdx.x][threadIdx.y + i];
+    }
 }

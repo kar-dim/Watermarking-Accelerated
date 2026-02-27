@@ -14,8 +14,8 @@ void launchNV12ToYUV420pKernel(const uint8_t* uvSrc, const int uvPitch, uint8_t*
 
 // convert pitched memory to float
 void launchPitchedToFloatKernel(const uint8_t* ySrc, float* yDst, const int width, const int height, const int pitch, const cudaStream_t stream) {
-    constexpr dim3 blockSize(16, 16);
-    const dim3 gridSize = cuda_utils::gridSizeCalculate(blockSize, height, width);
+    constexpr dim3 blockSize(32, 8);
+    const dim3 gridSize((width + 31) / 32, (height + 31) / 32);
     pitchedToFloat<<<gridSize, blockSize, 0, stream>>>(ySrc, yDst, width, height, pitch);
 }
 unsigned int gridSize1DMeStridedCalculate() {
