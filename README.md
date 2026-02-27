@@ -44,26 +44,26 @@ Implementations are optimized for maximum performance:
 - From the same section, you can also download the archive ```Watermarking_samples``` which includes sample video and image files.
 
 The CLI application:
-   - Embeds the watermark using the NVF and the proposed Prediction-Error mask for a video or image.
-   - Detects the watermark using the proposed Prediction-Error based detector for a video or image.
-   - For image mode only: (Optionally) Saves the watermarked images on the disk, one file for each mask used.
+   - Embeds or detects the watermark using the NVF and the proposed Prediction-Error mask for images and videos.
+   - For image mode only: Supports **batched** operation: It can embed or detect the watermark for all images under a specified folder. It is highly parallelized for both operations to reduce disk I/O latency.
    - Prints FPS/execution time for both operations, and both masks.
 
 **NOTE**:
-1. For video operations, only the proposed mask is used, which is more optimal.
+1. For video and image batched operations only the proposed mask is used, which is more optimal. The NVF based watermarked image is only saved for single images (explained below) and not in batched mode.
 2. CPU implementation is built with AVX2 support: ```-mavx2 -mfma```. To enable AVX-512 replace the previous with: <br/>```-march=native```. The performance gains are negligible, and for much broader compatibility we use AVX2 by default.
 
 The application should be parameterized from the corresponding ```settings.ini``` file. Here is a detailed explanation for each parameter:
 
 | Parameter                         | Description                                                                                                                 |
 |-----------------------------------|-----------------------------------------------------------------------------------------------------------------------------               |
-| \[image\]/path                    | Path to the input image to embed and detect watermark. This will set the sample application to ```image mode``` |
+| \[image\]/mode                    | ```[single, batch_embed, batch_detect]```: (Image mode only) Set the image mode option. If ```single``` the application will read the image file specified at ```[image]/path]``` and embeds/detects the watermark and prints results. If ```batch_embed``` or ```batch_detect``` then it reads a directory specified at at ```[image]/path]``` and it either embeds the watermark for all the image files it finds, writing them in a new folder called ```watermark_output``` in the specified folder, or it tries to detect the watermark and prints the correlation values.
+| \[image\]/path                    | Path to the input image (or directory for batched operations) to embed/detect watermark. This will set the sample application to ```image mode``` |
 | watermark_seed                    | The watermark seed. Used to generate a deterministic watermark. |
-| save_to_disk                      | ```[true/false]```: (Image mode only) Set to true to save the watermarked NVF and Prediction-Error files to disk.                                                |
+| save_to_disk                      | ```[true/false]```: (Image mode only) Set to true to save the watermarked NVF and Prediction-Error files to disk, works only if mode is ```single```.                                                |
 | display_fps                       | ```[true/false]```: Set to true to display execution times in FPS. Else, it will display execution time in seconds.                            |
 | p                                 | Window size for masking algorithms. All implementations support values of ```p=3,5,7``` and ```9```. |
 | psnr                              | PSNR (Peak Signal-to-Noise Ratio). Higher values correspond to less watermark in the image, reducing noise, but making detection harder.   |
-| benchmark_loops                   | (Image mode only) Loops the algorithms many times, simulating more work. A value of ```100~1000``` produces consistent execution times.                          |
+| benchmark_loops                   | (Image mode only) Loops the algorithms many times, simulating more work. A value of ```100~1000``` produces consistent execution times. Works only if mode is ```single```.                         |
 | opencl_device_id                  | ```[OpenCL only / Number]```: Works only for OpenCL binary. If multiple OpenCL devices are found, then set this to the desired device. Set it to 0 if one device is found. |
 
 
