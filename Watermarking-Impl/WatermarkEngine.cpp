@@ -161,7 +161,7 @@ bool isOpenCLBackend() {
 #endif
 }
 
-void updateSessionParams(ImageSession* s, int p, float psnr) {
+void updateSessionParams(ImageSession* s, const int p, const float psnr) {
     s->p = p;
     s->psnr = psnr;
 #if defined(_USE_GPU_)

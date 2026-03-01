@@ -28,7 +28,7 @@ using ExportHandle = std::unique_ptr<ExportedImage, ExportedImageDeleter>;
 
 // environment and params functions
 bool initializeEnvironment(const int openclDevice = 0);
-void updateSessionParams(ImageSession* session, int p, float psnr);
+void updateSessionParams(ImageSession* session, const int p, const float psnr);
 bool isGpuBackend();
 bool isOpenCLBackend();
 
@@ -45,7 +45,6 @@ void saveImage(const ImageSession* session, const std::string& outPath, MaskMeth
 ExportHandle createReusableExportBuffer();
 void exportForSave(const ImageSession* session, ExportedImage* reusableBuffer, MaskMethod method);
 void flushToDiskAsync(ExportedImage* handle, const std::string& outPath, MaskMethod method);
-const uint8_t* getExportedPixelData(const ExportedImage* handle, int& width, int& height, int& channels);
 const uint8_t* getSessionPixelData(const ImageSession* session, int& width, int& height, int& channels);
 
 // video processing functions
