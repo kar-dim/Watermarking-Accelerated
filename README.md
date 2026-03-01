@@ -170,7 +170,7 @@ All backends require FFmpeg which is also copied (most libav* DLLs, not included
 | **Eigen**  | zlib1.dll<br>libpng16.dll<br>jpeg62.dll<br>tiff.dll<br>libomp.dll<br>libwebp.lib (static lib) |
 
 
-# Libraries Used
+# Libraries/Tools Used
 
 - [Eigen](https://eigen.tuxfamily.org/index.php?title=Main_Page): A C++ template library for linear algebra.
 - [ArrayFire](https://arrayfire.org): A C++ library for fast GPU computing.
@@ -178,6 +178,8 @@ All backends require FFmpeg which is also copied (most libav* DLLs, not included
 - [CImg](https://cimg.eu/): A C++ library for image processing.
 - [inih](https://github.com/jtilly/inih): A lightweight C++ library for parsing .ini configuration files.
 - [cub](https://github.com/NVIDIA/cccl): A lower-level CUDA library designed for speed-of-light parallel algorithms. Used for device-wide, block-wide, and warp-wide reductions.
+- [Intel VTune Profiler](https://www.intel.com/content/www/us/en/develop/tools/vtune-profiler.html) and [AMD uProf](https://developer.amd.com/amd-uprof/): Used to profile CPU performance.
+- [NVIDIA Nsight Systems](https://developer.nvidia.com/nsight-systems) and [NVIDIA Compute](https://developer.nvidia.com/nsight-compute): Used to profile overall system-wide CUDA performance, and to individually profile specific CUDA kernels with detailed performance metrics.
 
 # Additional Dependencies for Building/Requirements
 
@@ -186,15 +188,6 @@ All backends require FFmpeg which is also copied (most libav* DLLs, not included
 - CPU Implementation: Image libraries (libjpeg, libpng, libtiff etc) are included and utilized internally by CImg for loading and saving of images.
 - ArrayFire should be installed globally, with default installation options. Environment Variable "AF_PATH" will be defined automatically.
 - FFmpeg must exist on system PATH (Pre-build binaries already include FFmpeg binaries and DLLs).
-
-
-# Profiling Tools
-| Tool                  | Description                                   |                                 |
-| -------------        | --------------------------------------------- | ------------------------------------|
-| [Intel VTune Profiler](https://www.intel.com/content/www/us/en/develop/tools/vtune-profiler.html) | Used to profile CPU performance | <img width="40" height="40" alt="vtune-logo-oneapi-2021" src="https://github.com/user-attachments/assets/9e555a48-15b9-4f5a-9fa1-544c93699d66" /> |
-| [AMD uProf](https://developer.amd.com/amd-uprof/)  | Used to profile CPU performance |  <img width="40" height="40" alt="amd logo" src="https://github.com/user-attachments/assets/a4bc05ed-66ce-42a6-a46f-366193b5b269" /> |  
-| [NVIDIA Nsight Systems](https://developer.nvidia.com/nsight-systems) | Used to profile overall system-wide CUDA performance | <img width="40" height="40" alt="nvidia-nsight-systems" src="https://github.com/user-attachments/assets/e77b6e42-4ce4-4bc6-aebe-b6802e44be37" /> |
-| [NVIDIA Compute](https://developer.nvidia.com/nsight-compute)  | Used to analyze and profile CUDA kernels |  <img width="40" height="40" alt="nsight-compute" src="https://github.com/user-attachments/assets/674bfdcc-cc5e-44b4-b345-08a3b795584a" /> |
 
 # Comparisons
 
