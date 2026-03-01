@@ -46,7 +46,7 @@ static int testForImageBatch(const INIReader& inir, const int p, const float psn
     // only create the below if we are embedding!
     fs::path outputDir;
     std::queue<std::future<void>> saveTasks;
-    std::vector<WatermarkEngine::ExportHandle> exportPool;
+    std::vector<ExportHandle> exportPool;
     size_t bufferIndex = 0;
     size_t maxParallelSaves = 0;
     if (isEmbed) {
@@ -55,7 +55,7 @@ static int testForImageBatch(const INIReader& inir, const int p, const float psn
         maxParallelSaves = omp_get_max_threads();
         // preallocate exactly enough buffers for the max concurrent threads
         for (size_t i = 0; i < maxParallelSaves; i++)
-            exportPool.push_back(WatermarkEngine::createReusableExportBuffer());
+            exportPool.push_back(createReusableExportBuffer());
     }
 
     // get the valid images of the directory, if no valid image files are found, throw an error
@@ -116,7 +116,7 @@ static int testForImageBatch(const INIReader& inir, const int p, const float psn
             cout << err(std::format(" [FAILED] {} - Error: {}\n", validFiles[i].filename().string(), cleanError(e.what())));
             // If an async task fails, we must catch it and manually prime the pump for the next iteration
             if (i + 1 < validFiles.size())
-                prefetchTask = std::async(std::launch::async, WatermarkEngine::preloadImageFromDisk, validFiles[i + 1].string());
+                prefetchTask = std::async(std::launch::async, preloadImageFromDisk, validFiles[i + 1].string());
         }
     }
     // finish any pending saves before exiting
