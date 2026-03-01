@@ -162,12 +162,11 @@ The same applies for CPU backend, where we copy the relevant libraries required 
 GPU implementations' image support relies on ArrayFire’s FreeImage dependency, while the CPU version manually integrates specific image libraries for use with CImg.
 All backends require FFmpeg which is also copied (most libav* DLLs, not included in the table below).
 
-
 | Backend | Dependencies |
 |---------|--------------|
-| **CUDA**   | FreeImage.dll<br>afcuda.dll |
-| **OpenCL** | FreeImage.dll<br>afopencl.dll<br>forge.dll<br>glfw3.dll<br>mkl_core.2.dll<br>mkl_def.2.dll<br>mkl_rt.2.dll<br>mkl_tbb_thread.2.dll |
-| **Eigen**  | zlib1.dll<br>libpng16.dll<br>jpeg62.dll<br>tiff.dll<br>libomp.dll<br>libwebp.lib (static lib) |
+| **CUDA** | `FreeImage.dll`, `afcuda.dll` |
+| **OpenCL** | `FreeImage.dll`, `afopencl.dll`, `forge.dll`, `glfw3.dll`, `mkl_core.2.dll`, `mkl_def.2.dll`, `mkl_rt.2.dll`, `mkl_tbb_thread.2.dll` |
+| **Eigen** | `zlib1.dll`, `libpng16.dll`, `jpeg62.dll`, `tiff.dll`, `libomp.dll`, `libwebp.lib` (static lib) |
 
 
 # Libraries/Tools Used
