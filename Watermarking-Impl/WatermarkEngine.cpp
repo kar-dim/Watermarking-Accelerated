@@ -1,7 +1,7 @@
 #include "buffer.hpp"
+#include "common_utils.hpp"
 #include "HostMemory.hpp"
 #include "ImageFileBuffer.hpp"
-#include "include/common_utils.hpp"
 #include "include/WatermarkEngine.hpp"
 #include "include/WatermarkTypes.hpp"
 #include "utils.hpp"
@@ -9,6 +9,7 @@
 #include "VideoProcessingContext.hpp"
 #include "WatermarkBase.hpp"
 #include <cstdint>
+#include <cstdio>
 #include <iostream>
 #include <memory>
 #include <omp.h>
@@ -16,10 +17,12 @@
 #include <sstream>
 #include <string>
 #include <utility>
+#include <vector>
 
 #if defined(_USE_GPU_)
 #include <arrayfire.h>
 #elif defined(_USE_EIGEN_)
+#include <cstring>
 #include "eigen_utils.hpp"
 #endif
 
@@ -78,14 +81,58 @@ void flushToDiskAsync(ExportedImage* handle, const std::string& outPath, MaskMet
     InternalUtils::saveImage(outPath, suffix, handle->finalPixels, handle->alpha);
 }
 
+// INTERNAL HELPERS
+namespace {
+// generic method taking the underlying ImageOutputBuffer directly
+const uint8_t* extractPixelData(const ImageOutputBuffer& buffer, int& width, int& height, int& channels) {
+    static std::vector<uint8_t> hostBuffer;
+#if defined(_USE_EIGEN_)
+    if (buffer.isRGB()) {
+        const auto& rgb = buffer.getRGB();
+        width = rgb[0].cols();
+        height = rgb[0].rows();
+        channels = 3;
+        const size_t planeSize = width * height;
+        hostBuffer.resize(planeSize * channels);
+        std::memcpy(hostBuffer.data(), rgb[0].data(), planeSize);
+        std::memcpy(hostBuffer.data() + planeSize, rgb[1].data(), planeSize);
+        std::memcpy(hostBuffer.data() + 2 * planeSize, rgb[2].data(), planeSize);
+        return hostBuffer.data();
+    } else {
+        const auto& gray = buffer.getGray();
+        width = gray.cols();
+        height = gray.rows();
+        channels = 1;
+        return gray.data();
+    }
+#elif defined(_USE_GPU_)
+    // ArrayFire needs to pull the data to host RAM
+    width = static_cast<int>(buffer.dims(1));
+    height = static_cast<int>(buffer.dims(0));
+    channels = static_cast<int>(buffer.dims(2));
+    hostBuffer.resize(width * height * channels);
+    buffer.host(hostBuffer.data());
+    return hostBuffer.data();
+#endif
+}
+} // end anonymous namespace
+
+// main function to get the data from the exported buffer (column-wise), it also fills the width, height and channels parameters for the caller
+const uint8_t* getExportedPixelData(const ExportedImage* handle, int& width, int& height, int& channels) { return extractPixelData(handle->finalPixels, width, height, channels); }
+
+// main function to get the data from the image session buffer (column-wise) directly, it also fills the width, height and channels parameters for the caller
+const uint8_t* getSessionPixelData(const ImageSession* session, int& width, int& height, int& channels) { return extractPixelData(session->watermarkBuffer, width, height, channels); }
+
 // initialization, including OpenCL device setup and ArrayFire info display, as well as OpenMP thread pool initialization
-void initializeEnvironment(const int openclDevice) {
+bool initializeEnvironment(const int openclDevice) {
+    bool deviceSetSuccess = true;
 #if defined(_USE_OPENCL_)
     try {
         af::setDevice(openclDevice);
     } catch (...) {
         std::cout << "NOTE: Invalid OpenCL device, using default 0\n";
         af::setDevice(0);
+        deviceSetSuccess = false;
     }
 #endif
 #if defined(_USE_GPU_)
@@ -95,6 +142,33 @@ void initializeEnvironment(const int openclDevice) {
 #pragma omp parallel
     {}
     std::cout << "Using " + std::to_string(omp_get_max_threads()) + " parallel threads for Watermark calculations.\n";
+    return deviceSetSuccess;
+}
+
+bool isGpuBackend() {
+#if defined(_USE_GPU_)
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool isOpenCLBackend() {
+#if defined(_USE_OPENCL_)
+    return true;
+#else
+    return false;
+#endif
+}
+
+void updateSessionParams(ImageSession* s, int p, float psnr) {
+    s->p = p;
+    s->psnr = psnr;
+#if defined(_USE_GPU_)
+    if (s->watermarkObj)
+        af::deviceGC();
+#endif
+    s->watermarkObj = createWatermarkObject(s->currentRows, s->currentCols, s->seed, s->p, s->psnr);
 }
 
 // creates a new session for image processing, initialized with the given parameters (no memory allocations yet)

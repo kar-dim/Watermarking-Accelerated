@@ -1,6 +1,6 @@
 #include "buffer.hpp"
 #include "ImageFileBuffer.hpp"
-#include "include/common_utils.hpp"
+#include "common_utils.hpp"
 #include "TinyEXIF.h"
 #include "utils.hpp"
 #include "WatermarkBase.hpp"

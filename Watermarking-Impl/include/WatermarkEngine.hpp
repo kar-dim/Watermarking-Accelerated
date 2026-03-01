@@ -26,8 +26,12 @@ using ImageHandle = std::unique_ptr<ImageSession, ImageSessionDeleter>;
 using PreloadedHandle = std::unique_ptr<PreloadedImage, PreloadedImageDeleter>;
 using ExportHandle = std::unique_ptr<ExportedImage, ExportedImageDeleter>;
 
-// initialize the environment (set OpenCL device, initialize ArrayFire/OpenMP etc)
-void initializeEnvironment(const int openclDevice = 0);
+// environment and params functions
+bool initializeEnvironment(const int openclDevice = 0);
+void updateSessionParams(ImageSession* session, int p, float psnr);
+bool isGpuBackend();
+bool isOpenCLBackend();
+
 // image processing functions
 ImageHandle createImageSession(const uint32_t watermarkSeed, const int p, const float psnr);
 PreloadedHandle preloadImageFromDisk(const std::string& imagePath);
@@ -41,6 +45,8 @@ void saveImage(const ImageSession* session, const std::string& outPath, MaskMeth
 ExportHandle createReusableExportBuffer();
 void exportForSave(const ImageSession* session, ExportedImage* reusableBuffer, MaskMethod method);
 void flushToDiskAsync(ExportedImage* handle, const std::string& outPath, MaskMethod method);
+const uint8_t* getExportedPixelData(const ExportedImage* handle, int& width, int& height, int& channels);
+const uint8_t* getSessionPixelData(const ImageSession* session, int& width, int& height, int& channels);
 
 // video processing functions
 struct VideoSettings {

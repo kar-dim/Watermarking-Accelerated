@@ -10,16 +10,9 @@
     <ClInclude Include="CudaStreamManager.hpp">
       <Filter>Header Files\cuda</Filter>
     </ClInclude>
-    <CudaCompile Include="utils.cpp">
-      <Filter>Source Files\util</Filter>
-    </CudaCompile>
     <ClCompile Include="utils.cpp">
       <Filter>Source Files\util</Filter>
     </ClCompile>
-
-    <CudaCompile Include="video_utils.cpp">
-      <Filter>Source Files\util</Filter>
-    </CudaCompile>
     <ClCompile Include="video_utils.cpp">
       <Filter>Source Files\util</Filter>
     </ClCompile>
@@ -150,9 +143,6 @@
       <Filter>public</Filter>
     </ClInclude>
     <ClInclude Include="include\WatermarkTypes.hpp">
-      <Filter>public</Filter>
-    </ClInclude>
-    <ClInclude Include="include\common_utils.hpp">
       <Filter>public</Filter>
     </ClInclude>
   </ItemGroup>

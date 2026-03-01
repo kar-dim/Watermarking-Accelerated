@@ -1,0 +1,10 @@
+<RCC>
+    <qresource prefix="/">
+        <file>assets/watermark_icon.ico</file>
+        <file>stylesheets/main.qss</file>
+        <file>assets/theme_images/checkbox.png</file>
+        <file alias="down_arrow.png">assets/theme_images/down_arrow.png</file>
+        <file>assets/theme_images/handle.png</file>
+		<file>assets/fonts/TitilliumWeb-Regular.ttf</file>
+    </qresource>
+</RCC>

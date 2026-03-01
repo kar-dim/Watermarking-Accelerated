@@ -2,7 +2,6 @@
 #include "libs/inih/INIReader.h"
 #include "WatermarkEngine.hpp"
 #include <algorithm>
-#include <cctype>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -59,22 +58,8 @@ static int testForImageBatch(const INIReader& inir, const int p, const float psn
             exportPool.push_back(WatermarkEngine::createReusableExportBuffer());
     }
 
-    // use a set of valid image extensions (case-insensitive) to filter files in the directory
-    const std::vector<string> validExts = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"};
-    std::vector<fs::path> validFiles;
-
-    // scan the directory
-    for (const auto& entry : fs::directory_iterator(inputDir)) {
-        if (entry.is_regular_file()) {
-            string ext = entry.path().extension().string();
-            std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-            if (std::find(validExts.begin(), validExts.end(), ext) != validExts.end())
-                validFiles.push_back(entry.path());
-        }
-    }
-
-    // sort alphabetically
-    std::sort(validFiles.begin(), validFiles.end());
+    // get the valid images of the directory, if no valid image files are found, throw an error
+    const std::vector<fs::path> validFiles = getValidImageFiles(inputDir);
     checkError(validFiles.empty(), "No valid image files found in directory!");
     cout << info(std::format("Found {} images. Starting batch {}...\n", validFiles.size(), isEmbed ? "embedding" : "detection"));
 
@@ -128,10 +113,7 @@ static int testForImageBatch(const INIReader& inir, const int p, const float psn
             successCount++;
 
         } catch (const std::exception& e) {
-            // get the first line of the error message for cleaner output
-            const std::string fullError = e.what();
-            const std::string cleanError = fullError.substr(0, fullError.find('\n'));
-            cout << err(std::format(" [FAILED] {} - Error: {}\n", validFiles[i].filename().string(), cleanError));
+            cout << err(std::format(" [FAILED] {} - Error: {}\n", validFiles[i].filename().string(), cleanError(e.what())));
             // If an async task fails, we must catch it and manually prime the pump for the next iteration
             if (i + 1 < validFiles.size())
                 prefetchTask = std::async(std::launch::async, WatermarkEngine::preloadImageFromDisk, validFiles[i + 1].string());
