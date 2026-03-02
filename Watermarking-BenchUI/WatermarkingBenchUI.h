@@ -1,10 +1,11 @@
 #pragma once
 #include "BenchmarkWorker.hpp"
+#include <QComboBox>
+#include <QImage>
 #include <QLabel>
 #include <QMainWindow>
 #include <QProgressBar>
 #include <QPushButton>
-#include <QSpinBox>
 #include <QString>
 #include <QWidget>
 
@@ -25,8 +26,8 @@ class WatermarkingBenchUI : public QMainWindow {
     QProgressBar* progressBar;
     QLabel* imageView;
     BenchmarkWorker* worker = nullptr;
-    QLabel* deviceLabel = nullptr; // opencl
-    QSpinBox* deviceSpinBox = nullptr;
+    QLabel* deviceLabel = nullptr;       // opencl
+    QComboBox* deviceComboBox = nullptr; // opencl
 
     void centerWindowOnScreen();
 };

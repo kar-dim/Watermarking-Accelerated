@@ -477,13 +477,13 @@ QCheckBox::indicator:disabled, QRadioButton::indicator:disabled
 }
 
 #deviceLabel {
-    font-size: 16px; 
+    font-size: 12px; 
     font-weight: bold; 
     color: #329cd1;
 }
 
-#deviceSpinBox {
-    font-size: 16px;
+#deviceComboBox {
+    font-size: 12px;
 }
 
 /* Optional: Make the Start button stand out from the default dark theme */

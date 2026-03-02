@@ -1,15 +1,15 @@
 ﻿#include "BenchmarkWorker.hpp"
 #include "WatermarkingBenchUI.h"
+#include <QComboBox>
 #include <QCoreApplication>
 #include <QDir>
 #include <QMainWindow>
-#include <QMessageBox>
-#include <QPixMap>
+#include <QPixmap>
 #include <QPushButton>
-#include <QString>
-#include <QScreen>
-#include <QStyle>
 #include <QRect>
+#include <QScreen>
+#include <QString>
+#include <QStyle>
 #include <QVBoxLayout>
 #include <QWidget>
 #include <WatermarkEngine.hpp>
@@ -38,23 +38,22 @@ WatermarkingBenchUI::WatermarkingBenchUI(QWidget* parent) : QMainWindow(parent) 
     layout->addWidget(progressBar);
     layout->addWidget(imageView, 1);
 
-    // for OpenCL backend only, add a device selection spinbox to choose between different OpenCL devices (if multiple are available)
+    // for OpenCL backend only, add a device selection combobox to choose between different OpenCL devices (if multiple are available)
     if (WatermarkEngine::isOpenCLBackend()) {
         QHBoxLayout* deviceLayout = new QHBoxLayout;
 
-        deviceLabel = new QLabel("OpenCL Device Index:", this);
+        deviceLabel = new QLabel("OpenCL Device:", this);
         deviceLabel->setObjectName("deviceLabel");
         deviceLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
 
-        deviceSpinBox = new QSpinBox(this);
-        deviceSpinBox->setRange(0, 8);
-        deviceSpinBox->setValue(0);
-        deviceSpinBox->setObjectName("deviceSpinBox");
-        deviceSpinBox->setMinimumSize(80, 30);
+        deviceComboBox = new QComboBox(this);
+        deviceComboBox->setObjectName("deviceComboBox");
+        for (const auto& devName : WatermarkEngine::getAvailableDevices())
+            deviceComboBox->addItem(QString::fromStdString(devName));
 
         deviceLayout->addStretch();
         deviceLayout->addWidget(deviceLabel);
-        deviceLayout->addWidget(deviceSpinBox);
+        deviceLayout->addWidget(deviceComboBox);
         deviceLayout->addStretch();
         deviceLayout->setContentsMargins(0, 10, 0, 10);
 
@@ -81,9 +80,9 @@ void WatermarkingBenchUI::startBenchmark() {
     progressBar->setValue(0);
     progressBar->setVisible(true);
     int selectedDevice = 0;
-    if (deviceSpinBox) {
-        selectedDevice = deviceSpinBox->value();
-        deviceSpinBox->setEnabled(false);
+    if (deviceComboBox) {
+        selectedDevice = deviceComboBox->currentIndex();
+        deviceComboBox->setEnabled(false);
     }
     statusLabel->setProperty("benchmarkState", "running");
     statusLabel->style()->unpolish(statusLabel);
@@ -97,9 +96,6 @@ void WatermarkingBenchUI::startBenchmark() {
 
     // initialize benchmark worker
     worker = new BenchmarkWorker(QDir(QCoreApplication::applicationDirPath()).filePath("samples/images"), selectedDevice, this);
-
-    // signal to show warning dialogs (e.g. if opencl device is invalid), use a blocking connection to ensure the dialog is shown before the benchmark continues
-    connect(worker, &BenchmarkWorker::showWarningDialog, this, [this](const QString& title, const QString& message) { QMessageBox::warning(this, title, message); }, Qt::BlockingQueuedConnection);
 
     // signal to update progress bar
     connect(worker, &BenchmarkWorker::progressUpdated, progressBar, [this](const int current, const int total) {
@@ -119,10 +115,10 @@ void WatermarkingBenchUI::startBenchmark() {
         // re-enable the UI elements
         startButton->setEnabled(true);
         progressBar->setVisible(false);
-        if (deviceSpinBox)
-            deviceSpinBox->setEnabled(true);
+        if (deviceComboBox)
+            deviceComboBox->setEnabled(true);
         // show the final score for both pipelines
-        const QString backendName = WatermarkEngine::isGpuBackend() ? (WatermarkEngine::isOpenCLBackend() ? "OpenCL" : "CUDA") : "CPU (Eigen)";
+        const QString backendName = QString::fromStdString(WatermarkEngine::getDeviceName(deviceComboBox ? deviceComboBox->currentIndex() : -1));
         const QString finalMessage =
             QString("<b>BENCHMARK COMPLETE</b><br>Hardware: %1<br>Avg Embed: <b>%2 FPS</b> | Avg Detect: <b>%3 FPS</b>").arg(backendName).arg(finalEmbedFps, 0, 'f', 1).arg(finalDetectFps, 0, 'f', 1);
         statusLabel->setText(finalMessage);

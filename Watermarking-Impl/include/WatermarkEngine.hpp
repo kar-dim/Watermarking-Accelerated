@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 /*!
  *  \brief  Main interface for Watermarking operations, including image loading, embedding, detection, and video processing.
@@ -31,6 +32,8 @@ bool initializeEnvironment(const int openclDevice = 0);
 void updateSessionParams(ImageSession* session, const int p, const float psnr);
 bool isGpuBackend();
 bool isOpenCLBackend();
+std::string getDeviceName(const int deviceIndex = -1);
+std::vector<std::string> getAvailableDevices();
 
 // image processing functions
 ImageHandle createImageSession(const uint32_t watermarkSeed, const int p, const float psnr);

@@ -14,7 +14,6 @@ class BenchmarkWorker : public QThread {
     void resultReady(const QImage& img, const int p, const float psnr, const double embedTime, const double detectTime, const double embedFps, const double detectFps, const QString& fileName,
                      const float correlation);
     void progressUpdated(const int currentStep, const int totalSteps);
-    void showWarningDialog(const QString& title, const QString& message);
     void errorOccurred(const QString& fileName, const QString& errorMessage);
     void benchmarkFinished(const double finalEmbedFps, const double finalDetectFps);
 

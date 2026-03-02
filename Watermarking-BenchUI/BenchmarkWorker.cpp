@@ -6,6 +6,9 @@
 #include <exception>
 #include <filesystem>
 #include <future>
+#include <QImage>
+#include <QString>
+#include <QThread>
 #include <ratio>
 #include <tuple>
 #include <utility>
@@ -18,10 +21,8 @@ namespace fs = std::filesystem;
 BenchmarkWorker::BenchmarkWorker(const QString& folderPath, int openclDevice, QObject* parent) : QThread(parent), inputFolder(folderPath), deviceIndex(openclDevice) {}
 
 void BenchmarkWorker::run() {
-    // initialize watermark environment For OpenCL only: if the specified device is invalid, emit a warning and continue with the default device (index 0)
-    const bool validDevice = WatermarkEngine::initializeEnvironment(deviceIndex);
-    if (!validDevice)
-        emit showWarningDialog("Invalid OpenCL Device", "The specified OpenCL device index was not found or is invalid.\n\nFalling back to default Device 0.\n\nClick OK to continue the benchmark.");
+    // initialize watermark environment For OpenCL only
+    WatermarkEngine::initializeEnvironment(deviceIndex);
 
     // check if the input directory which conntains the benchmark images is valid
     fs::path inputDir(inputFolder.toStdString());

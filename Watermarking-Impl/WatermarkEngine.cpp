@@ -20,9 +20,11 @@
 #include <vector>
 
 #if defined(_USE_GPU_)
+#include <algorithm>
 #include <arrayfire.h>
 #elif defined(_USE_EIGEN_)
 #include <cstring>
+#include <intrin.h>
 #include "eigen_utils.hpp"
 #endif
 
@@ -35,6 +37,8 @@ extern "C" {
 using namespace video_utils;
 using namespace CommonUtils;
 using namespace InternalUtils;
+
+using std::string;
 using FILEPtr = std::unique_ptr<FILE, decltype(&_pclose)>;
 
 namespace WatermarkEngine {
@@ -76,13 +80,24 @@ void exportForSave(const ImageSession* s, ExportedImage* p, MaskMethod method) {
 }
 
 // same as saveImage, but used as a separate step to allow for asynchronous saving (in batched mode)
-void flushToDiskAsync(ExportedImage* handle, const std::string& outPath, MaskMethod method) {
-    std::string suffix = (method == MaskMethod::NVF) ? "W_NVF" : "W_ME";
+void flushToDiskAsync(ExportedImage* handle, const string& outPath, MaskMethod method) {
+    string suffix = (method == MaskMethod::NVF) ? "W_NVF" : "W_ME";
     InternalUtils::saveImage(outPath, suffix, handle->finalPixels, handle->alpha);
 }
 
 // INTERNAL HELPERS
 namespace {
+// get the current arrayfire device (opencl, cuda)
+#if defined(_USE_GPU_)
+string getCurrentAFDeviceName() {
+    char name[256] = {0}, p[256] = {0}, t[256] = {0}, c[256] = {0};
+    af::deviceInfo(name, p, t, c);
+    // arrayfire puts underscores instead of spaces, we replace them with spaces
+    string cleanName(name);
+    std::replace(cleanName.begin(), cleanName.end(), '_', ' ');
+    return cleanName;
+}
+#endif
 // generic method taking the underlying ImageOutputBuffer directly
 const uint8_t* extractPixelData(const ImageOutputBuffer& buffer, int& width, int& height, int& channels) {
     static std::vector<uint8_t> hostBuffer;
@@ -145,6 +160,65 @@ bool initializeEnvironment(const int openclDevice) {
     return deviceSetSuccess;
 }
 
+// helper function to get the device name (GPU or CPU)
+string getDeviceName(const int deviceIndex) {
+#if defined(_USE_GPU_)
+    const int currentDevice = af::getDevice();
+    // swap to the requested device in order to get its name
+    if (deviceIndex >= 0)
+        af::setDevice(deviceIndex);
+    // get the current device name
+    return getCurrentAFDeviceName();
+    // swap back to the original device
+    if (deviceIndex >= 0)
+        af::setDevice(currentDevice);
+
+    // for CPU name, call __cpuid
+#elif defined(_USE_EIGEN_)
+#ifdef _WIN32
+    int CPUInfo[4] = {-1};
+    char CPUBrandString[0x40] = {0};
+    __cpuid(CPUInfo, 0x80000000);
+    unsigned int nExIds = CPUInfo[0];
+    for (unsigned int i = 0x80000000; i <= nExIds; ++i) {
+        __cpuid(CPUInfo, i);
+        if (i == 0x80000002)
+            memcpy(CPUBrandString, CPUInfo, sizeof(CPUInfo));
+        else if (i == 0x80000003)
+            memcpy(CPUBrandString + 16, CPUInfo, sizeof(CPUInfo));
+        else if (i == 0x80000004)
+            memcpy(CPUBrandString + 32, CPUInfo, sizeof(CPUInfo));
+    }
+    string cpuName(CPUBrandString);
+    cpuName.erase(cpuName.find_last_not_of(" \n\r\t\0") + 1);
+    return cpuName.empty() ? "Unknown CPU" : cpuName;
+#else
+    return "Unknown CPU";
+#endif
+#endif
+}
+
+// get the list of available arrayfire devices
+std::vector<string> getAvailableDevices() {
+    std::vector<string> devices;
+#if defined(_USE_GPU_)
+    const int currentDevice = af::getDevice();
+    const int count = af::getDeviceCount();
+    // swap to each device returned by arrayfire in order to get its name
+    for (int i = 0; i < count; i++) {
+        try {
+            af::setDevice(i);
+            devices.push_back(getCurrentAFDeviceName());
+        } catch (...) { devices.push_back("Unknown GPU Device " + std::to_string(i)); }
+    }
+    // swap back to the original device
+    af::setDevice(currentDevice);
+#elif defined(_USE_EIGEN_)
+    devices.push_back(getDeviceName());
+#endif
+    return devices;
+}
+
 bool isGpuBackend() {
 #if defined(_USE_GPU_)
     return true;
@@ -181,7 +255,7 @@ ImageHandle createImageSession(const uint32_t watermarkSeed, const int p, const 
 }
 
 // used for disk images preloading, useful for scenarios where multiple images need to be processed in parallel, as it allows the loading step to be done in parallel
-PreloadedHandle preloadImageFromDisk(const std::string& imagePath) {
+PreloadedHandle preloadImageFromDisk(const string& imagePath) {
     auto* p = new PreloadedImage();
     p->buffer = InternalUtils::loadImage(imagePath);
     return PreloadedHandle(p);
@@ -210,7 +284,7 @@ void bindPreloadedImage(ImageSession* s, PreloadedHandle preloadedData) {
 }
 
 // combines the loading and binding steps, useful for single image processing without the need for preloading multiple images in parallel
-void loadImage(ImageSession* session, const std::string& imagePath) { bindPreloadedImage(session, preloadImageFromDisk(imagePath)); }
+void loadImage(ImageSession* session, const string& imagePath) { bindPreloadedImage(session, preloadImageFromDisk(imagePath)); }
 
 // main function to embed the watermark into the loaded image, it calls the makeWatermark method of the watermark object,
 // which implements the actual embedding algorithm based on the specified mask method (NVF or ME)
@@ -243,8 +317,8 @@ float detectLoadedImage(const ImageSession* s, MaskMethod method) { return s->wa
 float detectEmbeddedBuffer(const ImageSession* s, MaskMethod method) { return s->watermarkObj->detectWatermark(s->detectGrayBuffer, method); }
 
 // saves the image to disk
-void saveImage(const ImageSession* s, const std::string& outPath, MaskMethod method) {
-    std::string suffix = (method == MaskMethod::NVF) ? "W_NVF" : "W_ME";
+void saveImage(const ImageSession* s, const string& outPath, MaskMethod method) {
+    string suffix = (method == MaskMethod::NVF) ? "W_NVF" : "W_ME";
     InternalUtils::saveImage(outPath, suffix, s->watermarkBuffer, s->imgBuffer.alphaChannel);
 }
 
