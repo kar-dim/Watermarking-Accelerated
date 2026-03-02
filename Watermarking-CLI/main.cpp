@@ -114,7 +114,7 @@ static int testForImageBatch(const INIReader& inir, const int p, const float psn
 
         } catch (const std::exception& e) {
             cout << err(std::format(" [FAILED] {} - Error: {}\n", validFiles[i].filename().string(), cleanError(e.what())));
-            // If an async task fails, we must catch it and manually prime the pump for the next iteration
+            // If an async task fails, we must catch it and manually spawn background thread for the next image
             if (i + 1 < validFiles.size())
                 prefetchTask = std::async(std::launch::async, preloadImageFromDisk, validFiles[i + 1].string());
         }
