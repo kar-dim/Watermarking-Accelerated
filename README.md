@@ -154,20 +154,21 @@ The solution provides multiple build configurations, each targeting a specific b
 4. In the **Solution Configurations** dropdown (top toolbar), select your configuration (e.g. `CUDA_Release`) or select `Batch Build` and select what configurations you want to build.
 5. Build the solution via **Build > Build Solution**.
 
-**Note:** Both CUDA and OpenCL backends depend on **ArrayFire**, which in turn requires its own set of runtime dependencies.
-If ArrayFire is properly installed, its `lib` directory (containing all required DLLs) is typically added to the system `PATH`, and everything should work out of the box.
-However, since not all systems have ArrayFire installed, we include the necessary DLLs in the prebuilt binaries. These files are copied directly from `$(AF_PATH)/lib` for convenience (Post-Build event).
-The same applies for CPU backend, where we copy the relevant libraries required by CImg (libjpeg, libpng, zlib, etc) and clang's OpenMP. 
-
-GPU implementations' image support relies on ArrayFire’s FreeImage dependency, while the CPU version manually integrates specific image libraries for use with CImg.
-All backends require FFmpeg which is also copied (most libav* DLLs, not included in the table below).
+We bundle all necessary DLLs with the prebuilt binaries so the application runs out-of-the-box without requiring a local ArrayFire or CImg development environment.
 
 | Backend | Dependencies |
 |---------|--------------|
+| **All** |	`FFmpeg (all libav*.dll binaries)` |
 | **CUDA** | `FreeImage.dll`, `afcuda.dll` |
 | **OpenCL** | `FreeImage.dll`, `afopencl.dll`, `forge.dll`, `glfw3.dll`, `mkl_core.2.dll`, `mkl_def.2.dll`, `mkl_rt.2.dll`, `mkl_tbb_thread.2.dll` |
 | **Eigen** | `zlib1.dll`, `libpng16.dll`, `jpeg62.dll`, `tiff.dll`, `libomp.dll`, `libwebp.lib` (static lib) |
 
+**NOTES:**
+- OpenCL implementation: The [OpenCL Headers](https://github.com/KhronosGroup/OpenCL-Headers), [OpenCL C++ Bindings](https://github.com/KhronosGroup/OpenCL-CLHPP) and [OpenCL Library file](https://github.com/KhronosGroup/OpenCL-SDK) are already included and configured for this project.
+- CUDA implementation: NVIDIA CUDA Toolkit is required for building. Minimum supported GPUs with Compute Capability 7.0 (sm_75) or newer, CUDA Toolkit 10.0 or newer.
+- CPU Implementation: Image libraries (libjpeg, libpng, libtiff etc) are included and utilized internally by CImg for loading and saving of images.
+- ArrayFire should be installed globally, with default installation options. Environment Variable "AF_PATH" will be defined automatically.
+- FFmpeg must exist on system PATH (Pre-build binaries already include FFmpeg binaries and DLLs).
 
 # Libraries/Tools Used
 
@@ -179,14 +180,6 @@ All backends require FFmpeg which is also copied (most libav* DLLs, not included
 - [cub](https://github.com/NVIDIA/cccl): A lower-level CUDA library designed for speed-of-light parallel algorithms. Used for device-wide, block-wide, and warp-wide reductions.
 - [Intel VTune Profiler](https://www.intel.com/content/www/us/en/develop/tools/vtune-profiler.html) and [AMD uProf](https://developer.amd.com/amd-uprof/): Used to profile CPU performance.
 - [NVIDIA Nsight Systems](https://developer.nvidia.com/nsight-systems) and [NVIDIA Compute](https://developer.nvidia.com/nsight-compute): Used to profile overall system-wide CUDA performance, and to individually profile specific CUDA kernels with detailed performance metrics.
-
-# Additional Dependencies for Building/Requirements
-
-- OpenCL implementation: The [OpenCL Headers](https://github.com/KhronosGroup/OpenCL-Headers), [OpenCL C++ Bindings](https://github.com/KhronosGroup/OpenCL-CLHPP) and [OpenCL Library file](https://github.com/KhronosGroup/OpenCL-SDK) are already included and configured for this project.
-- CUDA implementation: NVIDIA CUDA Toolkit is required for building. Minimum supported GPUs with Compute Capability 7.0 (sm_75) or newer, CUDA Toolkit 10.0 or newer.
-- CPU Implementation: Image libraries (libjpeg, libpng, libtiff etc) are included and utilized internally by CImg for loading and saving of images.
-- ArrayFire should be installed globally, with default installation options. Environment Variable "AF_PATH" will be defined automatically.
-- FFmpeg must exist on system PATH (Pre-build binaries already include FFmpeg binaries and DLLs).
 
 # Comparisons
 
@@ -217,8 +210,8 @@ Tests were executed with a loop count of 1000 iterations to ensure statistical s
 ## Observations
 
 - CUDA: Consistently delivers the highest throughput and it is the ideal choice for realtime applications.
-- OpenCL: Serves as a middle ground, offering some healthy acceleration over the CPU, while maintaining portability across non-NVIDIA hardware (AMD, Intel, etc). Its main purpose is to offload work from CPU to GPU in order to free the CPU for other tasks (like video encoding).
-- CPU: Functions as the fallback implementation. While slower, it is very optimized for CPU architecture, and also eensures compatibility on systems without dedicated GPUs.
+- OpenCL: Serves as a middle ground, offering some healthy acceleration over the CPU, while maintaining portability across non-NVIDIA hardware (AMD, Intel, etc). Its main purpose is to offload work from CPU to GPU in order to free the CPU for other tasks (like video encoding or batched processing).
+- CPU: Functions as the fallback implementation. While slower, it is optimized for CPU architecture, and also ensures compatibility on systems without dedicated GPUs.
 
 - Impact of Window Size (p): As the window size increases, the computational complexity grows quadratically.
      - p=3 (Small Window): Extremely high throughput.
