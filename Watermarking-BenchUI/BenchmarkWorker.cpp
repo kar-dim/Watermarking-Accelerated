@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <future>
 #include <ratio>
+#include <tuple>
 #include <utility>
 #include <vector>
 #include <WatermarkTypes.hpp>
@@ -26,21 +27,22 @@ void BenchmarkWorker::run() {
     fs::path inputDir(inputFolder.toStdString());
     if (!fs::exists(inputDir) || !fs::is_directory(inputDir)) {
         emit errorOccurred("System", "Invalid directory path!");
-        emit benchmarkFinished(0.0);
+        emit benchmarkFinished(0.0, 0.0);
         return;
     }
 
     // get the image files, if no valid image files are found, emit a finish signal with 0 FPS
     const std::vector<fs::path> validFiles = CommonUtils::getValidImageFiles(inputDir);
     if (validFiles.empty()) {
-        emit benchmarkFinished(0.0);
+        emit benchmarkFinished(0.0, 0.0);
         return;
     }
 
     // initialize accumulators for the benchmark results and calculate total steps for progress tracking
     const int totalSteps = static_cast<int>(validFiles.size() * pValues.size() * psnrValues.size());
     int currentStep = 0;
-    double totalTimeMs = 0.0;
+    double totalEmbedTimeMs = 0.0;
+    double totalDetectTimeMs = 0.0;
     int totalFrames = 0;
     // initialize with a fixed watermark seed and the first set of parameters (p, psnr)
     auto session = WatermarkEngine::createImageSession(12345, pValues[0], psnrValues[0]);
@@ -48,6 +50,22 @@ void BenchmarkWorker::run() {
     std::future<WatermarkEngine::PreloadedHandle> prefetchTask = std::async(std::launch::async, WatermarkEngine::preloadImageFromDisk, validFiles[0].string());
     // more warmup iterations for GPU to ensure accurate benchmarking, OpenCL needs less than CUDA
     const int benchmarkIterations = WatermarkEngine::isGpuBackend() ? (WatermarkEngine::isOpenCLBackend() ? 20 : 100) : 5;
+
+    // helper lambda to measure performance of a given task (embedding or detection)
+    auto measurePerformance = [&](auto&& task) {
+        task(); // initialization warmup: run the task once to ensure all memory allocations or arrayfire/openmp init are done
+        auto start = std::chrono::high_resolution_clock::now();
+        float lastResult = 0.0f;
+        // benchmark loop
+        for (int k = 0; k < benchmarkIterations; k++)
+            lastResult = task();
+        auto end = std::chrono::high_resolution_clock::now();
+        // calculate average time and total time for the current task
+        const double totalMs = std::chrono::duration<double, std::milli>(end - start).count();
+        const double avgMs = totalMs / benchmarkIterations;
+        const double fps = 1000.0 / avgMs;
+        return std::make_tuple(totalMs, avgMs, fps, lastResult);
+    };
 
     // main loop
     for (size_t i = 0; i < validFiles.size(); i++) {
@@ -63,23 +81,24 @@ void BenchmarkWorker::run() {
             // for all combinations
             for (int p : pValues) {
                 for (float psnr : psnrValues) {
+                    // update p and psnr in the session, this will trigger all necessary internal recalculations in the engine (e.g. random noise generation)
                     WatermarkEngine::updateSessionParams(session.get(), p, psnr);
-                    // initialization warmup: run the embedding once to ensure all memory allocations or arrayfire/openmp init are done before we start measuring time
-                    WatermarkEngine::embedImage(session.get(), MaskMethod::ME);
-                    // warmup for cpu/gpu to force P0 state (gpu needs much more warmup due to driver)
-                    auto start = std::chrono::high_resolution_clock::now();
-                    for (int k = 0; k < benchmarkIterations; k++)
+                    // EMBED BENCHMARK
+                    auto [totalEmbedMs, avgEmbedMs, embedFps, dummy] = measurePerformance([&]() {
                         WatermarkEngine::embedImage(session.get(), MaskMethod::ME);
-                    auto end = std::chrono::high_resolution_clock::now();
-                    // calculate average time per embedding and FPS for the current parameters, and accumulate total time and frames for final score calculation at the end of the batch
-                    const double totalBatchTimeMs = std::chrono::duration<double, std::milli>(end - start).count();
-                    const double avgEmbedTimeMs = totalBatchTimeMs / static_cast<double>(benchmarkIterations);
-                    const double currentFps = 1000.0 / avgEmbedTimeMs;
-                    totalTimeMs += totalBatchTimeMs;
+                        return 0.0f;
+                    });
+                    // DETECT BENCHMARK
+                    // necessary uint8 to float for detection
+                    WatermarkEngine::prepareDetectionImage(session.get(), MaskMethod::ME);
+                    auto [totalDetectMs, avgDetectMs, detectFps, currentCorrelation] = measurePerformance([&]() { return WatermarkEngine::detectEmbeddedBuffer(session.get(), MaskMethod::ME); });
+                    // accumulate total times and frames for final score calculation at the end of the benchmark
+                    totalEmbedTimeMs += totalEmbedMs;
+                    totalDetectTimeMs += totalDetectMs;
                     totalFrames += benchmarkIterations;
                     // GUI: convert the current watermarked image to a QImage format (interleaved RGB, transposed row-wise) for display in the GUI
                     // and emit current FPS and time for this specific frame and step completion to the GUI for display
-                    emit resultReady(convertToQtFormat(session.get()), p, static_cast<int>(psnr), avgEmbedTimeMs, currentFps, currentFileName);
+                    emit resultReady(convertToQtFormat(session.get()), p, psnr, avgEmbedMs, avgDetectMs, embedFps, detectFps, currentFileName, currentCorrelation);
                     emit progressUpdated(++currentStep, totalSteps);
                 }
             }
@@ -91,7 +110,9 @@ void BenchmarkWorker::run() {
     }
 
     // calculate final score (average FPS across all frames)
-    emit benchmarkFinished(totalTimeMs == 0.0 ? 0.0 : (totalFrames * 1000.0) / totalTimeMs);
+    const double finalEmbedFps = (totalEmbedTimeMs == 0.0) ? 0.0 : (totalFrames * 1000.0) / totalEmbedTimeMs;
+    const double finalDetectFps = (totalDetectTimeMs == 0.0) ? 0.0 : (totalFrames * 1000.0) / totalDetectTimeMs;
+    emit benchmarkFinished(finalEmbedFps, finalDetectFps);
 }
 
 // simple format conversion from the raw pixel data of the watermark session (column-major, planar) to a QImage (row-major, interleaved) for display in the GUI

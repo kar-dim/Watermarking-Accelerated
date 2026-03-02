@@ -11,11 +11,12 @@ class BenchmarkWorker : public QThread {
     explicit BenchmarkWorker(const QString& folderPath, int openclDevice = 0, QObject* parent = nullptr);
 
   signals:
-    void resultReady(const QImage& displayImage, const int p, const int psnr, const double avgTimeMs, const double fps, const QString& fileName);
+    void resultReady(const QImage& img, const int p, const float psnr, const double embedTime, const double detectTime, const double embedFps, const double detectFps, const QString& fileName,
+                     const float correlation);
     void progressUpdated(const int currentStep, const int totalSteps);
     void showWarningDialog(const QString& title, const QString& message);
     void errorOccurred(const QString& fileName, const QString& errorMessage);
-    void benchmarkFinished(double finalFps);
+    void benchmarkFinished(const double finalEmbedFps, const double finalDetectFps);
 
   protected:
     void run() override;

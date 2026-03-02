@@ -115,15 +115,17 @@ void WatermarkingBenchUI::startBenchmark() {
             [this](const QString& fileName, const QString& errorMessage) { statusLabel->setText(QString("<font color='red'>Skipped %1: %2</font>").arg(fileName).arg(errorMessage)); });
 
     // signal to handle benchmark completion, show the final score and re-enable the start button and device selection
-    connect(worker, &BenchmarkWorker::benchmarkFinished, this, [this](const double finalFps) {
+    connect(worker, &BenchmarkWorker::benchmarkFinished, this, [this](const double finalEmbedFps, const double finalDetectFps) {
         // re-enable the UI elements
         startButton->setEnabled(true);
         progressBar->setVisible(false);
         if (deviceSpinBox)
             deviceSpinBox->setEnabled(true);
-        // show the final score
+        // show the final score for both pipelines
         const QString backendName = WatermarkEngine::isGpuBackend() ? (WatermarkEngine::isOpenCLBackend() ? "OpenCL" : "CUDA") : "CPU (Eigen)";
-        statusLabel->setText(QString("<b>BENCHMARK COMPLETE</b><br>Hardware: %1 | Total Average: %2 FPS").arg(backendName).arg(finalFps, 0, 'f', 1));
+        const QString finalMessage =
+            QString("<b>BENCHMARK COMPLETE</b><br>Hardware: %1<br>Avg Embed: <b>%2 FPS</b> | Avg Detect: <b>%3 FPS</b>").arg(backendName).arg(finalEmbedFps, 0, 'f', 1).arg(finalDetectFps, 0, 'f', 1);
+        statusLabel->setText(finalMessage);
         statusLabel->setProperty("benchmarkState", "success");
         statusLabel->style()->unpolish(statusLabel);
         statusLabel->style()->polish(statusLabel);
@@ -133,14 +135,20 @@ void WatermarkingBenchUI::startBenchmark() {
         centerWindowOnScreen();
         worker->deleteLater();
     });
+
     worker->start();
 }
 
-void WatermarkingBenchUI::onResultReady(const QImage& img, const int p, const int psnr, const double time, const double fps, const QString& file) {
+void WatermarkingBenchUI::onResultReady(const QImage& img, const int p, const float psnr, const double embedTime, const double detectTime, const double embedFps, const double detectFps,
+                                        const QString& file, const float correlation) {
+    // clang-format off
     // update the status label with the current parameters and performance metrics
-    const QString statusText = QString("File: %1 | Block Size (p): %2 | PSNR: %3\nEmbed Time: %4 ms | Performance: %5 FPS").arg(file).arg(p).arg(psnr).arg(time, 0, 'f', 3).arg(fps, 0, 'f', 1);
-    statusLabel->setText(statusText);
+    const QString statusText = QString("File: %1 | Block (p): %2 | PSNR: %3 dB | Corr: %4\nEmbed: %5 ms (%6 FPS)  ||  Detect: %7 ms (%8 FPS)")
+                                   .arg(file).arg(p).arg(psnr, 0, 'f', 1).arg(correlation, 0, 'f', 4).arg(embedTime, 0, 'f', 2)
+                                   .arg(embedFps, 0, 'f', 1).arg(detectTime, 0, 'f', 2).arg(detectFps, 0, 'f', 1);
+    // clang-format on
     // update the image view with the new image (scaled to fit the view while maintaining aspect ratio)
+    statusLabel->setText(statusText);
     imageView->setPixmap(QPixmap::fromImage(img).scaled(imageView->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
 }
 
