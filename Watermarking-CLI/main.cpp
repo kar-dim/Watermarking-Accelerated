@@ -186,7 +186,7 @@ static int testForImageSingle(const INIReader& inir, const int p, const float ps
 }
 
 // video processing, it opens the video, embeds or detects the watermark based on the mode specified in settings.ini,
-// and optionally encodes the output video with the embedded watermark (using hardware if specified and available)
+// and optionally encodes the output video with the embedded watermark (using hardware acceleration if specified and available)
 static int testForVideo(const INIReader& inir, const string& videoFile, const int p, const float psnr) {
     const bool showFps = inir.GetBoolean("global", "display_fps", true);
     const bool isEmbed = inir.Get("video", "mode", "embed") == "embed";
