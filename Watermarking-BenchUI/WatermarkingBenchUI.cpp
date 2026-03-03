@@ -2,7 +2,6 @@
 #include "WatermarkingBenchUI.h"
 #include <QComboBox>
 #include <QCoreApplication>
-#include <QDir>
 #include <QMainWindow>
 #include <QPixmap>
 #include <QPushButton>
@@ -95,7 +94,7 @@ void WatermarkingBenchUI::startBenchmark() {
     centerWindowOnScreen();
 
     // initialize benchmark worker
-    worker = new BenchmarkWorker(QDir(QCoreApplication::applicationDirPath()).filePath("samples/images"), selectedDevice, this);
+    worker = new BenchmarkWorker(selectedDevice, this);
 
     // signal to update progress bar
     connect(worker, &BenchmarkWorker::progressUpdated, progressBar, [this](const int current, const int total) {
@@ -111,7 +110,7 @@ void WatermarkingBenchUI::startBenchmark() {
             [this](const QString& fileName, const QString& errorMessage) { statusLabel->setText(QString("<font color='red'>Skipped %1: %2</font>").arg(fileName).arg(errorMessage)); });
 
     // signal to handle benchmark completion, show the final score and re-enable the start button and device selection
-    connect(worker, &BenchmarkWorker::benchmarkFinished, this, [this](const double finalEmbedFps, const double finalDetectFps) {
+    connect(worker, &BenchmarkWorker::benchmarkFinished, this, [this](const double finalEmbedFps, const double finalDetectFps, const int finalScore) {
         // re-enable the UI elements
         startButton->setEnabled(true);
         progressBar->setVisible(false);
@@ -119,8 +118,11 @@ void WatermarkingBenchUI::startBenchmark() {
             deviceComboBox->setEnabled(true);
         // show the final score for both pipelines
         const QString backendName = QString::fromStdString(WatermarkEngine::getDeviceName(deviceComboBox ? deviceComboBox->currentIndex() : -1));
-        const QString finalMessage =
-            QString("<b>BENCHMARK COMPLETE</b><br>Hardware: %1<br>Avg Embed: <b>%2 FPS</b> | Avg Detect: <b>%3 FPS</b>").arg(backendName).arg(finalEmbedFps, 0, 'f', 1).arg(finalDetectFps, 0, 'f', 1);
+        const QString finalMessage = QString("<b>BENCHMARK COMPLETE</b><br>Hardware: %1<br>Avg Embed: <b>%2 FPS</b> | Avg Detect: <b>%3 FPS</b><br><br>SCORE: <b>%4</b>")
+                                         .arg(backendName)
+                                         .arg(finalEmbedFps, 0, 'f', 1)
+                                         .arg(finalDetectFps, 0, 'f', 1)
+                                         .arg(finalScore);
         statusLabel->setText(finalMessage);
         statusLabel->setProperty("benchmarkState", "success");
         statusLabel->style()->unpolish(statusLabel);

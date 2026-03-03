@@ -2,11 +2,15 @@
 #include "common_utils.hpp"
 #include "WatermarkEngine.hpp"
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <exception>
 #include <filesystem>
 #include <future>
+#include <QDir>
+#include <QFile>
 #include <QImage>
+#include <QIODevice>
 #include <QString>
 #include <QThread>
 #include <ratio>
@@ -18,7 +22,25 @@
 using namespace CommonUtils;
 namespace fs = std::filesystem;
 
-BenchmarkWorker::BenchmarkWorker(const QString& folderPath, int openclDevice, QObject* parent) : QThread(parent), inputFolder(folderPath), deviceIndex(openclDevice) {}
+BenchmarkWorker::BenchmarkWorker(int openclDevice, QObject* parent) : QThread(parent), deviceIndex(openclDevice) {
+    // read the image files (which are embedded in the executable) and write them to temporary folder
+    if (tempDir.isValid()) {
+        const QDir resourceDir(":/samples");
+        for (const QString& fileName : resourceDir.entryList(QDir::Files)) {
+            QFile resFile(":/samples/" + fileName);
+            if (resFile.open(QIODevice::ReadOnly)) {
+                const QString outPath = tempDir.path() + "/" + fileName;
+                QFile outFile(outPath);
+                if (outFile.open(QIODevice::WriteOnly))
+                    outFile.write(resFile.readAll());
+            }
+        }
+        // we can load the images from this temp folder
+        inputFolder = tempDir.path();
+    } else {
+        emit errorOccurred("System", "Failed to create temporary directory for benchmark samples.");
+    }
+}
 
 void BenchmarkWorker::run() {
     // initialize watermark environment For OpenCL only
@@ -28,14 +50,14 @@ void BenchmarkWorker::run() {
     fs::path inputDir(inputFolder.toStdString());
     if (!fs::exists(inputDir) || !fs::is_directory(inputDir)) {
         emit errorOccurred("System", "Invalid directory path!");
-        emit benchmarkFinished(0.0, 0.0);
+        emit benchmarkFinished(0.0, 0.0, 0);
         return;
     }
 
     // get the image files, if no valid image files are found, emit a finish signal with 0 FPS
     const std::vector<fs::path> validFiles = CommonUtils::getValidImageFiles(inputDir);
     if (validFiles.empty()) {
-        emit benchmarkFinished(0.0, 0.0);
+        emit benchmarkFinished(0.0, 0.0, 0);
         return;
     }
 
@@ -110,10 +132,11 @@ void BenchmarkWorker::run() {
         }
     }
 
-    // calculate final score (average FPS across all frames)
+    // calculate final score (geomean average FPS of both pipelines)
     const double finalEmbedFps = (totalEmbedTimeMs == 0.0) ? 0.0 : (totalFrames * 1000.0) / totalEmbedTimeMs;
     const double finalDetectFps = (totalDetectTimeMs == 0.0) ? 0.0 : (totalFrames * 1000.0) / totalDetectTimeMs;
-    emit benchmarkFinished(finalEmbedFps, finalDetectFps);
+    const int finalScore = static_cast<int>(std::round(std::sqrt(finalEmbedFps * finalDetectFps) * 100.0));
+    emit benchmarkFinished(finalEmbedFps, finalDetectFps, finalScore);
 }
 
 // simple format conversion from the raw pixel data of the watermark session (column-major, planar) to a QImage (row-major, interleaved) for display in the GUI
