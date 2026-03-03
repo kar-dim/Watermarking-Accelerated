@@ -42,7 +42,7 @@ Implementations are optimized for maximum performance:
 
 - Get the latest binaries [here](https://github.com/kar-dim/Watermarking-Accelerated/releases) for Eigen, OpenCL or CUDA platform. The binaries contain the sample CLI (command line) application and the embedded CUDA/OpenCL/Eigen implementations of the watermarking algorithms.
 - There are also binaries for the **benchmarking** application which benchmarks each backend and shows in the UI (Qt) the various combinations of parameters (PSNR, window size) and the final image. In the end a total score of FPS is shown as average FPS.   
-- From the same section, you can also download the archive ```samples.rar``` which includes sample video and image files to be used by the CLI application.
+- From the same section, you can also download the archive ```samples.rar``` which includes sample video and image files to be used by the CLI application. These sample files are also included in the binaries for convenience.
 
 The CLI application:
    - Embeds or detects the watermark using the NVF and the proposed Prediction-Error mask for images and videos.
