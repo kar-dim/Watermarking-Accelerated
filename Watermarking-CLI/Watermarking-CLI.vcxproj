@@ -122,6 +122,11 @@
 xcopy "$(SolutionDir)Watermarking-Impl\libs\ffmpeg\bin\ffmpeg.exe" "$(OutDir)" /y /D
 xcopy "$(AF_PATH)\lib\FreeImage.dll" "$(OutDir)" /y /D
 xcopy "$(AF_PATH)\lib\afcuda.dll" "$(OutDir)" /y /D
+xcopy "$(AF_PATH)\lib\cublas64_12.dll" "$(OutDir)" /y /D
+xcopy "$(AF_PATH)\lib\cufft64_11.dll" "$(OutDir)" /y /D
+xcopy "$(AF_PATH)\lib\cusolver64_11.dll" "$(OutDir)" /y /D
+xcopy "$(AF_PATH)\lib\nvrtc64_120_0.dll" "$(OutDir)" /y /D
+xcopy "$(AF_PATH)\lib\nvrtc-builtins64_128.dll" "$(OutDir)" /y /D
 xcopy /y /d /i /e "$(SolutionDir)samples\*.*" "$(OutDir)samples"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
@@ -242,6 +247,11 @@ xcopy /y /d /i /e "$(SolutionDir)samples\*.*" "$(OutDir)samples"</Command>
 xcopy "$(SolutionDir)Watermarking-Impl\libs\ffmpeg\bin\ffmpeg.exe" "$(OutDir)" /y /D
 xcopy "$(AF_PATH)\lib\FreeImage.dll" "$(OutDir)" /y /D
 xcopy "$(AF_PATH)\lib\afcuda.dll" "$(OutDir)" /y /D
+xcopy "$(AF_PATH)\lib\cublas64_12.dll" "$(OutDir)" /y /D
+xcopy "$(AF_PATH)\lib\cufft64_11.dll" "$(OutDir)" /y /D
+xcopy "$(AF_PATH)\lib\cusolver64_11.dll" "$(OutDir)" /y /D
+xcopy "$(AF_PATH)\lib\nvrtc64_120_0.dll" "$(OutDir)" /y /D
+xcopy "$(AF_PATH)\lib\nvrtc-builtins64_128.dll" "$(OutDir)" /y /D
 xcopy /y /d /i /e "$(SolutionDir)samples\*.*" "$(OutDir)samples"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
@@ -271,6 +281,11 @@ xcopy /y /d /i /e "$(SolutionDir)samples\*.*" "$(OutDir)samples"</Command>
 xcopy "$(SolutionDir)Watermarking-Impl\libs\ffmpeg\bin\ffmpeg.exe" "$(OutDir)" /y /D
 xcopy "$(AF_PATH)\lib\FreeImage.dll" "$(OutDir)" /y /D
 xcopy "$(AF_PATH)\lib\afcuda.dll" "$(OutDir)" /y /D
+xcopy "$(AF_PATH)\lib\cublas64_12.dll" "$(OutDir)" /y /D
+xcopy "$(AF_PATH)\lib\cufft64_11.dll" "$(OutDir)" /y /D
+xcopy "$(AF_PATH)\lib\cusolver64_11.dll" "$(OutDir)" /y /D
+xcopy "$(AF_PATH)\lib\nvrtc64_120_0.dll" "$(OutDir)" /y /D
+xcopy "$(AF_PATH)\lib\nvrtc-builtins64_128.dll" "$(OutDir)" /y /D
 xcopy /y /d /i /e "$(SolutionDir)samples\*.*" "$(OutDir)samples"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
