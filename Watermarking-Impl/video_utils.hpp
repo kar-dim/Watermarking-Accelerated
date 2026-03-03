@@ -1,7 +1,6 @@
 #pragma once
 
 #include "buffer.hpp"
-#include "include/WatermarkCore.hpp"
 #include "include/WatermarkTypes.hpp"
 #include "video_defines.hpp"
 #include "VideoProcessingContext.hpp"
