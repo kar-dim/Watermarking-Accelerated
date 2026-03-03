@@ -1,6 +1,6 @@
 #include "BenchmarkWorker.hpp"
 #include "common_utils.hpp"
-#include "WatermarkEngine.hpp"
+#include "WatermarkCore.hpp"
 #include <chrono>
 #include <cmath>
 #include <cstdint>
@@ -20,6 +20,7 @@
 #include <WatermarkTypes.hpp>
 
 using namespace CommonUtils;
+using namespace WatermarkCore;
 namespace fs = std::filesystem;
 
 BenchmarkWorker::BenchmarkWorker(int openclDevice, QObject* parent) : QThread(parent), deviceIndex(openclDevice) {
@@ -44,7 +45,7 @@ BenchmarkWorker::BenchmarkWorker(int openclDevice, QObject* parent) : QThread(pa
 
 void BenchmarkWorker::run() {
     // initialize watermark environment For OpenCL only
-    WatermarkEngine::initializeEnvironment(deviceIndex);
+    initializeEnvironment(deviceIndex);
 
     // check if the input directory which conntains the benchmark images is valid
     fs::path inputDir(inputFolder.toStdString());
@@ -68,11 +69,11 @@ void BenchmarkWorker::run() {
     double totalDetectTimeMs = 0.0;
     int totalFrames = 0;
     // initialize with a fixed watermark seed and the first set of parameters (p, psnr)
-    auto session = WatermarkEngine::createImageSession(12345, pValues[0], psnrValues[0]);
+    auto session = createImageSession(12345, pValues[0], psnrValues[0]);
     // first image load while we set up the session
-    std::future<WatermarkEngine::PreloadedHandle> prefetchTask = std::async(std::launch::async, WatermarkEngine::preloadImageFromDisk, validFiles[0].string());
+    std::future<PreloadedHandle> prefetchTask = std::async(std::launch::async, preloadImageFromDisk, validFiles[0].string());
     // more warmup iterations for GPU to ensure accurate benchmarking, OpenCL needs less than CUDA
-    const int benchmarkIterations = WatermarkEngine::isGpuBackend() ? (WatermarkEngine::isOpenCLBackend() ? 20 : 100) : 5;
+    const int benchmarkIterations = isGpuBackend() ? (isOpenCLBackend() ? 20 : 100) : 5;
 
     // helper lambda to measure performance of a given task (embedding or detection)
     auto measurePerformance = [&](auto&& task) {
@@ -97,24 +98,24 @@ void BenchmarkWorker::run() {
             // get the current image and prefetch next image in the background
             auto currentImage = prefetchTask.get();
             if (i + 1 < validFiles.size())
-                prefetchTask = std::async(std::launch::async, WatermarkEngine::preloadImageFromDisk, validFiles[i + 1].string());
+                prefetchTask = std::async(std::launch::async, preloadImageFromDisk, validFiles[i + 1].string());
             // lazily initialize the watermark session based on the current image dimensions
-            WatermarkEngine::bindPreloadedImage(session.get(), std::move(currentImage));
+            bindPreloadedImage(session.get(), std::move(currentImage));
 
             // for all combinations
             for (int p : pValues) {
                 for (float psnr : psnrValues) {
                     // update p and psnr in the session, this will trigger all necessary internal recalculations in the engine (e.g. random noise generation)
-                    WatermarkEngine::updateSessionParams(session.get(), p, psnr);
+                    updateSessionParams(session.get(), p, psnr);
                     // EMBED BENCHMARK
                     auto [totalEmbedMs, avgEmbedMs, embedFps, dummy] = measurePerformance([&]() {
-                        WatermarkEngine::embedImage(session.get(), MaskMethod::ME);
+                        embedImage(session.get(), MaskMethod::ME);
                         return 0.0f;
                     });
                     // DETECT BENCHMARK
                     // necessary uint8 to float for detection
-                    WatermarkEngine::prepareDetectionImage(session.get(), MaskMethod::ME);
-                    auto [totalDetectMs, avgDetectMs, detectFps, currentCorrelation] = measurePerformance([&]() { return WatermarkEngine::detectEmbeddedBuffer(session.get(), MaskMethod::ME); });
+                    prepareDetectionImage(session.get(), MaskMethod::ME);
+                    auto [totalDetectMs, avgDetectMs, detectFps, currentCorrelation] = measurePerformance([&]() { return detectEmbeddedBuffer(session.get(), MaskMethod::ME); });
                     // accumulate total times and frames for final score calculation at the end of the benchmark
                     totalEmbedTimeMs += totalEmbedMs;
                     totalDetectTimeMs += totalDetectMs;
@@ -128,7 +129,7 @@ void BenchmarkWorker::run() {
         } catch (const std::exception& e) {
             emit errorOccurred(currentFileName, QString::fromStdString(cleanError(e.what())));
             if (i + 1 < validFiles.size())
-                prefetchTask = std::async(std::launch::async, WatermarkEngine::preloadImageFromDisk, validFiles[i + 1].string());
+                prefetchTask = std::async(std::launch::async, preloadImageFromDisk, validFiles[i + 1].string());
         }
     }
 
@@ -141,9 +142,9 @@ void BenchmarkWorker::run() {
 
 // simple format conversion from the raw pixel data of the watermark session (column-major, planar) to a QImage (row-major, interleaved) for display in the GUI
 // optimized with OpenMP and cache locality in mind, but the timer does not count this, it is only used for display purposes
-QImage BenchmarkWorker::convertToQtFormat(WatermarkEngine::ImageSession* session) const {
+QImage BenchmarkWorker::convertToQtFormat(ImageSession* session) const {
     int rows = 0, cols = 0, channels = 0;
-    const uint8_t* rawData = WatermarkEngine::getSessionPixelData(session, cols, rows, channels);
+    const uint8_t* rawData = getSessionPixelData(session, cols, rows, channels);
     QImage displayImage(cols, rows, channels == 3 ? QImage::Format_RGB888 : QImage::Format_Grayscale8);
     // rgb
     if (channels == 3) {

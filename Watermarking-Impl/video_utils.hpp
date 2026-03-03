@@ -1,6 +1,7 @@
 #pragma once
 
 #include "buffer.hpp"
+#include "include/WatermarkCore.hpp"
 #include "include/WatermarkTypes.hpp"
 #include "video_defines.hpp"
 #include "VideoProcessingContext.hpp"
@@ -36,11 +37,11 @@ inline bool isHDR(const AVCodecContext* codecCtx) { return codecCtx->color_trc =
 
 #if defined(_USE_CUDA_)
 AVCodecContextPtr openDecoderHWAccel(const AVCodecParameters* inputCodecParams, const std::string& userHwDecoder, bool& useHwDecoder);
-void embedWatermarkHWAccel(WatermarkEngine::VideoSession* s, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe);
-void detectWatermarkHWAccel(WatermarkEngine::VideoSession* s, int& framesCount, const AVFrame* frame);
+void embedWatermarkHWAccel(WatermarkCore::VideoSession* s, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe);
+void detectWatermarkHWAccel(WatermarkCore::VideoSession* s, int& framesCount, const AVFrame* frame);
 #endif
-std::string getFilterGraphString(const WatermarkEngine::VideoSession* s);
-bool initFilterGraph(WatermarkEngine::VideoSession* s);
+std::string getFilterGraphString(const WatermarkCore::VideoSession* s);
+bool initFilterGraph(WatermarkCore::VideoSession* s);
 
 AVCodecContextPtr openDecoder(const AVCodecParameters* inputCodecParams, const std::string& userHwDecoder, bool& useHwDecoder);
 AVCodecContextPtr openSoftwareDecoder(const AVCodecParameters* inputCodecParams);
@@ -51,17 +52,17 @@ inline std::string getPixFmt(const AVStream* st) { return st->codecpar->color_ra
 inline std::string getColorRange(const AVStream* st) { return st->codecpar->color_range == AVCOL_RANGE_JPEG ? "-color_range:v:0 pc " : "-color_range:v:0 tv "; }
 std::string getStreamRotation(const AVStream* st);
 int findVideoStream(const AVFormatContext* inputFormatCtx);
-void embedWatermark(WatermarkEngine::VideoSession* s, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe);
-void detectWatermark(WatermarkEngine::VideoSession* s, int& framesCount, const AVFrame* frame);
-void embedAndWriteFrame(WatermarkEngine::VideoSession* s, const ImageBuffer& buffer, const int elements, FILE* ffmpegPipe);
-void processAndWriteYPlane(const bool embedWatermark, const AVFrame* frame, WatermarkEngine::VideoSession* s, FILE* ffmpegPipe);
-void writeChromaPlanes(const AVFrame* frame, WatermarkEngine::VideoSession* s, FILE* ffmpegPipe);
-int videoDispatcher(WatermarkEngine::VideoSession* s, VideoMode op, const bool needsFiltert = false, FILE* ffmpegPipe = nullptr);
-void filterFrame(AVFramePtr& frame, AVFramePtr& filteredFrame, const WatermarkEngine::VideoSession* s);
+void embedWatermark(WatermarkCore::VideoSession* s, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe);
+void detectWatermark(WatermarkCore::VideoSession* s, int& framesCount, const AVFrame* frame);
+void embedAndWriteFrame(WatermarkCore::VideoSession* s, const ImageBuffer& buffer, const int elements, FILE* ffmpegPipe);
+void processAndWriteYPlane(const bool embedWatermark, const AVFrame* frame, WatermarkCore::VideoSession* s, FILE* ffmpegPipe);
+void writeChromaPlanes(const AVFrame* frame, WatermarkCore::VideoSession* s, FILE* ffmpegPipe);
+int videoDispatcher(WatermarkCore::VideoSession* s, VideoMode op, const bool needsFiltert = false, FILE* ffmpegPipe = nullptr);
+void filterFrame(AVFramePtr& frame, AVFramePtr& filteredFrame, const WatermarkCore::VideoSession* s);
 
 // main frames loop logic for video watermark embedding and detection
 template <bool needsFilter, typename Func>
-int processFrames(const WatermarkEngine::VideoSession* s, Func&& processFrame) {
+int processFrames(const WatermarkCore::VideoSession* s, Func&& processFrame) {
     const AVPacketPtr packet(av_packet_alloc());
     AVFramePtr frame(av_frame_alloc());
     AVFramePtr filteredFrame(nullptr);
@@ -103,7 +104,7 @@ int processFrames(const WatermarkEngine::VideoSession* s, Func&& processFrame) {
 }
 
 template <typename TYPE, typename T>
-void loadInputFrame(WatermarkEngine::VideoSession* s, T* hostPtr) {
+void loadInputFrame(WatermarkCore::VideoSession* s, T* hostPtr) {
     const int width = s->videoStream->codecpar->width;
     const int height = s->videoStream->codecpar->height;
 #if defined(_USE_GPU_)

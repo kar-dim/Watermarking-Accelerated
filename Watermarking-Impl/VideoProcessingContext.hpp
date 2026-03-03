@@ -2,7 +2,7 @@
 
 #include "buffer.hpp"
 #include "HostMemory.hpp"
-#include "include/WatermarkEngine.hpp"
+#include "include/WatermarkCore.hpp"
 #include "video_defines.hpp"
 #include "WatermarkBase.hpp"
 #include <cstdint>
@@ -13,7 +13,7 @@ extern "C" {
 #include "libavfilter/avfilter.h"
 }
 
-namespace WatermarkEngine {
+namespace WatermarkCore {
 /*!
  * \brief  The unified internal session for video processing,
  *         this is hidden from the public API but shared internally
@@ -42,4 +42,4 @@ struct VideoSession {
     inline int height() const { return videoStream->codecpar->height; }
 };
 
-} // namespace WatermarkEngine
+} // namespace WatermarkCore

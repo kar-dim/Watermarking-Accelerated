@@ -4,7 +4,7 @@
 #include <QString>
 #include <QTemporaryDir>
 #include <QThread>
-#include <WatermarkEngine.hpp>
+#include <WatermarkCore.hpp>
 
 class BenchmarkWorker : public QThread {
     Q_OBJECT
@@ -29,5 +29,5 @@ class BenchmarkWorker : public QThread {
     QString inputFolder;
     int deviceIndex;
 
-    QImage convertToQtFormat(WatermarkEngine::ImageSession* session) const;
+    QImage convertToQtFormat(WatermarkCore::ImageSession* session) const;
 };

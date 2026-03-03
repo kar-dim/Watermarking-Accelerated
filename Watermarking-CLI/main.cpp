@@ -1,6 +1,6 @@
 #include "common_utils.hpp"
 #include "libs/inih/INIReader.h"
-#include "WatermarkEngine.hpp"
+#include "WatermarkCore.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
@@ -18,7 +18,7 @@
 #include <vector>
 #include <WatermarkTypes.hpp>
 
-using namespace WatermarkEngine;
+using namespace WatermarkCore;
 using namespace CommonUtils;
 namespace fs = std::filesystem;
 

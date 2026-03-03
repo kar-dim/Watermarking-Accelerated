@@ -1,5 +1,6 @@
 #include "buffer.hpp"
 #include "common_utils.hpp"
+#include "include/WatermarkCore.hpp"
 #include "include/WatermarkTypes.hpp"
 #include "video_defines.hpp"
 #include "video_utils.hpp"
@@ -52,7 +53,7 @@ using namespace Eigen;
 #endif
 
 using namespace CommonUtils;
-using namespace WatermarkEngine;
+using namespace WatermarkCore;
 using std::cout;
 using std::string;
 

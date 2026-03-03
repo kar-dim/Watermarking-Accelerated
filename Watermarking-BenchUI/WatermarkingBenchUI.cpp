@@ -11,7 +11,9 @@
 #include <QStyle>
 #include <QVBoxLayout>
 #include <QWidget>
-#include <WatermarkEngine.hpp>
+#include <WatermarkCore.hpp>
+
+using namespace WatermarkCore;
 
 WatermarkingBenchUI::WatermarkingBenchUI(QWidget* parent) : QMainWindow(parent) {
     // initialize the UI elements
@@ -38,7 +40,7 @@ WatermarkingBenchUI::WatermarkingBenchUI(QWidget* parent) : QMainWindow(parent) 
     layout->addWidget(imageView, 1);
 
     // for OpenCL backend only, add a device selection combobox to choose between different OpenCL devices (if multiple are available)
-    if (WatermarkEngine::isOpenCLBackend()) {
+    if (isOpenCLBackend()) {
         QHBoxLayout* deviceLayout = new QHBoxLayout;
 
         deviceLabel = new QLabel("OpenCL Device:", this);
@@ -47,7 +49,7 @@ WatermarkingBenchUI::WatermarkingBenchUI(QWidget* parent) : QMainWindow(parent) 
 
         deviceComboBox = new QComboBox(this);
         deviceComboBox->setObjectName("deviceComboBox");
-        for (const auto& devName : WatermarkEngine::getAvailableDevices())
+        for (const auto& devName : getAvailableDevices())
             deviceComboBox->addItem(QString::fromStdString(devName));
 
         deviceLayout->addStretch();
@@ -117,7 +119,7 @@ void WatermarkingBenchUI::startBenchmark() {
         if (deviceComboBox)
             deviceComboBox->setEnabled(true);
         // show the final score for both pipelines
-        const QString backendName = QString::fromStdString(WatermarkEngine::getDeviceName(deviceComboBox ? deviceComboBox->currentIndex() : -1));
+        const QString backendName = QString::fromStdString(WatermarkCore::getDeviceName(deviceComboBox ? deviceComboBox->currentIndex() : -1));
         const QString finalMessage = QString("<b>BENCHMARK COMPLETE</b><br>Hardware: %1<br>Avg Embed: <b>%2 FPS</b> | Avg Detect: <b>%3 FPS</b><br><br>SCORE: <b>%4</b>")
                                          .arg(backendName)
                                          .arg(finalEmbedFps, 0, 'f', 1)

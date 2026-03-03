@@ -62,7 +62,7 @@
     <ClCompile Include="TinyEXIF.cpp">
       <Filter>Source Files\util</Filter>
     </ClCompile>
-    <ClCompile Include="WatermarkEngine.cpp">
+    <ClCompile Include="WatermarkCore.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -139,10 +139,10 @@
     <ClInclude Include="TinyEXIF.h">
       <Filter>Header Files\util</Filter>
     </ClInclude>
-    <ClInclude Include="include\WatermarkEngine.hpp">
+    <ClInclude Include="include\WatermarkTypes.hpp">
       <Filter>public</Filter>
     </ClInclude>
-    <ClInclude Include="include\WatermarkTypes.hpp">
+    <ClInclude Include="include\WatermarkCore.hpp">
       <Filter>public</Filter>
     </ClInclude>
   </ItemGroup>

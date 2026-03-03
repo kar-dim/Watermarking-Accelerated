@@ -304,7 +304,7 @@
     </CudaCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="WatermarkEngine.cpp" />
+    <ClCompile Include="WatermarkCore.cpp" />
     <CudaCompile Include="cuda_utils.cu">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='OPENCL_Release|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='EIGEN_Release|x64'">true</ExcludedFromBuild>
@@ -381,7 +381,7 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='CUDA_ReleaseDist|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='OPENCL_Release|x64'">true</ExcludedFromBuild>
     </ClInclude>
-    <ClInclude Include="include\WatermarkEngine.hpp" />
+    <ClInclude Include="include\WatermarkCore.hpp" />
     <ClInclude Include="include\WatermarkTypes.hpp" />
     <ClInclude Include="kernels\kernels.cuh">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='OPENCL_Release|x64'">true</ExcludedFromBuild>

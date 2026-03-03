@@ -10,7 +10,7 @@
  *  \brief  Main interface for Watermarking operations, including image loading, embedding, detection, and video processing.
  *  \author Dimitris Karatzas
  */
-namespace WatermarkEngine {
+namespace WatermarkCore {
 // forward declarations of session structs and their deleters for RAII management
 struct ImageSession;
 struct VideoSession;
@@ -66,4 +66,4 @@ struct VideoSettings {
 VideoHandle initVideo(const VideoSettings& settings);
 int embedVideo(VideoSession* session);
 int detectVideo(VideoSession* session);
-} // namespace WatermarkEngine
+} // namespace WatermarkCore

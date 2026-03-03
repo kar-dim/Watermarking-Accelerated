@@ -1,11 +1,11 @@
-#include "WatermarkEngine.hpp"
+#include "WatermarkCore.hpp"
 #include <cstdint>
 #include <filesystem>
 #include <gtest/gtest.h>
 #include <string>
 #include <WatermarkTypes.hpp>
 
-using namespace WatermarkEngine;
+using namespace WatermarkCore;
 
 class WatermarkTest : public ::testing::Test {
 

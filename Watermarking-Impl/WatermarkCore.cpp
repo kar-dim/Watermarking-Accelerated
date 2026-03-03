@@ -2,7 +2,7 @@
 #include "common_utils.hpp"
 #include "HostMemory.hpp"
 #include "ImageFileBuffer.hpp"
-#include "include/WatermarkEngine.hpp"
+#include "include/WatermarkCore.hpp"
 #include "include/WatermarkTypes.hpp"
 #include "utils.hpp"
 #include "video_utils.hpp"
@@ -41,7 +41,7 @@ using namespace InternalUtils;
 using std::string;
 using FILEPtr = std::unique_ptr<FILE, decltype(&_pclose)>;
 
-namespace WatermarkEngine {
+namespace WatermarkCore {
 
 // definition of the Image session structs and their deleters
 struct ImageSession {
@@ -131,9 +131,6 @@ const uint8_t* extractPixelData(const ImageOutputBuffer& buffer, int& width, int
 #endif
 }
 } // end anonymous namespace
-
-// main function to get the data from the exported buffer (column-wise), it also fills the width, height and channels parameters for the caller
-const uint8_t* getExportedPixelData(const ExportedImage* handle, int& width, int& height, int& channels) { return extractPixelData(handle->finalPixels, width, height, channels); }
 
 // main function to get the data from the image session buffer (column-wise) directly, it also fills the width, height and channels parameters for the caller
 const uint8_t* getSessionPixelData(const ImageSession* session, int& width, int& height, int& channels) { return extractPixelData(session->watermarkBuffer, width, height, channels); }
@@ -369,4 +366,4 @@ int embedVideo(VideoSession* s) {
 // main function to detect the watermark from the video
 int detectVideo(VideoSession* s) { return videoDispatcher(s, VideoMode::DETECT, false, nullptr); }
 
-} // namespace WatermarkEngine
+} // namespace WatermarkCore
