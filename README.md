@@ -161,8 +161,8 @@ We bundle all necessary DLLs with the prebuilt binaries so the application runs 
 | Backend | Dependencies |
 |---------|--------------|
 | **All** |	`FFmpeg (all libav*.dll binaries)` |
-| **CUDA** | `FreeImage.dll`, `afcuda.dll`, `cublas64_12.dll`, `cufft64_11.dll`, `cusolver64_11.dll`, `nvrtc64_120_0.dll`, `nvrtc-builtins64_128.dll` |
-| **OpenCL** | `FreeImage.dll`, `afopencl.dll`, `forge.dll`, `glfw3.dll`, `mkl_core.2.dll`, `mkl_def.2.dll`, `mkl_rt.2.dll`, `mkl_tbb_thread.2.dll` |
+| **CUDA** | `FreeImage.dll`, `afcuda.dll`, `cublas64_12.dll`, `cublasLt64_12.dll`, `cufft64_11.dll`, `cusolver64_11.dll`, `cusparse64_12.dll`, `nvrtc64_120_0.dll`, `nvJitLink_120_0.dll` |
+| **OpenCL** | `FreeImage.dll`, `afopencl.dll`, `mkl_rt.2.dll` |
 | **Eigen** | `zlib1.dll`, `libpng16.dll`, `jpeg62.dll`, `tiff.dll`, `libomp.dll`, `libwebp.lib` (static lib) |
 
 **NOTES:**
