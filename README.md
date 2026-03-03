@@ -87,7 +87,7 @@ The CLI application should be parameterized from the corresponding ```settings.i
 | cuda_hw_encoder                   | ```[CUDA only: true/false]```: Offload encoding to the GPU using **NVENC**. This makes more sense when combined with **NVDEC** but it is not necessary. If set, then the encoder options of ```encode_codec_options``` settings are ignored, and valid nvenc codec options must be provided in the ```hw_encode_options``` section. |
 | encode_output_path                | Set this value to a file path, in order to embed watermark on the video from ```[video]/path``` parameter and save the watermarked file to disk. This will set the sample application to ```video embedding mode```. If you want to detect the watermark from the ```video``` parameter then comment this line, effectively setting the sample application to ```video detect mode```. |
 | encode_codec_options              | These are FFmpeg options for encoding only. It configures the coded library and its options. Example: ```-c:v libx265 -preset fast -crf 23```  will pass these encoding options to FFmpeg.|
-| hw_encode_options                 | These are FFmpeg options for encoding with NVENC. Only used when `cuda_hw_encoder` is `true`. Example: ```-c:v hevc_nvenc -preset p6 -tune hq -cq 26 -b:v 0``` is the NVENC equivalent to the sample used for CPU encoder. NOTE: Encoding and decoding as separate, we can decode with CPU and encode with NVENC (and vice versa), and of course we can do both! 
+| hw_encode_options                 | These are FFmpeg options for encoding with NVENC. Only used when `cuda_hw_encoder` is `true` and overwrites the ```encode_codec_options``` option. Example: ```-c:v hevc_nvenc -preset p6 -tune hq -cq 26 -b:v 0``` is the NVENC equivalent to the sample used for CPU encoder. NOTE: Encoding and decoding as separate, we can decode with CPU and encode with NVENC (and vice versa), and of course we can do both!
 
 # FFmpeg Command Used for Video Encoding
 
@@ -99,7 +99,7 @@ ffmpeg -y -f rawvideo
   -r <frame_rate>
   -i -
   -i <input_video_file>
-  <encode_codec_options>
+  <encoder_options>
   -c:s copy -c:a copy
   -map 1:s? -map 0:v -map 1:a?
   -max_interleave_delta 0
@@ -114,7 +114,7 @@ ffmpeg -y -f rawvideo
 - `-r <frame_rate>`: Frame rate of the video (extracted from the input).
 - `-i -`: Accepts raw video from stdin.
 - `-i <input_video_file>`: **USER SUPPLIED**: Original input file.
-- `<encode_codec_options>`: **USER SUPPLIED**: Encoder options such as codec, preset, and quality options (e.g., ```-c:v libx265 -preset fast -crf 23```).
+- `<encoder_options>`: **USER SUPPLIED**: Encoder options such as codec, preset, and quality options. If CUDA NVENC is requested then it reads the ```hw_encode_options``` parameter from the settings file, else it reads ```encode_codec_options```.
 - `-c:s copy -c:a copy`: Copies subtitle and audio streams without re-encoding.
 - `-map 1:s? -map 0:v -map 1:a?`: Maps subtitles/audio from the original input, and video from stdin.
 - `-max_interleave_delta 0`: Reduces potential interleaving delay issues.
