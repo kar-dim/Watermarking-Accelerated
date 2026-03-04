@@ -9,7 +9,6 @@
 #include <cstdint>
 #include <cub/cub.cuh>
 #include <cuda_runtime.h>
-#include <string>
 #include <thrust/iterator/transform_iterator.h>
 
 /*!
