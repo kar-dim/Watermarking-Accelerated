@@ -2,10 +2,13 @@
 
 #include "buffer.hpp"
 #include "include/WatermarkTypes.hpp"
+#include "WatermarkCrypto.hpp"
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <functional>
-#include <random>
+#include <numbers>
+#include <string>
 #include <vector>
 
 /*!
@@ -26,8 +29,8 @@ class WatermarkBase {
     float strengthFactor;
 
   public:
-    WatermarkBase(const unsigned int rows, const unsigned int cols, const uint32_t watermarkSeed, const float psnr, WatermarkLoader loader)
-        : baseRows(rows), baseCols(cols), totalPixels(baseRows * baseCols), randomMatrix(generateRandomMatrix(watermarkSeed, loader)), strengthFactor(computeStrengthFactor(psnr)) {}
+    WatermarkBase(const unsigned int rows, const unsigned int cols, const std::string& watermarkPassword, const float psnr, WatermarkLoader loader)
+        : baseRows(rows), baseCols(cols), totalPixels(baseRows * baseCols), randomMatrix(generateRandomMatrix(watermarkPassword, loader)), strengthFactor(computeStrengthFactor(psnr)) {}
 
     // delete copy and move operations we don't wannt them
     WatermarkBase(const WatermarkBase&) = delete;
@@ -49,28 +52,36 @@ class WatermarkBase {
     static inline float computeStrengthFactor(const float psnr) { return 255.0f / std::sqrt(std::pow(10.0f, psnr / 10.0f)); }
 
     // helper method to generate the watermark based on the given seed, using a parallelized approach with OpenMP for very fast generation
-    ImageBuffer generateRandomMatrix(const uint32_t watermarkSeed, WatermarkLoader loader) const {
-        constexpr int numPartitions = 64;
-        const size_t numElements = static_cast<size_t>(baseRows) * baseCols;
-
+    // it generates secure random values based on ChaCha20 and uses Box-Muller transform to conver to gaussian random
+    ImageBuffer generateRandomMatrix(const std::string& watermarkPassword, WatermarkLoader loader) const {
+        const int64_t numElements = static_cast<int64_t>(baseRows) * baseCols;
         std::vector<float> randomNums(numElements);
-        std::mt19937 masterGenerator(watermarkSeed);
-        std::vector<unsigned int> partitionSeeds(numPartitions);
-
-        // we have a deterministic starting seed for each thread
-        for (int i = 0; i < numPartitions; i++)
-            partitionSeeds[i] = masterGenerator();
-        
-        // generation in parallel
+        // precompute the base ChaCha20 state bytes from the given password
+        const std::array<uint32_t, 16> baseState = WatermarkCrypto::computeBaseState(watermarkPassword);
+        // step by 8 because ChaCha20 generates 8 uint64_t per block
 #pragma omp parallel for schedule(static)
-        for (int p = 0; p < numPartitions; p++) {
-            std::mt19937 localGenerator(partitionSeeds[p]);
-            std::normal_distribution<float> distribution(0.0f, 1.0f);
-            const auto start = p * numElements / numPartitions;
-            const auto end = (p + 1) * numElements / numPartitions;
-            for (auto i = start; i < end; i++)
-                randomNums[i] = distribution(localGenerator);
+        for (int64_t i = 0; i < numElements; i += 8) {
+            uint64_t blockCounter = static_cast<uint64_t>(i / 8);
+            uint64_t randomBits[8];
+            // generate 8 random numbers (XOR folded, ChaCha20 block)
+            WatermarkCrypto::chacha20Block(baseState, blockCounter, randomBits);
+            // process the 8 random integers into 4 Box-Muller pairs
+            for (int64_t j = 0; j < 4; j++) {
+                const int64_t idx = i + (j * 2);
+                if (idx >= numElements)
+                    break;
+                // generate two floats in (0,1] and transform them based on Box-Muller
+                const float u1 = WatermarkCrypto::toFloat(randomBits[j * 2]);
+                const float u2 = WatermarkCrypto::toFloat(randomBits[j * 2 + 1]);
+                const float radius = std::sqrt(-2.0f * std::log(u1));
+                const float theta = 2.0f * std::numbers::pi_v<float> * u2;
+                // write values
+                randomNums[idx] = radius * std::cos(theta);
+                if (idx + 1 < numElements)
+                    randomNums[idx + 1] = radius * std::sin(theta);
+            }
         }
+        // load the random values in the corresponding backend buffer (ArrayFire array, Eigen Array etc)
         return loader(randomNums, baseRows, baseCols);
     }
 };

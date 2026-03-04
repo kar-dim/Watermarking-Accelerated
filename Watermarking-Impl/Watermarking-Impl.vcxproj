@@ -420,6 +420,7 @@
     <ClInclude Include="VideoProcessingContext.hpp" />
     <ClInclude Include="video_defines.hpp" />
     <ClInclude Include="video_utils.hpp" />
+    <ClInclude Include="WatermarkCrypto.hpp" />
     <ClInclude Include="WatermarkCuda.cuh">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='OPENCL_Release|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='EIGEN_Release|x64'">true</ExcludedFromBuild>

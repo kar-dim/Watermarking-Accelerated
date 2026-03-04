@@ -5,7 +5,7 @@
 #include <arrayfire.h>
 #include <cmath>
 #include <concepts>
-#include <cstdint>
+#include <string>
 #include <vector>
 
 /*!
@@ -16,8 +16,8 @@
 template <int p>
 class WatermarkGPU : public WatermarkBase {
   public:
-    WatermarkGPU<p>(const unsigned int rows, const unsigned int cols, const uint32_t watermarkSeed, const float psnr)
-        : WatermarkBase(rows, cols, watermarkSeed, psnr, initializeRandomMatrix), strengthNumerator(strengthFactor * std::sqrt(static_cast<float>(this->totalPixels))) {}
+    WatermarkGPU<p>(const unsigned int rows, const unsigned int cols, const std::string& watermarkPassword, const float psnr)
+        : WatermarkBase(rows, cols, watermarkPassword, psnr, initializeRandomMatrix), strengthNumerator(strengthFactor * std::sqrt(static_cast<float>(this->totalPixels))) {}
 
     ~WatermarkGPU<p>() override = default;
 

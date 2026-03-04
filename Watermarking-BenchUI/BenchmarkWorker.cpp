@@ -69,7 +69,7 @@ void BenchmarkWorker::run() {
     double totalDetectTimeMs = 0.0;
     int totalFrames = 0;
     // initialize with a fixed watermark seed and the first set of parameters (p, psnr)
-    auto session = createImageSession(12345, pValues[0], psnrValues[0]);
+    auto session = createImageSession("password12345", pValues[0], psnrValues[0]);
     // first image load while we set up the session
     std::future<PreloadedHandle> prefetchTask = std::async(std::launch::async, preloadImageFromDisk, validFiles[0].string());
     // more warmup iterations for GPU to ensure accurate benchmarking, OpenCL needs less than CUDA

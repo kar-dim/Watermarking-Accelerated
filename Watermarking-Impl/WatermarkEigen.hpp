@@ -7,8 +7,8 @@
 #include "WatermarkBase.hpp"
 #include <algorithm>
 #include <cmath>
-#include <cstdint>
 #include <omp.h>
+#include <string>
 
 /*!
  *  \brief  Functions for watermark computation and detection, Eigen implementation.
@@ -40,9 +40,9 @@ class WatermarkEigen final : public WatermarkBase {
     using Map = Eigen::Map<T>;
 
   public:
-    WatermarkEigen<p>(const unsigned int rows, const unsigned int cols, const uint32_t watermarkSeed, const float psnr)
-        : WatermarkBase(rows, cols, watermarkSeed, psnr, initializeRandomMatrix), mask(rows, cols), errorSequence(rows, cols), filteredEstimation(rows, cols), u(rows, cols), uStrengthened(rows, cols),
-          meMatrixData(omp_get_max_threads(), rows) {}
+    WatermarkEigen<p>(const unsigned int rows, const unsigned int cols, const std::string& watermarkPassword, const float psnr)
+        : WatermarkBase(rows, cols, watermarkPassword, psnr, initializeRandomMatrix), mask(rows, cols), errorSequence(rows, cols), filteredEstimation(rows, cols), u(rows, cols),
+          uStrengthened(rows, cols), meMatrixData(omp_get_max_threads(), rows) {}
 
     // main watermark embedding method
     void makeWatermark(const ImageBuffer& inputGrayImage, const ImageBuffer& inputImage, ImageOutputBuffer& output, const MaskMethod maskType) override {

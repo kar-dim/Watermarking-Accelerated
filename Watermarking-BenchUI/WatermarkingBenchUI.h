@@ -9,6 +9,10 @@
 #include <QString>
 #include <QWidget>
 
+/*!
+ *  \brief  Main window of the Benchmark UI project
+ *  \author Dimitris Karatzas
+ */
 class WatermarkingBenchUI : public QMainWindow {
     Q_OBJECT
 

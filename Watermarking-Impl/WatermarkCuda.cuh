@@ -6,9 +6,9 @@
 #include "WatermarkBase.hpp"
 #include "WatermarkGpu.hpp"
 #include <arrayfire.h>
-#include <cstdint>
 #include <cub/cub.cuh>
 #include <cuda_runtime.h>
+#include <string>
 #include <thrust/iterator/transform_iterator.h>
 
 /*!
@@ -18,8 +18,8 @@
 template <int p>
 class WatermarkCuda final : public WatermarkGPU<p> {
   public:
-    WatermarkCuda<p>(const unsigned int rows, const unsigned int cols, const uint32_t watermarkSeed, const float psnr)
-        : WatermarkGPU<p>(rows, cols, watermarkSeed, psnr), afStream(CudaStreamManager::getInstance().getAfStream()), gridOptimalMe(cuda_utils::gridSize1DMeStridedCalculate()) {
+    WatermarkCuda<p>(const unsigned int rows, const unsigned int cols, const std::string& watermarkPassword, const float psnr)
+        : WatermarkGPU<p>(rows, cols, watermarkPassword, psnr), afStream(CudaStreamManager::getInstance().getAfStream()), gridOptimalMe(cuda_utils::gridSize1DMeStridedCalculate()) {
         // initialize ME kernel parameters based on image dims, we calculate total blocks in Y dimension and total tasks for optimal configuration
         const unsigned int meTotalBlocksY = WatermarkBase::alignUp<meBlockSize.x>(this->baseRows) / meBlockSize.x;
         meParams = {meTotalBlocksY, meTotalBlocksY * this->baseCols};

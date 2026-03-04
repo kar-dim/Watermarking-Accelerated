@@ -36,7 +36,7 @@ std::string getDeviceName(const int deviceIndex = -1);
 std::vector<std::string> getAvailableDevices();
 
 // image processing functions
-ImageHandle createImageSession(const uint32_t watermarkSeed, const int p, const float psnr);
+ImageHandle createImageSession(const std::string& watermarkPassword, const int p, const float psnr);
 PreloadedHandle preloadImageFromDisk(const std::string& imagePath);
 void loadImage(ImageSession* session, const std::string& imagePath);
 void bindPreloadedImage(ImageSession* session, PreloadedHandle preloadedData);
@@ -53,7 +53,7 @@ const uint8_t* getSessionPixelData(const ImageSession* session, int& width, int&
 // video processing functions
 struct VideoSettings {
     std::string videoFile;
-    uint32_t watermarkSeed;
+    std::string watermarkPassword;
     int p;
     float psnr;
     int watermarkInterval;

@@ -7,13 +7,17 @@
 
 using namespace WatermarkCore;
 
+/*!
+ *  \brief  Basic tests for the watermarking algorithms
+ *  \author Dimitris Karatzas
+ */
 class WatermarkTest : public ::testing::Test {
 
   protected:
-    static constexpr uint32_t watermarkSeed = 28390211;
     static constexpr int p = 3;
     static constexpr float psnr = 40.0f;
 
+    const std::string watermarkPassword = "random_watermark_password";
     const std::string imageFile = "../../Watermarking-CLI/samples/images/4k.png";
     const std::string imageNvfPath = "../../Watermarking-CLI/samples/images/4kW_NVF.png";
     const std::string imageMePath = "../../Watermarking-CLI/samples/images/4kW_ME.png";
@@ -22,7 +26,7 @@ class WatermarkTest : public ::testing::Test {
 
     void SetUp() override {
         initializeEnvironment(0);
-        session = createImageSession(watermarkSeed, p, psnr);
+        session = createImageSession(watermarkPassword, p, psnr);
         loadImage(session.get(), imageFile);
     }
 
@@ -64,7 +68,7 @@ TEST_F(WatermarkTest, SaveToDisk) {
     saveImage(session.get(), imageFile, MaskMethod::ME);
     EXPECT_TRUE(std::filesystem::exists(imageMePath)) << "ME image was not saved to disk!";
     // test if the saved image can be loaded and detected correctly
-    ImageHandle diskSession = createImageSession(watermarkSeed, p, psnr);
+    ImageHandle diskSession = createImageSession(watermarkPassword, p, psnr);
     loadImage(diskSession.get(), imageMePath);
     const float diskCorr = detectLoadedImage(diskSession.get(), MaskMethod::ME);
     EXPECT_GT(diskCorr, 0.80f) << "The saved image lost too much watermark data after saving to disk, OR was not embedded correctly!";

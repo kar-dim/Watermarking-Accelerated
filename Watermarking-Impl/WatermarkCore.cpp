@@ -45,7 +45,7 @@ namespace WatermarkCore {
 
 // definition of the Image session structs and their deleters
 struct ImageSession {
-    uint32_t seed;
+    string watermarkPassword;
     int p;
     float psnr;
     int currentRows = 0;
@@ -239,13 +239,13 @@ void updateSessionParams(ImageSession* s, const int p, const float psnr) {
     if (s->watermarkObj)
         af::deviceGC();
 #endif
-    s->watermarkObj = createWatermarkObject(s->currentRows, s->currentCols, s->seed, s->p, s->psnr);
+    s->watermarkObj = createWatermarkObject(s->currentRows, s->currentCols, s->watermarkPassword, s->p, s->psnr);
 }
 
 // creates a new session for image processing, initialized with the given parameters (no memory allocations yet)
-ImageHandle createImageSession(const uint32_t watermarkSeed, const int p, const float psnr) {
+ImageHandle createImageSession(const string& watermarkPassword, const int p, const float psnr) {
     auto* session = new ImageSession();
-    session->seed = watermarkSeed;
+    session->watermarkPassword = watermarkPassword;
     session->p = p;
     session->psnr = psnr;
     return ImageHandle(session);
@@ -271,7 +271,7 @@ void bindPreloadedImage(ImageSession* s, PreloadedHandle preloadedData) {
         if (s->watermarkObj)
             af::deviceGC();
 #endif
-        s->watermarkObj = createWatermarkObject(rows, cols, s->seed, s->p, s->psnr);
+        s->watermarkObj = createWatermarkObject(rows, cols, s->watermarkPassword, s->p, s->psnr);
         s->currentRows = rows;
         s->currentCols = cols;
 #if defined(_USE_EIGEN_)
@@ -339,7 +339,7 @@ VideoHandle initVideo(const VideoSettings& settings) {
     checkError(!session->inputDecoderCtx.get(), "Could not open video decoder");
     const int height = session->videoStream->codecpar->height;
     const int width = session->videoStream->codecpar->width;
-    session->watermarkObj = createWatermarkObject(height, width, settings.watermarkSeed, settings.p, settings.psnr);
+    session->watermarkObj = createWatermarkObject(height, width, settings.watermarkPassword, settings.p, settings.psnr);
     session->hostFrame = std::make_unique<HostMemory<uint8_t>>(session->useHwDecoder ? width * height * 3 / 2 : width * height);
     session->inputFrame = ImageBuffer({height, width});
     session->watermarkedFrame = ImageOutputBuffer({height, width});

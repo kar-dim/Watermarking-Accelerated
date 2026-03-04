@@ -35,8 +35,8 @@ static inline string success(const string& str) { return "\033[92m" + str + "\03
 
 // batch processing of images in a directory (for both embed and detect)
 static int testForImageBatch(const INIReader& inir, const int p, const float psnr, const bool isEmbed) {
-    const uint32_t watermarkSeed = inir.GetInteger("global", "watermark_seed", 0);
-    checkError(watermarkSeed == 0, "No valid watermark seed specified!");
+    const string watermarkPassword = inir.Get("global", "watermark_password", "");
+    checkError(watermarkPassword.empty(), "No valid watermark password specified!");
     const bool showFps = inir.GetBoolean("global", "display_fps", true);
 
     const fs::path inputDir(inir.Get("image", "path", ""));
@@ -64,7 +64,7 @@ static int testForImageBatch(const INIReader& inir, const int p, const float psn
     cout << info(std::format("Found {} images. Starting batch {}...\n", validFiles.size(), isEmbed ? "embedding" : "detection"));
 
     // initialize the watermarking session once and reuse for all images in the batch
-    auto session = createImageSession(watermarkSeed, p, psnr);
+    auto session = createImageSession(watermarkPassword, p, psnr);
     int successCount = 0;
     float corr = 0.0f;
     double totalEngineTime = 0.0;
@@ -143,8 +143,8 @@ static int testForImageBatch(const INIReader& inir, const int p, const float psn
 static int testForImageSingle(const INIReader& inir, const int p, const float psnr) {
     const string imageFile = inir.Get("image", "path", "NO_IMAGE");
     checkError(imageFile == "NO_IMAGE", "No valid image file specified!");
-    const uint32_t watermarkSeed = inir.GetInteger("global", "watermark_seed", 0);
-    checkError(watermarkSeed == 0, "No valid watermark seed specified!");
+    const string watermarkPassword = inir.Get("global", "watermark_password", "");
+    checkError(watermarkPassword.empty(), "No valid watermark seed specified!");
     const bool showFps = inir.GetBoolean("global", "display_fps", true);
     const bool saveToDisk = inir.GetBoolean("image", "save_to_disk", false);
     int loops = inir.GetInteger("image", "benchmark_loops", 5);
@@ -153,7 +153,7 @@ static int testForImageSingle(const INIReader& inir, const int p, const float ps
     cout << "Each test will be executed " << loops << " times.\n";
 
     // load watermarking session
-    auto s = createImageSession(watermarkSeed, p, psnr);
+    auto s = createImageSession(watermarkPassword, p, psnr);
     const double loadTime = executionTime([&]() { loadImage(s.get(), imageFile); });
     cout << "Time to load image data from disk: " << loadTime << " seconds\n\n";
 
@@ -194,7 +194,7 @@ static int testForVideo(const INIReader& inir, const string& videoFile, const in
     // supply the relevant settings to the video session input struct
     VideoSettings settings;
     settings.videoFile = videoFile;
-    settings.watermarkSeed = inir.GetInteger("global", "watermark_seed", 0);
+    settings.watermarkPassword = inir.Get("global", "watermark_password", "");
     settings.p = p;
     settings.psnr = psnr;
     settings.watermarkInterval = std::max(1, static_cast<int>(inir.GetInteger("video", "watermark_interval", 1)));

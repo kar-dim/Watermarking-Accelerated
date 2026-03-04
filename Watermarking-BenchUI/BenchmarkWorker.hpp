@@ -6,6 +6,10 @@
 #include <QThread>
 #include <WatermarkCore.hpp>
 
+/*!
+ *  \brief  Implementation of the benchmarking background thread
+ *  \author Dimitris Karatzas
+ */
 class BenchmarkWorker : public QThread {
     Q_OBJECT
   public:

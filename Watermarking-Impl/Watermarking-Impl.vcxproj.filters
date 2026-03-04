@@ -145,5 +145,8 @@
     <ClInclude Include="include\WatermarkCore.hpp">
       <Filter>public</Filter>
     </ClInclude>
+    <ClInclude Include="WatermarkCrypto.hpp">
+      <Filter>Header Files\util</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>
