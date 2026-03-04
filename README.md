@@ -23,7 +23,7 @@ The deprecated original Thesis code is in the archived repository <a href="https
   <img src="https://github.com/user-attachments/assets/6a257e34-6481-4a33-b334-fe20e24e02b3" width="25%">
 </p>
 
-This project implements and evaluates the performance (execution speed) of image watermarking algorithms on CPU versus GPU. It provides multiple implementations to enable comparisons between compute backends. Watermarks are generated using normally distributed random values with zero mean and standard deviation of one. Two watermark masks are used: The proposed Prediction Error mask, which is the main focus of the Thesis, and the NVF (Noise Visibility Function) mask for comparison purposes. The system supports both embedding and detection of watermarks in disk images and video streams. Video processing is handled via FFmpeg, enabling broad codec and container support, along with advanced features such as GPU-accelerated video decoding and encoding (CUDA only) and 10-bit/HDR (tonemapped) video support.
+This project implements and evaluates the performance (execution speed) of image watermarking algorithms on CPU versus GPU. It provides multiple implementations to enable comparisons between compute backends. Watermarks are generated as standard normal distributed matrices (μ=0,σ=1) using the Box-Muller transform. For cryptographic robustness, an arbitrary-length user password is converted via XOR-folding into a 256-bit key for the ```ChaCha20 block cipher```. This CSPRNG ensures bit exact, and cross platform determinism. The implementation is highly parallelized with OpenMP. The chosen transform for normal distribution is ```Box-Muller transform```. Two watermark masks are used: The proposed Prediction Error mask, which is the main focus of the Thesis, and the NVF (Noise Visibility Function) mask for comparison purposes. The system supports both embedding and detection of watermarks in disk images and video streams. Video processing is handled via FFmpeg, enabling broad codec and container support, along with advanced features such as GPU-accelerated video decoding and encoding (CUDA only) and 10-bit/HDR (tonemapped) video support.
 
 The repository contains all required source code and dependencies needed to reproduce the benchmarks and experiments.
 
@@ -67,7 +67,7 @@ The CLI application should be parameterized from the corresponding ```settings.i
 |-----------------------------------|-----------------------------------------------------------------------------------------------------------------------------               |
 | \[image\]/mode                    | ```[single, batch_embed, batch_detect]```: (Image mode only) Set the image mode option. If ```single``` the application will read the image file specified at ```[image]/path]``` and embeds/detects the watermark and prints results. If ```batch_embed``` or ```batch_detect``` then it reads a directory specified at at ```[image]/path]``` and it either embeds the watermark for all the image files it finds, writing them in a new folder called ```watermark_output``` in the specified folder, or it tries to detect the watermark and prints the correlation values.
 | \[image\]/path                    | Path to the input image (or directory for batched operations) to embed/detect watermark. This will set the sample application to ```image mode``` |
-| watermark_seed                    | The watermark seed. Used to generate a deterministic watermark. |
+| watermark_password                | The watermark password. Used to generate a deterministic and secure (as much as possible) watermark. |
 | save_to_disk                      | ```[true/false]```: (Image mode only) Set to true to save the watermarked NVF and Prediction-Error files to disk, works only if mode is ```single```.                                                |
 | display_fps                       | ```[true/false]```: Set to true to display execution times in FPS. Else, it will display execution time in seconds.                            |
 | p                                 | Window size for masking algorithms. All implementations support values of ```p=3,5,7``` and ```9```. |
@@ -129,7 +129,7 @@ ffmpeg -y -f rawvideo
 # How to Build
 
 This project is built using **Visual Studio** and consists of a **solution with various projects**.
-- Watermarking-Impl: The Core of this project, implements the algorithms for each backend. It also implements a fast and efficient deterministic watermarking generation with OpenMP. It is built as a **static library**.
+- Watermarking-Impl: The Core of this project, implements the algorithms for each backend. It also implements a fast, efficient, secure and deterministic watermark generation with OpenMP (CPU-only based). It is built as a **static library**.
 - Watermarking-CLI: The sample command line application that interacts with the Core project to embed and detect watermark in images and video.
 - Watermarking-BenchUI: The benchmarking project. It interacts with the Core project and benchmarks the performance of image watermarking. It uses Qt for UI.
 - Watermarking-Tests: Basic tests for the Core project.
