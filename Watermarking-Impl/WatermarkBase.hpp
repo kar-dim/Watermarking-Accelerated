@@ -7,7 +7,6 @@
 #include <cmath>
 #include <cstdint>
 #include <functional>
-#include <numbers>
 #include <string>
 #include <vector>
 
@@ -70,11 +69,8 @@ class WatermarkBase {
                 const int64_t idx = i + (j * 2);
                 if (idx >= numElements)
                     break;
-                // generate two floats in (0,1] and transform them based on Box-Muller
-                const float u1 = WatermarkCrypto::toFloat(randomBits[j * 2]);
-                const float u2 = WatermarkCrypto::toFloat(randomBits[j * 2 + 1]);
-                const float radius = std::sqrt(-2.0f * std::log(u1));
-                const float theta = 2.0f * std::numbers::pi_v<float> * u2;
+                // generate two floats in (0,1] and transform them based on Box-Muller (polar values)
+                const auto [radius, theta] = WatermarkCrypto::generateBoxMullerPair(randomBits[j * 2], randomBits[j * 2 + 1]);
                 // write values
                 randomNums[idx] = radius * std::cos(theta);
                 if (idx + 1 < numElements)

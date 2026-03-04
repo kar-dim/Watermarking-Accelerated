@@ -1,9 +1,12 @@
 #pragma once
 #include <array>
 #include <bit>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <numbers>
 #include <string>
+#include <utility>
 
 /*!
  *  \brief  Functions for watermark secure watermark generation (ChaCha20 and Box-Muller transform)
@@ -12,16 +15,11 @@
 namespace WatermarkCrypto {
 
 // convert 64-bit int to float strictly in the range (0, 1]
-inline float toFloat(uint64_t x) { return (x >> 40) * 0x1.0p-24f + 0x1.0p-24f; }
-
-// generate secret key (256-bit): XOR the arbitrary length string into exactly 32 bytes
-inline std::array<uint32_t, 8> computeKeyFromPassword(const std::string& watermarkPassword) {
-    uint8_t keyBytes[32] = {0};
-    for (size_t i = 0; i < watermarkPassword.length(); i++)
-        keyBytes[i % 32] ^= static_cast<uint8_t>(watermarkPassword[i]);
-    std::array<uint32_t, 8> finalBytes;
-    std::memcpy(finalBytes.data(), keyBytes, 32);
-    return finalBytes;
+// and then convert to Box-Muller polar pair
+inline std::pair<float, float> generateBoxMullerPair(const uint64_t x1, const uint64_t x2) {
+    const float u1 = (x1 >> 40) * 0x1.0p-24f + 0x1.0p-24f;
+    const float u2 = (x2 >> 40) * 0x1.0p-24f + 0x1.0p-24f;
+    return {std::sqrt(-2.0f * std::log(u1)), 2.0f * std::numbers::pi_v<float> * u2};
 }
 
 // constructs the immutable base state for ChaCha20 once (optimization)
