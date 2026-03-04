@@ -3,7 +3,6 @@
 #include "WatermarkCore.hpp"
 #include <algorithm>
 #include <chrono>
-#include <cstdint>
 #include <cstdlib>
 #include <exception>
 #include <filesystem>
