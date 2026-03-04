@@ -40,54 +40,49 @@ inline std::array<uint32_t, 16> computeBaseState(const std::string& watermarkPas
     return state;
 }
 
+// clang-format off
+// ChaCha20 QR fhelper unction, performs ARX (Add, Rotate, XOR)
+inline void QR(uint32_t& a, uint32_t& b, uint32_t& c, uint32_t& d) {
+    a += b; d ^= a; d = std::rotl(d, 16);
+    c += d; b ^= c; b = std::rotl(b, 12);
+    a += b; d ^= a; d = std::rotl(d, 8);
+    c += d; b ^= c; b = std::rotl(b, 7);
+}
+// clang-format on
+
 // 256-bit ChaCha20 block function, generates 64 bytes (eight 64-bit ints) of cryptographically secure noise based on a key string and a counter.
+// note: this implements the original DJB ChaCha20 specification (64-bit counter, 64-bit nonce)
 inline void chacha20Block(const std::array<uint32_t, 16>& baseState, const uint64_t blockCounter, uint64_t* out64) {
-    uint32_t working_state[16];
+    uint32_t workingState[16];
     // copy the initial state
-    std::memcpy(working_state, baseState.data(), 64);
+    std::memcpy(workingState, baseState.data(), 64);
 
     // inject the block counter for this specific OpenMP thread
     const uint32_t c0 = static_cast<uint32_t>(blockCounter & 0xFFFFFFFF);
     const uint32_t c1 = static_cast<uint32_t>(blockCounter >> 32);
-    working_state[12] = c0;
-    working_state[13] = c1;
-
-    // ARX Quarter Round lambda
-    auto QR = [&](uint32_t& a, uint32_t& b, uint32_t& c, uint32_t& d) {
-        a += b;
-        d ^= a;
-        d = std::rotl(d, 16);
-        c += d;
-        b ^= c;
-        b = std::rotl(b, 12);
-        a += b;
-        d ^= a;
-        d = std::rotl(d, 8);
-        c += d;
-        b ^= c;
-        b = std::rotl(b, 7);
-    };
+    workingState[12] = c0;
+    workingState[13] = c1;
 
     // 20 rounds
     for (int i = 0; i < 10; i++) {
-        QR(working_state[0], working_state[4], working_state[8], working_state[12]);
-        QR(working_state[1], working_state[5], working_state[9], working_state[13]);
-        QR(working_state[2], working_state[6], working_state[10], working_state[14]);
-        QR(working_state[3], working_state[7], working_state[11], working_state[15]);
-        QR(working_state[0], working_state[5], working_state[10], working_state[15]);
-        QR(working_state[1], working_state[6], working_state[11], working_state[12]);
-        QR(working_state[2], working_state[7], working_state[8], working_state[13]);
-        QR(working_state[3], working_state[4], working_state[9], working_state[14]);
+        QR(workingState[0], workingState[4], workingState[8], workingState[12]);
+        QR(workingState[1], workingState[5], workingState[9], workingState[13]);
+        QR(workingState[2], workingState[6], workingState[10], workingState[14]);
+        QR(workingState[3], workingState[7], workingState[11], workingState[15]);
+        QR(workingState[0], workingState[5], workingState[10], workingState[15]);
+        QR(workingState[1], workingState[6], workingState[11], workingState[12]);
+        QR(workingState[2], workingState[7], workingState[8], workingState[13]);
+        QR(workingState[3], workingState[4], workingState[9], workingState[14]);
     }
     // ChaCha final addition
     for (int i = 0; i < 12; i++)
-        working_state[i] += baseState[i];
-    working_state[14] += baseState[14];
-    working_state[15] += baseState[15];
-    working_state[12] += c0;
-    working_state[13] += c1;
+        workingState[i] += baseState[i];
+    workingState[14] += baseState[14];
+    workingState[15] += baseState[15];
+    workingState[12] += c0;
+    workingState[13] += c1;
 
     // output
-    std::memcpy(out64, working_state, 64);
+    std::memcpy(out64, workingState, 64);
 }
 } // namespace WatermarkCrypto
