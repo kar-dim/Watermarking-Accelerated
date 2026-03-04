@@ -5,6 +5,7 @@
 #include "include/WatermarkTypes.hpp"
 #include "PredictionErrorMatrixData.hpp"
 #include "WatermarkBase.hpp"
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <omp.h>
