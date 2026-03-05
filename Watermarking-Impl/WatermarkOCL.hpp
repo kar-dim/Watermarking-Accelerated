@@ -26,6 +26,7 @@ class WatermarkOCL final : public WatermarkGPU<p> {
     using clMemPtr = std::unique_ptr<cl_mem>;
 
     static constexpr unsigned int optimalLocalSize = 256; // safe universal local size for OpenCL, used almost anywhere
+    static constexpr unsigned int rxReduceLocalSize = 64;
     static constexpr std::pair windowLocalSize = {32, 8};
     static constexpr unsigned int choleskyLocalSize = p < 7 ? 1 : 64; // for p >= 7 we use 64-thread cholesky solver, for p < 7 single thread (faster for small p)
 
@@ -181,8 +182,13 @@ class WatermarkOCL final : public WatermarkGPU<p> {
 
     af::array computePredictionErrorData(const af::array& image, const bool calculateAbs) const override {
         using namespace cl_utils;
+        //"me" kernel constants
         constexpr int RxSize = (this->localSize * (this->localSize + 1)) / 2;
         constexpr int rxSize = this->localSize;
+        // reduce Rx/rx kernel constants
+        constexpr size_t RxGlobalX = ((RxSize + rxReduceLocalSize - 1) / rxReduceLocalSize) * rxReduceLocalSize;
+        constexpr size_t rxGlobalX = ((rxSize + rxReduceLocalSize - 1) / rxReduceLocalSize) * rxReduceLocalSize;
+        constexpr int numChunks = 256;
 
         return executeKernel(
             [&]() -> af::array {
@@ -196,21 +202,46 @@ class WatermarkOCL final : public WatermarkGPU<p> {
                 // call prediction error Rx/rx partials calculation kernel
                 queue.enqueueNDRangeKernel(KernelBuilder(programs, "me").args(wrap(imageMem.get()), wrap(RxPartialMem.get()), wrap(rxPartialMem.get()), this->baseCols, this->baseRows).build(),
                                            cl::NDRange(), cl::NDRange(meKernelDims.second, meKernelDims.first), cl::NDRange(optimalLocalSize, 1));
-                // return memory to arrayfire
-                this->unlockArrays(image, RxPartial, rxPartial);
 
-                // calculation of coefficients and error sequence
-                const auto correlationArrays = this->transformCorrelationArrays(RxPartial, rxPartial);
-                const af::array& Rx = correlationArrays.first;
-                const af::array& rx = correlationArrays.second;
-                const clMemPtr RxMemPtr(Rx.device<cl_mem>());
-                const clMemPtr rxMemPtr(rx.device<cl_mem>());
+                // setup and call reductions of the Rx/rx partials
+                const int totalBlocks = this->baseRows * meArraysBaseWidth;
+                const int blocksPerChunk = (totalBlocks + numChunks - 1) / numChunks;
+                // intermediate partial arrays for partial sums and final arrays
+                const af::array RxPartialsTemp(numChunks * RxSize);
+                const af::array rxPartialsTemp(numChunks * rxSize);
+                const af::array Rx(RxSize);
+                const af::array rx(rxSize);
+                const clMemPtr RxPartialsTempMem(RxPartialsTemp.device<cl_mem>());
+                const clMemPtr rxPartialsTempMem(rxPartialsTemp.device<cl_mem>());
+                const clMemPtr RxMem(Rx.device<cl_mem>());
+                const clMemPtr rxMem(rx.device<cl_mem>());
+
+                // call Rx/rx partial reduces
+                queue.enqueueNDRangeKernel(KernelBuilder(programs, "partial_reduce").args(wrap(RxPartialMem.get()), wrap(RxPartialsTempMem.get()), RxSize, totalBlocks, blocksPerChunk).build(),
+                                           cl::NDRange(), cl::NDRange(RxGlobalX, numChunks), cl::NDRange(rxReduceLocalSize, 1));
+
+                queue.enqueueNDRangeKernel(KernelBuilder(programs, "partial_reduce").args(wrap(rxPartialMem.get()), wrap(rxPartialsTempMem.get()), rxSize, totalBlocks, blocksPerChunk).build(),
+                                           cl::NDRange(), cl::NDRange(rxGlobalX, numChunks), cl::NDRange(rxReduceLocalSize, 1));
+
+                // call final Rx/rx reduces, 1 workgroup per coefficient (256 threads each)
+                queue.enqueueNDRangeKernel(KernelBuilder(programs, "final_reduce").args(wrap(RxPartialsTempMem.get()), wrap(RxMem.get()), numChunks, RxSize).build(), cl::NDRange(),
+                                           cl::NDRange(RxSize * optimalLocalSize), cl::NDRange(optimalLocalSize));
+
+                queue.enqueueNDRangeKernel(KernelBuilder(programs, "final_reduce").args(wrap(rxPartialsTempMem.get()), wrap(rxMem.get()), numChunks, rxSize).build(), cl::NDRange(),
+                                           cl::NDRange(rxSize * optimalLocalSize), cl::NDRange(optimalLocalSize));
+
+                // return memory to arrayfire
+                this->unlockArrays(image, RxPartial, rxPartial, RxPartialsTemp, rxPartialsTemp);
+
+                // calculation of coefficients
                 const clMemPtr coeffsMem(this->coefficients.template device<cl_mem>());
                 const clMemPtr stopFlagMem(this->stopFlag.template device<cl_mem>());
-                queue.enqueueNDRangeKernel(KernelBuilder(programs, "cholesky_solver").args(wrap(RxMemPtr.get()), wrap(rxMemPtr.get()), wrap(coeffsMem.get()), wrap(stopFlagMem.get())).build(),
-                                           cl::NDRange(), cl::NDRange(choleskyLocalSize), cl::NDRange(choleskyLocalSize));
+
+                queue.enqueueNDRangeKernel(KernelBuilder(programs, "cholesky_solver").args(wrap(RxMem.get()), wrap(rxMem.get()), wrap(coeffsMem.get()), wrap(stopFlagMem.get())).build(), cl::NDRange(),
+                                           cl::NDRange(choleskyLocalSize), cl::NDRange(choleskyLocalSize));
                 // return memory to arrayfire
                 this->unlockArrays(Rx, rx, this->coefficients, this->stopFlag);
+                // calculation of error sequence which use the coefficients we just computed
                 return computeErrorSequence(image, calculateAbs);
             },
             "me");
@@ -268,7 +299,7 @@ class WatermarkOCL final : public WatermarkGPU<p> {
                 // launch fused rrror sequence + partial correlation
                 queue.enqueueNDRangeKernel(KernelBuilder(programs, "calculate_error_sequence_and_partial_corr_fused")
                                                .args(wrap(maskMem.get()), wrap(randMem.get()), wrap(euMem.get()), wrap(coeffsMem.get()), wrap(dotPartialMem.get()), wrap(uNormPartialMem.get()),
-                                                     wrap(zNormPartialMem.get()), this->baseCols, this->baseRows, 0 /* calculateAbs = false */, wrap(stopFlagMem.get()))
+                                                     wrap(zNormPartialMem.get()), this->baseCols, this->baseRows, 0, wrap(stopFlagMem.get()))
                                                .build(),
                                            cl::NDRange(), cl::NDRange(this->texKernelDims.first, this->texKernelDims.second), cl::NDRange(windowLocalSize.first, windowLocalSize.second));
                 // reduce partials and compute correlation
@@ -282,18 +313,5 @@ class WatermarkOCL final : public WatermarkGPU<p> {
             },
             "compute correlation kernels");
         return correlation;
-    }
-
-    // helper method to sum the incomplete RxPartial and rxPartial arrays which were produced from the custom "me" kernel
-    // and to transform them to the correct size, so that they can be used by the system solver
-    std::pair<af::array, af::array> transformCorrelationArrays(const af::array& RxPartial, const af::array& rxPartial) const {
-        // reduction sum of blocks
-        // all [p^2-1,1] blocks will be summed in rx
-        // all [((p^2-1)(p^2))/2] vector blocks will be summed in Rx
-        const auto totalBlocks = rxPartial.elements() / this->localSize;
-        const auto RxStride = RxPartial.elements() / totalBlocks;
-        const af::array rx = af::sum(af::moddims(rxPartial, this->localSize, totalBlocks), 1);
-        const af::array Rx = af::sum(af::moddims(RxPartial, RxStride, totalBlocks), 1);
-        return std::make_pair(Rx, rx);
     }
 };

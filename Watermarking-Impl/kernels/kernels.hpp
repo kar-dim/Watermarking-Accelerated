@@ -680,6 +680,58 @@ __kernel void compute_abs_normalized_mask(
     }
 }
 
+__kernel void partial_reduce(
+    __global const float* restrict input,
+    __global float* restrict partials,
+    const int stride,
+    const int totalBlocks,
+    const int blocksPerChunk)
+{
+    const int coeffIdx = get_global_id(0);
+    const int chunkIdx = get_global_id(1);
+
+    if (coeffIdx >= stride)
+        return;
+
+    const int startB = chunkIdx * blocksPerChunk;
+    const int endB = min(startB + blocksPerChunk, totalBlocks);
+
+    float sum = 0.0f;
+    for (int b = startB; b < endB; ++b)
+        sum += input[coeffIdx + b * stride];
+    partials[coeffIdx * get_global_size(1) + chunkIdx] = sum;
+}
+
+__kernel void final_reduce(
+    __global const float* restrict partials,
+    __global float* restrict output,
+    const int numChunks,
+    const int stride)
+{
+    const int coeffIdx = get_group_id(0); 
+    const int tid = get_local_id(0);
+    const int wgSize = get_local_size(0);
+
+    __local float sums[256]; 
+
+    if (coeffIdx >= stride)
+        return;
+
+    float sum = 0.0f;
+    for (int i = tid; i < numChunks; i += wgSize)
+        sum += partials[coeffIdx * numChunks + i];
+    sums[tid] = sum;
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    for (int offset = wgSize / 2; offset > 0; offset >>= 1) {
+        if (tid < offset)
+            sums[tid] += sums[tid + offset];
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+    if (tid == 0)
+        output[coeffIdx] = sums[0];
+}
+
 )CLC"
 R"CLC(
 
