@@ -50,7 +50,7 @@ class WatermarkGPU : public WatermarkBase {
     // initialize the watermark random matrix into an arrayfire array (copy from host to GPU VRAM)
     // clang-format off
     static af::array initializeRandomMatrix(const std::vector<float>& watermarkVec, const unsigned int rows, const unsigned int cols) { 
-        return af::transpose(af::array(cols, rows, watermarkVec.data())); 
+        return af::array(rows, cols, watermarkVec.data()); 
     }
     // clang-format on
 

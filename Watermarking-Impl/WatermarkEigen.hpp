@@ -9,6 +9,7 @@
 #include <cmath>
 #include <omp.h>
 #include <string>
+#include <vector>
 
 /*!
  *  \brief  Functions for watermark computation and detection, Eigen implementation.
@@ -101,7 +102,7 @@ class WatermarkEigen final : public WatermarkBase {
 
     // initialize the watermark random matrix into an Eigen buffer
     static ImageBuffer initializeRandomMatrix(const std::vector<float>& watermarkVec, const unsigned int rows, const unsigned int cols) {
-        return ImageBuffer(Map<const Eigen::ArrayXXf>(watermarkVec.data(), cols, rows).transpose());
+        return ImageBuffer(ArrayXXf(Map<const ArrayXXf>(watermarkVec.data(), rows, cols)));
     }
 
     // helper method to clamp the pixel value to the image boundaries if out of bounds
