@@ -62,7 +62,7 @@ class WatermarkBase {
         for (int64_t i = 0; i < numElements; i += 8) {
             uint64_t blockCounter = static_cast<uint64_t>(i / 8);
             uint64_t randomBits[8];
-            // generate 8 random numbers (XOR folded, ChaCha20 block)
+            // generate 8 random numbers
             WatermarkCrypto::chacha20Block(baseState, blockCounter, randomBits);
             // process the 8 random integers into 4 Box-Muller pairs
             for (int64_t j = 0; j < 4; j++) {
