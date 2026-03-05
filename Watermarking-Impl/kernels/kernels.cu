@@ -235,7 +235,7 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
             }
 
             // load pixel B (tid + 128)
-            if ((bx * 256 + tid + 128) < width) {
+            if ((by * 256 + tid + 128) < height) {
                 load_neighbor_vec_p3_col(vecBot, centerBot, blockValues, tid + 128);
             } else {
                 vecBot = {};
