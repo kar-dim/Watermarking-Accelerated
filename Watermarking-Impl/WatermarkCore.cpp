@@ -81,7 +81,7 @@ void exportForSave(const ImageSession* s, ExportedImage* p, MaskMethod method) {
 
 // same as saveImage, but used as a separate step to allow for asynchronous saving (in batched mode)
 void flushToDiskAsync(ExportedImage* handle, const string& outPath, MaskMethod method) {
-    string suffix = (method == MaskMethod::NVF) ? "W_NVF" : "W_ME";
+    const string suffix = method == MaskMethod::NVF ? "W_NVF" : "W_ME";
     InternalUtils::saveImage(outPath, suffix, handle->finalPixels, handle->alpha);
 }
 
