@@ -44,7 +44,7 @@ BenchmarkWorker::BenchmarkWorker(int openclDevice, QObject* parent) : QThread(pa
 }
 
 void BenchmarkWorker::run() {
-    // initialize watermark environment For OpenCL only
+    // initialize watermark environment (device index is used for OpenCL only)
     initializeEnvironment(deviceIndex);
 
     // check if the input directory which conntains the benchmark images is valid
@@ -65,9 +65,9 @@ void BenchmarkWorker::run() {
     // initialize accumulators for the benchmark results and calculate total steps for progress tracking
     const int totalSteps = static_cast<int>(validFiles.size() * pValues.size() * psnrValues.size());
     int currentStep = 0;
+    int totalFrames = 0;
     double totalEmbedTimeMs = 0.0;
     double totalDetectTimeMs = 0.0;
-    int totalFrames = 0;
     // initialize with a fixed watermark seed and the first set of parameters (p, psnr)
     auto session = createImageSession("password12345", pValues[0], psnrValues[0]);
     // first image load while we set up the session
