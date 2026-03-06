@@ -225,10 +225,9 @@ Tests were executed with a loop count of 1000 iterations to ensure statistical s
 
 p = 3            |  p = 5
 :-------------------------:|:-------------------------:
- ![p3](https://github.com/user-attachments/assets/8c90375c-f2b5-43e6-b1eb-706ea52b4d78) | ![p5](https://github.com/user-attachments/assets/40e2d4b3-b6a4-457f-af0d-7fdea79bee41)
+ <img width="1024" height="768" alt="1" src="https://github.com/user-attachments/assets/6fe0a6bf-2f94-477e-82c4-d676db9b6f3b" /> |  <img width="1024" height="768" alt="2" src="https://github.com/user-attachments/assets/71a87665-01fa-422b-8aae-55700bfb4bdf" />
 p = 7            |  p = 9
- ![p7](https://github.com/user-attachments/assets/e1e743b5-b1bd-4c51-baad-3fce1141ca27) | ![p9](https://github.com/user-attachments/assets/c13bdb93-61ba-439c-8e7b-4d8948434398)
-
+ <img width="1024" height="768" alt="3" src="https://github.com/user-attachments/assets/4e73fb16-2e0a-4139-b4c0-891277b37d92" /> | <img width="1024" height="768" alt="4" src="https://github.com/user-attachments/assets/7012cf1f-102a-41de-9da7-2d2be98bd640" />
 
 # Benchmark UI
 
