@@ -5,6 +5,7 @@
 #include "kernels/kernels.cuh"
 #include "WatermarkBase.hpp"
 #include "WatermarkGpu.hpp"
+#include <algorithm>
 #include <arrayfire.h>
 #include <cub/cub.cuh>
 #include <cuda_runtime.h>
@@ -23,13 +24,8 @@ class WatermarkCuda final : public WatermarkGPU<p> {
         // initialize ME kernel parameters based on image dims, we calculate total blocks in Y dimension and total tasks for optimal configuration
         const unsigned int meTotalBlocksY = WatermarkBase::alignUp<meBlockSize.x>(this->baseRows) / meBlockSize.x;
         meParams = {meTotalBlocksY, meTotalBlocksY * this->baseCols};
-        // initialize cub scratch memory (for ME mask calculation used in detector) once
-        AbsTransformOp op;
-        auto iter = thrust::make_transform_iterator((const float*)nullptr, op);
-        size_t tmpStorageBytes = 0;
-        // ask CUB for required size of the temporary storage and allocate it permantently so we won't ask all the time
-        cub::DeviceReduce::Max(nullptr, tmpStorageBytes, iter, (float*)nullptr, this->totalPixels, 0);
-        cubTempStorage = af::array(tmpStorageBytes, u8);
+        // initialize CUB scratch memory for its reductions
+        initializeCubStorage();
     }
 
   private:
@@ -46,6 +42,29 @@ class WatermarkCuda final : public WatermarkGPU<p> {
     unsigned int gridOptimalMe;
     af::array cubTempStorage;
 
+    void initializeCubStorage() {
+        // ask CUB for required scratch space for the global sum reduction with an abs value transformation
+        AbsTransformOp op;
+        auto iter = thrust::make_transform_iterator((const float*)nullptr, op);
+        size_t tmpBytesTransform = 0;
+        cub::DeviceReduce::Max(nullptr, tmpBytesTransform, iter, (float*)nullptr, this->totalPixels, 0);
+        // ask CUB for required scratch space for the raw Pointer reduction
+        size_t tmpBytesRaw = 0;
+        cub::DeviceReduce::Max(nullptr, tmpBytesRaw, (const float*)nullptr, (float*)nullptr, this->totalPixels, 0);
+        // allocate the global scratchpad using the maximum required size to fit all cases
+        size_t finalTmpBytes = std::max(tmpBytesTransform, tmpBytesRaw);
+        cubTempStorage = af::array(finalTmpBytes, u8);
+    }
+
+    // helper function to reduce (sum) an array of totalPixel pixels, or an iterated array with a transformation OP
+    template <typename InputIteratorT>
+    void reduceMaxCub(InputIteratorT in, float* out) const {
+        size_t tmpStorageBytes = cubTempStorage.bytes();
+        // execute CUB global reduction
+        cub::DeviceReduce::Max((void*)cubTempStorage.device<unsigned char>(), tmpStorageBytes, in, out, this->totalPixels, afStream);
+        this->unlockArrays(cubTempStorage);
+    }
+
     af::array computeStrengthenedWatermark(const af::array& inputGrayImage, const af::array& inputImage, const MaskMethod maskType) const override {
         const af::array u(inputGrayImage.dims(), f32);
         const af::array output(inputImage.dims(), u8);
@@ -58,22 +77,24 @@ class WatermarkCuda final : public WatermarkGPU<p> {
             const dim3 gridSize = cuda_utils::gridSizeCalculate(windowBlockSize, this->baseCols, this->baseRows);
             nvf_u_and_sumsq_fused<p>
                 <<<gridSize, windowBlockSize, 0, afStream>>>(inputGrayImage.template device<float>(), this->randomMatrix.template device<float>(), uPtr, sumSqPtr, this->baseCols, this->baseRows);
-            this->unlockArrays(inputGrayImage);
+            this->unlockArrays(inputGrayImage, this->randomMatrix);
         } else {
-            // find max of error sequence, this cannot be fused because it is a global reduction
+            // find max of error sequence
             const af::array errorSeq = computePredictionErrorData(inputGrayImage, true);
-            const af::array errorSeqMax = af::max(af::flat(errorSeq));
+            const af::array errorSeqMax(1, f32);
+            const float* errSeqPtr = errorSeq.device<float>();
+            float* errMaxPtr = errorSeqMax.device<float>();
+            reduceMaxCub(errSeqPtr, errMaxPtr);
             // fused kernel to compute ME mask, strengthened watermark (u) and sum of squares of u
             const int blocksComputeU = cuda_utils::gridSize1DStridedCalculate(this->totalPixels, strWatermarkBlockSize);
-            me_u_and_sumsq_fused<<<blocksComputeU, strWatermarkBlockSize, 0, afStream>>>(errorSeq.device<float>(), this->randomMatrix.template device<float>(), uPtr, sumSqPtr,
-                                                                                         errorSeqMax.device<float>(), this->totalPixels);
-            this->unlockArrays(errorSeqMax, errorSeq);
+            me_u_and_sumsq_fused<<<blocksComputeU, strWatermarkBlockSize, 0, afStream>>>(errSeqPtr, this->randomMatrix.template device<float>(), uPtr, sumSqPtr, errMaxPtr, this->totalPixels);
+            this->unlockArrays(errorSeq, errorSeqMax, this->randomMatrix);
         }
         // compute and apply watermark
         const int blocksApply = cuda_utils::gridSize1DStridedCalculate(this->totalPixels, applyWatermarkBlockSize);
         apply_watermark_fused<<<blocksApply, applyWatermarkBlockSize, 0, afStream>>>(inputImage.device<float>(), uPtr, sumSqPtr, output.device<unsigned char>(), this->strengthNumerator,
                                                                                      this->totalPixels, static_cast<int>(inputImage.dims(2)));
-        this->unlockArrays(inputImage, u, sumSq, output, this->randomMatrix);
+        this->unlockArrays(inputImage, u, sumSq, output);
         return output;
     }
 
@@ -147,16 +168,12 @@ class WatermarkCuda final : public WatermarkGPU<p> {
         const float* errSeqPtr = errorSequence.device<float>();
         float* maskPtr = mask.device<float>();
         float* maxValPtr = maxVal.device<float>();
-        // use cub to find max of absolute values in error sequence, we use a transform iterator to apply abs on the fly, this way we avoid creating an intermediate array for absolute values
-        AbsTransformOp absOp;
-        auto absIter = thrust::make_transform_iterator(errSeqPtr, absOp);
-        void* tmpStorage = (void*)this->cubTempStorage.device<unsigned char>();
-        size_t tmpStorageBytes = this->cubTempStorage.bytes();
-        cub::DeviceReduce::Max(tmpStorage, tmpStorageBytes, absIter, maxValPtr, this->totalPixels, afStream);
+        // use cub to find max of absolute values in error sequence, we use a transform iterator to apply abs on the fly
+        reduceMaxCub(thrust::make_transform_iterator(errSeqPtr, AbsTransformOp{}), maxValPtr);
         // launch the normalization kernel to compute the mask, dividing each element of the error sequence with the max value we just computed
         const int gridSize = cuda_utils::gridSize1DStridedCalculate(this->totalPixels, maskNormalizationBlockSize);
         compute_abs_normalized_mask<<<gridSize, maskNormalizationBlockSize, 0, afStream>>>(errSeqPtr, maskPtr, maxValPtr, this->totalPixels);
-        this->unlockArrays(errorSequence, mask, maxVal, cubTempStorage);
+        this->unlockArrays(errorSequence, mask, maxVal);
         return mask;
     }
 
