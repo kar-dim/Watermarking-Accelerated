@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 /*!
@@ -40,6 +41,7 @@ ImageHandle createImageSession(const std::string& watermarkPassword, const int p
 PreloadedHandle preloadImageFromDisk(const std::string& imagePath);
 void loadImage(ImageSession* session, const std::string& imagePath);
 void bindPreloadedImage(ImageSession* session, PreloadedHandle preloadedData);
+std::pair<int, int> getImageDims(const ImageSession* s);
 void embedImage(ImageSession* session, MaskMethod method);
 void prepareDetectionImage(ImageSession* session, MaskMethod method);
 float detectLoadedImage(const ImageSession* session, MaskMethod method);

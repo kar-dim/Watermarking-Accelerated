@@ -17,6 +17,12 @@
  */
 namespace CommonUtils {
 
+// printing to console functions
+inline std::string info(const std::string& str) { return "\033[38;5;208m" + str + "\033[0m"; }
+inline std::string err(const std::string& str) { return "\033[91m" + str + "\033[0m"; }
+inline std::string success(const std::string& str) { return "\033[92m" + str + "\033[0m"; }
+
+// check if an error condition is true and throw with a specified error message
 inline void checkError(const bool isError, const std::string& errorMsg) {
     if (isError)
         throw std::runtime_error(errorMsg);

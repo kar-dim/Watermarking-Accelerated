@@ -153,7 +153,7 @@ bool initializeEnvironment(const int openclDevice) {
 #endif
 #pragma omp parallel
     {}
-    std::cout << "Using " + std::to_string(omp_get_max_threads()) + " parallel threads for Watermark calculations.\n";
+    std::cout << info("Using " + std::to_string(omp_get_max_threads()) + " parallel threads for Watermark calculations.\n");
     return deviceSetSuccess;
 }
 
@@ -258,6 +258,9 @@ PreloadedHandle preloadImageFromDisk(const string& imagePath) {
     return PreloadedHandle(p);
 }
 
+// used to get the current image dimensions
+std::pair<int, int> getImageDims(const ImageSession* s) { return {s->currentRows, s->currentCols}; }
+
 // binds a disk preloaded image buffer into the watermark session. It also lazily initializes the watermark object and buffers based on the dimensions of the loaded image, which is useful for
 // scenarios where multiple images of different dimensions need to be processed in parallel, as it avoids unnecessary allocations and initializations until the actual image data is available.
 void bindPreloadedImage(ImageSession* s, PreloadedHandle preloadedData) {
@@ -356,7 +359,7 @@ int embedVideo(VideoSession* s) {
     ffmpegCmd << "ffmpeg -y -f rawvideo " << getPixFmt(s->videoStream) << "-s " << s->videoStream->codecpar->width << "x" << s->videoStream->codecpar->height << " -r " << getFrameRate(s->videoStream)
               << " -i - -i \"" << s->settings.videoFile << "\" " << s->settings.encodeOptions << " -c:s copy -c:a copy -map 1:s? -map 0:v -map 1:a? -max_interleave_delta 0 "
               << getStreamRotation(s->videoStream) << getColorRange(s->videoStream) << "\"" << s->settings.encodeOutputPath << "\"";
-    std::cout << "\033[38;5;208m\nFFmpeg encode command: " << ffmpegCmd.str() << "\033[0m\n\n";
+    std::cout << info("\nFFmpeg encode command: " + ffmpegCmd.str() + "\n\n");
 
     FILEPtr ffmpegPipe(_popen(ffmpegCmd.str().c_str(), "wb"), _pclose);
     checkError(!ffmpegPipe.get(), "Error: Could not open FFmpeg pipe");

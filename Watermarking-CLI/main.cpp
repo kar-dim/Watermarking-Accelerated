@@ -28,10 +28,6 @@ using std::string;
  *  \brief  Helper functions for testing the watermark algorithms
  *  \author Dimitris Karatzas
  */
-static inline string info(const string& str) { return "\033[38;5;208m" + str + "\033[0m"; }
-static inline string err(const string& str) { return "\033[91m" + str + "\033[0m"; }
-static inline string success(const string& str) { return "\033[92m" + str + "\033[0m"; }
-
 // batch processing of images in a directory (for both embed and detect)
 static int testForImageBatch(const INIReader& inir, const int p, const float psnr, const bool isEmbed) {
     const string watermarkPassword = inir.Get("global", "watermark_password", "");
@@ -60,7 +56,7 @@ static int testForImageBatch(const INIReader& inir, const int p, const float psn
     // get the valid images of the directory, if no valid image files are found, throw an error
     const std::vector<fs::path> validFiles = getValidImageFiles(inputDir);
     checkError(validFiles.empty(), "No valid image files found in directory!");
-    cout << info(std::format("Found {} images. Starting batch {}...\n", validFiles.size(), isEmbed ? "embedding" : "detection"));
+    cout << info(std::format("Found {} images. Starting batch {}...\n\n", validFiles.size(), isEmbed ? "embedding" : "detection"));
 
     // initialize the watermarking session once and reuse for all images in the batch
     auto session = createImageSession(watermarkPassword, p, psnr);
@@ -154,7 +150,9 @@ static int testForImageSingle(const INIReader& inir, const int p, const float ps
     // load watermarking session
     auto s = createImageSession(watermarkPassword, p, psnr);
     const double loadTime = executionTime([&]() { loadImage(s.get(), imageFile); });
-    cout << "Time to load image data from disk: " << loadTime << " seconds\n\n";
+    cout << "Time to load image data from disk: " << loadTime << " seconds\n";
+    const auto dims = getImageDims(s.get());
+    cout << info("Image size is: " + std::to_string(dims.first) + "x" + std::to_string(dims.second) + " (HxW)\n\n");
 
     // helper lambda for embedding and detection benchmarks
     auto runWatermarkingProcess = [&](MaskMethod method, const string& name) {
