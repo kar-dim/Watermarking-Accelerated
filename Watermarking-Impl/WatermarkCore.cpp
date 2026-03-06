@@ -315,7 +315,7 @@ float detectEmbeddedBuffer(const ImageSession* s, MaskMethod method) { return s-
 
 // saves the image to disk
 void saveImage(const ImageSession* s, const string& outPath, MaskMethod method) {
-    string suffix = (method == MaskMethod::NVF) ? "W_NVF" : "W_ME";
+    const string suffix = method == MaskMethod::NVF ? "W_NVF" : "W_ME";
     InternalUtils::saveImage(outPath, suffix, s->watermarkBuffer, s->imgBuffer.alphaChannel);
 }
 
