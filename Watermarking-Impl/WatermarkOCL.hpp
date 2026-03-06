@@ -82,27 +82,38 @@ class WatermarkOCL final : public WatermarkGPU<p> {
                 "NVF_computeStrengthenedWatermark");
 
         } else {
-            // find max of error sequence, this cannot be fused because it is a global reduction
+            // compute prediction error
             const af::array errorSeq = computePredictionErrorData(inputGrayImage, true);
-            const af::array errorSeqMax = af::max(af::flat(errorSeq));
 
-            // fused kernel to compute ME mask, strengthened watermark (u) and sum of squares of u
-            const int workGroups = calculateLocalGroupsNumber(this->totalPixels, optimalLocalSize);
-            const int globalSize = workGroups * optimalLocalSize;
-
-            const af::array partials(workGroups, f32);
-            const clMemPtr partialsMem(partials.device<cl_mem>());
+            // allocate buffers
+            const int maxWorkGroups = calculateLocalGroupsNumber(this->totalPixels, optimalLocalSize);
+            const int maxGlobalSize = maxWorkGroups * optimalLocalSize;
+            const af::array errorSeqMax(1, f32);
+            const af::array maxPartials(maxWorkGroups, f32);
+            const af::array partials(maxWorkGroups, f32);
             const clMemPtr errorSeqMem(errorSeq.device<cl_mem>());
             const clMemPtr errorSeqMaxMem(errorSeqMax.device<cl_mem>());
+            const clMemPtr maxPartialsMem(maxPartials.device<cl_mem>());
+            const clMemPtr partialsMem(partials.device<cl_mem>());
 
             executeKernel(
                 [&]() {
+                    // compute max error sequence partials
+                    queue.enqueueNDRangeKernel(KernelBuilder(programs, "partial_max_reduce").args(wrap(errorSeqMem.get()), wrap(maxPartialsMem.get()), this->totalPixels).build(), cl::NDRange(),
+                                               cl::NDRange(maxGlobalSize), cl::NDRange(optimalLocalSize));
+
+                    // compute final error sequence max
+                    queue.enqueueNDRangeKernel(KernelBuilder(programs, "final_max_reduce").args(wrap(maxPartialsMem.get()), wrap(errorSeqMaxMem.get()), maxWorkGroups).build(), cl::NDRange(),
+                                               cl::NDRange(optimalLocalSize), cl::NDRange(optimalLocalSize));
+
+                    // fused kernel to compute ME mask, strengthened watermark (u) and sum of squares of u
                     queue.enqueueNDRangeKernel(KernelBuilder(programs, "me_u_and_partial_sumsq_fused")
                                                    .args(wrap(errorSeqMem.get()), wrap(randMem.get()), wrap(uMem.get()), wrap(partialsMem.get()), wrap(errorSeqMaxMem.get()), this->totalPixels)
                                                    .build(),
-                                               cl::NDRange(), cl::NDRange(globalSize), cl::NDRange(optimalLocalSize));
+                                               cl::NDRange(), cl::NDRange(maxGlobalSize), cl::NDRange(optimalLocalSize));
 
-                    queue.enqueueNDRangeKernel(KernelBuilder(programs, "reduce_sumsq_partials").args(wrap(partialsMem.get()), wrap(sumSqMem.get()), workGroups).build(), cl::NDRange(),
+                    // reduce sumsq partials
+                    queue.enqueueNDRangeKernel(KernelBuilder(programs, "reduce_sumsq_partials").args(wrap(partialsMem.get()), wrap(sumSqMem.get()), maxWorkGroups).build(), cl::NDRange(),
                                                cl::NDRange(optimalLocalSize), cl::NDRange(optimalLocalSize));
 
                     // apply watermark
@@ -110,9 +121,9 @@ class WatermarkOCL final : public WatermarkGPU<p> {
                         KernelBuilder(programs, "apply_watermark_fused")
                             .args(wrap(inputMem.get()), wrap(uMem.get()), wrap(sumSqMem.get()), wrap(outputMem.get()), this->strengthNumerator, this->totalPixels, static_cast<int>(inputImage.dims(2)))
                             .build(),
-                        cl::NDRange(), cl::NDRange(globalSize), cl::NDRange(optimalLocalSize));
+                        cl::NDRange(), cl::NDRange(maxGlobalSize), cl::NDRange(optimalLocalSize));
 
-                    this->unlockArrays(errorSeq, errorSeqMax, partials);
+                    this->unlockArrays(errorSeq, errorSeqMax, maxPartials, partials);
                 },
                 "ME_computeStrengthenedWatermark");
         }

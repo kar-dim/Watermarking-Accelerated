@@ -735,6 +735,57 @@ __kernel void final_reduce(
 )CLC"
 R"CLC(
 
+__kernel void partial_max_reduce(
+    __global const float* restrict input,
+    __global float* restrict partials,
+    const int totalElements)
+{
+    const int tid = get_local_id(0);
+    const int gid = get_global_id(0);
+    const int stride = get_global_size(0);
+    
+    __local float scratch[256]; 
+
+    float threadMax = 0.0f;
+    for(int i = gid; i < totalElements; i += stride)
+        threadMax = max(threadMax, input[i]);
+    scratch[tid] = threadMax;
+    barrier(CLK_LOCAL_MEM_FENCE);
+    
+    for (int offset = get_local_size(0) / 2; offset > 0; offset >>= 1) {
+        if (tid < offset)
+            scratch[tid] = max(scratch[tid], scratch[tid + offset]);
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+    if (tid == 0)
+        partials[get_group_id(0)] = scratch[0];
+}
+
+__kernel void final_max_reduce(
+    __global const float* restrict partials,
+    __global float* restrict output,
+    const int numPartials)
+{
+    const int tid = get_local_id(0);
+    
+    __local float scratch[256];
+
+    float threadMax = 0.0f;
+    for(int i = tid; i < numPartials; i += get_local_size(0))
+        threadMax = max(threadMax, partials[i]);
+    scratch[tid] = threadMax;
+    barrier(CLK_LOCAL_MEM_FENCE);
+    
+    for (int offset = get_local_size(0) / 2; offset > 0; offset >>= 1) {
+        if (tid < offset)
+            scratch[tid] = max(scratch[tid], scratch[tid + offset]);
+        barrier(CLK_LOCAL_MEM_FENCE);
+    }
+    
+    if (tid == 0)
+        output[0] = scratch[0];
+}
+
 __kernel void calculate_error_sequence_and_partial_corr_fused(
     __global const float* restrict mask,
     __global const float* restrict w,
