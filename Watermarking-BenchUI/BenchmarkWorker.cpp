@@ -92,7 +92,10 @@ void BenchmarkWorker::run() {
     };
 
     // main loop
+    // we check periodically if the thread is interrupted to exit gracefully
     for (size_t i = 0; i < validFiles.size(); i++) {
+        if (QThread::currentThread()->isInterruptionRequested())
+            return;
         const QString currentFileName = QString::fromStdString(validFiles[i].filename().string());
         try {
             // get the current image and prefetch next image in the background
@@ -105,6 +108,8 @@ void BenchmarkWorker::run() {
             // for all combinations
             for (int p : pValues) {
                 for (float psnr : psnrValues) {
+                    if (QThread::currentThread()->isInterruptionRequested())
+                        return;
                     // update p and psnr in the session, this will trigger all necessary internal recalculations in the engine (e.g. random noise generation)
                     updateSessionParams(session.get(), p, psnr);
                     // EMBED BENCHMARK
@@ -112,10 +117,14 @@ void BenchmarkWorker::run() {
                         embedImage(session.get(), MaskMethod::ME);
                         return 0.0f;
                     });
+                    if (QThread::currentThread()->isInterruptionRequested())
+                        return;
                     // DETECT BENCHMARK
                     // necessary uint8 to float for detection
                     prepareDetectionImage(session.get(), MaskMethod::ME);
                     auto [totalDetectMs, avgDetectMs, detectFps, currentCorrelation] = measurePerformance([&]() { return detectEmbeddedBuffer(session.get(), MaskMethod::ME); });
+                    if (QThread::currentThread()->isInterruptionRequested())
+                        return;
                     // accumulate total times and frames for final score calculation at the end of the benchmark
                     totalEmbedTimeMs += totalEmbedMs;
                     totalDetectTimeMs += totalDetectMs;

@@ -1,5 +1,6 @@
 ﻿#include "BenchmarkWorker.hpp"
 #include "WatermarkingBenchUI.h"
+#include <QCloseEvent>
 #include <QComboBox>
 #include <QCoreApplication>
 #include <QMainWindow>
@@ -73,6 +74,16 @@ WatermarkingBenchUI::WatermarkingBenchUI(QWidget* parent) : QMainWindow(parent) 
 
     // connect the start button to the benchmark function
     connect(startButton, &QPushButton::clicked, this, &WatermarkingBenchUI::startBenchmark);
+}
+
+// do not close the UI while the background bench thread is running (when user clicks "X" randomly)
+// we ask the worker to stop and wait for it
+void WatermarkingBenchUI::closeEvent(QCloseEvent* event) {
+    if (worker && worker->isRunning()) {
+        worker->requestInterruption();
+        worker->wait();
+    }
+    event->accept();
 }
 
 void WatermarkingBenchUI::startBenchmark() {

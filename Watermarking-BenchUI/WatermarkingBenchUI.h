@@ -1,5 +1,6 @@
 #pragma once
 #include "BenchmarkWorker.hpp"
+#include <QCloseEvent>
 #include <QComboBox>
 #include <QImage>
 #include <QLabel>
@@ -18,6 +19,9 @@ class WatermarkingBenchUI : public QMainWindow {
 
   public:
     explicit WatermarkingBenchUI(QWidget* parent = nullptr);
+
+  protected:
+    void closeEvent(QCloseEvent* event) override;
 
   private slots:
     void startBenchmark();
