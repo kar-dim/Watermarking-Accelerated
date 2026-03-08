@@ -73,18 +73,23 @@ void BenchmarkWorker::run() {
     // first image load while we set up the session
     std::future<PreloadedHandle> prefetchTask = std::async(std::launch::async, preloadImageFromDisk, validFiles[0].string());
 
+    // reserve the vector which would hold the benchmark times per image once
+    constexpr int maxIterations = 300;
+    std::vector<double> samples;
+    samples.reserve(maxIterations);
+
     // auto-tuned performance lambda
     auto measurePerformance = [&](auto&& task) {
-        // constants
-        constexpr int maxIterations = 300;
+        // constants and initialize
         constexpr int minWorkMs = 50; // minimum 50ms of work (for fast devices or small images)
         constexpr double targetCv = 0.10;
         constexpr double maxTimeBudgetMs = 250.0;
+        samples.clear();
 
         int minIterations = 5;
         // warmup
         auto t1 = std::chrono::high_resolution_clock::now();
-        float lastResult = task();
+        const float result = task();
         auto t2 = std::chrono::high_resolution_clock::now();
         const double firstRunMs = std::chrono::duration<double, std::milli>(t2 - t1).count();
         // optimization: if the device is very slow, allow only one or two loops in order to finish quicker
@@ -93,8 +98,6 @@ void BenchmarkWorker::run() {
         else if (firstRunMs > (maxTimeBudgetMs / 2.0))
             minIterations = 2;
 
-        std::vector<double> samples;
-        samples.reserve(maxIterations);
         // start auto-tuned bench
         while (samples.size() < maxIterations) {
             if (isInterruptionRequested())
@@ -106,9 +109,9 @@ void BenchmarkWorker::run() {
                 if (totalTime > minWorkMs && calculateCV(samples) < targetCv)
                     break;
             }
-            // Run next frame
+            // run next frame
             t1 = std::chrono::high_resolution_clock::now();
-            lastResult = task();
+            task();
             t2 = std::chrono::high_resolution_clock::now();
             samples.push_back(std::chrono::duration<double, std::milli>(t2 - t1).count());
         }
@@ -118,7 +121,7 @@ void BenchmarkWorker::run() {
         const double totalMs = std::accumulate(samples.begin(), samples.end(), 0.0);
         const double avgMs = (iterations > 0) ? (totalMs / iterations) : 0.0;
         const double fps = (avgMs > 0.0) ? (1000.0 / avgMs) : 0.0;
-        return std::make_tuple(totalMs, avgMs, fps, lastResult, iterations);
+        return std::make_tuple(totalMs, avgMs, fps, result, iterations);
     };
 
     // main loop
