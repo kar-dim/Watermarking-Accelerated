@@ -68,7 +68,6 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='EIGEN_Debug|x64'" Label="Configuration">
     <PlatformToolset>ClangCL</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
-    <WholeProgramOptimization>false</WholeProgramOptimization>
     <ConfigurationType>StaticLibrary</ConfigurationType>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
@@ -95,7 +94,7 @@
       <PreprocessorDefinitions>WIN32;WIN64;NOMINMAX;_DEBUG;_CONSOLE;_USE_CUDA_;_USE_GPU_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
-      <AdditionalIncludeDirectories>$(AF_PATH)\include;$(CUDA_PATH)\include;$(ProjectDir)libs\ffmpeg\include;$(SolutionDir)Watermarking-Utils;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(AF_PATH)\include;$(CUDA_PATH)\include;$(ProjectDir)libs\ffmpeg\include;$(SolutionDir)Watermarking-Util\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <OpenMPSupport>true</OpenMPSupport>
     </ClCompile>
@@ -127,7 +126,7 @@
       <PreprocessorDefinitions>WIN32;WIN64;NOMINMAX;NDEBUG;_CONSOLE;_USE_CUDA_;_USE_GPU_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
-      <AdditionalIncludeDirectories>$(AF_PATH)\include;$(CUDA_PATH)\include;$(ProjectDir)libs\ffmpeg\include;$(SolutionDir)Watermarking-Utils;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(AF_PATH)\include;$(CUDA_PATH)\include;$(ProjectDir)libs\ffmpeg\include;$(SolutionDir)Watermarking-Util\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <OpenMPSupport>true</OpenMPSupport>
     </ClCompile>
@@ -160,7 +159,7 @@
       <PreprocessorDefinitions>WIN32;WIN64;NOMINMAX;NDEBUG;_CONSOLE;_USE_CUDA_;_USE_GPU_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
-      <AdditionalIncludeDirectories>$(AF_PATH)\include;$(CUDA_PATH)\include;$(ProjectDir)libs\ffmpeg\include;$(SolutionDir)Watermarking-Utils;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(AF_PATH)\include;$(CUDA_PATH)\include;$(ProjectDir)libs\ffmpeg\include;$(SolutionDir)Watermarking-Util\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <OpenMPSupport>true</OpenMPSupport>
     </ClCompile>
@@ -202,7 +201,7 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='OPENCL_Release|x64'">
     <ClCompile>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
-      <AdditionalIncludeDirectories>$(AF_PATH)\include;$(ProjectDir)libs\opencl\include;$(ProjectDir)libs\ffmpeg\include;$(SolutionDir)Watermarking-Utils</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(AF_PATH)\include;$(ProjectDir)libs\opencl\include;$(ProjectDir)libs\ffmpeg\include;$(SolutionDir)Watermarking-Util\include</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;WIN64;NOMINMAX;NDEBUG;_CONSOLE;_USE_OPENCL_;_USE_GPU_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
@@ -233,7 +232,7 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='EIGEN_Release|x64'">
     <ClCompile>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
-      <AdditionalIncludeDirectories>$(ProjectDir)libs\Eigen;$(ProjectDir)libs\CImg;$(ProjectDir)libs\zlib\include;$(ProjectDir)libs\libpng\include;$(ProjectDir)libs\libjpeg\include;$(ProjectDir)libs\libwebp\include;$(ProjectDir)libs\libtiff\include;$(LLVMInstallDir)\lib\clang\17\include;$(ProjectDir)libs\ffmpeg\include;$(SolutionDir)Watermarking-Utils;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)libs\Eigen;$(ProjectDir)libs\CImg;$(ProjectDir)libs\zlib\include;$(ProjectDir)libs\libpng\include;$(ProjectDir)libs\libjpeg\include;$(ProjectDir)libs\libwebp\include;$(ProjectDir)libs\libtiff\include;$(LLVMInstallDir)\lib\clang\17\include;$(ProjectDir)libs\ffmpeg\include;$(SolutionDir)Watermarking-Util\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;WIN64;NOMINMAX;NDEBUG;_CONSOLE;_CRT_SECURE_NO_WARNINGS;_USE_EIGEN_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
@@ -265,7 +264,7 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='EIGEN_Debug|x64'">
     <ClCompile>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
-      <AdditionalIncludeDirectories>$(ProjectDir)libs\Eigen;$(ProjectDir)libs\CImg;$(ProjectDir)libs\zlib\include;$(ProjectDir)libs\libpng\include;$(ProjectDir)libs\libjpeg\include;$(ProjectDir)libs\libwebp\include;$(ProjectDir)libs\libtiff\include;$(LLVMInstallDir)\lib\clang\17\include;$(ProjectDir)libs\ffmpeg\include;$(SolutionDir)Watermarking-Utils;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)libs\Eigen;$(ProjectDir)libs\CImg;$(ProjectDir)libs\zlib\include;$(ProjectDir)libs\libpng\include;$(ProjectDir)libs\libjpeg\include;$(ProjectDir)libs\libwebp\include;$(ProjectDir)libs\libtiff\include;$(LLVMInstallDir)\lib\clang\17\include;$(ProjectDir)libs\ffmpeg\include;$(SolutionDir)Watermarking-Util\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;WIN64;NOMINMAX;_DEBUG;_CONSOLE;_CRT_SECURE_NO_WARNINGS;_USE_EIGEN_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
@@ -444,6 +443,11 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='EIGEN_Release|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='EIGEN_Debug|x64'">true</ExcludedFromBuild>
     </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Watermarking-Util\Watermarking-Util.vcxproj">
+      <Project>{b335e286-b5ae-48f0-b7fd-bcdb4b8dd6cc}</Project>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" Condition="'$(Configuration)'=='CUDA_Release' Or '$(Configuration)'=='CUDA_ReleaseDist' Or '$(Configuration)'=='CUDA_Debug'">

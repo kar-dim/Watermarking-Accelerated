@@ -185,7 +185,7 @@
     <ClCompile>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
       <OpenMPSupport>true</OpenMPSupport>
-      <AdditionalIncludeDirectories>$(SolutionDir)Watermarking-Impl\include;$(SolutionDir)Watermarking-Utils</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)Watermarking-Impl\include;$(SolutionDir)Watermarking-Util\include</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;WIN64;NOMINMAX;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus </AdditionalOptions>
     </ClCompile>
@@ -218,7 +218,7 @@ xcopy "$(AF_PATH)\lib\nvrtc64_120_0.dll" "$(OutDir)Watermarking-BenchUI" /y /D</
     <ClCompile>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
       <OpenMPSupport>true</OpenMPSupport>
-      <AdditionalIncludeDirectories>$(SolutionDir)Watermarking-Impl\include;$(SolutionDir)Watermarking-Utils</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)Watermarking-Impl\include;$(SolutionDir)Watermarking-Util\include</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;WIN64;NOMINMAX;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus</AdditionalOptions>
     </ClCompile>
@@ -251,7 +251,7 @@ xcopy "$(AF_PATH)\lib\nvrtc64_120_0.dll" "$(OutDir)Watermarking-BenchUI" /y /D</
     <ClCompile>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
       <OpenMPSupport>true</OpenMPSupport>
-      <AdditionalIncludeDirectories>$(SolutionDir)Watermarking-Impl\include;$(SolutionDir)Watermarking-Utils</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)Watermarking-Impl\include;$(SolutionDir)Watermarking-Util\include</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;WIN64;NOMINMAX;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus</AdditionalOptions>
     </ClCompile>
@@ -284,7 +284,7 @@ xcopy "$(AF_PATH)\lib\nvrtc64_120_0.dll" "$(OutDir)Watermarking-BenchUI" /y /D</
     <ClCompile>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
       <AdditionalOptions>-openmp -mavx2 -mfma /Zc:__cplusplus -Wno-unused-command-line-argument</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(SolutionDir)Watermarking-Impl\include;$(SolutionDir)Watermarking-Utils</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)Watermarking-Impl\include;$(SolutionDir)Watermarking-Util\include</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;WIN64;NOMINMAX;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <PostBuildEvent>
@@ -311,7 +311,7 @@ xcopy "$(SolutionDir)Watermarking-Impl\libs\ffmpeg\bin\ffmpeg.exe" "$(OutDir)Wat
     <ClCompile>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
       <AdditionalOptions>-openmp -mavx2 -mfma /clang:-O3 /Zc:__cplusplus -Wno-unused-command-line-argument -flto=thin %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(SolutionDir)Watermarking-Impl\include;$(SolutionDir)Watermarking-Utils</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)Watermarking-Impl\include;$(SolutionDir)Watermarking-Util\include</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;WIN64;NOMINMAX;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <PostBuildEvent>
@@ -338,7 +338,7 @@ xcopy "$(SolutionDir)Watermarking-Impl\libs\ffmpeg\bin\ffmpeg.exe" "$(OutDir)Wat
     <ClCompile>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
       <OpenMPSupport>true</OpenMPSupport>
-      <AdditionalIncludeDirectories>$(SolutionDir)Watermarking-Impl\include;$(SolutionDir)Watermarking-Utils</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)Watermarking-Impl\include;$(SolutionDir)Watermarking-Util\include</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;WIN64;NOMINMAX;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus </AdditionalOptions>
     </ClCompile>
@@ -452,6 +452,9 @@ xcopy "$(AF_PATH)\lib\mkl_rt.2.dll" "$(OutDir)Watermarking-BenchUI" /y /D</Comma
   <ItemGroup>
     <ProjectReference Include="..\Watermarking-Impl\Watermarking-Impl.vcxproj">
       <Project>{c5147f67-deb5-53d1-0721-708c83f1fd9e}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\Watermarking-Util\Watermarking-Util.vcxproj">
+      <Project>{b335e286-b5ae-48f0-b7fd-bcdb4b8dd6cc}</Project>
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>

@@ -112,7 +112,7 @@
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
-      <AdditionalIncludeDirectories>$(SolutionDir)Watermarking-Impl\include;$(ProjectDir)libs\inih;$(SolutionDir)Watermarking-Utils;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)Watermarking-Impl\include;$(SolutionDir)Watermarking-Util\include;$(ProjectDir)libs\inih;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <OpenMPSupport>true</OpenMPSupport>
     </ClCompile>
@@ -146,7 +146,7 @@ xcopy /y /d /i /e "$(SolutionDir)samples\*.*" "$(OutDir)samples"</Command>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
-      <AdditionalIncludeDirectories>$(SolutionDir)Watermarking-Impl\include;$(ProjectDir)libs\inih;$(SolutionDir)Watermarking-Utils;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)Watermarking-Impl\include;$(SolutionDir)Watermarking-Util\include;$(ProjectDir)libs\inih;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>-openmp -mavx2 -mfma /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
@@ -176,7 +176,7 @@ xcopy /y /d /i /e "$(SolutionDir)samples\*.*" "$(OutDir)samples"</Command>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
-      <AdditionalIncludeDirectories>$(SolutionDir)Watermarking-Impl\include;$(ProjectDir)libs\inih;$(SolutionDir)Watermarking-Utils;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)Watermarking-Impl\include;$(SolutionDir)Watermarking-Util\include;$(ProjectDir)libs\inih;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <OpenMPSupport>true</OpenMPSupport>
     </ClCompile>
@@ -204,7 +204,7 @@ xcopy /y /d /i /e "$(SolutionDir)samples\*.*" "$(OutDir)samples"</Command>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
-      <AdditionalIncludeDirectories>$(SolutionDir)Watermarking-Impl\include;$(ProjectDir)libs\inih;$(SolutionDir)Watermarking-Utils;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)Watermarking-Impl\include;$(SolutionDir)Watermarking-Util\include;$(ProjectDir)libs\inih;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>-openmp -mavx2 -mfma /clang:-O3 /Zc:__cplusplus -flto=thin %(AdditionalOptions)</AdditionalOptions>
     </ClCompile>
     <Link>
@@ -236,7 +236,7 @@ xcopy /y /d /i /e "$(SolutionDir)samples\*.*" "$(OutDir)samples"</Command>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
-      <AdditionalIncludeDirectories>$(SolutionDir)Watermarking-Impl\include;$(ProjectDir)libs\inih;$(SolutionDir)Watermarking-Utils;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)Watermarking-Impl\include;$(SolutionDir)Watermarking-Util\include;$(ProjectDir)libs\inih;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <OpenMPSupport>true</OpenMPSupport>
     </ClCompile>
@@ -272,7 +272,7 @@ xcopy /y /d /i /e "$(SolutionDir)samples\*.*" "$(OutDir)samples"</Command>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
-      <AdditionalIncludeDirectories>$(SolutionDir)Watermarking-Impl\include;$(ProjectDir)libs\inih;$(SolutionDir)Watermarking-Utils;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)Watermarking-Impl\include;$(SolutionDir)Watermarking-Util\include;$(ProjectDir)libs\inih;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <OpenMPSupport>true</OpenMPSupport>
     </ClCompile>
@@ -304,6 +304,9 @@ xcopy /y /d /i /e "$(SolutionDir)samples\*.*" "$(OutDir)samples"</Command>
   <ItemGroup>
     <ProjectReference Include="..\Watermarking-Impl\Watermarking-Impl.vcxproj">
       <Project>{c5147f67-deb5-53d1-0721-708c83f1fd9e}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\Watermarking-Util\Watermarking-Util.vcxproj">
+      <Project>{b335e286-b5ae-48f0-b7fd-bcdb4b8dd6cc}</Project>
     </ProjectReference>
   </ItemGroup>
   <ItemGroup>

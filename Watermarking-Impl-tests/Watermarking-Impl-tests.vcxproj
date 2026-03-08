@@ -157,6 +157,9 @@ xcopy "$(AF_PATH)\lib\mkl_tbb_thread.2.dll" "$(OutDir)" /y /D</Command>
     <ProjectReference Include="..\Watermarking-Impl\Watermarking-Impl.vcxproj">
       <Project>{c5147f67-deb5-53d1-0721-708c83f1fd9e}</Project>
     </ProjectReference>
+    <ProjectReference Include="..\Watermarking-Util\Watermarking-Util.vcxproj">
+      <Project>{b335e286-b5ae-48f0-b7fd-bcdb4b8dd6cc}</Project>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" Condition="'$(Configuration)'=='CUDA_Release'">

@@ -1,5 +1,4 @@
 #include "WatermarkCore.hpp"
-#include <cstdint>
 #include <filesystem>
 #include <gtest/gtest.h>
 #include <string>
@@ -18,9 +17,9 @@ class WatermarkTest : public ::testing::Test {
     static constexpr float psnr = 40.0f;
 
     const std::string watermarkPassword = "random_watermark_password";
-    const std::string imageFile = "../../Watermarking-CLI/samples/images/4k.png";
-    const std::string imageNvfPath = "../../Watermarking-CLI/samples/images/4kW_NVF.png";
-    const std::string imageMePath = "../../Watermarking-CLI/samples/images/4kW_ME.png";
+    const std::string imageFile = "samples/images/4k.png";
+    const std::string imageNvfPath = "samples/images/4kW_NVF.png";
+    const std::string imageMePath = "samples/images/4kW_ME.png";
 
     ImageHandle session{nullptr};
 

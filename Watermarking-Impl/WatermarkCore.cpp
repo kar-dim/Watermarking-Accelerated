@@ -216,8 +216,8 @@ std::vector<string> getAvailableDevices() {
     return devices;
 }
 
-bool isGpuBackend() {
-#if defined(_USE_GPU_)
+bool isCudaBackend() {
+#if defined(_USE_CUDA_)
     return true;
 #else
     return false;

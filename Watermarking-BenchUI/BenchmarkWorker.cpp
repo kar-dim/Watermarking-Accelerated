@@ -7,6 +7,7 @@
 #include <exception>
 #include <filesystem>
 #include <future>
+#include <numeric>
 #include <QDir>
 #include <QFile>
 #include <QImage>
@@ -30,8 +31,7 @@ BenchmarkWorker::BenchmarkWorker(int openclDevice, QObject* parent) : QThread(pa
         for (const QString& fileName : resourceDir.entryList(QDir::Files)) {
             QFile resFile(":/samples/" + fileName);
             if (resFile.open(QIODevice::ReadOnly)) {
-                const QString outPath = tempDir.path() + "/" + fileName;
-                QFile outFile(outPath);
+                QFile outFile(tempDir.path() + "/" + fileName);
                 if (outFile.open(QIODevice::WriteOnly))
                     outFile.write(resFile.readAll());
             }
@@ -65,30 +65,61 @@ void BenchmarkWorker::run() {
     // initialize accumulators for the benchmark results and calculate total steps for progress tracking
     const int totalSteps = static_cast<int>(validFiles.size() * pValues.size() * psnrValues.size());
     int currentStep = 0;
-    int totalFrames = 0;
+    int totalEmbedFrames = 0;
+    int totalDetectFrames = 0;
     double totalEmbedTimeMs = 0.0;
     double totalDetectTimeMs = 0.0;
     // initialize with a fixed watermark seed and the first set of parameters (p, psnr)
     auto session = createImageSession("password12345", pValues[0], psnrValues[0]);
     // first image load while we set up the session
     std::future<PreloadedHandle> prefetchTask = std::async(std::launch::async, preloadImageFromDisk, validFiles[0].string());
-    // more warmup iterations for GPU to ensure accurate benchmarking, OpenCL needs less than CUDA
-    const int benchmarkIterations = isGpuBackend() ? (isOpenCLBackend() ? 20 : 100) : 5;
 
-    // helper lambda to measure performance of a given task (embedding or detection)
+    // auto-tuned performance lambda
     auto measurePerformance = [&](auto&& task) {
-        task(); // initialization warmup: run the task once to ensure all memory allocations or arrayfire/openmp init are done
-        auto start = std::chrono::high_resolution_clock::now();
-        float lastResult = 0.0f;
-        // benchmark loop
-        for (int k = 0; k < benchmarkIterations; k++)
+        // constants
+        constexpr int maxIterations = 300;
+        constexpr int minWorkMs = 50; // minimum 50ms of work (for fast devices or small images)
+        constexpr double targetCv = 0.10;
+        constexpr double maxTimeBudgetMs = 250.0;
+
+        int minIterations = 5;
+        // warmup
+        auto t1 = std::chrono::high_resolution_clock::now();
+        float lastResult = task();
+        auto t2 = std::chrono::high_resolution_clock::now();
+        const double firstRunMs = std::chrono::duration<double, std::milli>(t2 - t1).count();
+        // optimization: if the device is very slow, allow only one or two loops in order to finish quicker
+        if (firstRunMs >= maxTimeBudgetMs)
+            minIterations = 1;
+        else if (firstRunMs > (maxTimeBudgetMs / 2.0))
+            minIterations = 2;
+        
+        std::vector<double> samples;
+        samples.reserve(maxIterations);
+        // start auto-tuned bench
+        while (samples.size() < maxIterations) {
+            if (isInterruptionRequested())
+                break;
+            const double totalTime = std::accumulate(samples.begin(), samples.end(), 0.0);
+            if (samples.size() >= minIterations) {
+                if (totalTime > maxTimeBudgetMs)
+                    break;
+                if (totalTime > minWorkMs && calculateCV(samples) < targetCv)
+                    break;
+            }
+            // Run next frame
+            t1 = std::chrono::high_resolution_clock::now();
             lastResult = task();
-        auto end = std::chrono::high_resolution_clock::now();
-        // calculate average time and total time for the current task
-        const double totalMs = std::chrono::duration<double, std::milli>(end - start).count();
-        const double avgMs = totalMs / benchmarkIterations;
-        const double fps = 1000.0 / avgMs;
-        return std::make_tuple(totalMs, avgMs, fps, lastResult);
+            t2 = std::chrono::high_resolution_clock::now();
+            samples.push_back(std::chrono::duration<double, std::milli>(t2 - t1).count());
+        }
+
+        // calculate stats based on the samples we actually ran
+        const int iterations = static_cast<int>(samples.size());
+        const double totalMs = std::accumulate(samples.begin(), samples.end(), 0.0);
+        const double avgMs = (iterations > 0) ? (totalMs / iterations) : 0.0;
+        const double fps = (avgMs > 0.0) ? (1000.0 / avgMs) : 0.0;
+        return std::make_tuple(totalMs, avgMs, fps, lastResult, iterations);
     };
 
     // main loop
@@ -113,22 +144,23 @@ void BenchmarkWorker::run() {
                     // update p and psnr in the session, this will trigger all necessary internal recalculations in the engine (e.g. random noise generation)
                     updateSessionParams(session.get(), p, psnr);
                     // EMBED BENCHMARK
-                    auto [totalEmbedMs, avgEmbedMs, embedFps, dummy] = measurePerformance([&]() {
+                    auto [tEmbed, avgEmbedMs, embedFps, dummy, iterEmbed] = measurePerformance([&]() {
                         embedImage(session.get(), MaskMethod::ME);
                         return 0.0f;
                     });
                     if (QThread::currentThread()->isInterruptionRequested())
                         return;
-                    // DETECT BENCHMARK
                     // necessary uint8 to float for detection
                     prepareDetectionImage(session.get(), MaskMethod::ME);
-                    auto [totalDetectMs, avgDetectMs, detectFps, currentCorrelation] = measurePerformance([&]() { return detectEmbeddedBuffer(session.get(), MaskMethod::ME); });
+                    // DETECT BENCHMARK
+                    auto [tDetect, avgDetectMs, detectFps, currentCorrelation, iterDetect] = measurePerformance([&]() { return detectEmbeddedBuffer(session.get(), MaskMethod::ME); });
                     if (QThread::currentThread()->isInterruptionRequested())
                         return;
                     // accumulate total times and frames for final score calculation at the end of the benchmark
-                    totalEmbedTimeMs += totalEmbedMs;
-                    totalDetectTimeMs += totalDetectMs;
-                    totalFrames += benchmarkIterations;
+                    totalEmbedTimeMs += tEmbed;
+                    totalDetectTimeMs += tDetect;
+                    totalEmbedFrames += iterEmbed;
+                    totalDetectFrames += iterDetect;
                     // GUI: convert the current watermarked image to a QImage format (interleaved RGB, transposed row-wise) for display in the GUI
                     // and emit current FPS and time for this specific frame and step completion to the GUI for display
                     emit resultReady(convertToQtFormat(session.get()), p, psnr, avgEmbedMs, avgDetectMs, embedFps, detectFps, currentFileName, currentCorrelation);
@@ -141,10 +173,9 @@ void BenchmarkWorker::run() {
                 prefetchTask = std::async(std::launch::async, preloadImageFromDisk, validFiles[i + 1].string());
         }
     }
-
     // calculate final score (geomean average FPS of both pipelines)
-    const double finalEmbedFps = (totalEmbedTimeMs == 0.0) ? 0.0 : (totalFrames * 1000.0) / totalEmbedTimeMs;
-    const double finalDetectFps = (totalDetectTimeMs == 0.0) ? 0.0 : (totalFrames * 1000.0) / totalDetectTimeMs;
+    const double finalEmbedFps = (totalEmbedTimeMs == 0.0) ? 0.0 : (totalEmbedFrames * 1000.0) / totalEmbedTimeMs;
+    const double finalDetectFps = (totalDetectTimeMs == 0.0) ? 0.0 : (totalDetectFrames * 1000.0) / totalDetectTimeMs;
     const int finalScore = static_cast<int>(std::round(std::sqrt(finalEmbedFps * finalDetectFps) * 100.0));
     emit benchmarkFinished(finalEmbedFps, finalDetectFps, finalScore);
 }
