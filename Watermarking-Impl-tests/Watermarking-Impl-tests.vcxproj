@@ -142,12 +142,8 @@ xcopy "$(SolutionDir)Watermarking-Impl\libs\libtiff\bin\tiff.dll" "$(SolutionDir
     <PostBuildEvent>
       <Command>xcopy "$(AF_PATH)\lib\afopencl.dll" "$(OutDir)" /y /D
 xcopy "$(AF_PATH)\lib\FreeImage.dll" "$(OutDir)" /y /D
-xcopy "$(AF_PATH)\lib\forge.dll" "$(OutDir)" /y /D
-xcopy "$(AF_PATH)\lib\glfw3.dll" "$(OutDir)" /y /D
-xcopy "$(AF_PATH)\lib\mkl_core.2.dll" "$(OutDir)" /y /D
-xcopy "$(AF_PATH)\lib\mkl_def.2.dll" "$(OutDir)" /y /D
 xcopy "$(AF_PATH)\lib\mkl_rt.2.dll" "$(OutDir)" /y /D
-xcopy "$(AF_PATH)\lib\mkl_tbb_thread.2.dll" "$(OutDir)" /y /D</Command>
+</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
