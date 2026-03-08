@@ -27,7 +27,7 @@ This project implements and evaluates the performance (execution speed) of image
 
 The repository contains all required source code and dependencies needed to reproduce the benchmarks and experiments.
 
-- Comparative performance analysis between CPU and GPU implementations (check `time_comparisons.zip` on the [Releases](https://github.com/kar-dim/Watermarking-Accelerated/releases) section).
+- Comparative performance analysis between CPU and GPU implementations (check [benchmarks](benchmarks/) folder for more information). To ensure fair and reproducible comparisons across hardware (e.g., discrete GPUs vs. low-power iGPUs), an Adaptive Time Budget Benchmarking algorithm was implemented. Unlike traditional fixed loop benchmarks, which can over-penalize slow devices or under-saturate fast ones, our system dynamically adjusts iteration counts based on the coefficient of variation, and a fixed time budget (250ms). This ensures that reported FPS values represent stable, peak throughput rather than driver latency or OS jitter.
 
 Implementations are optimized for maximum performance:
 - CPU implementation: Uses the ```Eigen``` library for linear algebra operations combined with efficient use of ```OpenMP``` multithreading (reductions, parallel loops). The application utilizes all available logical (or physical, specifically on video embedding) CPU cores for maximum performance. The project is configured to use ```clang``` compiler (clang-cl toolset) instead of MSVC, because it optimizes much better the heavily templated Eigen code.
