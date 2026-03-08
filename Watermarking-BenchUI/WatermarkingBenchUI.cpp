@@ -4,6 +4,7 @@
 #include <QComboBox>
 #include <QCoreApplication>
 #include <QMainWindow>
+#include <QMessageBox>
 #include <QPixmap>
 #include <QPushButton>
 #include <QRect>
@@ -118,10 +119,6 @@ void WatermarkingBenchUI::startBenchmark() {
     // signal to update the status label and image view with the latest results
     connect(worker, &BenchmarkWorker::resultReady, this, &WatermarkingBenchUI::onResultReady);
 
-    // signal to handle errors during benchmarking, show the error message in the status label with red color
-    connect(worker, &BenchmarkWorker::errorOccurred, this,
-            [this](const QString& fileName, const QString& errorMessage) { statusLabel->setText(QString("<font color='red'>Skipped %1: %2</font>").arg(fileName).arg(errorMessage)); });
-
     // signal to handle benchmark completion, show the final score and re-enable the start button and device selection
     connect(worker, &BenchmarkWorker::benchmarkFinished, this, [this](const double finalEmbedFps, const double finalDetectFps, const int finalScore) {
         // re-enable the UI elements
@@ -129,15 +126,24 @@ void WatermarkingBenchUI::startBenchmark() {
         progressBar->setVisible(false);
         if (deviceComboBox)
             deviceComboBox->setEnabled(true);
-        // show the final score for both pipelines
-        const QString backendName = QString::fromStdString(WatermarkCore::getDeviceName(deviceComboBox ? deviceComboBox->currentIndex() : -1));
-        const QString finalMessage = QString("<b>BENCHMARK COMPLETE</b><br>Hardware: %1<br>Avg Embed: <b>%2 FPS</b> | Avg Detect: <b>%3 FPS</b><br><br>SCORE: <b>%4</b>")
-                                         .arg(backendName)
-                                         .arg(finalEmbedFps, 0, 'f', 1)
-                                         .arg(finalDetectFps, 0, 'f', 1)
-                                         .arg(finalScore);
-        statusLabel->setText(finalMessage);
-        statusLabel->setProperty("benchmarkState", "success");
+        // failure case
+        if (finalScore == 0) {
+            statusLabel->setText("<b>BENCHMARK FAILED</b><br>");
+            statusLabel->setProperty("benchmarkState", "failure");
+            QMessageBox::critical(this, "Benchmark Failed",
+                                  "The benchmark encountered an error and could not complete.\n\nPossible causes:\n"
+                                  "- No temporary directory user rights\n- (GPU only case): OpenCL/CUDA driver crash\n- Out of memory");
+        } else {
+            // show the final score for both pipelines
+            const QString backendName = QString::fromStdString(WatermarkCore::getDeviceName(deviceComboBox ? deviceComboBox->currentIndex() : -1));
+            const QString finalMessage = QString("<b>BENCHMARK COMPLETE</b><br>Hardware: %1<br>Avg Embed: <b>%2 FPS</b> | Avg Detect: <b>%3 FPS</b><br><br>SCORE: <b>%4</b>")
+                                             .arg(backendName)
+                                             .arg(finalEmbedFps, 0, 'f', 1)
+                                             .arg(finalDetectFps, 0, 'f', 1)
+                                             .arg(finalScore);
+            statusLabel->setText(finalMessage);
+            statusLabel->setProperty("benchmarkState", "success");
+        }
         statusLabel->style()->unpolish(statusLabel);
         statusLabel->style()->polish(statusLabel);
         // hide the image view and shrink

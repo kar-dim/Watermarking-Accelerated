@@ -13,13 +13,12 @@
 class BenchmarkWorker : public QThread {
     Q_OBJECT
   public:
-    explicit BenchmarkWorker(int openclDevice = 0, QObject* parent = nullptr);
+    explicit BenchmarkWorker(const int openclDevice = 0, QObject* parent = nullptr);
 
   signals:
     void resultReady(const QImage& img, const int p, const float psnr, const double embedTime, const double detectTime, const double embedFps, const double detectFps, const QString& fileName,
                      const float correlation);
     void progressUpdated(const int currentStep, const int totalSteps);
-    void errorOccurred(const QString& fileName, const QString& errorMessage);
     void benchmarkFinished(const double finalEmbedFps, const double finalDetectFps, const int finalScore);
 
   protected:

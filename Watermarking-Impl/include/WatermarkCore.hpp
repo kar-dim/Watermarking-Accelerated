@@ -31,7 +31,6 @@ using ExportHandle = std::unique_ptr<ExportedImage, ExportedImageDeleter>;
 // environment and params functions
 bool initializeEnvironment(const int openclDevice = 0);
 void updateSessionParams(ImageSession* session, const int p, const float psnr);
-bool isCudaBackend();
 bool isOpenCLBackend();
 std::string getDeviceName(const int deviceIndex = -1);
 std::vector<std::string> getAvailableDevices();

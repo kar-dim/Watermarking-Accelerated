@@ -476,6 +476,11 @@ QCheckBox::indicator:disabled, QRadioButton::indicator:disabled
     font-size: 18px;
 }
 
+#statusLabel[benchmarkState="failure"] {
+    color: #ff0000;
+    font-size: 18px;
+}
+
 #deviceLabel {
     font-size: 12px; 
     font-weight: bold; 

@@ -4,7 +4,6 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
-#include <exception>
 #include <filesystem>
 #include <future>
 #include <numeric>
@@ -24,7 +23,9 @@ using namespace CommonUtils;
 using namespace WatermarkCore;
 namespace fs = std::filesystem;
 
-BenchmarkWorker::BenchmarkWorker(int openclDevice, QObject* parent) : QThread(parent), deviceIndex(openclDevice) {
+BenchmarkWorker::BenchmarkWorker(const int openclDevice, QObject* parent) : QThread(parent), deviceIndex(openclDevice) {}
+
+void BenchmarkWorker::run() {
     // read the image files (which are embedded in the executable) and write them to temporary folder
     if (tempDir.isValid()) {
         const QDir resourceDir(":/samples");
@@ -39,18 +40,16 @@ BenchmarkWorker::BenchmarkWorker(int openclDevice, QObject* parent) : QThread(pa
         // we can load the images from this temp folder
         inputFolder = tempDir.path();
     } else {
-        emit errorOccurred("System", "Failed to create temporary directory for benchmark samples.");
+        emit benchmarkFinished(0.0, 0.0, 0);
+        return;
     }
-}
 
-void BenchmarkWorker::run() {
     // initialize watermark environment (device index is used for OpenCL only)
     initializeEnvironment(deviceIndex);
 
     // check if the input directory which conntains the benchmark images is valid
     fs::path inputDir(inputFolder.toStdString());
     if (!fs::exists(inputDir) || !fs::is_directory(inputDir)) {
-        emit errorOccurred("System", "Invalid directory path!");
         emit benchmarkFinished(0.0, 0.0, 0);
         return;
     }
@@ -93,7 +92,7 @@ void BenchmarkWorker::run() {
             minIterations = 1;
         else if (firstRunMs > (maxTimeBudgetMs / 2.0))
             minIterations = 2;
-        
+
         std::vector<double> samples;
         samples.reserve(maxIterations);
         // start auto-tuned bench
@@ -167,10 +166,10 @@ void BenchmarkWorker::run() {
                     emit progressUpdated(++currentStep, totalSteps);
                 }
             }
-        } catch (const std::exception& e) {
-            emit errorOccurred(currentFileName, QString::fromStdString(cleanError(e.what())));
-            if (i + 1 < validFiles.size())
-                prefetchTask = std::async(std::launch::async, preloadImageFromDisk, validFiles[i + 1].string());
+        } catch (...) {
+            // if at least one file is not benchmarked, we consider it failure
+            emit benchmarkFinished(0.0, 0.0, 0);
+            return;
         }
     }
     // calculate final score (geomean average FPS of both pipelines)

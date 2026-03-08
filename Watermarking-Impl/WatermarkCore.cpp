@@ -216,14 +216,6 @@ std::vector<string> getAvailableDevices() {
     return devices;
 }
 
-bool isCudaBackend() {
-#if defined(_USE_CUDA_)
-    return true;
-#else
-    return false;
-#endif
-}
-
 bool isOpenCLBackend() {
 #if defined(_USE_OPENCL_)
     return true;
