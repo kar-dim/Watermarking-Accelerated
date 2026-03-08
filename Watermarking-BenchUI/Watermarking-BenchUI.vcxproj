@@ -200,7 +200,8 @@ xcopy "$(AF_PATH)\lib\cusparse64_12.dll" "$(OutDir)Watermarking-BenchUI" /y /D
 xcopy "$(AF_PATH)\lib\cufft64_11.dll" "$(OutDir)Watermarking-BenchUI" /y /D
 xcopy "$(AF_PATH)\lib\cusolver64_11.dll" "$(OutDir)Watermarking-BenchUI" /y /D
 xcopy "$(AF_PATH)\lib\nvJitLink_120_0.dll" "$(OutDir)Watermarking-BenchUI" /y /D
-xcopy "$(AF_PATH)\lib\nvrtc64_120_0.dll" "$(OutDir)Watermarking-BenchUI" /y /D</Command>
+xcopy "$(AF_PATH)\lib\nvrtc64_120_0.dll" "$(OutDir)Watermarking-BenchUI" /y /D
+xcopy "$(AF_PATH)\lib\nvrtc-builtins64_128.dll" "$(OutDir)Watermarking-BenchUI" /y /D</Command>
     </PostBuildEvent>
     <Link>
       <AdditionalLibraryDirectories>$(AF_PATH)\lib;$(SolutionDir)Watermarking-Impl\libs\ffmpeg\lib;$(CUDA_PATH)\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
@@ -233,7 +234,8 @@ xcopy "$(AF_PATH)\lib\cusparse64_12.dll" "$(OutDir)Watermarking-BenchUI" /y /D
 xcopy "$(AF_PATH)\lib\cufft64_11.dll" "$(OutDir)Watermarking-BenchUI" /y /D
 xcopy "$(AF_PATH)\lib\cusolver64_11.dll" "$(OutDir)Watermarking-BenchUI" /y /D
 xcopy "$(AF_PATH)\lib\nvJitLink_120_0.dll" "$(OutDir)Watermarking-BenchUI" /y /D
-xcopy "$(AF_PATH)\lib\nvrtc64_120_0.dll" "$(OutDir)Watermarking-BenchUI" /y /D</Command>
+xcopy "$(AF_PATH)\lib\nvrtc64_120_0.dll" "$(OutDir)Watermarking-BenchUI" /y /D
+xcopy "$(AF_PATH)\lib\nvrtc-builtins64_128.dll" "$(OutDir)Watermarking-BenchUI" /y /D</Command>
     </PostBuildEvent>
     <Link>
       <AdditionalLibraryDirectories>$(AF_PATH)\lib;$(SolutionDir)Watermarking-Impl\libs\ffmpeg\lib;$(CUDA_PATH)\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
@@ -266,7 +268,9 @@ xcopy "$(AF_PATH)\lib\cusparse64_12.dll" "$(OutDir)Watermarking-BenchUI" /y /D
 xcopy "$(AF_PATH)\lib\cufft64_11.dll" "$(OutDir)Watermarking-BenchUI" /y /D
 xcopy "$(AF_PATH)\lib\cusolver64_11.dll" "$(OutDir)Watermarking-BenchUI" /y /D
 xcopy "$(AF_PATH)\lib\nvJitLink_120_0.dll" "$(OutDir)Watermarking-BenchUI" /y /D
-xcopy "$(AF_PATH)\lib\nvrtc64_120_0.dll" "$(OutDir)Watermarking-BenchUI" /y /D</Command>
+xcopy "$(AF_PATH)\lib\nvrtc64_120_0.dll" "$(OutDir)Watermarking-BenchUI" /y /D
+xcopy "$(AF_PATH)\lib\nvrtc-builtins64_128.dll" "$(OutDir)Watermarking-BenchUI" /y /D
+</Command>
     </PostBuildEvent>
     <Link>
       <AdditionalLibraryDirectories>$(AF_PATH)\lib;$(SolutionDir)Watermarking-Impl\libs\ffmpeg\lib;$(CUDA_PATH)\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>

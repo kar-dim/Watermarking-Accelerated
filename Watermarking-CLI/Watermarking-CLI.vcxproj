@@ -135,6 +135,7 @@ xcopy "$(AF_PATH)\lib\cufft64_11.dll" "$(OutDir)" /y /D
 xcopy "$(AF_PATH)\lib\cusolver64_11.dll" "$(OutDir)" /y /D
 xcopy "$(AF_PATH)\lib\nvJitLink_120_0.dll" "$(OutDir)" /y /D
 xcopy "$(AF_PATH)\lib\nvrtc64_120_0.dll" "$(OutDir)" /y /D
+xcopy "$(AF_PATH)\lib\nvrtc-builtins64_128.dll" "$(OutDir)" /y /D
 xcopy /y /d /i /e "$(SolutionDir)samples\*.*" "$(OutDir)samples"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
@@ -259,6 +260,7 @@ xcopy "$(AF_PATH)\lib\cufft64_11.dll" "$(OutDir)" /y /D
 xcopy "$(AF_PATH)\lib\cusolver64_11.dll" "$(OutDir)" /y /D
 xcopy "$(AF_PATH)\lib\nvJitLink_120_0.dll" "$(OutDir)" /y /D
 xcopy "$(AF_PATH)\lib\nvrtc64_120_0.dll" "$(OutDir)" /y /D
+xcopy "$(AF_PATH)\lib\nvrtc-builtins64_128.dll" "$(OutDir)" /y /D
 xcopy /y /d /i /e "$(SolutionDir)samples\*.*" "$(OutDir)samples"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
@@ -295,6 +297,7 @@ xcopy "$(AF_PATH)\lib\cufft64_11.dll" "$(OutDir)" /y /D
 xcopy "$(AF_PATH)\lib\cusolver64_11.dll" "$(OutDir)" /y /D
 xcopy "$(AF_PATH)\lib\nvJitLink_120_0.dll" "$(OutDir)" /y /D
 xcopy "$(AF_PATH)\lib\nvrtc64_120_0.dll" "$(OutDir)" /y /D
+xcopy "$(AF_PATH)\lib\nvrtc-builtins64_128.dll" "$(OutDir)" /y /D
 xcopy /y /d /i /e "$(SolutionDir)samples\*.*" "$(OutDir)samples"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
