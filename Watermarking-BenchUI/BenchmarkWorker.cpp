@@ -6,7 +6,6 @@
 #include <cstdint>
 #include <filesystem>
 #include <future>
-#include <numeric>
 #include <QDir>
 #include <QFile>
 #include <QImage>
@@ -99,10 +98,10 @@ void BenchmarkWorker::run() {
             minIterations = 2;
 
         // start auto-tuned bench
+        double totalTime = 0.0;
         while (samples.size() < maxIterations) {
             if (isInterruptionRequested())
                 break;
-            const double totalTime = std::accumulate(samples.begin(), samples.end(), 0.0);
             if (samples.size() >= minIterations) {
                 if (totalTime > maxTimeBudgetMs)
                     break;
@@ -113,15 +112,17 @@ void BenchmarkWorker::run() {
             t1 = std::chrono::high_resolution_clock::now();
             task();
             t2 = std::chrono::high_resolution_clock::now();
-            samples.push_back(std::chrono::duration<double, std::milli>(t2 - t1).count());
+            // accumulate total time
+            const double duration = std::chrono::duration<double, std::milli>(t2 - t1).count();
+            totalTime += duration;
+            samples.push_back(duration);
         }
 
         // calculate stats based on the samples we actually ran
         const int iterations = static_cast<int>(samples.size());
-        const double totalMs = std::accumulate(samples.begin(), samples.end(), 0.0);
-        const double avgMs = (iterations > 0) ? (totalMs / iterations) : 0.0;
+        const double avgMs = (iterations > 0) ? (totalTime / iterations) : 0.0;
         const double fps = (avgMs > 0.0) ? (1000.0 / avgMs) : 0.0;
-        return std::make_tuple(totalMs, avgMs, fps, result, iterations);
+        return std::make_tuple(totalTime, avgMs, fps, result, iterations);
     };
 
     // main loop
