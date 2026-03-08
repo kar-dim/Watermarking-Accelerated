@@ -145,6 +145,7 @@ void WatermarkingBenchUI::startBenchmark() {
         this->adjustSize();
         centerWindowOnScreen();
         worker->deleteLater();
+        worker = nullptr; // we must nullify because we check it later
     });
 
     worker->start();
