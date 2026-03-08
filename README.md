@@ -134,6 +134,7 @@ This project is built using **Visual Studio** and consists of a **solution with 
 - Watermarking-Impl: The Core of this project, implements the algorithms for each backend. It also implements a fast, efficient, secure and deterministic watermark generation with OpenMP (CPU-only based). It is built as a **static library**.
 - Watermarking-CLI: The sample command line application that interacts with the Core project to embed and detect watermark in images and video.
 - Watermarking-BenchUI: The benchmarking project. It interacts with the Core project and benchmarks the performance of image watermarking. It uses Qt for UI.
+- Watermarking-Util: Common utility methods without dependencies, that may be used by any project. It is built as a **static library**.
 - Watermarking-Tests: Basic tests for the Core project.
 
 ### Solution Configurations
