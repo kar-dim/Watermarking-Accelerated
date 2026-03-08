@@ -225,9 +225,9 @@ Tests were executed with a loop count of 1000 iterations to ensure statistical s
 
 p = 3            |  p = 5
 :-------------------------:|:-------------------------:
- <img width="1024" height="768" alt="1" src="https://github.com/user-attachments/assets/6fe0a6bf-2f94-477e-82c4-d676db9b6f3b" /> |  <img width="1024" height="768" alt="2" src="https://github.com/user-attachments/assets/71a87665-01fa-422b-8aae-55700bfb4bdf" />
+![Benchmark 1](benchmarks/1.png) | ![Benchmark 2](benchmarks/2.png)
 p = 7            |  p = 9
- <img width="1024" height="768" alt="3" src="https://github.com/user-attachments/assets/4e73fb16-2e0a-4139-b4c0-891277b37d92" /> | <img width="1024" height="768" alt="4" src="https://github.com/user-attachments/assets/7012cf1f-102a-41de-9da7-2d2be98bd640" />
+![Benchmark 3](benchmarks/3.png) | ![Benchmark 4](benchmarks/4.png)
 
 # Benchmark UI
 
