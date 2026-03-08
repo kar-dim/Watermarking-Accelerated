@@ -233,6 +233,6 @@ p = 7            |  p = 9
 
  Benchmark screen | Result screen
 :-------------------------:|:-------------------------:
-![Watermarking-BenchUI_QTaFwyJDQY](https://github.com/user-attachments/assets/96776c9b-19d9-4cc4-970c-6ef1b87f35df) | ![Watermarking-BenchUI_bt0keQi3lB](https://github.com/user-attachments/assets/eb05446e-b958-4046-b4cc-50208b4166c3)
-![Watermarking-BenchUI_8FfBLuXMk7](https://github.com/user-attachments/assets/53adbc25-1f93-43be-810f-7e17069f1937) | ![Watermarking-BenchUI_Gchi8x5LKt](https://github.com/user-attachments/assets/3e5ebf79-ef32-4833-930a-74dc30a2097b)
+![Watermarking-BenchUI_QTaFwyJDQY](https://github.com/user-attachments/assets/96776c9b-19d9-4cc4-970c-6ef1b87f35df) | ![Watermarking-BenchUI_bb3Beo4yBk](https://github.com/user-attachments/assets/dc35aabd-d312-4f8d-a3fb-f79d02fd0bae)
+![Watermarking-BenchUI_8FfBLuXMk7](https://github.com/user-attachments/assets/53adbc25-1f93-43be-810f-7e17069f1937) | ![Watermarking-BenchUI_Gchi8x5LKt](https://github.com/user-attachments/assets/50130346-02ef-4bef-8dd9-5ce5c44ae9c5)
  
