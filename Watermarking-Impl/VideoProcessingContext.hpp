@@ -7,6 +7,7 @@
 #include "WatermarkBase.hpp"
 #include <cstdint>
 #include <memory>
+#include <utility>
 
 extern "C" {
 #include "libavformat/avformat.h"
@@ -37,9 +38,8 @@ struct VideoSession {
     ImageBuffer inputFrame;
     ImageOutputBuffer watermarkedFrame;
     Gray8Buffer grayFrame;
-    // convenient getters for video properties
-    inline int width() const { return videoStream->codecpar->width; }
-    inline int height() const { return videoStream->codecpar->height; }
+    // convenient getter for video properties
+    inline std::pair<int, int> videoDims() const { return {videoStream->codecpar->height, videoStream->codecpar->width}; }
 };
 
 } // namespace WatermarkCore

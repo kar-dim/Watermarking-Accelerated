@@ -90,8 +90,7 @@ AVCodecContextPtr openDecoderHWAccel(const AVCodecParameters* inputCodecParams, 
 void embedWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe) {
     const auto afStream = CudaStreamManager::getInstance().getAfStream();
     const auto videoStream = CudaStreamManager::getInstance().getCustomStream();
-    const int width = s->width();
-    const int height = s->height();
+    const auto [height, width] = s->videoDims();
     const ImageBuffer lumaBuffer(height, width, f32);
     const ImageBuffer chromaBuffer(width, height / 2, u8);
     // launch NV12 to YUV420 kernel (for UV planes)
@@ -125,9 +124,10 @@ void detectWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* fr
         return;
     }
     // detect watermark after watermarkInterval frames
+    const auto [height, width] = s->videoDims();
     const auto afStream = CudaStreamManager::getInstance().getAfStream();
-    const ImageBuffer lumaBuffer(s->height(), s->width(), f32);
-    cuda_utils::launchPitchedToFloatKernel(frame->data[0], lumaBuffer.device<float>(), s->width(), s->height(), frame->linesize[0], afStream);
+    const ImageBuffer lumaBuffer(height, width, f32);
+    cuda_utils::launchPitchedToFloatKernel(frame->data[0], lumaBuffer.device<float>(), width, height, frame->linesize[0], afStream);
     lumaBuffer.unlock();
     float correlation = s->watermarkObj->detectWatermark(lumaBuffer, MaskMethod::ME);
     cout << "Correlation for frame: " << (framesCount + 1) << ": " << correlation << "\n";
@@ -173,8 +173,7 @@ void filterFrame(AVFramePtr& frame, AVFramePtr& filteredFrame, const VideoSessio
 
 // load an uint8_t buffer into a GPU or Eigen buffer
 void loadInputFrame(VideoSession* s, const uint8_t* hostPtr) {
-    const int width = s->videoStream->codecpar->width;
-    const int height = s->videoStream->codecpar->height;
+    const auto [height, width] = s->videoDims();
 #if defined(_USE_GPU_)
     s->inputFrame = Gray8Buffer(width, height, hostPtr, afHost).T().as(f32);
 #else
@@ -328,8 +327,7 @@ void detectWatermark(VideoSession* s, int& framesCount, const AVFrame* frame) {
         framesCount++;
         return;
     }
-    const int width = s->width();
-    const int height = s->height();
+    const auto [height, width] = s->videoDims();
     // detect watermark after watermarkInterval frames, else early return
     uint8_t* srcY = frame->data[0];
     // if there is row padding (for alignment), we must copy the data to a contiguous block!
@@ -432,8 +430,7 @@ AVRational getTimeBase(const AVStream* st) {
 
 // runs the watermark creation for a video frame and writes the watermarked frame to the ffmpeg pipe
 void processAndWriteYPlane(const bool embedWatermark, const AVFrame* frame, VideoSession* s, FILE* ffmpegPipe) {
-    const int width = s->width();
-    const int height = s->height();
+    const auto [height, width] = s->videoDims();
     uint8_t* srcY = frame->data[0];
     // if there is row padding (for alignment), we must copy the data to a contiguous block!
     if (frame->linesize[0] != width) {
@@ -450,8 +447,7 @@ void processAndWriteYPlane(const bool embedWatermark, const AVFrame* frame, Vide
 
 // writes the chroma planes (U and V) to the ffmpeg pipe, either assuming aligned pointers or not
 void writeChromaPlanes(const AVFrame* frame, VideoSession* s, FILE* ffmpegPipe) {
-    const int width = s->width();
-    const int height = s->height();
+    const auto [height, width] = s->videoDims();
     // lambda to write a single chroma plane
     auto writePlane = [&](const uint8_t* src, const int linesize) {
         if (linesize != width / 2) {
@@ -460,7 +456,6 @@ void writeChromaPlanes(const AVFrame* frame, VideoSession* s, FILE* ffmpegPipe) 
         } else
             fwrite(src, 1, width * height / 4, ffmpegPipe);
     };
-
     // write U
     writePlane(frame->data[1], frame->linesize[1]);
     // write V
