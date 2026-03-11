@@ -179,7 +179,7 @@ void BenchmarkWorker::run() {
     // calculate final score (geomean average FPS of both pipelines)
     const double finalEmbedFps = (totalEmbedTimeMs == 0.0) ? 0.0 : (totalEmbedFrames * 1000.0) / totalEmbedTimeMs;
     const double finalDetectFps = (totalDetectTimeMs == 0.0) ? 0.0 : (totalDetectFrames * 1000.0) / totalDetectTimeMs;
-    const int finalScore = static_cast<int>(std::round(std::sqrt(finalEmbedFps * finalDetectFps) * 100.0));
+    const int finalScore = static_cast<int>(std::round(std::sqrt(finalEmbedFps * finalDetectFps) * 10.0));
     emit benchmarkFinished(finalEmbedFps, finalDetectFps, finalScore);
 }
 

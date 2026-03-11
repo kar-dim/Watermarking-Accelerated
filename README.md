@@ -55,7 +55,7 @@ The Benchmark application:
   - Embeds the proposed Prediction-Error mask watermark for a predefined set of images and shows the watermarkedf result on the fly in a window.
   - It uses various values of p (window size) and PSNR to test a broad set of combinations.
   - Does not need to parameterized, it is a standalone application used for image benchmarking only. Does not write to disk (only temporary files) nor is used for video.
-  - Calculates a **Total Score** using the geometric mean of the two pipelines, scaled by a constant ($C=100$) for readability:
+  - Calculates a **Total Score** using the geometric mean of the two pipelines, scaled by a constant ($C=10$) for readability:
 
 $$\text{Score} = C \cdot \sqrt{\text{FPS}_{\text{embed}} \cdot \text{FPS}_{\text{detect}}}$$
 
