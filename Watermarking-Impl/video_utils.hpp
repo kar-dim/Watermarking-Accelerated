@@ -5,6 +5,7 @@
 #include "video_defines.hpp"
 #include "VideoProcessingContext.hpp"
 #include <cerrno>
+#include <cstdint>
 #include <cstdio>
 #include <span>
 #include <stdexcept>
@@ -58,6 +59,7 @@ void processAndWriteYPlane(const bool embedWatermark, const AVFrame* frame, Wate
 void writeChromaPlanes(const AVFrame* frame, WatermarkCore::VideoSession* s, FILE* ffmpegPipe);
 int videoDispatcher(WatermarkCore::VideoSession* s, VideoMode op, const bool needsFiltert = false, FILE* ffmpegPipe = nullptr);
 void filterFrame(AVFramePtr& frame, AVFramePtr& filteredFrame, const WatermarkCore::VideoSession* s);
+void loadInputFrame(WatermarkCore::VideoSession* s, const uint8_t* hostPtr);
 
 // main frames loop logic for video watermark embedding and detection
 template <bool needsFilter, typename Func>
@@ -100,16 +102,5 @@ int processFrames(const WatermarkCore::VideoSession* s, Func&& processFrame) {
         std::forward<Func>(processFrame)(frame.get(), framesCount);
     }
     return framesCount;
-}
-
-template <typename TYPE, typename T>
-void loadInputFrame(WatermarkCore::VideoSession* s, T* hostPtr) {
-    const int width = s->videoStream->codecpar->width;
-    const int height = s->videoStream->codecpar->height;
-#if defined(_USE_GPU_)
-    s->inputFrame = TYPE(width, height, hostPtr, afHost).T().as(f32);
-#else
-    s->inputFrame = Eigen::Map<TYPE>(hostPtr, width, height).transpose().template cast<float>();
-#endif
 }
 } // namespace video_utils

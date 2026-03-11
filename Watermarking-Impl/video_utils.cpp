@@ -171,6 +171,17 @@ void filterFrame(AVFramePtr& frame, AVFramePtr& filteredFrame, const VideoSessio
     av_frame_move_ref(frame.get(), filteredFrame.get());
 }
 
+// load an uint8_t buffer into a GPU or Eigen buffer
+void loadInputFrame(VideoSession* s, const uint8_t* hostPtr) {
+    const int width = s->videoStream->codecpar->width;
+    const int height = s->videoStream->codecpar->height;
+#if defined(_USE_GPU_)
+    s->inputFrame = Gray8Buffer(width, height, hostPtr, afHost).T().as(f32);
+#else
+    s->inputFrame = Map<const Gray8Buffer>(hostPtr, width, height).transpose().template cast<float>();
+#endif
+}
+
 // initialize the filter graph for 10-bit to 8-bit conversion and HDR to SDR tonemapping
 bool initFilterGraph(VideoSession* s) {
     const string exceptionMessage = "Failed to initialize filter graph in: ";
@@ -327,7 +338,7 @@ void detectWatermark(VideoSession* s, int& framesCount, const AVFrame* frame) {
             memcpy(s->hostFrame.get()->get() + y * width, frame->data[0] + y * frame->linesize[0], width);
         srcY = s->hostFrame.get()->get();
     }
-    loadInputFrame<Gray8Buffer>(s, srcY);
+    loadInputFrame(s, srcY);
     float correlation = s->watermarkObj->detectWatermark(s->inputFrame, MaskMethod::ME);
     cout << "Correlation for frame: " << (framesCount + 1) << ": " << correlation << "\n";
     framesCount++;
@@ -431,7 +442,7 @@ void processAndWriteYPlane(const bool embedWatermark, const AVFrame* frame, Vide
         srcY = s->hostFrame.get()->get();
     }
     if (embedWatermark) {
-        loadInputFrame<Gray8Buffer>(s, srcY);
+        loadInputFrame(s, srcY);
         embedAndWriteFrame(s, s->inputFrame, width * height, ffmpegPipe);
     } else
         fwrite(srcY, 1, width * height, ffmpegPipe);
