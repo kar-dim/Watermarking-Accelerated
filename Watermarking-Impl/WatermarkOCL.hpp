@@ -19,7 +19,7 @@ class WatermarkOCL final : public WatermarkGPU<p> {
   public:
     WatermarkOCL<p>(const unsigned int rows, const unsigned int cols, const std::string& watermarkPassword, const float psnr)
         : WatermarkGPU<p>(rows, cols, watermarkPassword, psnr), texKernelDims{alignUp<windowLocalSize.first>(rows), alignUp<windowLocalSize.second>(cols)},
-          meKernelDims{rows, alignUp<optimalLocalSize>(cols)}, programs(cl_utils::buildKernels(p)) {}
+          meKernelDims{rows, alignUp<optimalLocalSize>(cols)}, programs(cl_utils::OpenCLKernelCache<p>::getProgram()) {}
 
   private:
     using WatermarkBase::alignUp;
