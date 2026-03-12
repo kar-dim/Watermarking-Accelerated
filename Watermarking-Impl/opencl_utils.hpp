@@ -31,7 +31,7 @@ class KernelBuilder {
 // helper method to build opencl kernels from source
 cl::Program buildKernels(const int p);
 
-// cache for reusing opencl kernels (static thread local program for each p)
+// cache for reusing opencl kernels (static/global opencl program for each p)
 template <int p>
 struct OpenCLKernelCache {
     static cl::Program getProgram() {
