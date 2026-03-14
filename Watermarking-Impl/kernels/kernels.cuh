@@ -333,6 +333,7 @@ __device__ __forceinline__ int getMappedVarIndex(const int k) {
 // naive 1-thread Cholesky solver used for its very low latency versus cuSOLVER but useful only for very small systems, p = 3 (N = 8) or p = 5 (N = 24)
 template <int p>
 __global__ void cholesky_solver(const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ X, int* __restrict__ stopFlag) {
+    static_assert(p <= 5, "Simple 1-thread cholesky solver kernel should NEVER be instantiated for p > 5");
     constexpr int N = (p * p) - 1;
 
     auto IDX = [](const int r, const int c) { return (r * (r + 1)) / 2 + c; };
@@ -450,6 +451,7 @@ exit:
 // parallel cholesky solver for p = 7 (N = 48) and p = 9 (N = 80), using one warp (32 threads)
 template <int p>
 __global__ void cholesky_solver_parallel(const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ X, int* __restrict__ stopFlag) {
+    static_assert(p > 5, "Parallel cholesky solver kernel should NEVER be instantiated for p <= 5");
     constexpr int N = (p * p) - 1;
     constexpr int packedSize = (N * (N + 1)) / 2;
     constexpr int vecPackedLimit = packedSize / 4;
