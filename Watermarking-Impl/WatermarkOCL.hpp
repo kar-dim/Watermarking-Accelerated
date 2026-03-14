@@ -1,4 +1,5 @@
 ﻿#pragma once
+#include "AfclBuffer.hpp"
 #include "include/WatermarkTypes.hpp"
 #include "opencl_init.h"
 #include "opencl_utils.hpp"
@@ -39,219 +40,163 @@ class WatermarkOCL final : public WatermarkGPU<p> {
 
     af::array computeStrengthenedWatermark(const af::array& inputGrayImage, const af::array& inputImage, const MaskMethod maskType) const override {
         using namespace cl_utils;
-        const af::array u(inputGrayImage.dims(), f32);
-        const af::array output(inputImage.dims(), u8);
-        const af::array sumSq = af::constant(0.0f, 1, f32);
-
-        const clMemPtr uMem(u.device<cl_mem>());
-        const clMemPtr outputMem(output.device<cl_mem>());
-        const clMemPtr sumSqMem(sumSq.device<cl_mem>());
-        const clMemPtr randMem(this->randomMatrix.template device<cl_mem>());
-        const clMemPtr inputMem(inputImage.device<cl_mem>());
-        const clMemPtr inputGrayMem(inputGrayImage.device<cl_mem>());
-
+        const AfclBuffer inputGrayBuf(inputGrayImage);
+        const AfclBuffer inputBuf(inputImage);
+        const AfclBuffer randBuf(this->randomMatrix);
+        const AfclBuffer uBuf(inputGrayImage.dims(), f32);
+        const AfclBuffer sumSqBuf(1, f32);
+        AfclBuffer outputBuf(inputImage.dims(), u8);
         if (maskType == MaskMethod::NVF) {
             const int workGroups = static_cast<int>((this->texKernelDims.first / windowLocalSize.first) * (this->texKernelDims.second / windowLocalSize.second));
-            const af::array partials(workGroups, f32);
-            const clMemPtr partialsMem(partials.device<cl_mem>());
-
+            const AfclBuffer partialsBuf(workGroups, f32);
             executeKernel(
                 [&]() {
                     // fused kernel to compute NVF mask, strengthened watermark (u) and sum of squares of u
-                    queue.enqueueNDRangeKernel(KernelBuilder(programs, "nvf_u_and_partial_sumsq_fused")
-                                                   .args(wrap(inputGrayMem.get()), wrap(randMem.get()), wrap(uMem.get()), wrap(partialsMem.get()), this->baseCols, this->baseRows)
-                                                   .build(),
-                                               cl::NDRange(), cl::NDRange(texKernelDims.first, texKernelDims.second), cl::NDRange(windowLocalSize.first, windowLocalSize.second));
-
+                    queue.enqueueNDRangeKernel(
+                        KernelBuilder(programs, "nvf_u_and_partial_sumsq_fused").args(inputGrayBuf.get(), randBuf.get(), uBuf.get(), partialsBuf.get(), this->baseCols, this->baseRows).build(),
+                        cl::NDRange(), cl::NDRange(texKernelDims.first, texKernelDims.second), cl::NDRange(windowLocalSize.first, windowLocalSize.second));
                     // reduce the partial sums (single workgroup)
-                    queue.enqueueNDRangeKernel(KernelBuilder(programs, "reduce_sumsq_partials").args(wrap(partialsMem.get()), wrap(sumSqMem.get()), workGroups).build(), cl::NDRange(),
+                    queue.enqueueNDRangeKernel(KernelBuilder(programs, "reduce_sumsq_partials").args(partialsBuf.get(), sumSqBuf.get(), workGroups).build(), cl::NDRange(),
                                                cl::NDRange(optimalLocalSize), cl::NDRange(optimalLocalSize));
-
                     // apply watermark
                     const int workGroupsApply = calculateLocalGroupsNumber(this->totalPixels, optimalLocalSize);
                     const int globalSizeApply = workGroupsApply * optimalLocalSize;
-
-                    queue.enqueueNDRangeKernel(
-                        KernelBuilder(programs, "apply_watermark_fused")
-                            .args(wrap(inputMem.get()), wrap(uMem.get()), wrap(sumSqMem.get()), wrap(outputMem.get()), this->strengthNumerator, this->totalPixels, static_cast<int>(inputImage.dims(2)))
-                            .build(),
-                        cl::NDRange(), cl::NDRange(globalSizeApply), cl::NDRange(optimalLocalSize));
-
-                    this->unlockArrays(inputGrayImage, partials);
+                    queue.enqueueNDRangeKernel(KernelBuilder(programs, "apply_watermark_fused")
+                                                   .args(inputBuf.get(), uBuf.get(), sumSqBuf.get(), outputBuf.get(), this->strengthNumerator, this->totalPixels, static_cast<int>(inputImage.dims(2)))
+                                                   .build(),
+                                               cl::NDRange(), cl::NDRange(globalSizeApply), cl::NDRange(optimalLocalSize));
                 },
                 "NVF_computeStrengthenedWatermark");
-
         } else {
             // compute prediction error
-            const af::array errorSeq = computePredictionErrorData(inputGrayImage, true);
-
-            // allocate buffers
+            const AfclBuffer errorSeqBuf(computePredictionErrorData(inputGrayImage, true));
             const int maxWorkGroups = calculateLocalGroupsNumber(this->totalPixels, optimalLocalSize);
             const int maxGlobalSize = maxWorkGroups * optimalLocalSize;
-            const af::array errorSeqMax(1, f32);
-            const af::array maxPartials(maxWorkGroups, f32);
-            const af::array partials(maxWorkGroups, f32);
-            const clMemPtr errorSeqMem(errorSeq.device<cl_mem>());
-            const clMemPtr errorSeqMaxMem(errorSeqMax.device<cl_mem>());
-            const clMemPtr maxPartialsMem(maxPartials.device<cl_mem>());
-            const clMemPtr partialsMem(partials.device<cl_mem>());
-
+            const AfclBuffer errorSeqMaxBuf(1, f32);
+            const AfclBuffer maxPartialsBuf(maxWorkGroups, f32);
+            const AfclBuffer partialsBuf(maxWorkGroups, f32);
             executeKernel(
                 [&]() {
                     // compute max error sequence partials
-                    queue.enqueueNDRangeKernel(KernelBuilder(programs, "partial_max_reduce").args(wrap(errorSeqMem.get()), wrap(maxPartialsMem.get()), this->totalPixels).build(), cl::NDRange(),
+                    queue.enqueueNDRangeKernel(KernelBuilder(programs, "partial_max_reduce").args(errorSeqBuf.get(), maxPartialsBuf.get(), this->totalPixels).build(), cl::NDRange(),
                                                cl::NDRange(maxGlobalSize), cl::NDRange(optimalLocalSize));
-
                     // compute final error sequence max
-                    queue.enqueueNDRangeKernel(KernelBuilder(programs, "final_max_reduce").args(wrap(maxPartialsMem.get()), wrap(errorSeqMaxMem.get()), maxWorkGroups).build(), cl::NDRange(),
+                    queue.enqueueNDRangeKernel(KernelBuilder(programs, "final_max_reduce").args(maxPartialsBuf.get(), errorSeqMaxBuf.get(), maxWorkGroups).build(), cl::NDRange(),
                                                cl::NDRange(optimalLocalSize), cl::NDRange(optimalLocalSize));
-
                     // fused kernel to compute ME mask, strengthened watermark (u) and sum of squares of u
-                    queue.enqueueNDRangeKernel(KernelBuilder(programs, "me_u_and_partial_sumsq_fused")
-                                                   .args(wrap(errorSeqMem.get()), wrap(randMem.get()), wrap(uMem.get()), wrap(partialsMem.get()), wrap(errorSeqMaxMem.get()), this->totalPixels)
+                    queue.enqueueNDRangeKernel(
+                        KernelBuilder(programs, "me_u_and_partial_sumsq_fused").args(errorSeqBuf.get(), randBuf.get(), uBuf.get(), partialsBuf.get(), errorSeqMaxBuf.get(), this->totalPixels).build(),
+                        cl::NDRange(), cl::NDRange(maxGlobalSize), cl::NDRange(optimalLocalSize));
+                    // reduce sumsq partials
+                    queue.enqueueNDRangeKernel(KernelBuilder(programs, "reduce_sumsq_partials").args(partialsBuf.get(), sumSqBuf.get(), maxWorkGroups).build(), cl::NDRange(),
+                                               cl::NDRange(optimalLocalSize), cl::NDRange(optimalLocalSize));
+                    // apply watermark
+                    queue.enqueueNDRangeKernel(KernelBuilder(programs, "apply_watermark_fused")
+                                                   .args(inputBuf.get(), uBuf.get(), sumSqBuf.get(), outputBuf.get(), this->strengthNumerator, this->totalPixels, static_cast<int>(inputImage.dims(2)))
                                                    .build(),
                                                cl::NDRange(), cl::NDRange(maxGlobalSize), cl::NDRange(optimalLocalSize));
-
-                    // reduce sumsq partials
-                    queue.enqueueNDRangeKernel(KernelBuilder(programs, "reduce_sumsq_partials").args(wrap(partialsMem.get()), wrap(sumSqMem.get()), maxWorkGroups).build(), cl::NDRange(),
-                                               cl::NDRange(optimalLocalSize), cl::NDRange(optimalLocalSize));
-
-                    // apply watermark
-                    queue.enqueueNDRangeKernel(
-                        KernelBuilder(programs, "apply_watermark_fused")
-                            .args(wrap(inputMem.get()), wrap(uMem.get()), wrap(sumSqMem.get()), wrap(outputMem.get()), this->strengthNumerator, this->totalPixels, static_cast<int>(inputImage.dims(2)))
-                            .build(),
-                        cl::NDRange(), cl::NDRange(maxGlobalSize), cl::NDRange(optimalLocalSize));
-
-                    this->unlockArrays(errorSeq, errorSeqMax, maxPartials, partials);
                 },
                 "ME_computeStrengthenedWatermark");
         }
-
-        this->unlockArrays(inputImage, u, sumSq, output, this->randomMatrix);
-        return output;
+        outputBuf.unlock();
+        return outputBuf.getArray();
     }
 
     af::array computeCustomMask(const af::array& image) const override {
         using namespace cl_utils;
-        const af::array customMask(this->baseRows, this->baseCols);
-        const clMemPtr imageMem(image.device<cl_mem>());
-        const clMemPtr outputMem(customMask.device<cl_mem>());
+        const AfclBuffer imageBuf(image);
+        AfclBuffer customMaskBuf(this->baseRows, this->baseCols, f32);
         // transposed global dimensions because of column-major order in arrayfire
         executeKernel(
             [&]() {
-                queue.enqueueNDRangeKernel(KernelBuilder(programs, "nvf").args(wrap(imageMem.get()), wrap(outputMem.get()), this->baseCols, this->baseRows).build(), cl::NDRange(),
+                queue.enqueueNDRangeKernel(KernelBuilder(programs, "nvf").args(imageBuf.get(), customMaskBuf.get(), this->baseCols, this->baseRows).build(), cl::NDRange(),
                                            cl::NDRange(texKernelDims.first, texKernelDims.second), cl::NDRange(windowLocalSize.first, windowLocalSize.second));
-                this->unlockArrays(image, customMask);
             },
             "nvf");
-        return customMask;
+        customMaskBuf.unlock();
+        return customMaskBuf.getArray();
     }
 
     af::array computeErrorSequence(const af::array& image, const bool calculateAbs) const override {
         using namespace cl_utils;
-        const af::array errorSequence(this->baseRows, this->baseCols);
-        const clMemPtr imageMem(image.device<cl_mem>());
-        const clMemPtr coeffsMem(this->coefficients.template device<cl_mem>());
-        const clMemPtr errorSequenceMem(errorSequence.device<cl_mem>());
-        const clMemPtr stopFlagMem(this->stopFlag.template device<cl_mem>());
+        const AfclBuffer imageBuf(image);
+        const AfclBuffer coeffsBuf(this->coefficients);
+        const AfclBuffer stopFlagBuf(this->stopFlag);
+        AfclBuffer errorSequenceBuf(this->baseRows, this->baseCols, f32);
         // transposed global dimensions because of column-major order in arrayfire
         executeKernel(
             [&]() {
-                queue.enqueueNDRangeKernel(
-                    KernelBuilder(programs, "error_sequence")
-                        .args(wrap(imageMem.get()), wrap(errorSequenceMem.get()), wrap(coeffsMem.get()), this->baseCols, this->baseRows, (int)calculateAbs, wrap(stopFlagMem.get()))
-                        .build(),
-                    cl::NDRange(), cl::NDRange(texKernelDims.first, texKernelDims.second), cl::NDRange(windowLocalSize.first, windowLocalSize.second));
-                this->unlockArrays(image, errorSequence, this->coefficients, this->stopFlag);
+                queue.enqueueNDRangeKernel(KernelBuilder(programs, "error_sequence")
+                                               .args(imageBuf.get(), errorSequenceBuf.get(), coeffsBuf.get(), this->baseCols, this->baseRows, static_cast<int>(calculateAbs), stopFlagBuf.get())
+                                               .build(),
+                                           cl::NDRange(), cl::NDRange(texKernelDims.first, texKernelDims.second), cl::NDRange(windowLocalSize.first, windowLocalSize.second));
             },
             "error_sequence");
-        return errorSequence;
+        errorSequenceBuf.unlock();
+        return errorSequenceBuf.getArray();
     }
 
     af::array computeErrorSequence(const af::array& inputA, const af::array& inputB) const override {
         using namespace cl_utils;
-        const af::array errorSequence(this->baseRows, this->baseCols);
-        const clMemPtr inputAmem(inputA.device<cl_mem>());
-        const clMemPtr inputBmem(inputB.device<cl_mem>());
-        const clMemPtr coeffsMem(this->coefficients.template device<cl_mem>());
-        const clMemPtr errorSequenceMem(errorSequence.device<cl_mem>());
-        const clMemPtr stopFlagMem(this->stopFlag.template device<cl_mem>());
+        const AfclBuffer inputABuf(inputA);
+        const AfclBuffer inputBBuf(inputB);
+        const AfclBuffer coeffsBuf(this->coefficients);
+        const AfclBuffer stopFlagBuf(this->stopFlag);
+        AfclBuffer errorSequenceBuf(this->baseRows, this->baseCols, f32);
         // transposed global dimensions because of column-major order in arrayfire
         executeKernel(
             [&]() {
-                queue.enqueueNDRangeKernel(
-                    KernelBuilder(programs, "error_sequence_fused")
-                        .args(wrap(inputAmem.get()), wrap(inputBmem.get()), wrap(errorSequenceMem.get()), wrap(coeffsMem.get()), this->baseCols, this->baseRows, wrap(stopFlagMem.get()))
-                        .build(),
-                    cl::NDRange(), cl::NDRange(texKernelDims.first, texKernelDims.second), cl::NDRange(windowLocalSize.first, windowLocalSize.second));
-                this->unlockArrays(inputA, inputB, errorSequence, this->coefficients, this->stopFlag);
+                queue.enqueueNDRangeKernel(KernelBuilder(programs, "error_sequence_fused")
+                                               .args(inputABuf.get(), inputBBuf.get(), errorSequenceBuf.get(), coeffsBuf.get(), this->baseCols, this->baseRows, stopFlagBuf.get())
+                                               .build(),
+                                           cl::NDRange(), cl::NDRange(texKernelDims.first, texKernelDims.second), cl::NDRange(windowLocalSize.first, windowLocalSize.second));
             },
             "error_sequence_fused");
-        return errorSequence;
+        errorSequenceBuf.unlock();
+        return errorSequenceBuf.getArray();
     }
 
     af::array computePredictionErrorData(const af::array& image, const bool calculateAbs) const override {
         using namespace cl_utils;
-        //"me" kernel constants
         constexpr int RxSize = (this->localSize * (this->localSize + 1)) / 2;
         constexpr int rxSize = this->localSize;
-        // reduce Rx/rx kernel constants
         constexpr size_t RxGlobalX = ((RxSize + rxReduceLocalSize - 1) / rxReduceLocalSize) * rxReduceLocalSize;
         constexpr size_t rxGlobalX = ((rxSize + rxReduceLocalSize - 1) / rxReduceLocalSize) * rxReduceLocalSize;
         constexpr int numChunks = 256;
-
         return executeKernel(
             [&]() -> af::array {
                 const auto meArraysBaseWidth = meKernelDims.second / optimalLocalSize;
-                const af::array RxPartial(this->baseRows, meArraysBaseWidth * RxSize);
-                const af::array rxPartial(this->baseRows, meArraysBaseWidth * rxSize);
-                const clMemPtr RxPartialMem(RxPartial.device<cl_mem>());
-                const clMemPtr rxPartialMem(rxPartial.device<cl_mem>());
-                const clMemPtr imageMem(image.device<cl_mem>());
-
-                // call prediction error Rx/rx partials calculation kernel
-                queue.enqueueNDRangeKernel(KernelBuilder(programs, "me").args(wrap(imageMem.get()), wrap(RxPartialMem.get()), wrap(rxPartialMem.get()), this->baseCols, this->baseRows).build(),
-                                           cl::NDRange(), cl::NDRange(meKernelDims.second, meKernelDims.first), cl::NDRange(optimalLocalSize, 1));
-
-                // setup and call reductions of the Rx/rx partials
                 const int totalBlocks = this->baseRows * meArraysBaseWidth;
                 const int blocksPerChunk = (totalBlocks + numChunks - 1) / numChunks;
-                // intermediate partial arrays for partial sums and final arrays
-                const af::array RxPartialsTemp(numChunks * RxSize);
-                const af::array rxPartialsTemp(numChunks * rxSize);
-                const af::array Rx(RxSize);
-                const af::array rx(rxSize);
-                const clMemPtr RxPartialsTempMem(RxPartialsTemp.device<cl_mem>());
-                const clMemPtr rxPartialsTempMem(rxPartialsTemp.device<cl_mem>());
-                const clMemPtr RxMem(Rx.device<cl_mem>());
-                const clMemPtr rxMem(rx.device<cl_mem>());
-
-                // call Rx/rx partial reduces
-                queue.enqueueNDRangeKernel(KernelBuilder(programs, "partial_reduce").args(wrap(RxPartialMem.get()), wrap(RxPartialsTempMem.get()), RxSize, totalBlocks, blocksPerChunk).build(),
-                                           cl::NDRange(), cl::NDRange(RxGlobalX, numChunks), cl::NDRange(rxReduceLocalSize, 1));
-
-                queue.enqueueNDRangeKernel(KernelBuilder(programs, "partial_reduce").args(wrap(rxPartialMem.get()), wrap(rxPartialsTempMem.get()), rxSize, totalBlocks, blocksPerChunk).build(),
-                                           cl::NDRange(), cl::NDRange(rxGlobalX, numChunks), cl::NDRange(rxReduceLocalSize, 1));
-
-                // call final Rx/rx reduces, 1 workgroup per coefficient (256 threads each)
-                queue.enqueueNDRangeKernel(KernelBuilder(programs, "final_reduce").args(wrap(RxPartialsTempMem.get()), wrap(RxMem.get()), numChunks, RxSize).build(), cl::NDRange(),
+                const AfclBuffer imageBuf(image);
+                const AfclBuffer coeffsBuf(this->coefficients);
+                const AfclBuffer stopFlagBuf(this->stopFlag);
+                AfclBuffer RxPartialBuf(this->baseRows, meArraysBaseWidth * RxSize, f32);
+                AfclBuffer rxPartialBuf(this->baseRows, meArraysBaseWidth * rxSize, f32);
+                AfclBuffer RxPartialsTempBuf(numChunks * RxSize, f32);
+                AfclBuffer rxPartialsTempBuf(numChunks * rxSize, f32);
+                AfclBuffer RxBuf(RxSize, f32);
+                AfclBuffer rxBuf(rxSize, f32);
+                // call prediction error Rx/rx partials calculation kernel
+                queue.enqueueNDRangeKernel(KernelBuilder(programs, "me").args(imageBuf.get(), RxPartialBuf.get(), rxPartialBuf.get(), this->baseCols, this->baseRows).build(), cl::NDRange(),
+                                           cl::NDRange(meKernelDims.second, meKernelDims.first), cl::NDRange(optimalLocalSize, 1));
+                // call Rx and rx partial reduce
+                queue.enqueueNDRangeKernel(KernelBuilder(programs, "partial_reduce").args(RxPartialBuf.get(), RxPartialsTempBuf.get(), RxSize, totalBlocks, blocksPerChunk).build(), cl::NDRange(),
+                                           cl::NDRange(RxGlobalX, numChunks), cl::NDRange(rxReduceLocalSize, 1));
+                queue.enqueueNDRangeKernel(KernelBuilder(programs, "partial_reduce").args(rxPartialBuf.get(), rxPartialsTempBuf.get(), rxSize, totalBlocks, blocksPerChunk).build(), cl::NDRange(),
+                                           cl::NDRange(rxGlobalX, numChunks), cl::NDRange(rxReduceLocalSize, 1));
+                // call final Rx and rx reduce, 1 workgroup per coefficient
+                queue.enqueueNDRangeKernel(KernelBuilder(programs, "final_reduce").args(RxPartialsTempBuf.get(), RxBuf.get(), numChunks, RxSize).build(), cl::NDRange(),
                                            cl::NDRange(RxSize * optimalLocalSize), cl::NDRange(optimalLocalSize));
-
-                queue.enqueueNDRangeKernel(KernelBuilder(programs, "final_reduce").args(wrap(rxPartialsTempMem.get()), wrap(rxMem.get()), numChunks, rxSize).build(), cl::NDRange(),
+                queue.enqueueNDRangeKernel(KernelBuilder(programs, "final_reduce").args(rxPartialsTempBuf.get(), rxBuf.get(), numChunks, rxSize).build(), cl::NDRange(),
                                            cl::NDRange(rxSize * optimalLocalSize), cl::NDRange(optimalLocalSize));
-
-                // return memory to arrayfire
-                this->unlockArrays(image, RxPartial, rxPartial, RxPartialsTemp, rxPartialsTemp);
-
+                // return the partial buffers to the arrayfire pool (they may be huge for large p)
+                AfclBuffer::unlockArrays(RxPartialBuf, rxPartialBuf, RxPartialsTempBuf, rxPartialsTempBuf);
                 // calculation of coefficients
-                const clMemPtr coeffsMem(this->coefficients.template device<cl_mem>());
-                const clMemPtr stopFlagMem(this->stopFlag.template device<cl_mem>());
-
-                queue.enqueueNDRangeKernel(KernelBuilder(programs, "cholesky_solver").args(wrap(RxMem.get()), wrap(rxMem.get()), wrap(coeffsMem.get()), wrap(stopFlagMem.get())).build(), cl::NDRange(),
+                queue.enqueueNDRangeKernel(KernelBuilder(programs, "cholesky_solver").args(RxBuf.get(), rxBuf.get(), coeffsBuf.get(), stopFlagBuf.get()).build(), cl::NDRange(),
                                            cl::NDRange(choleskyLocalSize), cl::NDRange(choleskyLocalSize));
-                // return memory to arrayfire
-                this->unlockArrays(Rx, rx, this->coefficients, this->stopFlag);
+                // unlock the remaining buffers, optinal but let's help arrayfire manage the memory better
+                AfclBuffer::unlockArrays(RxBuf, rxBuf);
                 // calculation of error sequence which use the coefficients we just computed
                 return computeErrorSequence(image, calculateAbs);
             },
@@ -262,67 +207,56 @@ class WatermarkOCL final : public WatermarkGPU<p> {
         using namespace cl_utils;
         const int workGroups = calculateLocalGroupsNumber(this->totalPixels, optimalLocalSize);
         const int globalSize = workGroups * optimalLocalSize;
-        const af::array mask(errorSequence.dims(), f32);
-        const af::array maxVal(1, f32);
-        const af::array partialMax(workGroups, f32);
-        const clMemPtr errMem(errorSequence.device<cl_mem>());
-        const clMemPtr maskMem(mask.device<cl_mem>());
-        const clMemPtr maxValMem(maxVal.device<cl_mem>());
-        const clMemPtr partialMaxMem(partialMax.device<cl_mem>());
-
+        const AfclBuffer errSeqBuf(errorSequence);
+        const AfclBuffer maxValBuf(1, f32);
+        const AfclBuffer partialMaxBuf(workGroups, f32);
+        AfclBuffer maskBuf(errorSequence.dims(), f32);
         executeKernel(
             [&]() {
                 // transform to abs and find "partial maxes"
-                queue.enqueueNDRangeKernel(KernelBuilder(programs, "reduce_abs_max_partials").args(wrap(errMem.get()), wrap(partialMaxMem.get()), this->totalPixels).build(), cl::NDRange(),
+                queue.enqueueNDRangeKernel(KernelBuilder(programs, "reduce_abs_max_partials").args(errSeqBuf.get(), partialMaxBuf.get(), this->totalPixels).build(), cl::NDRange(),
                                            cl::NDRange(globalSize), cl::NDRange(optimalLocalSize));
+
                 // final max reduction
-                queue.enqueueNDRangeKernel(KernelBuilder(programs, "reduce_abs_max_final").args(wrap(partialMaxMem.get()), wrap(maxValMem.get()), workGroups).build(), cl::NDRange(),
-                                           cl::NDRange(optimalLocalSize), cl::NDRange(optimalLocalSize));
+                queue.enqueueNDRangeKernel(KernelBuilder(programs, "reduce_abs_max_final").args(partialMaxBuf.get(), maxValBuf.get(), workGroups).build(), cl::NDRange(), cl::NDRange(optimalLocalSize),
+                                           cl::NDRange(optimalLocalSize));
+
                 // normalize mask
-                queue.enqueueNDRangeKernel(KernelBuilder(programs, "compute_abs_normalized_mask").args(wrap(errMem.get()), wrap(maskMem.get()), wrap(maxValMem.get()), this->totalPixels).build(),
-                                           cl::NDRange(), cl::NDRange(globalSize), cl::NDRange(optimalLocalSize));
-                this->unlockArrays(errorSequence, mask, maxVal, partialMax);
+                queue.enqueueNDRangeKernel(KernelBuilder(programs, "compute_abs_normalized_mask").args(errSeqBuf.get(), maskBuf.get(), maxValBuf.get(), this->totalPixels).build(), cl::NDRange(),
+                                           cl::NDRange(globalSize), cl::NDRange(optimalLocalSize));
             },
             "compute_prediction_error_mask_fused");
-
-        return mask;
+        maskBuf.unlock();
+        return maskBuf.getArray();
     }
 
     float computeCorrelation(const af::array& e_u, const af::array& mask) const override {
         using namespace cl_utils;
         const int workGroups = static_cast<int>((texKernelDims.first / windowLocalSize.first) * (texKernelDims.second / windowLocalSize.second));
-        const af::array dotPartial(workGroups, f32);
-        const af::array uNormPartial(workGroups, f32);
-        const af::array zNormPartial(workGroups, f32);
-        const af::array correlationResult(1, f32);
-        const clMemPtr maskMem(mask.device<cl_mem>());
-        const clMemPtr randMem(this->randomMatrix.template device<cl_mem>());
-        const clMemPtr euMem(e_u.device<cl_mem>());
-        const clMemPtr coeffsMem(this->coefficients.template device<cl_mem>());
-        const clMemPtr stopFlagMem(this->stopFlag.template device<cl_mem>());
-        const clMemPtr dotPartialMem(dotPartial.device<cl_mem>());
-        const clMemPtr uNormPartialMem(uNormPartial.device<cl_mem>());
-        const clMemPtr zNormPartialMem(zNormPartial.device<cl_mem>());
-        const clMemPtr correlationResultMem(correlationResult.device<cl_mem>());
-        float correlation = 0.0f;
+        const AfclBuffer maskBuf(mask);
+        const AfclBuffer wBuf(this->randomMatrix);
+        const AfclBuffer euBuf(e_u);
+        const AfclBuffer coeffsBuf(this->coefficients);
+        const AfclBuffer stopFlagBuf(this->stopFlag);
+        const AfclBuffer dotPartialBuf(workGroups, f32);
+        const AfclBuffer uNormPartialBuf(workGroups, f32);
+        const AfclBuffer zNormPartialBuf(workGroups, f32);
+        AfclBuffer corrResultBuf(1, f32);
         executeKernel(
             [&]() {
                 // launch fused rrror sequence + partial correlation
                 queue.enqueueNDRangeKernel(KernelBuilder(programs, "calculate_error_sequence_and_partial_corr_fused")
-                                               .args(wrap(maskMem.get()), wrap(randMem.get()), wrap(euMem.get()), wrap(coeffsMem.get()), wrap(dotPartialMem.get()), wrap(uNormPartialMem.get()),
-                                                     wrap(zNormPartialMem.get()), this->baseCols, this->baseRows, 0, wrap(stopFlagMem.get()))
+                                               .args(maskBuf.get(), wBuf.get(), euBuf.get(), coeffsBuf.get(), dotPartialBuf.get(), uNormPartialBuf.get(), zNormPartialBuf.get(), this->baseCols,
+                                                     this->baseRows, 0, stopFlagBuf.get())
                                                .build(),
                                            cl::NDRange(), cl::NDRange(this->texKernelDims.first, this->texKernelDims.second), cl::NDRange(windowLocalSize.first, windowLocalSize.second));
                 // reduce partials and compute correlation
-                queue.enqueueNDRangeKernel(KernelBuilder(programs, "calculate_final_correlation")
-                                               .args(wrap(dotPartialMem.get()), wrap(uNormPartialMem.get()), wrap(zNormPartialMem.get()), wrap(correlationResultMem.get()), workGroups)
-                                               .build(),
-                                           cl::NDRange(), cl::NDRange(corrFinalLocalSize), cl::NDRange(corrFinalLocalSize));
-                // retrieve the correlation result
-                this->unlockArrays(mask, e_u, dotPartial, uNormPartial, zNormPartial, correlationResult, this->coefficients, this->stopFlag, this->randomMatrix);
-                correlation = correlationResult.scalar<float>();
+                queue.enqueueNDRangeKernel(
+                    KernelBuilder(programs, "calculate_final_correlation").args(dotPartialBuf.get(), uNormPartialBuf.get(), zNormPartialBuf.get(), corrResultBuf.get(), workGroups).build(),
+                    cl::NDRange(), cl::NDRange(corrFinalLocalSize), cl::NDRange(corrFinalLocalSize));
             },
             "compute correlation kernels");
-        return correlation;
+        // retrieve the correlation result back to host and return it
+        return corrResultBuf.scalar<float>();
     }
 };
