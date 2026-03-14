@@ -7,7 +7,6 @@
 #include "WatermarkGpu.hpp"
 #include <af/opencl.h>
 #include <arrayfire.h>
-#include <memory>
 #include <string>
 #include <utility>
 
@@ -24,7 +23,6 @@ class WatermarkOCL final : public WatermarkGPU<p> {
 
   private:
     using WatermarkBase::alignUp;
-    using clMemPtr = std::unique_ptr<cl_mem>;
 
     static constexpr unsigned int optimalLocalSize = 256; // safe universal local size for OpenCL, used almost anywhere
     static constexpr unsigned int rxReduceLocalSize = 64;
