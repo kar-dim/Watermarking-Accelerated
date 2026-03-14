@@ -61,7 +61,7 @@ class WatermarkGPU : public WatermarkBase {
     af::array coefficients = af::array(localSize, f32);
     af::array stopFlag = af::constant(0, 1, s32);
 
-    // computes u = a * (M * W) where a=strength, M=mask calculated and W is the random noise matrix
+    // computes u = x + [a * (M * W)] where x = input image, a = strength, M = computed mask, and W is the random noise matrix
     virtual af::array computeStrengthenedWatermark(const ImageBuffer& inputGrayImage, const ImageBuffer& inputImage, const MaskMethod maskType) const = 0;
 
     // computes custom Mask
