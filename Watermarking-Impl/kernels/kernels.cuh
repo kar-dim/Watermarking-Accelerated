@@ -84,14 +84,14 @@ __device__ __forceinline__ void fillBlock(const float* __restrict__ inputA, cons
 
 // helper function to fill block-wide shared memory cooperatively for ME kernels
 // optimized to minimize uncoalesced reads and warp stalls
-template <int p, int BlockSize, int StripHeight = BlockSize + p - 1>
+template <int p, int PixelsPerBlock, int StripHeight = PixelsPerBlock + p - 1>
 __device__ __forceinline__ void fillBlockStripVertical(half blockValues[p][StripHeight], const float* __restrict__ input, const int width, const int height, const int bx, const int by) {
     constexpr float scaleFactor = 0.00392156862f;
     constexpr int radius = (p - 1) / 2;
     constexpr int totalPixels = p * StripHeight;
 
     const int baseGlobalCol = (bx * 1) - radius;
-    const int baseGlobalRow = (by * BlockSize) - radius;
+    const int baseGlobalRow = (by * PixelsPerBlock) - radius;
     int idx = threadIdx.x;
     while (idx < totalPixels) {
         const int r = idx % StripHeight;
@@ -99,7 +99,7 @@ __device__ __forceinline__ void fillBlockStripVertical(half blockValues[p][Strip
         const int globalCol = clamp(width - 1, 0, baseGlobalCol + c);
         const int globalRow = clamp(height - 1, 0, baseGlobalRow + r);
         blockValues[c][r] = __float2half(input[(globalCol * height) + globalRow] * scaleFactor);
-        idx += BlockSize;
+        idx += blockDim.x;
     }
 }
 

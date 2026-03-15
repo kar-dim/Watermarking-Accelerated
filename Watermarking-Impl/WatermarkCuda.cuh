@@ -22,7 +22,8 @@ class WatermarkCuda final : public WatermarkGPU<p> {
     WatermarkCuda<p>(const unsigned int rows, const unsigned int cols, const std::string& watermarkPassword, const float psnr)
         : WatermarkGPU<p>(rows, cols, watermarkPassword, psnr), afStream(CudaStreamManager::getInstance().getAfStream()), gridOptimalMe(cuda_utils::gridSize1DMeStridedCalculate()) {
         // initialize ME kernel parameters based on image dims, we calculate total blocks in Y dimension and total tasks for optimal configuration
-        const unsigned int meTotalBlocksY = WatermarkBase::alignUp<meBlockSize.x>(this->baseRows) / meBlockSize.x;
+        constexpr unsigned int pixelsPerBlockY = (p == 3) ? (meBlockSize.x * 2) : meBlockSize.x;
+        const unsigned int meTotalBlocksY = WatermarkBase::alignUp<pixelsPerBlockY>(this->baseRows) / pixelsPerBlockY;
         meParams = {meTotalBlocksY, meTotalBlocksY * this->baseCols};
         // initialize CUB scratch memory for its reductions
         initializeCubStorage();

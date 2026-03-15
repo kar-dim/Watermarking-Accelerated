@@ -42,7 +42,7 @@ __device__ void load_neighbor_row_funnel_p3_col(half& a, half& b, half& c, const
 }
 
 // column version of the 3x3 helper vector loader
-__device__ void load_neighbor_vec_p3_col(half8& dst, half& center, const half blockValues[3][258], const int col) {
+__device__ void load_neighbor_vec_p3_col(half8& dst, half& center, const half blockValues[3][514], const int col) {
     load_neighbor_row_funnel_p3_col(dst.a, dst.b, dst.c, blockValues[0], col);
     load_neighbor_row_funnel_p3_col(dst.d, center, dst.e, blockValues[1], col);
     load_neighbor_row_funnel_p3_col(dst.f, dst.g, dst.h, blockValues[2], col);
@@ -195,10 +195,10 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
     const int gridTotal = gridDim.x * gridDim.y;
     const int blockLinear = blockIdx.y * gridDim.x + blockIdx.x;
 
-    __shared__ alignas(16) float RxLocal[128][OUT_STRIDE]; // note: for p=3 we process 256 pixels, but pack them into 128 vectors of size 2
-    __shared__ alignas(16) half blockValues[3][258];
-    __shared__ alignas(16) float rxStaging[4][8]; // 4 warps (128 threads) instead of 256
-    __shared__ typename cub::WarpReduce<rxVecData<8>>::TempStorage temp_storage[4];
+    __shared__ alignas(16) float RxLocal[256][OUT_STRIDE]; // note: for p=3 we process 512 pixels, but pack them into 256 vectors of size 2
+    __shared__ alignas(16) half blockValues[3][514];
+    __shared__ alignas(16) float rxStaging[8][8]; // 8 warps
+    __shared__ typename cub::WarpReduce<rxVecData<8>>::TempStorage temp_storage[8];
 
     wmma::fragment<wmma::accumulator, 16, 16, 16, float> acc_C;
     wmma::fill_fragment(acc_C, 0.0f);
@@ -214,83 +214,75 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
             continue;
 
         // all 256 threads help load the strip
-        fillBlockStripVertical<3, 256>(blockValues, input, width, height, bx, by);
+        fillBlockStripVertical<3, 512>(blockValues, input, width, height, bx, by);
         __syncthreads();
 
         // load window (p=3 optimized)
-        // ONLY for p=3 version: WMMA minimum size is 16x16 tensors, so we pack 2 pixels per thread to fill the tile
-        // because the 3x3 neighborhood is small we would waste gpu resources if we only processed 1 pixel per thread (we would need to PAD 75% of tensor values!)
-        // thread x packs pixel x (top) and pixel x+128 (bottom)
-        if (tid < 128) {
-            half8 vecTop, vecBot;
-            half centerTop, centerBot;
-            // load pixel A (tid)
-            if ((by * 256 + tid) < height) {
-                load_neighbor_row_funnel_p3(vecTop.a, vecTop.b, vecTop.c, blockValues[0]);
-                load_neighbor_row_funnel_p3(vecTop.d, centerTop, vecTop.e, blockValues[1]);
-                load_neighbor_row_funnel_p3(vecTop.f, vecTop.g, vecTop.h, blockValues[2]);
-            } else {
-                vecTop = {};
-                centerTop = blockValues[1][tid + 1];
-            }
+        // ONLY for p=3 version: thread 'tid' packs pixel 'tid' (top) AND pixel 'tid+256' (bottom)
+        half8 vecTop, vecBot;
+        half centerTop, centerBot;
+        // load pixel A (tid)
+        if ((by * 512 + tid) < height) {
+            load_neighbor_row_funnel_p3(vecTop.a, vecTop.b, vecTop.c, blockValues[0]);
+            load_neighbor_row_funnel_p3(vecTop.d, centerTop, vecTop.e, blockValues[1]);
+            load_neighbor_row_funnel_p3(vecTop.f, vecTop.g, vecTop.h, blockValues[2]);
+        } else {
+            vecTop = {};
+            centerTop = blockValues[1][tid + 1];
+        }
 
-            // load pixel B (tid + 128)
-            if ((by * 256 + tid + 128) < height) {
-                load_neighbor_vec_p3_col(vecBot, centerBot, blockValues, tid + 128);
-            } else {
-                vecBot = {};
-                centerBot = blockValues[1][tid + 128 + 1];
-            }
+        // load pixel B (tid + 256)
+        if ((by * 512 + tid + 256) < height) {
+            load_neighbor_vec_p3_col(vecBot, centerBot, blockValues, tid + 256);
+        } else {
+            vecBot = {};
+            centerBot = blockValues[1][tid + 128 + 1];
+        }
 
-            // rx accumulation (do both pixels)
-            const half2 center2Top = __half2half2(centerTop);
-            const half2 center2Bot = __half2half2(centerBot);
-            const half2* ptrTop = reinterpret_cast<half2*>(&vecTop);
-            const half2* ptrBot = reinterpret_cast<half2*>(&vecBot);
+        // rx accumulation (do both pixels)
+        const half2 center2Top = __half2half2(centerTop);
+        const half2 center2Bot = __half2half2(centerBot);
+        const half2* ptrTop = reinterpret_cast<half2*>(&vecTop);
+        const half2* ptrBot = reinterpret_cast<half2*>(&vecBot);
 
 #pragma unroll
-            for (int j = 0; j < 4; j++) {
-                // pixel A
-                float2 res = __half22float2(__hmul2(ptrTop[j], center2Top));
-                rxPersistent.vals[j * 2] += res.x;
-                rxPersistent.vals[j * 2 + 1] += res.y;
-                // pixel B
-                res = __half22float2(__hmul2(ptrBot[j], center2Bot));
-                rxPersistent.vals[j * 2] += res.x;
-                rxPersistent.vals[j * 2 + 1] += res.y;
-            }
-
-            // Rx accumulation (Tensor Cores) PACKED (2 pixels)
-            // rowPtrVec[0] = top, rowPtrVec[1] = bottom
-            half* rowPtr = reinterpret_cast<half*>(&RxLocal[tid][0]);
-            half8* rowPtrVec = reinterpret_cast<half8*>(rowPtr);
-            rowPtrVec[0] = vecTop;
-            rowPtrVec[1] = vecBot; // here is our "packing trick" (one fully filled WMMA tile (16)
+        for (int j = 0; j < 4; j++) {
+            // pixel A
+            float2 res = __half22float2(__hmul2(ptrTop[j], center2Top));
+            rxPersistent.vals[j * 2] += res.x;
+            rxPersistent.vals[j * 2 + 1] += res.y;
+            // pixel B
+            res = __half22float2(__hmul2(ptrBot[j], center2Bot));
+            rxPersistent.vals[j * 2] += res.x;
+            rxPersistent.vals[j * 2 + 1] += res.y;
         }
+
+        // Rx accumulation (Tensor Cores) PACKED (2 pixels)
+        // rowPtrVec[0] = top, rowPtrVec[1] = bottom
+        half* rowPtr = reinterpret_cast<half*>(&RxLocal[tid][0]);
+        half8* rowPtrVec = reinterpret_cast<half8*>(rowPtr);
+        rowPtrVec[0] = vecTop;
+        rowPtrVec[1] = vecBot; // here is our "packing trick" (one fully filled WMMA tile (16)
         __syncthreads();
 
-        // for WMMA: only first 128 threads (4 warps) need to run
-        if (tid < 128) {
-            wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::col_major> A;
-            wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::row_major> B;
+        // all 256 threads do WMMA now
+        wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::col_major> A;
+        wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::row_major> B;
 #pragma unroll
-            for (int k0 = 0; k0 < 32; k0 += 16) {
-                const half* tilePtr = reinterpret_cast<half*>(&RxLocal[startRow + k0][0]);
-                wmma::load_matrix_sync(A, tilePtr, IN_STRIDE);
-                wmma::load_matrix_sync(B, tilePtr, IN_STRIDE);
-                wmma::mma_sync(acc_C, A, B, acc_C);
-            }
+        for (int k0 = 0; k0 < 32; k0 += 16) {
+            const half* tilePtr = reinterpret_cast<half*>(&RxLocal[startRow + k0][0]);
+            wmma::load_matrix_sync(A, tilePtr, IN_STRIDE);
+            wmma::load_matrix_sync(B, tilePtr, IN_STRIDE);
+            wmma::mma_sync(acc_C, A, B, acc_C);
         }
         __syncthreads();
     }
 
     // write to global memory
-    if (tid < 128) {
-        float* warpOutput = &RxLocal[warpId * 32][0];
-        wmma::store_matrix_sync(warpOutput, acc_C, OUT_STRIDE, wmma::mem_row_major);
-        // write rx (cub)
-        writeRxVec<8>(rx, rxPersistent, temp_storage[warpId], &rxStaging[warpId][0]);
-    }
+    float* warpOutput = &RxLocal[warpId * 32][0];
+    wmma::store_matrix_sync(warpOutput, acc_C, OUT_STRIDE, wmma::mem_row_major);
+    // write rx (cub)
+    writeRxVec<8>(rx, rxPersistent, temp_storage[warpId], &rxStaging[warpId][0]);
     __syncthreads();
 
     // write Rx (top left + bottom right)
@@ -298,7 +290,7 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
         const int2 coords = getPackedCoords(tid);
         float sum = 0.0f;
 #pragma unroll
-        for (int w = 0; w < 4; w++) {
+        for (int w = 0; w < 8; w++) {
             // tile 1 (top left): pixel A results
             sum += RxLocal[w * 32 + coords.x][coords.y];
             // tile 4 (bottom right): pixel B results (offset: rows+8, cols+8)
@@ -551,7 +543,7 @@ __global__ void me_p9(const float* __restrict__ input, float* __restrict__ Rx, f
     __shared__ typename cub::WarpReduce<rxVecData<80>>::TempStorage temp_storage[4];
     half(*blockValues)[136] = reinterpret_cast<half(*)[136]>(&RxLocal[0][0]); // trick to reuse shared memory
 
-    // Init Accumulators (Float)
+    // init Accumulators (float)
     wmma::fragment<wmma::accumulator, 16, 16, 16, float> acc_Rx[15];
 #pragma unroll
     for (int i = 0; i < 15; i++)
