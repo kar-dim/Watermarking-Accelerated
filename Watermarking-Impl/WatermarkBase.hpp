@@ -60,11 +60,8 @@ class WatermarkBase {
         // step by 8 because ChaCha20 generates 8 uint64_t per block
 #pragma omp parallel for schedule(static)
         for (int64_t i = 0; i < numElements; i += 8) {
-            uint64_t blockCounter = static_cast<uint64_t>(i / 8);
-            uint64_t randomBits[8];
-            // generate 8 random numbers
-            WatermarkCrypto::chacha20Block(baseState, blockCounter, randomBits);
-            // process the 8 random integers into 4 Box-Muller pairs
+            // generate 8 random numbers with ChaCha20 and process them as 4 Box-Muller pairs
+            const std::array<uint64_t, 8> randomBits = WatermarkCrypto::chacha20Block(baseState, static_cast<uint64_t>(i / 8));
             for (int64_t j = 0; j < 4; j++) {
                 const int64_t idx = i + (j * 2);
                 if (idx >= numElements)

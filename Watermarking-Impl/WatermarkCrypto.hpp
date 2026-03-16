@@ -108,9 +108,9 @@ inline void QR(uint32_t& a, uint32_t& b, uint32_t& c, uint32_t& d) {
 }
 // clang-format on
 
-// 256-bit ChaCha20 block function, generates 64 bytes (eight 64-bit ints) of cryptographically secure noise based on a key string and a counter.
+// 256-bit ChaCha20 block function, generates 64 bytes (eight 64-bit ints) of cryptographically secure noise based on a key string and a counter
 // note: this implements the original DJB ChaCha20 specification (64-bit counter, 64-bit nonce)
-inline void chacha20Block(const std::array<uint32_t, 16>& baseState, const uint64_t blockCounter, uint64_t* out64) {
+inline std::array<uint64_t, 8> chacha20Block(const std::array<uint32_t, 16>& baseState, const uint64_t blockCounter) {
     std::array<uint32_t, 16> workingState;
     // copy the initial state
     std::memcpy(workingState.data(), baseState.data(), 64);
@@ -141,6 +141,6 @@ inline void chacha20Block(const std::array<uint32_t, 16>& baseState, const uint6
     workingState[13] += c1;
 
     // output
-    std::memcpy(out64, workingState.data(), 64);
+    return std::bit_cast<std::array<uint64_t, 8>>(workingState);
 }
 } // namespace WatermarkCrypto
