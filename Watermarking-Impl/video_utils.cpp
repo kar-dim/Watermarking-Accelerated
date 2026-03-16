@@ -162,9 +162,8 @@ void filterFrame(AVFramePtr& frame, AVFramePtr& filteredFrame, const VideoSessio
     int ret = av_buffersrc_add_frame_flags(s->buffersrcCtx, frame.get(), AV_BUFFERSRC_FLAG_KEEP_REF);
     checkError(ret < 0, "Failed to add frame to filter graph");
     ret = av_buffersink_get_frame(s->buffersinkCtx, filteredFrame.get());
-    // don't exit if more frames (buffering is used) are needed to produce one output frame, just keep the original
-    if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
-        return;
+    // throw if filter graph has buffered frames or it died somehow, we strictly want 1-to-1 frame relation (scaling and tonemap are always 1-to-1, but let's make sure)
+    checkError(ret == AVERROR(EAGAIN) || ret == AVERROR_EOF, "Filter graph buffered the frame. 1-to-1 filtering strictly required!");
     checkError(ret < 0, "Failed to get filtered frame: " + std::to_string(ret));
     // replace original frame with filtered one
     av_frame_unref(frame.get());
@@ -195,7 +194,7 @@ bool initFilterGraph(VideoSession* s) {
     string args = std::format("video_size={}x{}:pix_fmt={}:time_base={}/{}:pixel_aspect={}/{}", s->inputDecoderCtx->width, s->inputDecoderCtx->height, pixFmtName, timeBase.num, timeBase.den,
                               s->inputDecoderCtx->sample_aspect_ratio.num, s->inputDecoderCtx->sample_aspect_ratio.den);
 
-    // allocate filter graph and source/sink filters
+    // allocate filter graph and source/sink filters (multi-threaded by default for CPU filters like tonemap)
     AVFilterGraphPtr graphPtr(avfilter_graph_alloc());
     checkError(!graphPtr, exceptionMessage + "avfilter_graph_alloc");
 
