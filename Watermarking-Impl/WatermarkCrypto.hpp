@@ -82,19 +82,13 @@ inline std::array<uint8_t, 32> sha256(const std::string& input) {
 }
 // clang-format on
 
-// constructs the immutable base state for ChaCha20 once (optimization)
+// constructs the immutable base state (64 bytes) for ChaCha20 once (optimization)
 inline std::array<uint32_t, 16> computeBaseState(const std::string& watermarkPassword) {
-    std::array<uint32_t, 16> state = {0};
-    // ChaCha20 constants
-    state[0] = 0x61707865;
-    state[1] = 0x3320646e;
-    state[2] = 0x79622d32;
-    state[3] = 0x6b206574;
-    // hash the password with SHA-256
-    const std::array<uint8_t, 32> keyBytes = sha256(watermarkPassword);
-    // copy the 32 bytes into the "key slot" (indices 4-11)
-    std::memcpy(&state[4], keyBytes.data(), 32);
-    // nonce (indices 14-15) remains 0 and block counter (indices 12-13) remains 0 for now (injected per block)
+    // ChaCha20 constants (first 16 bytes)
+    std::array<uint32_t, 16> state = {0x61707865, 0x3320646e, 0x79622d32, 0x6b206574};
+    // hash the password with SHA-256 and copy the 32 bytes into the "key slot" (indices 4-11)
+    std::memcpy(&state[4], sha256(watermarkPassword).data(), 32);
+    // block counter (indices 12-13) and nonce (indices 14-15) remain 0 for now (injected per block), last 16 bytes
     return state;
 }
 
