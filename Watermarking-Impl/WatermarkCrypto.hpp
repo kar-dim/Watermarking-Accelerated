@@ -15,12 +15,12 @@
  */
 namespace WatermarkCrypto {
 
-// convert 64-bit int to float strictly in the range (0, 1]
-// and then convert to Box-Muller polar pair
-inline std::pair<float, float> generateBoxMullerPair(const uint64_t x1, const uint64_t x2) {
-    const float u1 = (x1 >> 40) * 0x1.0p-24f + 0x1.0p-24f;
-    const float u2 = (x2 >> 40) * 0x1.0p-24f + 0x1.0p-24f;
-    return {std::sqrt(-2.0f * std::log(u1)), 2.0f * std::numbers::pi_v<float> * u2};
+// convert 64-bit int to float strictly in the range (0, 1] and then convert it to Box-Muller normal distribution pair
+inline std::pair<float, float> generateBoxMullerNormalPair(const uint64_t x1, const uint64_t x2) {
+    constexpr auto toUniformFloat = [](const uint64_t x) -> float { return (x >> 40) * 0x1.0p-24f + 0x1.0p-24f; };
+    const float radius = std::sqrt(-2.0f * std::log(toUniformFloat(x1)));
+    const float theta = 2.0f * std::numbers::pi_v<float> * toUniformFloat(x2);
+    return {radius * std::cos(theta), radius * std::sin(theta)};
 }
 
 // clang-format off
