@@ -18,25 +18,29 @@ inline int2 getPackedCoords(const int k) {
     return (int2)(r, c);
 }
 
+#define FILL_BLOCK_IMPL(LOAD_EXPR)                                             \
+    const int baseGlobalX = (int)(get_group_id(1) * get_local_size(1)) - PAD;  \
+    const int baseGlobalY = (int)(get_group_id(0) * get_local_size(0)) - PAD;  \
+    const int tid = get_local_id(1) * get_local_size(0) + get_local_id(0);     \
+    const int totalThreads = get_local_size(0) * get_local_size(1);            \
+    const int totalElements = SH_DIM_FAST * SH_DIM_SLOW;                       \
+                                                                               \
+    for (int i = tid; i < totalElements; i += totalThreads) {                  \
+        const int r = i % SH_DIM_FAST;                                         \
+        const int c = i / SH_DIM_FAST;                                         \
+        const int globalX = clamp(baseGlobalX + c, 0, width - 1);              \
+        const int globalY = clamp(baseGlobalY + r, 0, height - 1);             \
+        const int idx = globalX * height + globalY;                            \
+        sharedMem[i] = (LOAD_EXPR);                                            \
+    }
+
 inline void fillBlock(
     const __global float* restrict input,
     __local float* restrict sharedMem,
     const int width,
-    const int height) 
+    const int height)
 {
-    const int baseGlobalX = (int)(get_group_id(1) * get_local_size(1)) - PAD; 
-    const int baseGlobalY = (int)(get_group_id(0) * get_local_size(0)) - PAD;
-    const int tid = get_local_id(1) * get_local_size(0) + get_local_id(0);
-    const int totalThreads = get_local_size(0) * get_local_size(1); 
-    const int totalElements = SH_DIM_FAST * SH_DIM_SLOW;
-    
-    for (int i = tid; i < totalElements; i += totalThreads) {
-        const int r = i % SH_DIM_FAST;
-        const int c = i / SH_DIM_FAST;
-        const int globalX = clamp(baseGlobalX + c, 0, width - 1);
-        const int globalY = clamp(baseGlobalY + r, 0, height - 1);
-        sharedMem[i] = input[globalX * height + globalY];
-    }
+    FILL_BLOCK_IMPL(input[idx])
 }
 
 inline void fillBlockFused(
@@ -44,22 +48,9 @@ inline void fillBlockFused(
     const __global float* restrict inputB,
     __local float* restrict sharedMem,
     const int width,
-    const int height) 
+    const int height)
 {
-    const int baseGlobalX = (int)(get_group_id(1) * get_local_size(1)) - PAD; 
-    const int baseGlobalY = (int)(get_group_id(0) * get_local_size(0)) - PAD;
-    const int tid = get_local_id(1) * get_local_size(0) + get_local_id(0);
-    const int totalThreads = get_local_size(0) * get_local_size(1); 
-    const int totalElements = SH_DIM_FAST * SH_DIM_SLOW;
-    
-    for (int i = tid; i < totalElements; i += totalThreads) {
-        const int r = i % SH_DIM_FAST;
-        const int c = i / SH_DIM_FAST;
-        const int globalX = clamp(baseGlobalX + c, 0, width - 1);
-        const int globalY = clamp(baseGlobalY + r, 0, height - 1);
-        const int idx = globalX * height + globalY;
-        sharedMem[i] = inputA[idx] * inputB[idx];
-    }
+    FILL_BLOCK_IMPL(inputA[idx] * inputB[idx])
 }
 
 inline float compute_nvf_mask(
