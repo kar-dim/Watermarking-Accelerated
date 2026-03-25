@@ -12,7 +12,7 @@ inline const std::string kernels = R"CLC(
 
 #pragma OPENCL EXTENSION cl_khr_fp16 : enable
 
-inline int2 getPackedCoords(int k) {
+inline int2 getPackedCoords(const int k) {
     const int r = (int)((sqrt(1.0f + 8.0f * k) - 1.0f) / 2.0f);
     const int c = k - (r * (r + 1)) / 2;
     return (int2)(r, c);
@@ -231,40 +231,6 @@ __kernel void error_sequence(
         const float output = error_sequence_coeffs_filter(centerPtr, coeffs);
         x_[x * height + y] = calculateAbs ? fabs(output) : output;
     }
-}
-
-__kernel void compute_u_and_partial_sumsq(
-    __global const float* restrict mask,
-    __global const float* restrict w,
-    __global float* restrict u,
-    __global float* restrict partials,
-    const int N) 
-{
-    const int tid = get_local_id(0);
-    const int stride = get_global_size(0);
-    const int gid = get_group_id(0);
-    int idx = get_global_id(0);
-    
-    __local float sums[256];
-
-    float localSumSq = 0.0f;
-    while (idx < N) {
-        const float uVal = mask[idx] * w[idx];
-        u[idx] = uVal;
-        localSumSq += uVal * uVal;
-        idx += stride;
-    }
-    sums[tid] = localSumSq;
-    barrier(CLK_LOCAL_MEM_FENCE);
-
-    for (int s = 128; s > 0; s >>= 1) {
-        if (tid < s)
-            sums[tid] += sums[tid + s];
-        barrier(CLK_LOCAL_MEM_FENCE);
-    }
-
-    if (tid == 0)
-        partials[gid] = sums[0];
 }
 
 __kernel void reduce_sumsq_partials(
@@ -1026,7 +992,7 @@ __kernel void cholesky_solver(__global const float* restrict A,
         }
     }
 
-    // cooperative Load of Vector B (rx)
+    // cooperative load of vector B (rx)
     for (int k = tid; k < NEIGHB_SIZE; k += workers)
         sB[k] = B[k];
 
@@ -1070,7 +1036,7 @@ __kernel void cholesky_solver(__global const float* restrict A,
         barrier(CLK_LOCAL_MEM_FENCE);
     }
 
-    // forward Substitution (L * y = b)
+    // forward substitution (L * y = b)
     for (int k = 0; k < NEIGHB_SIZE; k++) {
         if (tid == 0)
             sB[k] *= sA[k][k]; // sA[k][k] is actually 1/L_kk stored from earlier
@@ -1085,7 +1051,7 @@ __kernel void cholesky_solver(__global const float* restrict A,
         barrier(CLK_LOCAL_MEM_FENCE);
     }
 
-    // backward Substitution (L^T * x = y)
+    // backward substitution (L^T * x = y)
     for (int k = NEIGHB_SIZE - 1; k >= 0; k--) {
         if (tid == 0)
             sB[k] *= sA[k][k]; 
