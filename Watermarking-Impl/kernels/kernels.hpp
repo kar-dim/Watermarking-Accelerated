@@ -12,12 +12,30 @@ inline const std::string kernels = R"CLC(
 
 #pragma OPENCL EXTENSION cl_khr_fp16 : enable
 
-inline int2 getPackedCoords(const int k) {
-    const int r = (int)((sqrt(1.0f + 8.0f * k) - 1.0f) / 2.0f);
-    const int c = k - (r * (r + 1)) / 2;
-    return (int2)(r, c);
-}
+// TREE REDUCTION MACROS
+#define REDUCE_SUM(TID, START_OFFSET, ARR)                              \
+    for (int _s = (START_OFFSET); _s > 0; _s >>= 1) {                   \
+        if ((TID) < _s) ARR[(TID)] += ARR[(TID) + _s];                  \
+        barrier(CLK_LOCAL_MEM_FENCE);                                   \
+    }
 
+#define REDUCE_MAX(TID, START_OFFSET, ARR)                              \
+    for (int _s = (START_OFFSET); _s > 0; _s >>= 1) {                   \
+        if ((TID) < _s) ARR[(TID)] = fmax(ARR[(TID)], ARR[(TID) + _s]); \
+        barrier(CLK_LOCAL_MEM_FENCE); \
+    }
+
+#define REDUCE_SUM_3(TID, START_OFFSET, ARR1, ARR2, ARR3)               \
+    for (int _s = (START_OFFSET); _s > 0; _s >>= 1) {                   \
+        if ((TID) < _s) {                                               \
+            ARR1[(TID)] += ARR1[(TID) + _s];                            \
+            ARR2[(TID)] += ARR2[(TID) + _s];                            \
+            ARR3[(TID)] += ARR3[(TID) + _s];                            \
+        }                                                               \
+        barrier(CLK_LOCAL_MEM_FENCE);                                   \
+    }
+
+// FILL WINDOW MACRO
 #define FILL_BLOCK_IMPL(LOAD_EXPR)                                             \
     const int baseGlobalX = (int)(get_group_id(1) * get_local_size(1)) - PAD;  \
     const int baseGlobalY = (int)(get_group_id(0) * get_local_size(0)) - PAD;  \
@@ -127,13 +145,8 @@ __kernel void nvf_u_and_partial_sumsq_fused(
     }
     sums[linearTid] = threadSumSq;
     barrier(CLK_LOCAL_MEM_FENCE);
-
-    for (int s = 128; s > 0; s >>= 1) {
-        if (linearTid < s)
-            sums[linearTid] += sums[linearTid + s];
-        barrier(CLK_LOCAL_MEM_FENCE);
-    }
-
+    
+    REDUCE_SUM(linearTid, (get_local_size(0) * get_local_size(1)) / 2, sums);
     if (linearTid == 0)
         partials[get_group_id(1) * get_num_groups(0) + get_group_id(0)] = sums[0];
 }
@@ -167,12 +180,7 @@ __kernel void me_u_and_partial_sumsq_fused(
     sums[tid] = localSumSq;
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    for (int s = 128; s > 0; s >>= 1) {
-        if (tid < s)
-            sums[tid] += sums[tid + s];
-        barrier(CLK_LOCAL_MEM_FENCE);
-    }
-
+    REDUCE_SUM(tid, (get_local_size(0) * get_local_size(1)) / 2, sums);
     if (tid == 0)
         partials[gid] = sums[0];
 }
@@ -234,19 +242,15 @@ __kernel void reduce_sumsq_partials(
 
     float localSum = 0.0f;
     int idx = tid;
+    const int stride = get_global_size(0);
     while (idx < numPartials) {
         localSum += partials[idx];
-        idx += 256;
+        idx += stride;
     }
     sums[tid] = localSum;
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    for (int s = 128; s > 0; s >>= 1) {
-        if (tid < s)
-            sums[tid] += sums[tid + s];
-        barrier(CLK_LOCAL_MEM_FENCE);
-    }
-
+    REDUCE_SUM(tid, get_local_size(0) / 2, sums);
     if (tid == 0)
         *globalSumSq = sums[0];
 }
@@ -278,6 +282,11 @@ __kernel void apply_watermark_fused(
 )CLC"
 R"CLC(
 
+inline int2 getPackedCoords(const int k) {
+    const int r = (int)((sqrt(1.0f + 8.0f * k) - 1.0f) / 2.0f);
+    const int c = k - (r * (r + 1)) / 2;
+    return (int2)(r, c);
+}
 
 // OpenCL upper packed Indexing:
 // maps Lower diagonal coords (r, c) where r >= c to the corresponding upper diagonal packed index (c, r)
@@ -595,18 +604,13 @@ __kernel void final_reduce(
     sums[tid] = sum;
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    for (int offset = wgSize / 2; offset > 0; offset >>= 1) {
-        if (tid < offset)
-            sums[tid] += sums[tid + offset];
-        barrier(CLK_LOCAL_MEM_FENCE);
-    }
+    REDUCE_SUM(tid, wgSize / 2, sums);
     if (tid == 0)
         output[coeffIdx] = sums[0];
 }
 
 )CLC"
 R"CLC(
-
 
 __kernel void final_max_reduce(
     __global const float* restrict partials,
@@ -623,12 +627,7 @@ __kernel void final_max_reduce(
     scratch[tid] = threadMax;
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    for (int offset = get_local_size(0) / 2; offset > 0; offset >>= 1) {
-        if (tid < offset)
-            scratch[tid] = max(scratch[tid], scratch[tid + offset]);
-        barrier(CLK_LOCAL_MEM_FENCE);
-    }
-    
+    REDUCE_MAX(tid, get_local_size(0) / 2, scratch);
     if (tid == 0)
         output[0] = scratch[0];
 }
@@ -653,11 +652,7 @@ __kernel void NAME(                                                \
     cache[tid] = localMax;                                         \
     barrier(CLK_LOCAL_MEM_FENCE);                                  \
                                                                    \
-    for (int s = 128; s > 0; s >>= 1) {                            \
-        if (tid < s)                                               \
-            cache[tid] = fmax(cache[tid], cache[tid + s]);         \
-        barrier(CLK_LOCAL_MEM_FENCE);                              \
-    }                                                              \
+    REDUCE_MAX(tid, get_local_size(0) / 2, cache);                 \
     if (tid == 0)                                                  \
         partials[get_group_id(0)] = cache[0];                      \
 }
@@ -715,15 +710,7 @@ __kernel void calculate_error_sequence_and_partial_corr_fused(
     normZCache[linearTid] = threadNormZ;
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    for (int s = 128; s > 0; s >>= 1) {
-        if (linearTid < s) {
-            dotCache[linearTid] += dotCache[linearTid + s];
-            normUCache[linearTid] += normUCache[linearTid + s];
-            normZCache[linearTid] += normZCache[linearTid + s];
-        }
-        barrier(CLK_LOCAL_MEM_FENCE);
-    }
-
+    REDUCE_SUM_3(linearTid, 128, dotCache, normUCache, normZCache);
     if (linearTid == 0) {
         const int groupId1D = get_group_id(1) * get_num_groups(0) + get_group_id(0);
         partialDots[groupId1D] = dotCache[0];
@@ -785,19 +772,11 @@ __kernel void calculate_final_correlation(
     sumZ[tid] = localZ;
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    for (int s = localSize / 2; s > 0; s >>= 1) {
-        if (tid < s) {
-            sumDot[tid] += sumDot[tid + s];
-            sumU[tid] += sumU[tid + s];
-            sumZ[tid] += sumZ[tid + s];
-        }
-        barrier(CLK_LOCAL_MEM_FENCE);
-    }
-
+    REDUCE_SUM_3(tid, localSize / 2, sumDot, sumU, sumZ);
     if (tid == 0) {
-        float final_dot = sumDot[0];
-        float final_norm_u = sqrt(sumU[0]);
-        float final_norm_z = sqrt(sumZ[0]);
+        const float final_dot = sumDot[0];
+        const float final_norm_u = sqrt(sumU[0]);
+        const float final_norm_z = sqrt(sumZ[0]);
         result[0] = (final_norm_u > 0.0f && final_norm_z > 0.0f) ? (final_dot / (final_norm_u * final_norm_z)) : 0.0f;
     }
 }
