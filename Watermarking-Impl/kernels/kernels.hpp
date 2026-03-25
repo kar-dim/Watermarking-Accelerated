@@ -2,15 +2,18 @@
 #include <string>
 inline const std::string kernels = R"CLC(
 
-#define PAD               (WINDOW_SIZE / 2)
-#define NEIGHB_SIZE       ((WINDOW_SIZE * WINDOW_SIZE) - 1)
-#define N_PIXELS          (float) (WINDOW_SIZE * WINDOW_SIZE)
-#define N_PIXELS_SQ       (N_PIXELS * N_PIXELS)
-#define SHAREDSIZE        (16 + 2 * PAD)
-#define SH_DIM_FAST       (32 + (2 * PAD))
-#define SH_DIM_SLOW       (8 + (2 * PAD))
+#define PAD                 (WINDOW_SIZE / 2)
+#define NEIGHB_SIZE         ((WINDOW_SIZE * WINDOW_SIZE) - 1)
+#define N_PIXELS            (float) (WINDOW_SIZE * WINDOW_SIZE)
+#define N_PIXELS_SQ         (N_PIXELS * N_PIXELS)
+#define SHAREDSIZE          (16 + 2 * PAD)
+#define SH_DIM_FAST         (32 + (2 * PAD))
+#define SH_DIM_SLOW         (8 + (2 * PAD))
+#define ATOMIC_SCALE_F      1000000000.0f
+#define ATOMIC_SCALE_F_INV  1.0e-9f
 
 #pragma OPENCL EXTENSION cl_khr_fp16 : enable
+#pragma OPENCL EXTENSION cl_khr_int64_base_atomics : enable
 
 // TREE REDUCTION MACROS
 #define REDUCE_SUM(TID, START_OFFSET, ARR)                              \
@@ -332,8 +335,8 @@ inline int2 getPackedCoords(const int k) {
 
 #if WINDOW_SIZE == 3
 __kernel void me(__global const float* restrict input,
-    __global float* restrict Rx,
-    __global float* restrict rx,
+    volatile __global ulong* restrict Rx,
+    volatile __global ulong* restrict rx,
     const int width,
     const int height)
 
@@ -407,8 +410,7 @@ __kernel void me(__global const float* restrict input,
 #pragma unroll
         for (int i = 0; i < 32; i++)
             sum += rxPartial[i][localId];
-        const int blockOffset = (y * get_num_groups(0) * 8) + (get_group_id(0) * 8);
-        rx[blockOffset + localId] = sum;
+        atom_add(&rx[localId], (ulong)(sum * ATOMIC_SCALE_F));
     } //no barrier needed here
 
     if (isValid) {
@@ -450,17 +452,16 @@ __kernel void me(__global const float* restrict input,
 #pragma unroll
         for (int k = 0; k < 7; k++)
             totalSum += ((__local float*)rxPartial)[flatId + k * 36];
-        const int blockOffset = (y * get_num_groups(0) * 36) + (get_group_id(0) * 36);
-        Rx[blockOffset + flatId] = totalSum;
+        atom_add(&Rx[flatId], (ulong)(totalSum * ATOMIC_SCALE_F));
     }
 }
 #elif WINDOW_SIZE >= 5
 __kernel void me(
-__global const float* restrict input,
-__global float* restrict Rx,
-__global float* restrict rx,
-const int width,
-const int height) 
+    __global const float* restrict input,
+    volatile __global ulong* restrict Rx,
+    volatile __global ulong* restrict rx,
+    const int width,
+    const int height) 
 {
     const int gx = get_group_id(0);
     const int gy = get_group_id(1);
@@ -515,8 +516,7 @@ const int height)
                 const float4 fb = vload_half4(0, (__local half*)&blockValues[rowB][p + shiftB]);
                 coeffSum += dot(fa, fb);
             }
-            const int outputIndex = (gy * get_num_groups(0) * MAT_SIZE) + (gx * MAT_SIZE) + SOLVER_IDX(r_idx, c_idx);
-            Rx[outputIndex] = coeffSum;
+            atom_add(&Rx[SOLVER_IDX(r_idx, c_idx)], (ulong)(coeffSum * ATOMIC_SCALE_F));
             
         } else {
             // rx
@@ -530,8 +530,7 @@ const int height)
                 const float4 fc = vload_half4(0, (__local half*)&blockValues[ROW_CENTER][p + SHIFT_CENTER]);
                 coeffSum += dot(fn, fc);
             }
-            const int outputIndex = (gy * get_num_groups(0) * NEIGHB_SIZE) + (gx * NEIGHB_SIZE) + nIdx;
-            rx[outputIndex] = coeffSum;
+            atom_add(&rx[nIdx], (ulong)(coeffSum * ATOMIC_SCALE_F));
         }
     }
 }
@@ -559,54 +558,6 @@ __kernel void compute_abs_normalized_mask(
         mask[idx] = fabs(errorSeq[idx]) / denom;
         idx += stride;
     }
-}
-
-__kernel void partial_reduce(
-    __global const float* restrict input,
-    __global float* restrict partials,
-    const int stride,
-    const int totalBlocks,
-    const int blocksPerChunk)
-{
-    const int coeffIdx = get_global_id(0);
-    const int chunkIdx = get_global_id(1);
-
-    if (coeffIdx >= stride)
-        return;
-
-    const int startB = chunkIdx * blocksPerChunk;
-    const int endB = min(startB + blocksPerChunk, totalBlocks);
-
-    float sum = 0.0f;
-    for (int b = startB; b < endB; ++b)
-        sum += input[coeffIdx + b * stride];
-    partials[coeffIdx * get_global_size(1) + chunkIdx] = sum;
-}
-
-__kernel void final_reduce(
-    __global const float* restrict partials,
-    __global float* restrict output,
-    const int numChunks,
-    const int stride)
-{
-    const int coeffIdx = get_group_id(0); 
-    const int tid = get_local_id(0);
-    const int wgSize = get_local_size(0);
-
-    __local float sums[256]; 
-
-    if (coeffIdx >= stride)
-        return;
-
-    float sum = 0.0f;
-    for (int i = tid; i < numChunks; i += wgSize)
-        sum += partials[coeffIdx * numChunks + i];
-    sums[tid] = sum;
-    barrier(CLK_LOCAL_MEM_FENCE);
-
-    REDUCE_SUM(tid, wgSize / 2, sums);
-    if (tid == 0)
-        output[coeffIdx] = sums[0];
 }
 
 )CLC"
@@ -785,10 +736,10 @@ __kernel void calculate_final_correlation(
 // define this kernel ONLY for p=3 and p=5
 // do NOT define this for p=7 and p=9, opencl driver will hang when building!!
 #if WINDOW_SIZE == 3 || WINDOW_SIZE == 5
-__kernel void cholesky_solver(__global const float* restrict A, 
-                                 __global const float* restrict B,
-                                 __global float* restrict X,
-                                 __global int* restrict stopFlag) {
+__kernel void cholesky_solver(__global const ulong* restrict A, 
+                              __global const ulong* restrict B,
+                              __global float* restrict X,
+                              __global int* restrict stopFlag) {
     // packed array size: N * (N + 1) / 2
     #define PACKED_SIZE ((NEIGHB_SIZE * (NEIGHB_SIZE + 1)) / 2)
     
@@ -798,39 +749,12 @@ __kernel void cholesky_solver(__global const float* restrict A,
     float __attribute__((aligned(16))) packed[PACKED_SIZE]; 
     float __attribute__((aligned(16))) localB[NEIGHB_SIZE];
 
-    const bool isAligned = ((((size_t)A | (size_t)B | (size_t)X) & 0xF) == 0);
-    if (isAligned) {
-        __global const float4* vecA = (__global const float4*)A;
-        __global const float4* vecB = (__global const float4*)B;
-        const int vecLimitA = (PACKED_SIZE + 3) / 4;
-        
 #pragma unroll
-        for (int k = 0; k < vecLimitA; k++) {
-            const float4 v = vecA[k];
-            packed[k * 4 + 0] = v.x;
-            packed[k * 4 + 1] = v.y;
-            packed[k * 4 + 2] = v.z;
-            packed[k * 4 + 3] = v.w;
-        }
-
-        const int vecLimitB = (NEIGHB_SIZE + 3) / 4;
+    for (int k = 0; k < PACKED_SIZE; k++)
+        packed[k] = (float)A[k] * ATOMIC_SCALE_F_INV;
 #pragma unroll
-        for (int i = 0; i < vecLimitB; i++) {
-            const float4 v = vecB[i];
-            localB[i * 4 + 0] = v.x;
-            localB[i * 4 + 1] = v.y;
-            localB[i * 4 + 2] = v.z;
-            localB[i * 4 + 3] = v.w;
-        }
-    } 
-    else {
-#pragma unroll
-        for (int k = 0; k < PACKED_SIZE; k++)
-            packed[k] = A[k];
-#pragma unroll
-        for (int i = 0; i < NEIGHB_SIZE; i++)
-            localB[i] = B[i];
-    }
+    for (int i = 0; i < NEIGHB_SIZE; i++)
+        localB[i] = (float)B[i] * ATOMIC_SCALE_F_INV;
 
     // Cholesky decomposition and solving
     for (int i = 0; i < NEIGHB_SIZE; i++) {
@@ -872,7 +796,8 @@ __kernel void cholesky_solver(__global const float* restrict A,
         localB[i] = (localB[i] - sum) / packed[SOLVER_IDX(i, i)];
     }
     *stopFlag = 0;
-exit:
+exit: ;
+    const bool isAligned = ((((size_t)X) & 0xF) == 0);
     if (isAligned) {
         __global float4* vecX = (__global float4*)X;
         const int vecLimitB = NEIGHB_SIZE / 4;
@@ -897,8 +822,8 @@ exit:
 
 #else
 // parallel cholesky solver for p = 7 (N = 48) and p = 9 (N = 80), using one workgroup
-__kernel void cholesky_solver(__global const float* restrict A, 
-                              __global const float* restrict B,
+__kernel void cholesky_solver(__global const ulong* restrict A, 
+                              __global const ulong* restrict B,
                               __global float* restrict X,
                               __global int* restrict stopFlag) {
 
@@ -912,13 +837,13 @@ __kernel void cholesky_solver(__global const float* restrict A,
     // Rx is stored as col-major lower packed (SOLVER_IDX), we unpack it into sA[row][col]
     for (int c = 0; c < NEIGHB_SIZE; c++) {
         for (int r = c + tid; r < NEIGHB_SIZE; r += workers) {
-            sA[r][c] = A[SOLVER_IDX(r, c)];
+            sA[r][c] = (float)A[SOLVER_IDX(r, c)] * ATOMIC_SCALE_F_INV;
         }
     }
 
     // cooperative load of vector B (rx)
     for (int k = tid; k < NEIGHB_SIZE; k += workers)
-        sB[k] = B[k];
+        sB[k] = (float)B[k] * ATOMIC_SCALE_F_INV;
 
     // initialize stopFlag (thread 0 only)
     if (tid == 0) 

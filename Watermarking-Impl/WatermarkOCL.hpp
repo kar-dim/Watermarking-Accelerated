@@ -138,43 +138,19 @@ class WatermarkOCL final : public WatermarkGPU<p> {
         using namespace cl_utils;
         constexpr int RxSize = (this->localSize * (this->localSize + 1)) / 2;
         constexpr int rxSize = this->localSize;
-        constexpr size_t RxGlobalX = ((RxSize + rxReduceLocalSize - 1) / rxReduceLocalSize) * rxReduceLocalSize;
-        constexpr size_t rxGlobalX = ((rxSize + rxReduceLocalSize - 1) / rxReduceLocalSize) * rxReduceLocalSize;
-        constexpr int numChunks = 256;
         return executeKernel(
             [&]() -> af::array {
-                const auto meArraysBaseWidth = meKernelDims.second / optimalLocalSize;
-                const int totalBlocks = this->baseRows * meArraysBaseWidth;
-                const int blocksPerChunk = (totalBlocks + numChunks - 1) / numChunks;
                 const AfclBuffer imageBuf(image);
                 const AfclBuffer coeffsBuf(this->coefficients);
                 const AfclBuffer stopFlagBuf(this->stopFlag);
-                AfclBuffer RxPartialBuf(this->baseRows, meArraysBaseWidth * RxSize, f32);
-                AfclBuffer rxPartialBuf(this->baseRows, meArraysBaseWidth * rxSize, f32);
-                AfclBuffer RxPartialsTempBuf(numChunks * RxSize, f32);
-                AfclBuffer rxPartialsTempBuf(numChunks * rxSize, f32);
-                AfclBuffer RxBuf(RxSize, f32);
-                AfclBuffer rxBuf(rxSize, f32);
-                // call prediction error Rx/rx partials calculation kernel
-                queue.enqueueNDRangeKernel(KernelBuilder(programs, "me").args(imageBuf.get(), RxPartialBuf.get(), rxPartialBuf.get(), this->baseCols, this->baseRows).build(), cl::NDRange(),
+                const AfclBuffer RxBuf(af::constant(0, RxSize, u64));
+                const AfclBuffer rxBuf(af::constant(0, rxSize, u64));
+                // call prediction error Rx/rx matrices calculation kernel
+                queue.enqueueNDRangeKernel(KernelBuilder(programs, "me").args(imageBuf.get(), RxBuf.get(), rxBuf.get(), this->baseCols, this->baseRows).build(), cl::NDRange(),
                                            cl::NDRange(meKernelDims.second, meKernelDims.first), cl::NDRange(optimalLocalSize, 1));
-                // call Rx and rx partial reduce
-                queue.enqueueNDRangeKernel(KernelBuilder(programs, "partial_reduce").args(RxPartialBuf.get(), RxPartialsTempBuf.get(), RxSize, totalBlocks, blocksPerChunk).build(), cl::NDRange(),
-                                           cl::NDRange(RxGlobalX, numChunks), cl::NDRange(rxReduceLocalSize, 1));
-                queue.enqueueNDRangeKernel(KernelBuilder(programs, "partial_reduce").args(rxPartialBuf.get(), rxPartialsTempBuf.get(), rxSize, totalBlocks, blocksPerChunk).build(), cl::NDRange(),
-                                           cl::NDRange(rxGlobalX, numChunks), cl::NDRange(rxReduceLocalSize, 1));
-                // call final Rx and rx reduce, 1 workgroup per coefficient
-                queue.enqueueNDRangeKernel(KernelBuilder(programs, "final_reduce").args(RxPartialsTempBuf.get(), RxBuf.get(), numChunks, RxSize).build(), cl::NDRange(),
-                                           cl::NDRange(RxSize * optimalLocalSize), cl::NDRange(optimalLocalSize));
-                queue.enqueueNDRangeKernel(KernelBuilder(programs, "final_reduce").args(rxPartialsTempBuf.get(), rxBuf.get(), numChunks, rxSize).build(), cl::NDRange(),
-                                           cl::NDRange(rxSize * optimalLocalSize), cl::NDRange(optimalLocalSize));
-                // return the partial buffers to the arrayfire pool (they may be huge for large p)
-                AfclBuffer::unlockArrays(RxPartialBuf, rxPartialBuf, RxPartialsTempBuf, rxPartialsTempBuf);
                 // calculation of coefficients
                 queue.enqueueNDRangeKernel(KernelBuilder(programs, "cholesky_solver").args(RxBuf.get(), rxBuf.get(), coeffsBuf.get(), stopFlagBuf.get()).build(), cl::NDRange(),
                                            cl::NDRange(choleskyLocalSize), cl::NDRange(choleskyLocalSize));
-                // unlock the remaining buffers, optinal but let's help arrayfire manage the memory better
-                AfclBuffer::unlockArrays(RxBuf, rxBuf);
                 // calculation of error sequence which use the coefficients we just computed
                 return computeErrorSequence(image, calculateAbs);
             },
