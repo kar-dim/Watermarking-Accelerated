@@ -546,35 +546,6 @@ const int height)
 #undef BOUNDARY
 #endif
 
-__kernel void reduce_abs_max_partials(
-    __global const float* restrict errorSeq,
-    __global float* restrict partialMax,
-    const int N)
-{
-    const int tid = get_local_id(0);
-    const int stride = get_global_size(0);
-    int idx = get_global_id(0);
-
-    __local float maxCache[256];
-
-    float localMax = 0.0f;
-    while (idx < N) {
-        localMax = fmax(localMax, fabs(errorSeq[idx]));
-        idx += stride;
-    }
-    maxCache[tid] = localMax;
-    barrier(CLK_LOCAL_MEM_FENCE);
-
-    for (int s = 128; s > 0; s >>= 1) {
-        if (tid < s)
-            maxCache[tid] = fmax(maxCache[tid], maxCache[tid + s]);
-        barrier(CLK_LOCAL_MEM_FENCE);
-    }
-
-    if (tid == 0)
-        partialMax[get_group_id(0)] = maxCache[0];
-}
-
 __kernel void compute_abs_normalized_mask(
     __global const float* restrict errorSeq,
     __global float* restrict mask,
@@ -645,31 +616,6 @@ __kernel void final_reduce(
 )CLC"
 R"CLC(
 
-__kernel void partial_max_reduce(
-    __global const float* restrict input,
-    __global float* restrict partials,
-    const int totalElements)
-{
-    const int tid = get_local_id(0);
-    const int gid = get_global_id(0);
-    const int stride = get_global_size(0);
-    
-    __local float scratch[256]; 
-
-    float threadMax = 0.0f;
-    for(int i = gid; i < totalElements; i += stride)
-        threadMax = max(threadMax, input[i]);
-    scratch[tid] = threadMax;
-    barrier(CLK_LOCAL_MEM_FENCE);
-    
-    for (int offset = get_local_size(0) / 2; offset > 0; offset >>= 1) {
-        if (tid < offset)
-            scratch[tid] = max(scratch[tid], scratch[tid + offset]);
-        barrier(CLK_LOCAL_MEM_FENCE);
-    }
-    if (tid == 0)
-        partials[get_group_id(0)] = scratch[0];
-}
 
 __kernel void final_max_reduce(
     __global const float* restrict partials,
@@ -677,7 +623,7 @@ __kernel void final_max_reduce(
     const int numPartials)
 {
     const int tid = get_local_id(0);
-    
+
     __local float scratch[256];
 
     float threadMax = 0.0f;
@@ -685,7 +631,7 @@ __kernel void final_max_reduce(
         threadMax = max(threadMax, partials[i]);
     scratch[tid] = threadMax;
     barrier(CLK_LOCAL_MEM_FENCE);
-    
+
     for (int offset = get_local_size(0) / 2; offset > 0; offset >>= 1) {
         if (tid < offset)
             scratch[tid] = max(scratch[tid], scratch[tid + offset]);
@@ -695,6 +641,43 @@ __kernel void final_max_reduce(
     if (tid == 0)
         output[0] = scratch[0];
 }
+
+#define DEFINE_MAX_REDUCE_KERNEL(NAME, TRANSFORM)                  \
+__kernel void NAME(                                                \
+    __global const float* restrict input,                          \
+    __global float* restrict partials,                             \
+    const int N)                                                   \
+{                                                                  \
+    const int tid = get_local_id(0);                               \
+    const int stride = get_global_size(0);                         \
+    int idx = get_global_id(0);                                    \
+                                                                   \
+    __local float cache[256];                                      \
+                                                                   \
+    float localMax = 0.0f;                                         \
+    while (idx < N) {                                              \
+        localMax = fmax(localMax, TRANSFORM(input[idx]));          \
+        idx += stride;                                             \
+    }                                                              \
+    cache[tid] = localMax;                                         \
+    barrier(CLK_LOCAL_MEM_FENCE);                                  \
+                                                                   \
+    for (int s = 128; s > 0; s >>= 1) {                            \
+        if (tid < s)                                               \
+            cache[tid] = fmax(cache[tid], cache[tid + s]);         \
+        barrier(CLK_LOCAL_MEM_FENCE);                              \
+    }                                                              \
+    if (tid == 0)                                                  \
+        partials[get_group_id(0)] = cache[0];                      \
+}
+
+#define IDENTITY(x) (x)
+#define ABSVAL(x)   fabs(x)
+DEFINE_MAX_REDUCE_KERNEL(partial_max_reduce, IDENTITY)
+DEFINE_MAX_REDUCE_KERNEL(reduce_abs_max_partials, ABSVAL)
+#undef IDENTITY
+#undef ABSVAL
+#undef DEFINE_MAX_REDUCE_KERNEL
 
 __kernel void calculate_error_sequence_and_partial_corr_fused(
     __global const float* restrict mask,
