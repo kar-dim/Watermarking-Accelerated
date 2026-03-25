@@ -8,183 +8,6 @@
 
 using namespace nvcuda;
 
-__device__ void load_neighbor_row_funnel_p3(half& p0, half& p1, half& p2, const half* rowBase) {
-    // shift Amount (0 or 16 bits), if threadIdx.x is odd, we shift right by 1 half (16 bits)
-    const uint32_t shift = (threadIdx.x & 1) * 16;
-    // load 2x 32-bit chunks (4 halves) using the aligned index
-    // cast to uint* to load 32 bits at a time (equivalent to half2)
-    const uint32_t* ptr = reinterpret_cast<const uint32_t*>(&rowBase[threadIdx.x & ~1]);
-    uint32_t u0 = ptr[0]; // Loads halves [aligned, aligned+1]
-    uint32_t u1 = ptr[1]; // Loads halves [aligned+2, aligned+3]
-    // funnel shift (vectorized selection, this reconstructs the sliding window)
-    uint32_t pair0 = __funnelshift_r(u0, u1, shift);
-    uint32_t pairFinal = u1 >> shift;
-    // unpack
-    const half2 hPair0 = reinterpret_cast<half2&>(pair0);
-    const half2 hFinal = reinterpret_cast<half2&>(pairFinal);
-    // store
-    p0 = hPair0.x;
-    p1 = hPair0.y;
-    p2 = hFinal.x;
-}
-
-// column version of the funnel loader (p=3)
-__device__ void load_neighbor_row_funnel_p3_col(half& a, half& b, half& c, const half* rowBase, const int col) {
-    const uint32_t shift = (col & 1) * 16;
-    const uint32_t* ptr = reinterpret_cast<const uint32_t*>(&rowBase[col & ~1]);
-    uint32_t p0 = __funnelshift_r(ptr[0], ptr[1], shift);
-    uint32_t pF = ptr[1] >> shift;
-    const half2 h0 = reinterpret_cast<half2&>(p0);
-    const half2 hF = reinterpret_cast<half2&>(pF);
-    a = h0.x;
-    b = h0.y;
-    c = hF.x;
-}
-
-// column version of the 3x3 helper vector loader
-__device__ void load_neighbor_vec_p3_col(half8& dst, half& center, const half blockValues[3][514], const int col) {
-    load_neighbor_row_funnel_p3_col(dst.a, dst.b, dst.c, blockValues[0], col);
-    load_neighbor_row_funnel_p3_col(dst.d, center, dst.e, blockValues[1], col);
-    load_neighbor_row_funnel_p3_col(dst.f, dst.g, dst.h, blockValues[2], col);
-}
-
-__device__ void load_neighbor_row_funnel_p5(half& p0, half& p1, half& p2, half& p3, half& p4, const half* rowBase) {
-    // shift Amount (0 or 16 bits), if threadIdx.x is odd, we shift right by 1 half (16 bits)
-    const uint32_t shift = (threadIdx.x & 1) * 16;
-    // load 3 x 32-bit chunks (6 halves) using the aligned index
-    // cast to uint* to load 32 bits at a time (equivalent to half2)
-    const uint32_t* ptr = reinterpret_cast<const uint32_t*>(&rowBase[threadIdx.x & ~1]);
-    // funnel shift (vectorized selection, this reconstructs the sliding window)
-    uint32_t pair0 = __funnelshift_r(ptr[0], ptr[1], shift);
-    uint32_t pair1 = __funnelshift_r(ptr[1], ptr[2], shift);
-    uint32_t pairFinal = ptr[2] >> shift;
-    // unpack
-    const half2 hPair0 = reinterpret_cast<half2&>(pair0);
-    const half2 hPair1 = reinterpret_cast<half2&>(pair1);
-    const half2 hFinal = reinterpret_cast<half2&>(pairFinal);
-    // store
-    p0 = hPair0.x;
-    p1 = hPair0.y;
-    p2 = hPair1.x;
-    p3 = hPair1.y;
-    p4 = hFinal.x;
-}
-
-__device__ void load_neighbor_row_funnel_p7(half* dst, const half* rowBase) {
-    // shift Amount (0 or 16 bits), if threadIdx.x is odd, we shift right by 1 half (16 bits)
-    const uint32_t shift = (threadIdx.x & 1) * 16;
-    // load 4 x 32-bit chunks (8 halves) using the aligned index
-    // cast to uint* to load 32 bits at a time (equivalent to half2)
-    const uint32_t* ptr = reinterpret_cast<const uint32_t*>(&rowBase[threadIdx.x & ~1]);
-    // load 4 chunks (128 bits total read, covers 8 halves)
-    uint32_t u0 = ptr[0];
-    uint32_t u1 = ptr[1];
-    uint32_t u2 = ptr[2];
-    uint32_t u3 = ptr[3];
-    // funnel shift (vectorized selection, this reconstructs the sliding window)
-    uint32_t p0 = __funnelshift_r(u0, u1, shift);
-    uint32_t p1 = __funnelshift_r(u1, u2, shift);
-    uint32_t p2 = __funnelshift_r(u2, u3, shift);
-    uint32_t p3 = u3 >> shift;
-    // unpack
-    reinterpret_cast<half2*>(dst)[0] = reinterpret_cast<half2&>(p0);
-    reinterpret_cast<half2*>(dst)[1] = reinterpret_cast<half2&>(p1);
-    reinterpret_cast<half2*>(dst)[2] = reinterpret_cast<half2&>(p2);
-    // store
-    dst[6] = reinterpret_cast<half2&>(p3).x;
-}
-
-__device__ void load_neighbor_row_funnel_p9(half* dst, const half* rowBase) {
-    // shift Amount (0 or 16 bits), if threadIdx.x is odd, we shift right by 1 half (16 bits)
-    const uint32_t shift = (threadIdx.x & 1) * 16;
-    // load 5 x 32-bit chunks (10 halves) to cover the 9 pixels + alignment
-    // cast to uint* to load 32 bits at a time (equivalent to half2)
-    const uint32_t* ptr = reinterpret_cast<const uint32_t*>(&rowBase[threadIdx.x & ~1]);
-    // load 5 chunks (160 bits total read, covers 10 halves)
-    uint32_t u0 = ptr[0];
-    uint32_t u1 = ptr[1];
-    uint32_t u2 = ptr[2];
-    uint32_t u3 = ptr[3];
-    uint32_t u4 = ptr[4];
-    // funnel shift (vectorized selection, this reconstructs the sliding window)
-    uint32_t p0 = __funnelshift_r(u0, u1, shift);
-    uint32_t p1 = __funnelshift_r(u1, u2, shift);
-    uint32_t p2 = __funnelshift_r(u2, u3, shift);
-    uint32_t p3 = __funnelshift_r(u3, u4, shift);
-    uint32_t p4 = u4 >> shift; // Last chunk
-    // unpack
-    reinterpret_cast<half2*>(dst)[0] = reinterpret_cast<half2&>(p0);
-    reinterpret_cast<half2*>(dst)[1] = reinterpret_cast<half2&>(p1);
-    reinterpret_cast<half2*>(dst)[2] = reinterpret_cast<half2&>(p2);
-    reinterpret_cast<half2*>(dst)[3] = reinterpret_cast<half2&>(p3);
-    // store
-    dst[8] = reinterpret_cast<half2&>(p4).x;
-}
-
-__device__ void load_neighbor_vec_p5(half8* dst, const half blockValues[5][260], half& center) {
-    half8 v0, v1, v2;
-    load_neighbor_row_funnel_p5(v0.a, v0.b, v0.c, v0.d, v0.e, blockValues[0]);
-    load_neighbor_row_funnel_p5(v0.f, v0.g, v0.h, v1.a, v1.b, blockValues[1]);
-    load_neighbor_row_funnel_p5(v1.c, v1.d, center, v1.e, v1.f, blockValues[2]);
-    load_neighbor_row_funnel_p5(v1.g, v1.h, v2.a, v2.b, v2.c, blockValues[3]);
-    load_neighbor_row_funnel_p5(v2.d, v2.e, v2.f, v2.g, v2.h, blockValues[4]);
-    // STS.128
-    dst[0] = v0;
-    dst[1] = v1;
-    dst[2] = v2;
-    dst[3] = {};
-}
-
-__device__ void load_neighbor_vec_p7(half8* dst, const half blockValues[7][134], half& center) {
-    half rows[7][8]; // 8 cols for padding/alignment simplicity
-#pragma unroll
-    for (int i = 0; i < 7; i++)
-        load_neighbor_row_funnel_p7(rows[i], blockValues[i]);
-
-    center = rows[3][3];
-    half* d = reinterpret_cast<half*>(dst);
-    int idx = 0;
-#pragma unroll
-    for (int r = 0; r < 7; r++) {
-        if (r == 3) {
-            d[idx++] = rows[r][0];
-            d[idx++] = rows[r][1];
-            d[idx++] = rows[r][2];
-            d[idx++] = rows[r][4];
-            d[idx++] = rows[r][5];
-            d[idx++] = rows[r][6];
-        } else {
-#pragma unroll
-            for (int c = 0; c < 7; c++)
-                d[idx++] = rows[r][c];
-        }
-    }
-}
-
-__device__ void load_neighbor_vec_p9(half8* dst, const half blockValues[9][136], half& center) {
-    half rows[9][10];
-#pragma unroll
-    for (int i = 0; i < 9; i++)
-        load_neighbor_row_funnel_p9(reinterpret_cast<half*>(rows[i]), blockValues[i]);
-    center = rows[4][4];
-    // pack 80 halves into 10 half8 vectors (skip center)
-    half* d = reinterpret_cast<half*>(dst);
-    int idx = 0;
-#pragma unroll
-    for (int r = 0; r < 9; r++) {
-        if (r == 4) {
-#pragma unroll
-            for (int c = 0; c < 9; c++)
-                if (c != 4)
-                    d[idx++] = rows[r][c];
-        } else {
-#pragma unroll
-            for (int c = 0; c < 9; c++)
-                d[idx++] = rows[r][c];
-        }
-    }
-}
-
 __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const int width, const int height, const int totalBlocksY, const int taskTotal) {
     constexpr int IN_STRIDE = 40; // 20 floats -> 40 halves
     constexpr int OUT_STRIDE = 20;
@@ -223,9 +46,7 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
         half centerTop, centerBot;
         // load pixel A (tid)
         if ((by * 512 + tid) < height) {
-            load_neighbor_row_funnel_p3(vecTop.a, vecTop.b, vecTop.c, blockValues[0]);
-            load_neighbor_row_funnel_p3(vecTop.d, centerTop, vecTop.e, blockValues[1]);
-            load_neighbor_row_funnel_p3(vecTop.f, vecTop.g, vecTop.h, blockValues[2]);
+            load_neighbor_vec<3>(&vecTop, blockValues, centerTop, tid);
         } else {
             vecTop = {};
             centerTop = blockValues[1][tid + 1];
@@ -233,7 +54,7 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
 
         // load pixel B (tid + 256)
         if ((by * 512 + tid + 256) < height) {
-            load_neighbor_vec_p3_col(vecBot, centerBot, blockValues, tid + 256);
+            load_neighbor_vec<3>(&vecBot, blockValues, centerBot, tid + 256);
         } else {
             vecBot = {};
             centerBot = blockValues[1][tid + 128 + 1];
@@ -338,7 +159,7 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
         half8 localVec8[3];
 
         if ((by * 256 + tid) < height) {
-            load_neighbor_vec_p5(localVec8, blockValues, centerVal);
+            load_neighbor_vec<5>(localVec8, blockValues, centerVal, tid);
         } else {
 #pragma unroll
             for (int i = 0; i < 3; i++)
@@ -454,7 +275,7 @@ __global__ void me_p7(const float* __restrict__ input, float* __restrict__ Rx, f
 
         // load window
         if ((by * 128 + tid) < height) {
-            load_neighbor_vec_p7(localVec8, blockValues, centerVal);
+            load_neighbor_vec<7>(localVec8, blockValues, centerVal, tid);
         } else {
 #pragma unroll
             for (int i = 0; i < 6; ++i)
@@ -569,7 +390,7 @@ __global__ void me_p9(const float* __restrict__ input, float* __restrict__ Rx, f
         half centerVal;
         half8 localVec8[10];
         if ((by * 128 + tid) < height) {
-            load_neighbor_vec_p9(localVec8, blockValues, centerVal);
+            load_neighbor_vec<9>(localVec8, blockValues, centerVal, tid);
         } else {
 #pragma unroll
             for (int i = 0; i < 10; ++i)

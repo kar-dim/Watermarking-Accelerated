@@ -89,6 +89,7 @@ __device__ __forceinline__ void fillBlockStripVertical(half blockValues[p][Strip
     constexpr float scaleFactor = 0.00392156862f;
     constexpr int radius = (p - 1) / 2;
     constexpr int totalPixels = p * StripHeight;
+    constexpr int blockSize = p <= 5 ? 256 : 128; // note: blockDim.x is slower here! it is important to use constexpr for this critical hot loop!
 
     const int baseGlobalCol = (bx * 1) - radius;
     const int baseGlobalRow = (by * PixelsPerBlock) - radius;
@@ -99,7 +100,7 @@ __device__ __forceinline__ void fillBlockStripVertical(half blockValues[p][Strip
         const int globalCol = clamp(width - 1, 0, baseGlobalCol + c);
         const int globalRow = clamp(height - 1, 0, baseGlobalRow + r);
         blockValues[c][r] = __float2half(input[(globalCol * height) + globalRow] * scaleFactor);
-        idx += blockDim.x;
+        idx += blockSize;
     }
 }
 
@@ -600,16 +601,52 @@ __device__ void RxStreamPass(const int tid, float (*__restrict__ RxLocal)[92], f
     }
 }
 
-// Prediction Error helper device kernels
-__device__ void load_neighbor_row_funnel_p3(half& p0, half& p1, half& p2, const half* rowBase);
-__device__ void load_neighbor_row_funnel_p3_col(half& a, half& b, half& c, const half* rowBase, const int col);
-__device__ void load_neighbor_vec_p3_col(half8& dst, half& center, const half blockValues[3][258], const int col);
-__device__ void load_neighbor_row_funnel_p5(half& p0, half& p1, half& p2, half& p3, half& p4, const half* rowBase);
-__device__ void load_neighbor_row_funnel_p7(half* dst, const half* rowBase);
-__device__ void load_neighbor_row_funnel_p9(half* dst, const half* rowBase);
-__device__ void load_neighbor_vec_p5(half8* dst, const half blockValues[5][260], half& center);
-__device__ void load_neighbor_vec_p7(half8* dst, const half blockValues[7][134], half& center);
-__device__ void load_neighbor_vec_p9(half8* dst, const half blockValues[9][136], half& center);
+// helper funnel shift functions, used to load neighbors ("patches") by shifting half values with funnel shift
+template <int p>
+__device__ void load_neighbor_row_funnel(half* dst, const half* rowBase, const int col) {
+    // if our starting column is odd, the data we want starts "halfway" in a 32-bit chunk, we must shift right by 16 bits
+    const uint32_t shift = (col & 1) * 16;
+    // force the pointer to the nearest 32-bit aligned place, by masking the lowest bit (of the column index)
+    const uint32_t* ptr = reinterpret_cast<const uint32_t*>(&rowBase[col & ~1]);
+    // window extract, we read two 32-bit chunks, concat them into 64-bits and funnel shift right to get the 32-bit (half2) window we want
+#pragma unroll
+    for (int i = 0; i < p / 2; i++) {
+        uint32_t pair = __funnelshift_r(ptr[i], ptr[i + 1], shift);
+        reinterpret_cast<half2*>(dst)[i] = reinterpret_cast<half2&>(pair);
+    }
+    // p is always odd -> we will always have one dangling half left over at the end of the row, We shift it and extract the lowest 16 bits
+    uint32_t lastChunk = ptr[p / 2] >> shift;
+    dst[p - 1] = reinterpret_cast<half2&>(lastChunk).x;
+}
+
+template <int p, int RowStride>
+__device__ void load_neighbor_vec(half8* dst, const half blockValues[p][RowStride], half& center, const int col) {
+    constexpr int centerIdx = p / 2;
+
+    // pad the row width to p + 1 (forcing an even number of elements), combined with alignas(4) this guarantees every row starts on 4-byte boundary,
+    // ensuring the reinterpret_cast<half2*> in the funnel function never throws misaligned access error
+    alignas(4) half rows[p][p + 1];
+#pragma unroll
+    for (int i = 0; i < p; i++)
+        load_neighbor_row_funnel<p>(rows[i], blockValues[i], col);
+    // extract the center pixel
+    center = rows[centerIdx][centerIdx];
+    // flatten the remaining PxP window into a 1D vector array
+    half* d = reinterpret_cast<half*>(dst);
+    int idx = 0;
+#pragma unroll
+    for (int r = 0; r < p; r++) {
+#pragma unroll
+        for (int c = 0; c < p; c++) {
+            if (r == centerIdx && c == centerIdx)
+                continue;
+            d[idx++] = rows[r][c];
+        }
+    }
+    // for p=5 only clear the last vec (last 8 halfs) for the WMMA path later
+    if constexpr (p == 5)
+        dst[3] = {};
+}
 
 // Prediction Error kernels (ME) for p = 3, p = 5, p = 7 and p = 9
 __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const int width, const int height, const int totalBlocksY, const int taskTotal);
