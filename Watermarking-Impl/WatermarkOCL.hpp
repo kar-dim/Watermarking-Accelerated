@@ -196,7 +196,7 @@ class WatermarkOCL final : public WatermarkGPU<p> {
                                            cl::NDRange(globalSize), cl::NDRange(optimalLocalSize));
 
                 // final max reduction
-                queue.enqueueNDRangeKernel(KernelBuilder(programs, "reduce_abs_max_final").args(partialMaxBuf.get(), maxValBuf.get(), workGroups).build(), cl::NDRange(), cl::NDRange(optimalLocalSize),
+                queue.enqueueNDRangeKernel(KernelBuilder(programs, "final_max_reduce").args(partialMaxBuf.get(), maxValBuf.get(), workGroups).build(), cl::NDRange(), cl::NDRange(optimalLocalSize),
                                            cl::NDRange(optimalLocalSize));
 
                 // normalize mask

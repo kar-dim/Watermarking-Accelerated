@@ -575,35 +575,6 @@ __kernel void reduce_abs_max_partials(
         partialMax[get_group_id(0)] = maxCache[0];
 }
 
-__kernel void reduce_abs_max_final(
-    __global const float* restrict partialMax,
-    __global float* restrict globalMax,
-    const int numPartials)
-{
-    const int tid = get_local_id(0);
-
-    __local float maxCache[256];
-
-    float localMax = 0.0f;
-    int idx = tid;
-    while (idx < numPartials) {
-        localMax = fmax(localMax, partialMax[idx]);
-        idx += 256;
-    }
-    
-    maxCache[tid] = localMax;
-    barrier(CLK_LOCAL_MEM_FENCE);
-
-    for (int s = 128; s > 0; s >>= 1) {
-        if (tid < s)
-            maxCache[tid] = fmax(maxCache[tid], maxCache[tid + s]);
-        barrier(CLK_LOCAL_MEM_FENCE);
-    }
-
-    if (tid == 0)
-        *globalMax = maxCache[0];
-}
-
 __kernel void compute_abs_normalized_mask(
     __global const float* restrict errorSeq,
     __global float* restrict mask,
@@ -860,7 +831,7 @@ __kernel void calculate_final_correlation(
 // naive very low latency 1-thread solver
 // define this kernel ONLY for p=3 and p=5
 // do NOT define this for p=7 and p=9, opencl driver will hang when building!!
-#if WINDOW_SIZE == 3 && WINDOW_SIZE == 5
+#if WINDOW_SIZE == 3 || WINDOW_SIZE == 5
 __kernel void cholesky_solver(__global const float* restrict A, 
                                  __global const float* restrict B,
                                  __global float* restrict X,
