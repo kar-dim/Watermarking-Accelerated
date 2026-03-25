@@ -70,9 +70,6 @@ class WatermarkGPU : public WatermarkBase {
     // computes error sequence, used in prediction error mask
     virtual af::array computeErrorSequence(const af::array& image, const bool calculateAbs) const = 0;
 
-    // computes error sequence between two inputs, used in correlation calculation. calculateAbs is always false
-    virtual af::array computeErrorSequence(const af::array& inputA, const af::array& inputB) const = 0;
-
     // Used in both creation and detection of the watermark,
     // calculates error sequence and prediction error filter (coefficients)
     virtual af::array computePredictionErrorData(const af::array& image, const bool calculateAbs) const = 0;

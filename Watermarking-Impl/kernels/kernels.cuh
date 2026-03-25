@@ -192,7 +192,7 @@ __global__ void nvf_u_and_sumsq_fused(const float* __restrict__ input, const flo
 }
 
 // main kernel for error sequence calculation
-template <int p, bool FUSED>
+template <int p>
 __global__ void calculate_error_sequence(const float* __restrict__ inputA, const float* __restrict__ inputB, float* __restrict__ x_, const float* __restrict__ coeffs, const int width,
                                          const int height, const bool calculateAbs, const int* __restrict__ stopFlag) {
     constexpr int pad = p / 2;
@@ -207,7 +207,7 @@ __global__ void calculate_error_sequence(const float* __restrict__ inputA, const
 
     if (tid < coeffsSize)
         sCoeffs[tid] = coeffs[tid];
-    fillBlock<FUSED, p, shDimFast, shDimSlow>(inputA, inputB, &region[0][0], width, height);
+    fillBlock<false, p, shDimFast, shDimSlow>(inputA, inputB, &region[0][0], width, height);
     __syncthreads();
 
     const int y = blockIdx.x * blockDim.x + threadIdx.x;

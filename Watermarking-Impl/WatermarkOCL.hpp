@@ -134,26 +134,6 @@ class WatermarkOCL final : public WatermarkGPU<p> {
         return errorSequenceBuf.getArray();
     }
 
-    af::array computeErrorSequence(const af::array& inputA, const af::array& inputB) const override {
-        using namespace cl_utils;
-        const AfclBuffer inputABuf(inputA);
-        const AfclBuffer inputBBuf(inputB);
-        const AfclBuffer coeffsBuf(this->coefficients);
-        const AfclBuffer stopFlagBuf(this->stopFlag);
-        AfclBuffer errorSequenceBuf(this->baseRows, this->baseCols, f32);
-        // transposed global dimensions because of column-major order in arrayfire
-        executeKernel(
-            [&]() {
-                queue.enqueueNDRangeKernel(KernelBuilder(programs, "error_sequence_fused")
-                                               .args(inputABuf.get(), inputBBuf.get(), errorSequenceBuf.get(), coeffsBuf.get(), this->baseCols, this->baseRows, stopFlagBuf.get())
-                                               .build(),
-                                           cl::NDRange(), cl::NDRange(texKernelDims.first, texKernelDims.second), cl::NDRange(windowLocalSize.first, windowLocalSize.second));
-            },
-            "error_sequence_fused");
-        errorSequenceBuf.unlock();
-        return errorSequenceBuf.getArray();
-    }
-
     af::array computePredictionErrorData(const af::array& image, const bool calculateAbs) const override {
         using namespace cl_utils;
         constexpr int RxSize = (this->localSize * (this->localSize + 1)) / 2;

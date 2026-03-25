@@ -233,33 +233,6 @@ __kernel void error_sequence(
     }
 }
 
-__kernel void error_sequence_fused(
-    __global const float* restrict inputA, 
-    __global const float* restrict inputB,
-    __global float* restrict x_,
-    __constant float* restrict coeffs,
-    const int width,
-    const int height,
-    __constant int* restrict stopFlag) 
-{
-    const int x = get_global_id(1);
-    const int y = get_global_id(0);
-
-    __local __attribute__((aligned(16))) float region[SH_DIM_SLOW][SH_DIM_FAST];
-    __local float* centerPtr = &region[get_local_id(1) + PAD][get_local_id(0) + PAD];
-    
-    fillBlockFused(inputA, inputB, &region[0][0], width, height);
-    barrier(CLK_LOCAL_MEM_FENCE);
-
-    if (x < width && y < height) {
-        if (*stopFlag) { 
-            x_[x * height + y] = 0.0f; 
-            return; 
-        }
-        x_[x * height + y] = error_sequence_coeffs_filter(centerPtr, coeffs);
-    }
-}
-
 __kernel void compute_u_and_partial_sumsq(
     __global const float* restrict mask,
     __global const float* restrict w,
@@ -804,7 +777,7 @@ __kernel void calculate_error_sequence_and_partial_corr_fused(
 
     __local __attribute__((aligned(16))) float region[SH_DIM_SLOW][SH_DIM_FAST];
     
-    // Create the pointer directly to the center pixel of this thread's window
+    // create the pointer directly to the center pixel of this thread's window
     __local float* centerPtr = &region[get_local_id(1) + PAD][get_local_id(0) + PAD];
     
     __local float dotCache[256];
