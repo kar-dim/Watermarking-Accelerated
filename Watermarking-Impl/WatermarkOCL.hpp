@@ -25,7 +25,6 @@ class WatermarkOCL final : public WatermarkGPU<p> {
     using WatermarkBase::alignUp;
 
     static constexpr unsigned int optimalLocalSize = 256; // safe universal local size for OpenCL, used almost anywhere
-    static constexpr unsigned int rxReduceLocalSize = 64;
     static constexpr std::pair windowLocalSize = {32, 8};
     static constexpr unsigned int choleskyLocalSize = p < 7 ? 1 : 64; // for p >= 7 we use 64-thread cholesky solver, for p < 7 single thread (faster for small p)
 
@@ -42,20 +41,15 @@ class WatermarkOCL final : public WatermarkGPU<p> {
         const AfclBuffer inputBuf(inputImage);
         const AfclBuffer randBuf(this->randomMatrix);
         const AfclBuffer uBuf(inputGrayImage.dims(), f32);
-        const AfclBuffer sumSqBuf(1, f32);
+        const AfclBuffer sumSqBuf(af::constant(0, 1, u64));
         AfclBuffer outputBuf(inputImage.dims(), u8);
         if (maskType == MaskMethod::NVF) {
-            const int workGroups = static_cast<int>((this->texKernelDims.first / windowLocalSize.first) * (this->texKernelDims.second / windowLocalSize.second));
-            const AfclBuffer partialsBuf(workGroups, f32);
             executeKernel(
                 [&]() {
                     // fused kernel to compute NVF mask, strengthened watermark (u) and sum of squares of u
                     queue.enqueueNDRangeKernel(
-                        KernelBuilder(programs, "nvf_u_and_partial_sumsq_fused").args(inputGrayBuf.get(), randBuf.get(), uBuf.get(), partialsBuf.get(), this->baseCols, this->baseRows).build(),
-                        cl::NDRange(), cl::NDRange(texKernelDims.first, texKernelDims.second), cl::NDRange(windowLocalSize.first, windowLocalSize.second));
-                    // reduce the partial sums (single workgroup)
-                    queue.enqueueNDRangeKernel(KernelBuilder(programs, "reduce_sumsq_partials").args(partialsBuf.get(), sumSqBuf.get(), workGroups).build(), cl::NDRange(),
-                                               cl::NDRange(optimalLocalSize), cl::NDRange(optimalLocalSize));
+                        KernelBuilder(programs, "nvf_u_and_sumsq_fused").args(inputGrayBuf.get(), randBuf.get(), uBuf.get(), sumSqBuf.get(), this->baseCols, this->baseRows).build(), cl::NDRange(),
+                        cl::NDRange(texKernelDims.first, texKernelDims.second), cl::NDRange(windowLocalSize.first, windowLocalSize.second));
                     // apply watermark
                     const int workGroupsApply = calculateLocalGroupsNumber(this->totalPixels, optimalLocalSize);
                     const int globalSizeApply = workGroupsApply * optimalLocalSize;
@@ -72,7 +66,6 @@ class WatermarkOCL final : public WatermarkGPU<p> {
             const int maxGlobalSize = maxWorkGroups * optimalLocalSize;
             const AfclBuffer errorSeqMaxBuf(1, f32);
             const AfclBuffer maxPartialsBuf(maxWorkGroups, f32);
-            const AfclBuffer partialsBuf(maxWorkGroups, f32);
             executeKernel(
                 [&]() {
                     // compute max error sequence partials
@@ -83,11 +76,8 @@ class WatermarkOCL final : public WatermarkGPU<p> {
                                                cl::NDRange(optimalLocalSize), cl::NDRange(optimalLocalSize));
                     // fused kernel to compute ME mask, strengthened watermark (u) and sum of squares of u
                     queue.enqueueNDRangeKernel(
-                        KernelBuilder(programs, "me_u_and_partial_sumsq_fused").args(errorSeqBuf.get(), randBuf.get(), uBuf.get(), partialsBuf.get(), errorSeqMaxBuf.get(), this->totalPixels).build(),
+                        KernelBuilder(programs, "me_u_and_sumsq_fused").args(errorSeqBuf.get(), randBuf.get(), uBuf.get(), sumSqBuf.get(), errorSeqMaxBuf.get(), this->totalPixels).build(),
                         cl::NDRange(), cl::NDRange(maxGlobalSize), cl::NDRange(optimalLocalSize));
-                    // reduce sumsq partials
-                    queue.enqueueNDRangeKernel(KernelBuilder(programs, "reduce_sumsq_partials").args(partialsBuf.get(), sumSqBuf.get(), maxWorkGroups).build(), cl::NDRange(),
-                                               cl::NDRange(optimalLocalSize), cl::NDRange(optimalLocalSize));
                     // apply watermark
                     queue.enqueueNDRangeKernel(KernelBuilder(programs, "apply_watermark_fused")
                                                    .args(inputBuf.get(), uBuf.get(), sumSqBuf.get(), outputBuf.get(), this->strengthNumerator, this->totalPixels, static_cast<int>(inputImage.dims(2)))

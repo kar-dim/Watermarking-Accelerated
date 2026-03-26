@@ -6,7 +6,6 @@ inline const std::string kernels = R"CLC(
 #define NEIGHB_SIZE         ((WINDOW_SIZE * WINDOW_SIZE) - 1)
 #define N_PIXELS            (float) (WINDOW_SIZE * WINDOW_SIZE)
 #define N_PIXELS_SQ         (N_PIXELS * N_PIXELS)
-#define SHAREDSIZE          (16 + 2 * PAD)
 #define SH_DIM_FAST         (32 + (2 * PAD))
 #define SH_DIM_SLOW         (8 + (2 * PAD))
 #define ATOMIC_SCALE_F      1000000000.0f
@@ -117,11 +116,11 @@ __kernel void nvf(
     nvf[(x * height) + y] = compute_nvf_mask(region, shSlow, shFast);
 }
 
-__kernel void nvf_u_and_partial_sumsq_fused(
+__kernel void nvf_u_and_sumsq_fused(
     const __global float* restrict input,
     const __global float* restrict w,
     __global float* restrict u,
-    __global float* restrict partials,
+    volatile __global ulong* restrict globalSumSq,
     const int width, const int height)
 {
     const int x = get_global_id(1);
@@ -151,20 +150,19 @@ __kernel void nvf_u_and_partial_sumsq_fused(
     
     REDUCE_SUM(linearTid, (get_local_size(0) * get_local_size(1)) / 2, sums);
     if (linearTid == 0)
-        partials[get_group_id(1) * get_num_groups(0) + get_group_id(0)] = sums[0];
+        atom_add(globalSumSq, (ulong)(sums[0] * ATOMIC_SCALE_F));
 }
 
-__kernel void me_u_and_partial_sumsq_fused(
+__kernel void me_u_and_sumsq_fused(
     __global const float* restrict errorSeq,
     __global const float* restrict w,
     __global float* restrict u,
-    __global float* restrict partials,
+    volatile __global ulong* restrict globalSumSq,
     __global const float* restrict maxVal,
     const int N)
 {
     const int tid = get_local_id(0);
     const int stride = get_global_size(0);
-    const int gid = get_group_id(0);
     int idx = get_global_id(0);
 
     __local float sums[256];
@@ -177,15 +175,14 @@ __kernel void me_u_and_partial_sumsq_fused(
         const float uVal = maskVal * w[idx];
         u[idx] = uVal;
         localSumSq += uVal * uVal;
-        
         idx += stride;
     }
     sums[tid] = localSumSq;
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    REDUCE_SUM(tid, (get_local_size(0) * get_local_size(1)) / 2, sums);
+    REDUCE_SUM(tid, get_local_size(0) / 2, sums);
     if (tid == 0)
-        partials[gid] = sums[0];
+        atom_add(globalSumSq, (ulong)(sums[0] * ATOMIC_SCALE_F));
 }
 
 //use pointer arithmetic for dot product to help compilers optimize address calculations fast
@@ -235,39 +232,16 @@ __kernel void error_sequence(
     }
 }
 
-__kernel void reduce_sumsq_partials(
-    __global const float* restrict partials,
-    __global float* restrict globalSumSq,
-    const int numPartials)
-{
-    const int tid = get_local_id(0);
-    __local float sums[256];
-
-    float localSum = 0.0f;
-    int idx = tid;
-    const int stride = get_global_size(0);
-    while (idx < numPartials) {
-        localSum += partials[idx];
-        idx += stride;
-    }
-    sums[tid] = localSum;
-    barrier(CLK_LOCAL_MEM_FENCE);
-
-    REDUCE_SUM(tid, get_local_size(0) / 2, sums);
-    if (tid == 0)
-        *globalSumSq = sums[0];
-}
-
 __kernel void apply_watermark_fused(
     __global const float* restrict input,
     __global const float* restrict u,
-    __constant float* restrict sumSqPtr,
+    __constant ulong* restrict sumSqPtr,
     __global unsigned char* restrict output,
     const float strengthNumerator,
     const int planeElements,
     const int numChannels) 
 {
-    const float uSumSquared = *sumSqPtr;
+    const float uSumSquared = (float)(*sumSqPtr) * ATOMIC_SCALE_F_INV;
     float strength = (uSumSquared > 1e-12f) ? (strengthNumerator * rsqrt(uSumSquared)) : 0.0f;
     const int stride = get_global_size(0);
     int idx = get_global_id(0);
