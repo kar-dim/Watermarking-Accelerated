@@ -7,6 +7,7 @@
 #include "WatermarkGpu.hpp"
 #include <algorithm>
 #include <arrayfire.h>
+#include <cstdint>
 #include <cub/cub.cuh>
 #include <cuda_runtime.h>
 #include <string>
@@ -69,10 +70,10 @@ class WatermarkCuda final : public WatermarkGPU<p> {
     af::array computeStrengthenedWatermark(const af::array& inputGrayImage, const af::array& inputImage, const MaskMethod maskType) const override {
         const af::array u(inputGrayImage.dims(), f32);
         const af::array output(inputImage.dims(), u8);
-        const af::array sumSq = af::constant(0.0f, 1, f32);
+        const af::array sumSq = af::constant(0, 1, u64);
 
         float* uPtr = u.device<float>();
-        float* sumSqPtr = sumSq.device<float>();
+        uint64_t* sumSqPtr = sumSq.device<uint64_t>();
         // fused kernel to compute NVF mask, strengthened watermark (u) and sum of squares of u
         if (maskType == MaskMethod::NVF) {
             const dim3 gridSize = cuda_utils::gridSizeCalculate(windowBlockSize, this->baseCols, this->baseRows);
@@ -126,10 +127,10 @@ class WatermarkCuda final : public WatermarkGPU<p> {
         constexpr int RxSize = (this->localSize * (this->localSize + 1)) / 2;
         constexpr int rxSize = this->localSize;
 
-        const af::array Rx = af::constant(0.0f, RxSize, 1, f32);
-        const af::array rx = af::constant(0.0f, rxSize, 1, f32);
-        float* RxPtr = Rx.device<float>();
-        float* rxPtr = rx.device<float>();
+        const af::array Rx = af::constant(0, RxSize, 1, u64);
+        const af::array rx = af::constant(0, rxSize, 1, u64);
+        uint64_t* RxPtr = Rx.device<uint64_t>();
+        uint64_t* rxPtr = rx.device<uint64_t>();
 
         // compute autocorrelation matrix Rx and vector rx for the ME coefficients using grid-stride kernels optimized for the number of SMs on the GPU
         if constexpr (p == 3)

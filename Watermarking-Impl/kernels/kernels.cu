@@ -8,7 +8,7 @@
 
 using namespace nvcuda;
 
-__global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const int width, const int height, const int totalBlocksY, const int taskTotal) {
+__global__ void me_p3(const float* __restrict__ input, uint64_t* __restrict__ Rx, uint64_t* __restrict__ rx, const int width, const int height, const int totalBlocksY, const int taskTotal) {
     constexpr int IN_STRIDE = 40; // 20 floats -> 40 halves
     constexpr int OUT_STRIDE = 20;
 
@@ -117,11 +117,11 @@ __global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, f
             // tile 4 (bottom right): pixel B results (offset: rows+8, cols+8)
             sum += RxLocal[w * 32 + 8 + coords.x][8 + coords.y];
         }
-        atomicAdd(&Rx[tid], sum);
+        atomicAdd(Rx + tid, static_cast<uint64_t>(sum * ATOMIC_SCALE_F));
     }
 }
 
-__global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const int width, const int height, const int totalBlocksY, const int taskTotal) {
+__global__ void me_p5(const float* __restrict__ input, uint64_t* __restrict__ Rx, uint64_t* __restrict__ rx, const int width, const int height, const int totalBlocksY, const int taskTotal) {
     constexpr int IN_STRIDE = 72;
     constexpr int OUT_STRIDE = 36; // 36 + 0, no need to pad for bank conflicts!
 
@@ -222,7 +222,7 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
 #pragma unroll
         for (int w = 0; w < 8; w++)
             sum += RxLocal[w * 32 + coords.x][coords.y];
-        atomicAdd(&Rx[k], sum);
+        atomicAdd(Rx + k, static_cast<uint64_t>(sum * ATOMIC_SCALE_F));
     };
 
     // pass 1: [0, 255]
@@ -234,7 +234,7 @@ __global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, f
     }
 }
 
-__global__ void me_p7(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const int width, const int height, const int totalBlocksY, const int taskTotal) {
+__global__ void me_p7(const float* __restrict__ input, uint64_t* __restrict__ Rx, uint64_t* __restrict__ rx, const int width, const int height, const int totalBlocksY, const int taskTotal) {
     constexpr int IN_STRIDE = 120;
     constexpr int OUT_STRIDE = 60; // 56 + 4 to avoid bank conflicts
 
@@ -346,11 +346,11 @@ __global__ void me_p7(const float* __restrict__ input, float* __restrict__ Rx, f
 #pragma unroll
         for (int w = 0; w < 4; w++)
             sum += RxLocal[w * 48 + coords.x][coords.y];
-        atomicAdd(&Rx[k], sum);
+        atomicAdd(Rx + k, static_cast<uint64_t>(sum * ATOMIC_SCALE_F));
     }
 }
 
-__global__ void me_p9(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const int width, const int height, const int totalBlocksY, const int taskTotal) {
+__global__ void me_p9(const float* __restrict__ input, uint64_t* __restrict__ Rx, uint64_t* __restrict__ rx, const int width, const int height, const int totalBlocksY, const int taskTotal) {
     constexpr int INPUT_STRIDE = 184;
     constexpr int OUT_STRIDE = 92; // 88 + 4 to avoid bank conflicts
 
@@ -494,7 +494,7 @@ __global__ void me_p9(const float* __restrict__ input, float* __restrict__ Rx, f
     writeRxVec<80>(rx, rxPersistent, temp_storage[warpId], warpOutput);
 }
 
-__global__ void me_u_and_sumsq_fused(const float* __restrict__ errorSeq, const float* __restrict__ w, float* __restrict__ u, float* __restrict__ globalSumSq, const float* __restrict__ maxVal,
+__global__ void me_u_and_sumsq_fused(const float* __restrict__ errorSeq, const float* __restrict__ w, float* __restrict__ u, uint64_t* __restrict__ globalSumSq, const float* __restrict__ maxVal,
                                      const int N) {
     constexpr int blockSize = 768;
 
@@ -521,12 +521,12 @@ __global__ void me_u_and_sumsq_fused(const float* __restrict__ errorSeq, const f
     // block reduce with cub and atomic add to global sum by the leader
     const float blockTotalSq = BlockReduceT(temp_storage).Sum(threadSumSq);
     if (tid == 0)
-        atomicAdd(globalSumSq, blockTotalSq);
+        atomicAdd(globalSumSq, static_cast<uint64_t>(blockTotalSq * ATOMIC_SCALE_F));
 }
 
-__global__ void apply_watermark_fused(const float* __restrict__ input, const float* __restrict__ u, const float* __restrict__ sumSqPtr, uint8_t* __restrict__ output, const float strengthNumerator,
+__global__ void apply_watermark_fused(const float* __restrict__ input, const float* __restrict__ u, const uint64_t* __restrict__ sumSqPtr, uint8_t* __restrict__ output, const float strengthNumerator,
                                       const int planeElements, const int numChannels) {
-    const float uSumSquared = *sumSqPtr; // read the precomputed sum of squares from global memory (all threads read the same value, it is cached)
+    const float uSumSquared = static_cast<float>(*sumSqPtr) * ATOMIC_SCALE_F_INV; // read the precomputed sum of squares from global memory (all threads read the same value, it is cached)
     const float strength = uSumSquared > 1e-12f ? strengthNumerator * rsqrtf(uSumSquared) : 0.0f;
     // grid stride loop over the PLANE (HxW) only (if 1 channel then it's the whole image)
     const int gridSize = blockDim.x * gridDim.x;
@@ -626,7 +626,7 @@ __global__ void nV12ToYUV420p(const uint8_t* __restrict__ uvSrc, const int uvPit
 }
 
 __global__ void pitchedToFloat(const uint8_t* __restrict__ input, float* __restrict__ output, const int width, const int height, const int pitch) {
-    
+
     __shared__ float tile[32][33]; // 32x32 tile, +1 to avoid bank conflicts
 
     // x and y are the coordinates in the original input image

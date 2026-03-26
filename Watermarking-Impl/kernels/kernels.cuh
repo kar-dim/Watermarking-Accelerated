@@ -5,6 +5,11 @@
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 
+// convert FLOAT to UINT64 safely by multiplying with a very large value in order to not use digits
+// for converting back to float, we multiply with the inverse
+constexpr float ATOMIC_SCALE_F = 1000000000.0f;
+constexpr float ATOMIC_SCALE_F_INV = 1.0e-9f;
+
 // half8 struct for vectorized operations on 8 half values
 struct alignas(16) half8 {
     half a, b, c, d, e, f, g, h;
@@ -155,7 +160,7 @@ __global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, co
 // NVF mask calculation AND u calculation fused in one kernel to save global memory bandwidth and increase speed
 // this is used ONLY for embedding, not for detection, because in detection we need the error sequence of the mask itself
 template <int p>
-__global__ void nvf_u_and_sumsq_fused(const float* __restrict__ input, const float* __restrict__ w, float* __restrict__ u, float* __restrict__ globalSumSq, const int width, const int height) {
+__global__ void nvf_u_and_sumsq_fused(const float* __restrict__ input, const float* __restrict__ w, float* __restrict__ u, uint64_t* __restrict__ globalSumSq, const int width, const int height) {
     constexpr int pad = p / 2;
     constexpr int shDimFast = 32 + (2 * pad);
     constexpr int shDimSlow = 8 + (2 * pad);
@@ -188,7 +193,7 @@ __global__ void nvf_u_and_sumsq_fused(const float* __restrict__ input, const flo
     // block reduce with cub and atomic add to global sum by the leader
     const float blockTotalSq = BlockReduceT(temp_storage).Sum(threadSumSq);
     if (linearTid == 0)
-        atomicAdd(globalSumSq, blockTotalSq);
+        atomicAdd(globalSumSq, static_cast<uint64_t>(blockTotalSq * ATOMIC_SCALE_F));
 }
 
 // main kernel for error sequence calculation
@@ -303,7 +308,7 @@ __global__ void calculate_error_sequence_and_partial_corr_fused(const float* __r
 
 // helper method used to reduce "rx" vector values and atomic add them (all threads cooperate)
 template <int SIZE, typename StorageT>
-__device__ __forceinline__ void writeRxVec(float* __restrict__ rx, const rxVecData<SIZE>& rxData, StorageT& temp_storage, float* __restrict__ warpStaging) {
+__device__ __forceinline__ void writeRxVec(uint64_t* __restrict__ rx, const rxVecData<SIZE>& rxData, StorageT& temp_storage, float* __restrict__ warpStaging) {
     const rxVecData<SIZE> warpSum = cub::WarpReduce<rxVecData<SIZE>>(temp_storage).Sum(rxData);
     if ((threadIdx.x & 31) == 0) {
 #pragma unroll
@@ -314,7 +319,7 @@ __device__ __forceinline__ void writeRxVec(float* __restrict__ rx, const rxVecDa
     // cooperative global atomicAdd
 #pragma unroll
     for (int i = threadIdx.x & 31; i < SIZE; i += 32)
-        atomicAdd(&rx[i], warpStaging[i]);
+        atomicAdd(rx + i, static_cast<uint64_t>(warpStaging[i] * ATOMIC_SCALE_F));
 }
 
 // this function reverts the transpose introduced by the ME kernel. To achieve coalesced VRAM reads the image was loaded as column-major, this transposed
@@ -333,7 +338,7 @@ __device__ __forceinline__ int getMappedVarIndex(const int k) {
 
 // naive 1-thread Cholesky solver used for its very low latency versus cuSOLVER but useful only for very small systems, p = 3 (N = 8) or p = 5 (N = 24)
 template <int p>
-__global__ void cholesky_solver(const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ X, int* __restrict__ stopFlag) {
+__global__ void cholesky_solver(const uint64_t* __restrict__ A, const uint64_t* __restrict__ B, float* __restrict__ X, int* __restrict__ stopFlag) {
     static_assert(p <= 5, "Simple 1-thread cholesky solver kernel should NEVER be instantiated for p > 5");
     constexpr int N = (p * p) - 1;
 
@@ -349,47 +354,38 @@ __global__ void cholesky_solver(const float* __restrict__ A, const float* __rest
     float alignas(16) packed[SIZE];
     float alignas(16) localB[N];
 
-    // check if A, B, and X are 16-byte aligned for vectorized loads
+    // check if A, B, and X are 16byte aligned for vectorized loads
     const bool isAligned = (((reinterpret_cast<uintptr_t>(A) | reinterpret_cast<uintptr_t>(B) | reinterpret_cast<uintptr_t>(X)) & 0xF) == 0);
     if (isAligned) {
-        const float4* vecA = reinterpret_cast<const float4*>(A);
-        const float4* vecB = reinterpret_cast<const float4*>(B);
-
-        // load A (Rx)
-        constexpr int vecLimitA = SIZE / 4;
+        constexpr int vecLimitA = SIZE / 2;
+        constexpr int vecLimitB = N / 2;
+        const ulonglong2* vecA = reinterpret_cast<const ulonglong2*>(A);
+        const ulonglong2* vecB = reinterpret_cast<const ulonglong2*>(B);
 #pragma unroll
         for (int k = 0; k < vecLimitA; k++) {
-            const float4 v = vecA[k];
-            packed[k * 4 + 0] = v.x;
-            packed[k * 4 + 1] = v.y;
-            packed[k * 4 + 2] = v.z;
-            packed[k * 4 + 3] = v.w;
+            const ulonglong2 v = vecA[k];
+            packed[k * 2 + 0] = static_cast<float>(v.x) * ATOMIC_SCALE_F_INV;
+            packed[k * 2 + 1] = static_cast<float>(v.y) * ATOMIC_SCALE_F_INV;
         }
-        // tail elements of A (if SIZE is not multiple of 4)
-        for (int k = vecLimitA << 2; k < SIZE; k++)
-            packed[k] = A[k];
+        for (int k = vecLimitA << 1; k < SIZE; k++)
+            packed[k] = static_cast<float>(A[k]) * ATOMIC_SCALE_F_INV;
 
-        // load B (rx)
-        constexpr int vecLimitB = N / 4;
 #pragma unroll
         for (int i = 0; i < vecLimitB; i++) {
-            const float4 v = vecB[i];
-            localB[i * 4 + 0] = v.x;
-            localB[i * 4 + 1] = v.y;
-            localB[i * 4 + 2] = v.z;
-            localB[i * 4 + 3] = v.w;
+            const ulonglong2 v = vecB[i];
+            localB[i * 2 + 0] = static_cast<float>(v.x) * ATOMIC_SCALE_F_INV;
+            localB[i * 2 + 1] = static_cast<float>(v.y) * ATOMIC_SCALE_F_INV;
         }
-        // tail elements of B (if SIZE is not multiple of 4)
-        for (int i = vecLimitB << 2; i < N; i++)
-            localB[i] = B[i];
-        // scalar path
+        for (int i = vecLimitB << 1; i < N; i++)
+            localB[i] = static_cast<float>(B[i]) * ATOMIC_SCALE_F_INV;
     } else {
+        // scalar path
 #pragma unroll
         for (int k = 0; k < SIZE; k++)
-            packed[k] = A[k];
+            packed[k] = static_cast<float>(A[k]) * ATOMIC_SCALE_F_INV;
 #pragma unroll
         for (int i = 0; i < N; i++)
-            localB[i] = B[i];
+            localB[i] = static_cast<float>(B[i]) * ATOMIC_SCALE_F_INV;
     }
 
     // in-place Cholesky Decomposition
@@ -451,12 +447,10 @@ exit:
 
 // parallel cholesky solver for p = 7 (N = 48) and p = 9 (N = 80), using one warp (32 threads)
 template <int p>
-__global__ void cholesky_solver_parallel(const float* __restrict__ A, const float* __restrict__ B, float* __restrict__ X, int* __restrict__ stopFlag) {
+__global__ void cholesky_solver_parallel(const uint64_t* __restrict__ A, const uint64_t* __restrict__ B, float* __restrict__ X, int* __restrict__ stopFlag) {
     static_assert(p > 5, "Parallel cholesky solver kernel should NEVER be instantiated for p <= 5");
     constexpr int N = (p * p) - 1;
     constexpr int packedSize = (N * (N + 1)) / 2;
-    constexpr int vecPackedLimit = packedSize / 4;
-    constexpr int vecBlimit = N / 4;
 
     const int laneId = threadIdx.x;
 
@@ -466,46 +460,40 @@ __global__ void cholesky_solver_parallel(const float* __restrict__ A, const floa
     // cooperative load (packedSize elements -> NxN Shared)
     // check if A, B, and X are 16-byte aligned for vectorized loads
     const bool isAligned = ((reinterpret_cast<uintptr_t>(A) | reinterpret_cast<uintptr_t>(B) | reinterpret_cast<uintptr_t>(X)) & 0xF) == 0;
-
-    // if aligned: packedSize floats = vecPackedLimit float4
+    // Rx
     if (isAligned) {
-        const float4* vecA = reinterpret_cast<const float4*>(A);
-        // loop over vecPackedLimit vectors
+        constexpr int vecPackedLimit = packedSize / 2;
+        const ulonglong2* vecA = reinterpret_cast<const ulonglong2*>(A);
+        // vectorized path
         for (int k = laneId; k < vecPackedLimit; k += 32) {
-            float4 v = vecA[k];
-            // unpack vector into Shared Memory
-            const int baseIdx = k * 4;
+            ulonglong2 v = vecA[k];
+            const int baseIdx = k * 2;
             const int2 c0 = getPackedCoords(baseIdx + 0);
-            sA[c0.x][c0.y] = v.x;
+            sA[c0.x][c0.y] = static_cast<float>(v.x) * ATOMIC_SCALE_F_INV;
             const int2 c1 = getPackedCoords(baseIdx + 1);
-            sA[c1.x][c1.y] = v.y;
-            const int2 c2 = getPackedCoords(baseIdx + 2);
-            sA[c2.x][c2.y] = v.z;
-            const int2 c3 = getPackedCoords(baseIdx + 3);
-            sA[c3.x][c3.y] = v.w;
+            sA[c1.x][c1.y] = static_cast<float>(v.y) * ATOMIC_SCALE_F_INV;
         }
         // scalar path
     } else {
         for (int k = laneId; k < packedSize; k += 32) {
             const int2 c = getPackedCoords(k);
-            sA[c.x][c.y] = A[k];
+            sA[c.x][c.y] = static_cast<float>(A[k]) * ATOMIC_SCALE_F_INV;
         }
     }
-
-    // if aligned: N floats = vecBlimit float4
+    // rx
     if (isAligned) {
-        const float4* vecB = reinterpret_cast<const float4*>(B);
-        if (laneId < vecBlimit) {
-            const float4 v = vecB[laneId];
-            sB[laneId * 4 + 0] = v.x;
-            sB[laneId * 4 + 1] = v.y;
-            sB[laneId * 4 + 2] = v.z;
-            sB[laneId * 4 + 3] = v.w;
+        constexpr int vecBlimit = N / 2;
+        const ulonglong2* vecB = reinterpret_cast<const ulonglong2*>(B);
+        // vectorized path
+        for (int k = laneId; k < vecBlimit; k += 32) {
+            const ulonglong2 v = vecB[k];
+            sB[k * 2 + 0] = static_cast<float>(v.x) * ATOMIC_SCALE_F_INV;
+            sB[k * 2 + 1] = static_cast<float>(v.y) * ATOMIC_SCALE_F_INV;
         }
         // scalar path
     } else {
         for (int k = laneId; k < N; k += 32)
-            sB[k] = B[k];
+            sB[k] = static_cast<float>(B[k]) * ATOMIC_SCALE_F_INV;
     }
 
     // initialize stop flag
@@ -589,7 +577,7 @@ __global__ void cholesky_solver_parallel(const float* __restrict__ A, const floa
 
 // helper method to perform a streaming reduction of Rx values from shared window to global memory
 template <int startIdx, int endIdx, int rowOffset>
-__device__ void RxStreamPass(const int tid, float (*__restrict__ RxLocal)[92], float* __restrict__ Rx) {
+__device__ void RxStreamPass(const int tid, float (*__restrict__ RxLocal)[92], uint64_t* __restrict__ Rx) {
     for (int k = startIdx + tid; k < endIdx; k += 128) {
         const int2 coords = getPackedCoords(k);
         const int rowInWindow = coords.x - rowOffset;
@@ -597,7 +585,7 @@ __device__ void RxStreamPass(const int tid, float (*__restrict__ RxLocal)[92], f
 #pragma unroll
         for (int w = 0; w < 4; w++)
             sum += RxLocal[w * 32 + rowInWindow][coords.y];
-        atomicAdd(&Rx[k], sum);
+        atomicAdd(Rx + k, static_cast<uint64_t>(sum * ATOMIC_SCALE_F));
     }
 }
 
@@ -649,17 +637,17 @@ __device__ void load_neighbor_vec(half8* dst, const half blockValues[p][RowStrid
 }
 
 // Prediction Error kernels (ME) for p = 3, p = 5, p = 7 and p = 9
-__global__ void me_p3(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const int width, const int height, const int totalBlocksY, const int taskTotal);
-__global__ void me_p5(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const int width, const int height, const int totalBlocksY, const int taskTotal);
-__global__ void me_p7(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const int width, const int height, const int totalBlocksY, const int taskTotal);
-__global__ void me_p9(const float* __restrict__ input, float* __restrict__ Rx, float* __restrict__ rx, const int width, const int height, const int totalBlocksY, const int taskTotal);
+__global__ void me_p3(const float* __restrict__ input, uint64_t* __restrict__ Rx, uint64_t* __restrict__ rx, const int width, const int height, const int totalBlocksY, const int taskTotal);
+__global__ void me_p5(const float* __restrict__ input, uint64_t* __restrict__ Rx, uint64_t* __restrict__ rx, const int width, const int height, const int totalBlocksY, const int taskTotal);
+__global__ void me_p7(const float* __restrict__ input, uint64_t* __restrict__ Rx, uint64_t* __restrict__ rx, const int width, const int height, const int totalBlocksY, const int taskTotal);
+__global__ void me_p9(const float* __restrict__ input, uint64_t* __restrict__ Rx, uint64_t* __restrict__ rx, const int width, const int height, const int totalBlocksY, const int taskTotal);
 
 // fused calculation of ME mask, u, and sum of squares
-__global__ void me_u_and_sumsq_fused(const float* __restrict__ errorSeq, const float* __restrict__ w, float* __restrict__ u, float* __restrict__ globalSumSq, const float* __restrict__ maxVal,
+__global__ void me_u_and_sumsq_fused(const float* __restrict__ errorSeq, const float* __restrict__ w, float* __restrict__ u, uint64_t* __restrict__ globalSumSq, const float* __restrict__ maxVal,
                                      const int N);
 
 // fused application of watermark: applies the watermark and calculates the output in one pass, using the precomputed u and sum of squares for normalization
-__global__ void apply_watermark_fused(const float* __restrict__ input, const float* __restrict__ u, const float* __restrict__ sumSqPtr, uint8_t* __restrict__ output, const float strengthNumerator,
+__global__ void apply_watermark_fused(const float* __restrict__ input, const float* __restrict__ u, const uint64_t* __restrict__ sumSqPtr, uint8_t* __restrict__ output, const float strengthNumerator,
                                       const int planeElements, const int numChannels);
 
 // calculation of the absolute value of the error sequence normalized by its max value, used in detection of ME mask
