@@ -37,37 +37,28 @@ class WatermarkOCL final : public WatermarkGPU<p> {
 
     af::array computeStrengthenedWatermark(const af::array& inputGrayImage, const af::array& inputImage, const MaskMethod maskType) const override {
         using namespace cl_utils;
+        const int maxWorkGroups = calculateLocalGroupsNumber(this->totalPixels, optimalLocalSize);
+        const int maxGlobalSize = maxWorkGroups * optimalLocalSize;
         const AfclBuffer inputGrayBuf(inputGrayImage);
         const AfclBuffer inputBuf(inputImage);
         const AfclBuffer randBuf(this->randomMatrix);
         const AfclBuffer uBuf(inputGrayImage.dims(), f32);
         const AfclBuffer sumSqBuf(af::constant(0, 1, u64));
         AfclBuffer outputBuf(inputImage.dims(), u8);
-        if (maskType == MaskMethod::NVF) {
-            executeKernel(
-                [&]() {
+        executeKernel(
+            [&]() {
+                if (maskType == MaskMethod::NVF) {
                     // fused kernel to compute NVF mask, strengthened watermark (u) and sum of squares of u
                     queue.enqueueNDRangeKernel(
                         KernelBuilder(programs, "nvf_u_and_sumsq_fused").args(inputGrayBuf.get(), randBuf.get(), uBuf.get(), sumSqBuf.get(), this->baseCols, this->baseRows).build(), cl::NDRange(),
                         cl::NDRange(texKernelDims.first, texKernelDims.second), cl::NDRange(windowLocalSize.first, windowLocalSize.second));
-                    // apply watermark
-                    const int workGroupsApply = calculateLocalGroupsNumber(this->totalPixels, optimalLocalSize);
-                    const int globalSizeApply = workGroupsApply * optimalLocalSize;
-                    queue.enqueueNDRangeKernel(KernelBuilder(programs, "apply_watermark_fused")
-                                                   .args(inputBuf.get(), uBuf.get(), sumSqBuf.get(), outputBuf.get(), this->strengthNumerator, this->totalPixels, static_cast<int>(inputImage.dims(2)))
-                                                   .build(),
-                                               cl::NDRange(), cl::NDRange(globalSizeApply), cl::NDRange(optimalLocalSize));
-                },
-                "NVF_computeStrengthenedWatermark");
-        } else {
-            // compute prediction error
-            const AfclBuffer errorSeqBuf(computePredictionErrorData(inputGrayImage, true));
-            const int maxWorkGroups = calculateLocalGroupsNumber(this->totalPixels, optimalLocalSize);
-            const int maxGlobalSize = maxWorkGroups * optimalLocalSize;
-            const AfclBuffer errorSeqMaxBuf(1, f32);
-            const AfclBuffer maxPartialsBuf(maxWorkGroups, f32);
-            executeKernel(
-                [&]() {
+
+                } else {
+                    // compute prediction error
+                    const AfclBuffer errorSeqBuf(computePredictionErrorData(inputGrayImage, true));
+                    const AfclBuffer errorSeqMaxBuf(1, f32);
+                    const AfclBuffer maxPartialsBuf(maxWorkGroups, f32);
+
                     // compute max error sequence partials
                     queue.enqueueNDRangeKernel(KernelBuilder(programs, "partial_max_reduce").args(errorSeqBuf.get(), maxPartialsBuf.get(), this->totalPixels).build(), cl::NDRange(),
                                                cl::NDRange(maxGlobalSize), cl::NDRange(optimalLocalSize));
@@ -78,14 +69,14 @@ class WatermarkOCL final : public WatermarkGPU<p> {
                     queue.enqueueNDRangeKernel(
                         KernelBuilder(programs, "me_u_and_sumsq_fused").args(errorSeqBuf.get(), randBuf.get(), uBuf.get(), sumSqBuf.get(), errorSeqMaxBuf.get(), this->totalPixels).build(),
                         cl::NDRange(), cl::NDRange(maxGlobalSize), cl::NDRange(optimalLocalSize));
-                    // apply watermark
-                    queue.enqueueNDRangeKernel(KernelBuilder(programs, "apply_watermark_fused")
-                                                   .args(inputBuf.get(), uBuf.get(), sumSqBuf.get(), outputBuf.get(), this->strengthNumerator, this->totalPixels, static_cast<int>(inputImage.dims(2)))
-                                                   .build(),
-                                               cl::NDRange(), cl::NDRange(maxGlobalSize), cl::NDRange(optimalLocalSize));
-                },
-                "ME_computeStrengthenedWatermark");
-        }
+                }
+                // apply watermark
+                queue.enqueueNDRangeKernel(KernelBuilder(programs, "apply_watermark_fused")
+                                               .args(inputBuf.get(), uBuf.get(), sumSqBuf.get(), outputBuf.get(), this->strengthNumerator, this->totalPixels, static_cast<int>(inputImage.dims(2)))
+                                               .build(),
+                                           cl::NDRange(), cl::NDRange(maxGlobalSize), cl::NDRange(optimalLocalSize));
+            },
+            "computeStrengthenedWatermark");
         outputBuf.unlock();
         return outputBuf.getArray();
     }
