@@ -8,8 +8,6 @@ inline const std::string kernels = R"CLC(
 #define N_PIXELS_SQ         (N_PIXELS * N_PIXELS)
 #define SH_DIM_FAST         (32 + (2 * PAD))
 #define SH_DIM_SLOW         (8 + (2 * PAD))
-#define ATOMIC_SCALE_F      1000000000.0f
-#define ATOMIC_SCALE_F_INV  1.0e-9f
 
 #pragma OPENCL EXTENSION cl_khr_fp16 : enable
 #pragma OPENCL EXTENSION cl_khr_int64_base_atomics : enable
@@ -53,6 +51,14 @@ inline const std::string kernels = R"CLC(
         const int idx = globalX * height + globalY;                            \
         sharedMem[i] = (LOAD_EXPR);                                            \
     }
+
+inline ulong toScaledUlong(const float value) { 
+    return (ulong)(value * 1000000000.0f); 
+}
+
+inline float toUnscaledFloat(const ulong value) { 
+    return (float)(value) * 1.0e-9f; 
+}
 
 inline void fillBlock(
     const __global float* restrict input,
@@ -150,7 +156,7 @@ __kernel void nvf_u_and_sumsq_fused(
     
     REDUCE_SUM(linearTid, (get_local_size(0) * get_local_size(1)) / 2, sums);
     if (linearTid == 0)
-        atom_add(globalSumSq, (ulong)(sums[0] * ATOMIC_SCALE_F));
+        atom_add(globalSumSq, toScaledUlong(sums[0]));
 }
 
 __kernel void me_u_and_sumsq_fused(
@@ -182,7 +188,7 @@ __kernel void me_u_and_sumsq_fused(
 
     REDUCE_SUM(tid, get_local_size(0) / 2, sums);
     if (tid == 0)
-        atom_add(globalSumSq, (ulong)(sums[0] * ATOMIC_SCALE_F));
+        atom_add(globalSumSq, toScaledUlong(sums[0]));
 }
 
 //use pointer arithmetic for dot product to help compilers optimize address calculations fast
@@ -241,7 +247,7 @@ __kernel void apply_watermark_fused(
     const int planeElements,
     const int numChannels) 
 {
-    const float uSumSquared = (float)(*sumSqPtr) * ATOMIC_SCALE_F_INV;
+    const float uSumSquared = toUnscaledFloat(*sumSqPtr);
     float strength = (uSumSquared > 1e-12f) ? (strengthNumerator * rsqrt(uSumSquared)) : 0.0f;
     const int stride = get_global_size(0);
     int idx = get_global_id(0);
@@ -384,7 +390,7 @@ __kernel void me(__global const float* restrict input,
 #pragma unroll
         for (int i = 0; i < 32; i++)
             sum += rxPartial[i][localId];
-        atom_add(&rx[localId], (ulong)(sum * ATOMIC_SCALE_F));
+        atom_add(&rx[localId], toScaledUlong(sum));
     } //no barrier needed here
 
     if (isValid) {
@@ -426,7 +432,7 @@ __kernel void me(__global const float* restrict input,
 #pragma unroll
         for (int k = 0; k < 7; k++)
             totalSum += ((__local float*)rxPartial)[flatId + k * 36];
-        atom_add(&Rx[flatId], (ulong)(totalSum * ATOMIC_SCALE_F));
+        atom_add(&Rx[flatId], toScaledUlong(totalSum));
     }
 }
 #elif WINDOW_SIZE >= 5
@@ -490,7 +496,7 @@ __kernel void me(
                 const float4 fb = vload_half4(0, (__local half*)&blockValues[rowB][p + shiftB]);
                 coeffSum += dot(fa, fb);
             }
-            atom_add(&Rx[SOLVER_IDX(r_idx, c_idx)], (ulong)(coeffSum * ATOMIC_SCALE_F));
+            atom_add(&Rx[SOLVER_IDX(r_idx, c_idx)], toScaledUlong(coeffSum));
             
         } else {
             // rx
@@ -504,7 +510,7 @@ __kernel void me(
                 const float4 fc = vload_half4(0, (__local half*)&blockValues[ROW_CENTER][p + SHIFT_CENTER]);
                 coeffSum += dot(fn, fc);
             }
-            atom_add(&rx[nIdx], (ulong)(coeffSum * ATOMIC_SCALE_F));
+            atom_add(&rx[nIdx], toScaledUlong(coeffSum));
         }
     }
 }
@@ -725,10 +731,10 @@ __kernel void cholesky_solver(__global const ulong* restrict A,
 
 #pragma unroll
     for (int k = 0; k < PACKED_SIZE; k++)
-        packed[k] = (float)A[k] * ATOMIC_SCALE_F_INV;
+        packed[k] = toUnscaledFloat(A[k]);
 #pragma unroll
     for (int i = 0; i < NEIGHB_SIZE; i++)
-        localB[i] = (float)B[i] * ATOMIC_SCALE_F_INV;
+        localB[i] = toUnscaledFloat(B[i]);
 
     // Cholesky decomposition and solving
     for (int i = 0; i < NEIGHB_SIZE; i++) {
@@ -811,13 +817,13 @@ __kernel void cholesky_solver(__global const ulong* restrict A,
     // Rx is stored as col-major lower packed (SOLVER_IDX), we unpack it into sA[row][col]
     for (int c = 0; c < NEIGHB_SIZE; c++) {
         for (int r = c + tid; r < NEIGHB_SIZE; r += workers) {
-            sA[r][c] = (float)A[SOLVER_IDX(r, c)] * ATOMIC_SCALE_F_INV;
+            sA[r][c] = toUnscaledFloat(A[SOLVER_IDX(r, c)]);
         }
     }
 
     // cooperative load of vector B (rx)
     for (int k = tid; k < NEIGHB_SIZE; k += workers)
-        sB[k] = (float)B[k] * ATOMIC_SCALE_F_INV;
+        sB[k] = toUnscaledFloat(B[k]);
 
     // initialize stopFlag (thread 0 only)
     if (tid == 0) 
