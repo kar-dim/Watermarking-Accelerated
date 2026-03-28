@@ -78,6 +78,7 @@ __global__ void me_p3(const float* __restrict__ input, uint64_t* __restrict__ Rx
 #pragma unroll
         for (int k0 = 0; k0 < 32; k0 += 16) {
             const half* tilePtr = reinterpret_cast<half*>(&RxLocal[startRow + k0][0]);
+            // load + compute directly
             wmma::load_matrix_sync(A, tilePtr, IN_STRIDE);
             wmma::load_matrix_sync(B, tilePtr, IN_STRIDE);
             wmma::mma_sync(acc_C, A, B, acc_C);
@@ -156,28 +157,29 @@ __global__ void me_p5(const float* __restrict__ input, uint64_t* __restrict__ Rx
         // accumulate rx
         accumulateRxVec<3>(localVec8, rxPersistent.vals, __half2float(centerVal));
 
+        // accumulate Rx (Tensor Cores)
         half* rowPtr = reinterpret_cast<half*>(&RxLocal[tid][0]);
         half8* rowPtrVec = reinterpret_cast<half8*>(rowPtr);
-        // stride is 36 floats -> 72 halves, we must zero the 4th vector (indices 24-31)
-        // else the tile calculation will read garbage
 #pragma unroll
         for (int i = 0; i < 3; i++)
             rowPtrVec[i] = localVec8[i];
-        rowPtrVec[3] = {};
+        rowPtrVec[3] = {}; // zero padding
         __syncthreads();
 
-        wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::col_major> A_frag;
-        wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::row_major> B_frag;
+        wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::col_major> A[2];
+        wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::row_major> B[2];
 #pragma unroll
         for (int k0 = 0; k0 < 32; k0 += 16) {
             const half* tilePtr = reinterpret_cast<half*>(&RxLocal[startRow + k0][0]);
-            wmma::load_matrix_sync(A_frag, tilePtr, IN_STRIDE);
-            wmma::load_matrix_sync(B_frag, tilePtr, IN_STRIDE);
-            wmma::mma_sync(acc_C00, A_frag, B_frag, acc_C00);
-            wmma::load_matrix_sync(A_frag, tilePtr + 16, IN_STRIDE);
-            wmma::mma_sync(acc_C10, A_frag, B_frag, acc_C10);
-            wmma::load_matrix_sync(B_frag, tilePtr + 16, IN_STRIDE);
-            wmma::mma_sync(acc_C11, A_frag, B_frag, acc_C11);
+            // pipeline all memory loads
+            wmma::load_matrix_sync(A[0], tilePtr, IN_STRIDE);
+            wmma::load_matrix_sync(B[0], tilePtr, IN_STRIDE);
+            wmma::load_matrix_sync(A[1], tilePtr + 16, IN_STRIDE);
+            wmma::load_matrix_sync(B[1], tilePtr + 16, IN_STRIDE);
+            // fire all Tensor Core math
+            wmma::mma_sync(acc_C00, A[0], B[0], acc_C00);
+            wmma::mma_sync(acc_C10, A[1], B[0], acc_C10);
+            wmma::mma_sync(acc_C11, A[1], B[1], acc_C11);
         }
         __syncthreads();
     }
@@ -268,17 +270,19 @@ __global__ void me_p7(const float* __restrict__ input, uint64_t* __restrict__ Rx
             rowPtrVec[i] = localVec8[i];
         rowPtrVec[6] = {}; // zero padding
         __syncthreads();
+
         wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::col_major> A[3];
         wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::row_major> B[3];
-
 #pragma unroll
         for (int k0 = 0; k0 < 32; k0 += 16) {
             const half* tilePtr = reinterpret_cast<half*>(&RxLocal[startRow + k0][0]);
+            // pipeline all memory loads
 #pragma unroll
             for (int i = 0; i < 3; i++) {
                 wmma::load_matrix_sync(A[i], tilePtr + (i * 16), IN_STRIDE);
                 wmma::load_matrix_sync(B[i], tilePtr + (i * 16), IN_STRIDE);
             }
+            // fire all Tensor Core math
             wmma::mma_sync(acc_Rx[0], A[0], B[0], acc_Rx[0]);
             wmma::mma_sync(acc_Rx[1], A[1], B[0], acc_Rx[1]);
             wmma::mma_sync(acc_Rx[2], A[1], B[1], acc_Rx[2]);
@@ -365,6 +369,7 @@ __global__ void me_p9(const float* __restrict__ input, uint64_t* __restrict__ Rx
         accumulateRxVec<10>(localVec8, rxPersistent.vals, __half2float(centerVal));
         __syncthreads();
 
+        // accumulate Rx (Tensor Cores)
         half8* shmemPtr = reinterpret_cast<half8*>(&RxLocal[tid][0]);
 #pragma unroll
         for (int i = 0; i < 10; i++)
@@ -372,34 +377,46 @@ __global__ void me_p9(const float* __restrict__ input, uint64_t* __restrict__ Rx
         shmemPtr[10] = {}; // zero padding
         __syncthreads();
 
-        // accumulate Rx (Tensor Cores)
         wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::col_major> A[5];
-        wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::row_major> B[5];
+        wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::row_major> B[2];
 
         const half* tilePtr = reinterpret_cast<half*>(&RxLocal[startRow][0]);
 #pragma unroll
         for (int k0 = 0; k0 < 32; k0 += 16) {
             const half* currTile = tilePtr + (k0 * INPUT_STRIDE);
+            // pipeline all 5 A loads
 #pragma unroll
-            for (int i = 0; i < 5; i++) {
+            for (int i = 0; i < 5; i++)
                 wmma::load_matrix_sync(A[i], currTile + (i * 16), INPUT_STRIDE);
-                wmma::load_matrix_sync(B[i], currTile + (i * 16), INPUT_STRIDE);
-            }
+            // load the first two B (col 0)
+            wmma::load_matrix_sync(B[0], currTile + (0 * 16), INPUT_STRIDE);
+            wmma::load_matrix_sync(B[1], currTile + (1 * 16), INPUT_STRIDE);
+            // fire Tensor math for col 0
             wmma::mma_sync(acc_Rx[0], A[0], B[0], acc_Rx[0]);
             wmma::mma_sync(acc_Rx[1], A[1], B[0], acc_Rx[1]);
-            wmma::mma_sync(acc_Rx[2], A[1], B[1], acc_Rx[2]);
             wmma::mma_sync(acc_Rx[3], A[2], B[0], acc_Rx[3]);
-            wmma::mma_sync(acc_Rx[4], A[2], B[1], acc_Rx[4]);
-            wmma::mma_sync(acc_Rx[5], A[2], B[2], acc_Rx[5]);
             wmma::mma_sync(acc_Rx[6], A[3], B[0], acc_Rx[6]);
-            wmma::mma_sync(acc_Rx[7], A[3], B[1], acc_Rx[7]);
-            wmma::mma_sync(acc_Rx[8], A[3], B[2], acc_Rx[8]);
-            wmma::mma_sync(acc_Rx[9], A[3], B[3], acc_Rx[9]);
             wmma::mma_sync(acc_Rx[10], A[4], B[0], acc_Rx[10]);
+            // B[0] is done, we can overwrite it with col 2 in the background
+            wmma::load_matrix_sync(B[0], currTile + (2 * 16), INPUT_STRIDE);
+            // fire Tensor math for col 1
+            wmma::mma_sync(acc_Rx[2], A[1], B[1], acc_Rx[2]);
+            wmma::mma_sync(acc_Rx[4], A[2], B[1], acc_Rx[4]);
+            wmma::mma_sync(acc_Rx[7], A[3], B[1], acc_Rx[7]);
             wmma::mma_sync(acc_Rx[11], A[4], B[1], acc_Rx[11]);
-            wmma::mma_sync(acc_Rx[12], A[4], B[2], acc_Rx[12]);
-            wmma::mma_sync(acc_Rx[13], A[4], B[3], acc_Rx[13]);
-            wmma::mma_sync(acc_Rx[14], A[4], B[4], acc_Rx[14]);
+            // B[1] is done, we can overwrite it with col 3 in the background
+            wmma::load_matrix_sync(B[1], currTile + (3 * 16), INPUT_STRIDE);
+            // fire Tensor math for col 2
+            wmma::mma_sync(acc_Rx[5], A[2], B[0], acc_Rx[5]);
+            wmma::mma_sync(acc_Rx[8], A[3], B[0], acc_Rx[8]);
+            wmma::mma_sync(acc_Rx[12], A[4], B[0], acc_Rx[12]);
+            // B[0] is done, we can overwrite it with col 4 in the background
+            wmma::load_matrix_sync(B[0], currTile + (4 * 16), INPUT_STRIDE);
+            // fire Tensor math for col 3
+            wmma::mma_sync(acc_Rx[9], A[3], B[1], acc_Rx[9]);
+            wmma::mma_sync(acc_Rx[13], A[4], B[1], acc_Rx[13]);
+            // fire Tensor math for col 4
+            wmma::mma_sync(acc_Rx[14], A[4], B[0], acc_Rx[14]);
         }
         __syncthreads();
     }
