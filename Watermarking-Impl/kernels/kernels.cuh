@@ -5,10 +5,10 @@
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 
-// convert FLOAT to UINT64 safely by multiplying with a very large value in order to not use digits
+// convert FLOAT to UINT64 safely by multiplying with a very large power of 10 in order to not lose digits
 // for converting back to float, we multiply with the inverse
-constexpr float ATOMIC_SCALE_F = 1000000000.0f;
-constexpr float ATOMIC_SCALE_F_INV = 1.0e-9f;
+__device__ inline uint64_t toScaledUint64(float value) { return static_cast<uint64_t>(value * 1000000000.0f); }
+__device__ inline float toUnscaledFloat(uint64_t value) { return static_cast<float>(value * 1.0e-9f); }
 
 // half8 struct for vectorized operations on 8 half values
 struct alignas(16) half8 {
@@ -193,7 +193,8 @@ __global__ void nvf_u_and_sumsq_fused(const float* __restrict__ input, const flo
     // block reduce with cub and atomic add to global sum by the leader
     const float blockTotalSq = BlockReduceT(temp_storage).Sum(threadSumSq);
     if (linearTid == 0)
-        atomicAdd(globalSumSq, static_cast<uint64_t>(blockTotalSq * ATOMIC_SCALE_F));
+
+        atomicAdd(globalSumSq, toScaledUint64(blockTotalSq));
 }
 
 // main kernel for error sequence calculation
@@ -319,7 +320,7 @@ __device__ __forceinline__ void writeRxVec(uint64_t* __restrict__ rx, const rxVe
     // cooperative global atomicAdd
 #pragma unroll
     for (int i = threadIdx.x & 31; i < SIZE; i += 32)
-        atomicAdd(rx + i, static_cast<uint64_t>(warpStaging[i] * ATOMIC_SCALE_F));
+        atomicAdd(rx + i, toScaledUint64(warpStaging[i]));
 }
 
 // this function reverts the transpose introduced by the ME kernel. To achieve coalesced VRAM reads the image was loaded as column-major, this transposed
@@ -364,28 +365,29 @@ __global__ void cholesky_solver(const uint64_t* __restrict__ A, const uint64_t* 
 #pragma unroll
         for (int k = 0; k < vecLimitA; k++) {
             const ulonglong2 v = vecA[k];
-            packed[k * 2 + 0] = static_cast<float>(v.x) * ATOMIC_SCALE_F_INV;
-            packed[k * 2 + 1] = static_cast<float>(v.y) * ATOMIC_SCALE_F_INV;
+
+            packed[k * 2 + 0] = toUnscaledFloat(v.x);
+            packed[k * 2 + 1] = toUnscaledFloat(v.y);
         }
         for (int k = vecLimitA << 1; k < SIZE; k++)
-            packed[k] = static_cast<float>(A[k]) * ATOMIC_SCALE_F_INV;
+            packed[k] = toUnscaledFloat(A[k]);
 
 #pragma unroll
         for (int i = 0; i < vecLimitB; i++) {
             const ulonglong2 v = vecB[i];
-            localB[i * 2 + 0] = static_cast<float>(v.x) * ATOMIC_SCALE_F_INV;
-            localB[i * 2 + 1] = static_cast<float>(v.y) * ATOMIC_SCALE_F_INV;
+            localB[i * 2 + 0] = toUnscaledFloat(v.x);
+            localB[i * 2 + 1] = toUnscaledFloat(v.y);
         }
         for (int i = vecLimitB << 1; i < N; i++)
-            localB[i] = static_cast<float>(B[i]) * ATOMIC_SCALE_F_INV;
+            localB[i] = toUnscaledFloat(B[i]);
     } else {
         // scalar path
 #pragma unroll
         for (int k = 0; k < SIZE; k++)
-            packed[k] = static_cast<float>(A[k]) * ATOMIC_SCALE_F_INV;
+            packed[k] = toUnscaledFloat(A[k]);
 #pragma unroll
         for (int i = 0; i < N; i++)
-            localB[i] = static_cast<float>(B[i]) * ATOMIC_SCALE_F_INV;
+            localB[i] = toUnscaledFloat(B[i]);
     }
 
     // in-place Cholesky Decomposition
@@ -469,15 +471,15 @@ __global__ void cholesky_solver_parallel(const uint64_t* __restrict__ A, const u
             ulonglong2 v = vecA[k];
             const int baseIdx = k * 2;
             const int2 c0 = getPackedCoords(baseIdx + 0);
-            sA[c0.x][c0.y] = static_cast<float>(v.x) * ATOMIC_SCALE_F_INV;
+            sA[c0.x][c0.y] = toUnscaledFloat(v.x);
             const int2 c1 = getPackedCoords(baseIdx + 1);
-            sA[c1.x][c1.y] = static_cast<float>(v.y) * ATOMIC_SCALE_F_INV;
+            sA[c1.x][c1.y] = toUnscaledFloat(v.y);
         }
         // scalar path
     } else {
         for (int k = laneId; k < packedSize; k += 32) {
             const int2 c = getPackedCoords(k);
-            sA[c.x][c.y] = static_cast<float>(A[k]) * ATOMIC_SCALE_F_INV;
+            sA[c.x][c.y] = toUnscaledFloat(A[k]);
         }
     }
     // rx
@@ -487,13 +489,13 @@ __global__ void cholesky_solver_parallel(const uint64_t* __restrict__ A, const u
         // vectorized path
         for (int k = laneId; k < vecBlimit; k += 32) {
             const ulonglong2 v = vecB[k];
-            sB[k * 2 + 0] = static_cast<float>(v.x) * ATOMIC_SCALE_F_INV;
-            sB[k * 2 + 1] = static_cast<float>(v.y) * ATOMIC_SCALE_F_INV;
+            sB[k * 2 + 0] = toUnscaledFloat(v.x);
+            sB[k * 2 + 1] = toUnscaledFloat(v.y);
         }
         // scalar path
     } else {
         for (int k = laneId; k < N; k += 32)
-            sB[k] = static_cast<float>(B[k]) * ATOMIC_SCALE_F_INV;
+            sB[k] = toUnscaledFloat(B[k]);
     }
 
     // initialize stop flag
@@ -585,7 +587,7 @@ __device__ void RxStreamPass(const int tid, float (*__restrict__ RxLocal)[92], u
 #pragma unroll
         for (int w = 0; w < 4; w++)
             sum += RxLocal[w * 32 + rowInWindow][coords.y];
-        atomicAdd(Rx + k, static_cast<uint64_t>(sum * ATOMIC_SCALE_F));
+        atomicAdd(Rx + k, toScaledUint64(sum));
     }
 }
 

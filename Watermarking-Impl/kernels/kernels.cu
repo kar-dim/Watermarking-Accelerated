@@ -117,7 +117,7 @@ __global__ void me_p3(const float* __restrict__ input, uint64_t* __restrict__ Rx
             // tile 4 (bottom right): pixel B results (offset: rows+8, cols+8)
             sum += RxLocal[w * 32 + 8 + coords.x][8 + coords.y];
         }
-        atomicAdd(Rx + tid, static_cast<uint64_t>(sum * ATOMIC_SCALE_F));
+        atomicAdd(Rx + tid, toScaledUint64(sum));
     }
 }
 
@@ -222,7 +222,7 @@ __global__ void me_p5(const float* __restrict__ input, uint64_t* __restrict__ Rx
 #pragma unroll
         for (int w = 0; w < 8; w++)
             sum += RxLocal[w * 32 + coords.x][coords.y];
-        atomicAdd(Rx + k, static_cast<uint64_t>(sum * ATOMIC_SCALE_F));
+        atomicAdd(Rx + k, toScaledUint64(sum));
     };
 
     // pass 1: [0, 255]
@@ -346,7 +346,7 @@ __global__ void me_p7(const float* __restrict__ input, uint64_t* __restrict__ Rx
 #pragma unroll
         for (int w = 0; w < 4; w++)
             sum += RxLocal[w * 48 + coords.x][coords.y];
-        atomicAdd(Rx + k, static_cast<uint64_t>(sum * ATOMIC_SCALE_F));
+        atomicAdd(Rx + k, toScaledUint64(sum));
     }
 }
 
@@ -521,12 +521,12 @@ __global__ void me_u_and_sumsq_fused(const float* __restrict__ errorSeq, const f
     // block reduce with cub and atomic add to global sum by the leader
     const float blockTotalSq = BlockReduceT(temp_storage).Sum(threadSumSq);
     if (tid == 0)
-        atomicAdd(globalSumSq, static_cast<uint64_t>(blockTotalSq * ATOMIC_SCALE_F));
+        atomicAdd(globalSumSq, toScaledUint64(blockTotalSq));
 }
 
 __global__ void apply_watermark_fused(const float* __restrict__ input, const float* __restrict__ u, const uint64_t* __restrict__ sumSqPtr, uint8_t* __restrict__ output, const float strengthNumerator,
                                       const int planeElements, const int numChannels) {
-    const float uSumSquared = static_cast<float>(*sumSqPtr) * ATOMIC_SCALE_F_INV; // read the precomputed sum of squares from global memory (all threads read the same value, it is cached)
+    const float uSumSquared = toUnscaledFloat(*sumSqPtr) ; // read the precomputed sum of squares from global memory (all threads read the same value, it is cached)
     const float strength = uSumSquared > 1e-12f ? strengthNumerator * rsqrtf(uSumSquared) : 0.0f;
     // grid stride loop over the PLANE (HxW) only (if 1 channel then it's the whole image)
     const int gridSize = blockDim.x * gridDim.x;
