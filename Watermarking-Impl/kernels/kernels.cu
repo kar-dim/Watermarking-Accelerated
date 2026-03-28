@@ -200,14 +200,11 @@ __global__ void me_p5(const float* __restrict__ input, uint64_t* __restrict__ Rx
             sum += RxLocal[w * 32 + coords.x][coords.y];
         atomicAdd(Rx + k, toScaledUint64(sum));
     };
-
     // pass 1: [0, 255]
     writeRx(tid);
-
     // pass 2: [256, 299]
-    if (tid < 44) {
+    if (tid < 44)
         writeRx(tid + 256);
-    }
 }
 
 __global__ void me_p7(const float* __restrict__ input, uint64_t* __restrict__ Rx, uint64_t* __restrict__ rx, const int width, const int height, const int totalBlocksY, const int taskTotal) {
@@ -254,7 +251,7 @@ __global__ void me_p7(const float* __restrict__ input, uint64_t* __restrict__ Rx
             load_neighbor_vec<7>(localVec8, blockValues, centerVal, tid);
         } else {
 #pragma unroll
-            for (int i = 0; i < 6; ++i)
+            for (int i = 0; i < 6; i++)
                 localVec8[i] = {};
             centerVal = blockValues[3][tid + 3];
         }
@@ -358,7 +355,7 @@ __global__ void me_p9(const float* __restrict__ input, uint64_t* __restrict__ Rx
             load_neighbor_vec<9>(localVec8, blockValues, centerVal, tid);
         } else {
 #pragma unroll
-            for (int i = 0; i < 10; ++i)
+            for (int i = 0; i < 10; i++)
                 localVec8[i] = {};
             centerVal = blockValues[4][tid + 4];
         }
