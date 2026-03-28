@@ -173,11 +173,11 @@ __kernel void me_u_and_sumsq_fused(
 
     __local float sums[256];
 
-    const float denom = (*maxVal) + 1.0e-6f;
+    const float invDenom = 1.0f / ((*maxVal) + 1.0e-6f);
     float localSumSq = 0.0f;
 
     while (idx < N) {
-        const float maskVal = errorSeq[idx] / denom;
+        const float maskVal = errorSeq[idx] * invDenom;
         const float uVal = maskVal * w[idx];
         u[idx] = uVal;
         localSumSq += uVal * uVal;
@@ -533,9 +533,9 @@ __kernel void compute_abs_normalized_mask(
 {
     const int stride = get_global_size(0);
     int idx = get_global_id(0);
-    const float denom = *maxVal + 1.0e-6f;
+    const float invDenom = 1.0f / ((*maxVal) + 1.0e-6f);
     while (idx < N) {
-        mask[idx] = fabs(errorSeq[idx]) / denom;
+        mask[idx] = fabs(errorSeq[idx]) * invDenom;
         idx += stride;
     }
 }

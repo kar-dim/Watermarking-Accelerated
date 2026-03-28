@@ -193,7 +193,6 @@ __global__ void nvf_u_and_sumsq_fused(const float* __restrict__ input, const flo
     // block reduce with cub and atomic add to global sum by the leader
     const float blockTotalSq = BlockReduceT(temp_storage).Sum(threadSumSq);
     if (linearTid == 0)
-
         atomicAdd(globalSumSq, toScaledUint64(blockTotalSq));
 }
 
@@ -365,7 +364,6 @@ __global__ void cholesky_solver(const uint64_t* __restrict__ A, const uint64_t* 
 #pragma unroll
         for (int k = 0; k < vecLimitA; k++) {
             const ulonglong2 v = vecA[k];
-
             packed[k * 2 + 0] = toUnscaledFloat(v.x);
             packed[k * 2 + 1] = toUnscaledFloat(v.y);
         }
@@ -397,12 +395,10 @@ __global__ void cholesky_solver(const uint64_t* __restrict__ A, const uint64_t* 
 #pragma unroll
         for (int j = 0; j <= i; j++) {
             float sum = 0.0f;
-
             // dot product of previous L rows
 #pragma unroll
             for (int k = 0; k < j; k++)
                 sum += packed[IDX(i, k)] * packed[IDX(j, k)];
-
             if (i == j) {
                 const float val = packed[IDX(i, i)] - sum;
                 if (val <= 1e-12f) {

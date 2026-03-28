@@ -504,14 +504,14 @@ __global__ void me_u_and_sumsq_fused(const float* __restrict__ errorSeq, const f
     const int tid = threadIdx.x;
     const int gridSize = blockDim.x * gridDim.x;
 
-    const float denom = (*maxVal) + 1.0e-6f; // cached
+    const float invDenom = 1.0f / ((*maxVal) + 1.0e-6f); // cached
     float threadSumSq = 0.0f;
     int idx = blockIdx.x * blockDim.x + tid;
 
     // grid stride loop
     while (idx < N) {
         // normalize error sequence (mask), calculate u, store globally AND calculate local sum of squares of u in one fused pass
-        const float maskVal = errorSeq[idx] / denom;
+        const float maskVal = errorSeq[idx] * invDenom;
         const float uVal = maskVal * w[idx];
         u[idx] = uVal;
         threadSumSq += uVal * uVal;
@@ -545,11 +545,11 @@ __global__ void apply_watermark_fused(const float* __restrict__ input, const flo
 
 __global__ void compute_abs_normalized_mask(const float* __restrict__ errorSeq, float* __restrict__ mask, const float* __restrict__ maxVal, const int N) {
     const int stride = blockDim.x * gridDim.x;
-    const float denom = (*maxVal) + 1.0e-6f; // cached
+    const float invDenom = 1.0f / ((*maxVal) + 1.0e-6f); // cached
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     while (idx < N) {
         // read, absolute, divide, and write value in one fused pass
-        mask[idx] = fabsf(errorSeq[idx]) / denom;
+        mask[idx] = fabsf(errorSeq[idx]) * invDenom;
         idx += stride;
     }
 }
