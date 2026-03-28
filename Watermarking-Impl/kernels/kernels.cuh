@@ -306,6 +306,22 @@ __global__ void calculate_error_sequence_and_partial_corr_fused(const float* __r
     }
 }
 
+// helper method used to accumulate "rx" vector values in the ME kernel, we template the outer loop to fully unroll it and gain maximum performance
+template <int N>
+__device__ __forceinline__ void accumulateRxVec(const half8* __restrict__ localVec8, float* __restrict__ rxVals, const float center) {
+#pragma unroll
+    for (int i = 0; i < N; i++) {
+        const half2* inPtr = reinterpret_cast<const half2*>(&localVec8[i]);
+        float2* rxPtr = reinterpret_cast<float2*>(&rxVals[i * 8]);
+#pragma unroll
+        for (int j = 0; j < 4; j++) {
+            const float2 in_f2 = __half22float2(inPtr[j]);
+            rxPtr[j].x = fmaf(in_f2.x, center, rxPtr[j].x);
+            rxPtr[j].y = fmaf(in_f2.y, center, rxPtr[j].y);
+        }
+    }
+}
+
 // helper method used to reduce "rx" vector values and atomic add them (all threads cooperate)
 template <int SIZE, typename StorageT>
 __device__ __forceinline__ void writeRxVec(uint64_t* __restrict__ rx, const rxVecData<SIZE>& rxData, StorageT& temp_storage, float* __restrict__ warpStaging) {

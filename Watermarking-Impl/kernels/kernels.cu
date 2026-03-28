@@ -61,22 +61,8 @@ __global__ void me_p3(const float* __restrict__ input, uint64_t* __restrict__ Rx
         }
 
         // rx accumulation (do both pixels)
-        const half2 center2Top = __half2half2(centerTop);
-        const half2 center2Bot = __half2half2(centerBot);
-        const half2* ptrTop = reinterpret_cast<half2*>(&vecTop);
-        const half2* ptrBot = reinterpret_cast<half2*>(&vecBot);
-
-#pragma unroll
-        for (int j = 0; j < 4; j++) {
-            // pixel A
-            float2 res = __half22float2(__hmul2(ptrTop[j], center2Top));
-            rxPersistent.vals[j * 2] += res.x;
-            rxPersistent.vals[j * 2 + 1] += res.y;
-            // pixel B
-            res = __half22float2(__hmul2(ptrBot[j], center2Bot));
-            rxPersistent.vals[j * 2] += res.x;
-            rxPersistent.vals[j * 2 + 1] += res.y;
-        }
+        accumulateRxVec<1>(&vecTop, rxPersistent.vals, __half2float(centerTop));
+        accumulateRxVec<1>(&vecBot, rxPersistent.vals, __half2float(centerBot));
 
         // Rx accumulation (Tensor Cores) PACKED (2 pixels)
         // rowPtrVec[0] = top, rowPtrVec[1] = bottom
@@ -166,19 +152,9 @@ __global__ void me_p5(const float* __restrict__ input, uint64_t* __restrict__ Rx
                 localVec8[i] = {};
             centerVal = blockValues[2][tid + 2];
         }
-        half2 center = __half2half2(centerVal);
 
         // accumulate rx
-#pragma unroll
-        for (int i = 0; i < 3; i++) {
-            half2* inPtr = reinterpret_cast<half2*>(&localVec8[i]);
-#pragma unroll
-            for (int j = 0; j < 4; j++) {
-                const float2 res = __half22float2(__hmul2(inPtr[j], center));
-                rxPersistent.vals[i * 8 + j * 2 + 0] += res.x;
-                rxPersistent.vals[i * 8 + j * 2 + 1] += res.y;
-            }
-        }
+        accumulateRxVec<3>(localVec8, rxPersistent.vals, __half2float(centerVal));
 
         half* rowPtr = reinterpret_cast<half*>(&RxLocal[tid][0]);
         half8* rowPtrVec = reinterpret_cast<half8*>(rowPtr);
@@ -282,20 +258,9 @@ __global__ void me_p7(const float* __restrict__ input, uint64_t* __restrict__ Rx
                 localVec8[i] = {};
             centerVal = blockValues[3][tid + 3];
         }
-        half2 center = __half2half2(centerVal);
 
-        // accumulate rx
-#pragma unroll
-        for (int i = 0; i < 6; i++) {
-            half2* inPtr = reinterpret_cast<half2*>(&localVec8[i]);
-#pragma unroll
-            for (int j = 0; j < 4; j++) {
-                const float2 res = __half22float2(__hmul2(inPtr[j], center));
-                rxPersistent.vals[i * 8 + j * 2 + 0] += res.x;
-                rxPersistent.vals[i * 8 + j * 2 + 1] += res.y;
-            }
-        }
-        // note: for p=7 because we reuse shared memory we are forced to sync here!
+        // accumulate rx, note: for p=7 because we reuse shared memory we are forced to sync here!
+        accumulateRxVec<6>(localVec8, rxPersistent.vals, __half2float(centerVal));
         __syncthreads();
 
         // accumulate Rx (Tensor Cores)
@@ -397,20 +362,10 @@ __global__ void me_p9(const float* __restrict__ input, uint64_t* __restrict__ Rx
                 localVec8[i] = {};
             centerVal = blockValues[4][tid + 4];
         }
-        half2 center = __half2half2(centerVal);
+        const float center = __half2float(centerVal);
 
-        // accumulate rx
-#pragma unroll
-        for (int i = 0; i < 10; i++) {
-            half2* inPtr = reinterpret_cast<half2*>(&localVec8[i]);
-#pragma unroll
-            for (int j = 0; j < 4; j++) {
-                const float2 res = __half22float2(__hmul2(inPtr[j], center));
-                rxPersistent.vals[i * 8 + j * 2 + 0] += res.x;
-                rxPersistent.vals[i * 8 + j * 2 + 1] += res.y;
-            }
-        }
-        // note: for p=9 because we reuse shared memory we are forced to sync here!
+        // accumulate rx, note: for p=9 because we reuse shared memory we are forced to sync here!
+        accumulateRxVec<10>(localVec8, rxPersistent.vals, __half2float(centerVal));
         __syncthreads();
 
         half8* shmemPtr = reinterpret_cast<half8*>(&RxLocal[tid][0]);
@@ -420,6 +375,7 @@ __global__ void me_p9(const float* __restrict__ input, uint64_t* __restrict__ Rx
         shmemPtr[10] = {}; // zero padding
         __syncthreads();
 
+        // accumulate Rx (Tensor Cores)
         wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::col_major> A[5];
         wmma::fragment<wmma::matrix_b, 16, 16, 16, half, wmma::row_major> B[5];
 
@@ -526,7 +482,7 @@ __global__ void me_u_and_sumsq_fused(const float* __restrict__ errorSeq, const f
 
 __global__ void apply_watermark_fused(const float* __restrict__ input, const float* __restrict__ u, const uint64_t* __restrict__ sumSqPtr, uint8_t* __restrict__ output, const float strengthNumerator,
                                       const int planeElements, const int numChannels) {
-    const float uSumSquared = toUnscaledFloat(*sumSqPtr) ; // read the precomputed sum of squares from global memory (all threads read the same value, it is cached)
+    const float uSumSquared = toUnscaledFloat(*sumSqPtr); // read the precomputed sum of squares from global memory (all threads read the same value, it is cached)
     const float strength = uSumSquared > 1e-12f ? strengthNumerator * rsqrtf(uSumSquared) : 0.0f;
     // grid stride loop over the PLANE (HxW) only (if 1 channel then it's the whole image)
     const int gridSize = blockDim.x * gridDim.x;
