@@ -16,7 +16,7 @@ inline dim3 gridSizeCalculate(const dim3 blockSize, const int rows, const int co
 inline int gridSize1DStridedCalculate(const int N, const int blockSize) { return std::min<int>((N + blockSize - 1) / blockSize, 2560); }
 // helper method to calculate prediction error kernel 1D grid size based on the number of SMs of the GPU
 template <typename KernelFunc>
-inline unsigned int gridSize1DMeStridedCalculate(KernelFunc kernel, const int blockSize) {
+inline unsigned int gridSizeMeCalculate(KernelFunc kernel, const int blockSize) {
     int numSMs;
     cudaDeviceGetAttribute(&numSMs, cudaDevAttrMultiProcessorCount, 0);
     int maxBlocksPerSM;

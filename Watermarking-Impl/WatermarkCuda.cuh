@@ -24,13 +24,13 @@ class WatermarkCuda final : public WatermarkGPU<p> {
         : WatermarkGPU<p>(rows, cols, watermarkPassword, psnr), afStream(CudaStreamManager::getInstance().getAfStream()) {
         // calculate optimal grid size for ME kernel based on the number of SMs on the GPU
         if constexpr (p == 3)
-            gridOptimalMe = cuda_utils::gridSize1DMeStridedCalculate(me_p3, meBlockSize.x);
+            gridOptimalMe = cuda_utils::gridSizeMeCalculate(me_p3, meBlockSize.x);
         else if constexpr (p == 5)
-            gridOptimalMe = cuda_utils::gridSize1DMeStridedCalculate(me_p5, meBlockSize.x);
+            gridOptimalMe = cuda_utils::gridSizeMeCalculate(me_p5, meBlockSize.x);
         else if constexpr (p == 7)
-            gridOptimalMe = cuda_utils::gridSize1DMeStridedCalculate(me_p7, meBlockSize.x);
+            gridOptimalMe = cuda_utils::gridSizeMeCalculate(me_p7, meBlockSize.x);
         else
-            gridOptimalMe = cuda_utils::gridSize1DMeStridedCalculate(me_p9, meBlockSize.x);
+            gridOptimalMe = cuda_utils::gridSizeMeCalculate(me_p9, meBlockSize.x);
         // initialize ME kernel parameters based on image dims, we calculate total blocks in Y dimension and total tasks for optimal configuration
         constexpr unsigned int pixelsPerBlockY = (p == 3) ? (meBlockSize.x * 2) : meBlockSize.x;
         const unsigned int meTotalBlocksY = WatermarkBase::alignUp<pixelsPerBlockY>(this->baseRows) / pixelsPerBlockY;

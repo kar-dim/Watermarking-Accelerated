@@ -19,7 +19,13 @@ class WatermarkOCL final : public WatermarkGPU<p> {
   public:
     WatermarkOCL<p>(const unsigned int rows, const unsigned int cols, const std::string& watermarkPassword, const float psnr)
         : WatermarkGPU<p>(rows, cols, watermarkPassword, psnr), texKernelDims{alignUp<windowLocalSize.first>(rows), alignUp<windowLocalSize.second>(cols)},
-          meKernelDims{rows, alignUp<optimalLocalSize>(cols)}, programs(cl_utils::OpenCLKernelCache<p>::getProgram()) {}
+          programs(cl_utils::OpenCLKernelCache<p>::getProgram()) {
+        // calculate optimal grid size for ME kernel based on the number of SMs on the GPU
+        gridOptimalMe = cl_utils::gridSizeMeCalculate(device, cl_utils::KernelBuilder(programs, "me").build());
+        constexpr unsigned int pixelsPerBlockX = optimalLocalSize;
+        const unsigned int meTotalBlocksX = alignUp<pixelsPerBlockX>(this->baseCols) / pixelsPerBlockX;
+        meParams = {meTotalBlocksX, meTotalBlocksX * this->baseRows};
+    }
 
   private:
     using WatermarkBase::alignUp;
@@ -31,7 +37,9 @@ class WatermarkOCL final : public WatermarkGPU<p> {
     cl::Context context{afcl::getContext(true)};
     cl::CommandQueue queue{afcl::getQueue(true)};
     cl::Device device{afcl::getDeviceId(), true};
-    std::pair<int, int> texKernelDims, meKernelDims;
+    std::pair<int, int> texKernelDims;
+    unsigned int gridOptimalMe;
+    std::pair<int, int> meParams;
     unsigned int corrFinalLocalSize = cl_utils::maxPow2WorkGroupSize(device); // we could use the safe universal of 256, but the kernel that uses this benefits from larger local sizes
     cl::Program programs;
 
@@ -127,8 +135,8 @@ class WatermarkOCL final : public WatermarkGPU<p> {
                 const AfclBuffer RxBuf(af::constant(0, RxSize, u64));
                 const AfclBuffer rxBuf(af::constant(0, rxSize, u64));
                 // call prediction error Rx/rx matrices calculation kernel
-                queue.enqueueNDRangeKernel(KernelBuilder(programs, "me").args(imageBuf.get(), RxBuf.get(), rxBuf.get(), this->baseCols, this->baseRows).build(), cl::NDRange(),
-                                           cl::NDRange(meKernelDims.second, meKernelDims.first), cl::NDRange(optimalLocalSize, 1));
+                queue.enqueueNDRangeKernel(KernelBuilder(programs, "me").args(imageBuf.get(), RxBuf.get(), rxBuf.get(), this->baseCols, this->baseRows, meParams.first, meParams.second).build(),
+                                           cl::NDRange(), cl::NDRange(gridOptimalMe * optimalLocalSize), cl::NDRange(optimalLocalSize));
                 // calculation of coefficients
                 queue.enqueueNDRangeKernel(KernelBuilder(programs, "cholesky_solver").args(RxBuf.get(), rxBuf.get(), coeffsBuf.get(), stopFlagBuf.get()).build(), cl::NDRange(),
                                            cl::NDRange(choleskyLocalSize), cl::NDRange(choleskyLocalSize));
@@ -151,11 +159,9 @@ class WatermarkOCL final : public WatermarkGPU<p> {
                 // transform to abs and find "partial maxes"
                 queue.enqueueNDRangeKernel(KernelBuilder(programs, "reduce_abs_max_partials").args(errSeqBuf.get(), partialMaxBuf.get(), this->totalPixels).build(), cl::NDRange(),
                                            cl::NDRange(globalSize), cl::NDRange(optimalLocalSize));
-
                 // final max reduction
                 queue.enqueueNDRangeKernel(KernelBuilder(programs, "final_max_reduce").args(partialMaxBuf.get(), maxValBuf.get(), workGroups).build(), cl::NDRange(), cl::NDRange(optimalLocalSize),
                                            cl::NDRange(optimalLocalSize));
-
                 // normalize mask
                 queue.enqueueNDRangeKernel(KernelBuilder(programs, "compute_abs_normalized_mask").args(errSeqBuf.get(), maskBuf.get(), maxValBuf.get(), this->totalPixels).build(), cl::NDRange(),
                                            cl::NDRange(globalSize), cl::NDRange(optimalLocalSize));
