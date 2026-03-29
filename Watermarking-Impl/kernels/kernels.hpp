@@ -263,7 +263,7 @@ __kernel void apply_watermark_fused(
 }
 
 )CLC"
-R"CLC(
+                                   R"CLC(
 
 inline int2 getPackedCoords(const int k) {
     const int r = (int)((sqrt(1.0f + 8.0f * k) - 1.0f) / 2.0f);
@@ -317,218 +317,203 @@ inline int2 getPackedCoords(const int k) {
 __kernel void me(__global const float* restrict input,
     volatile __global ulong* restrict Rx,
     volatile __global ulong* restrict rx,
-    const int width, const int height,
-    const int totalBlocksX, const int taskTotal)
+    const int width,
+    const int height)
+
 {
+    const int x = get_global_id(0);
+    const int y = get_global_id(1);
+    const int outputIndex = (y *  get_global_size(0)) + x;
     const int localId = get_local_id(0);
-    const int gridTotal = get_num_groups(0);
     const float halfScaleFactor = 0.00392156862f;
 
+    __local __attribute__((aligned(16))) half RxLocal[256][40];
     __local half blockValues[3][258];
-    __local float smem[8][256];
+    __local float rxPartial[32][8];
 
-    float acc_Rx[36];
-    float acc_rx[8];
-    for (int i = 0; i < 36; i++)
-        acc_Rx[i] = 0.0f;
-    for (int i = 0; i < 8; i++)
-        acc_rx[i] = 0.0f;
+    if (y >= height)
+        return;
 
-    for (int taskIdx = get_group_id(0); taskIdx < taskTotal; taskIdx += gridTotal) {
-        const int gy = taskIdx / totalBlocksX;
-        const int gx = taskIdx % totalBlocksX;
-
-        if (gy >= height)
-            continue;
-
-        const int baseGlobalCol = (gx * 256) - 1; 
-        const int baseGlobalRow = gy - 1;
-        
-        int r = localId % 3;
-        int c = localId / 3;
-        int idx = localId;
-        
-        while (idx < 3 * 258) {
-            int gCol = clamp(baseGlobalCol + c, 0, width - 1);
-            int gRow = clamp(baseGlobalRow + r, 0, height - 1);
-            vstore_half(input[gCol * height + gRow] * halfScaleFactor, 0, &blockValues[r][c]);
-            idx += 256;
-            c += 85;
-            r += 1;
-            if (r >= 3) {
-                r -= 3;
-                c += 1;
-            }
+    const int totalPixels = 3 * 258;
+    const int colStep = 85;
+    const int rowStep = 1;
+    const int baseGlobalCol = (get_group_id(0) * 256) - 1; 
+    const int baseGlobalRow = get_group_id(1) - 1;
+    int r = localId % 3;
+    int c = localId / 3;
+    int idx = localId;
+    while (idx < totalPixels) {
+        int gCol = clamp(baseGlobalCol + c, 0, (int)width - 1);
+        int gRow = clamp(baseGlobalRow + r, 0, (int)height - 1);
+        vstore_half(input[gCol * height + gRow] * halfScaleFactor, 0, &blockValues[r][c]);
+        idx += 256;
+        c += colStep;
+        r += rowStep;
+        if (r >= 3) {
+            r -= 3;
+            c += 1;
         }
-        barrier(CLK_LOCAL_MEM_FENCE);
-
-        const int globalX = gx * 256 + localId;
-        if (globalX < width) {
-            const int localX = localId + 1;
-            float x_0 = blockValues[0][localX - 1];
-            float x_1 = blockValues[0][localX];
-            float x_2 = blockValues[0][localX + 1];
-            float x_3 = blockValues[1][localX - 1];
-            float center = blockValues[1][localX];
-            float x_4 = blockValues[1][localX + 1];
-            float x_5 = blockValues[2][localX - 1];
-            float x_6 = blockValues[2][localX];
-            float x_7 = blockValues[2][localX + 1];
-
-            acc_rx[0] += x_0 * center;
-            acc_rx[1] += x_1 * center;
-            acc_rx[2] += x_2 * center;
-            acc_rx[3] += x_3 * center;
-            acc_rx[4] += x_4 * center;
-            acc_rx[5] += x_5 * center;
-            acc_rx[6] += x_6 * center;
-            acc_rx[7] += x_7 * center;
-
-            float vec[8] = {x_0, x_1, x_2, x_3, x_4, x_5, x_6, x_7};
-            int k = 0;
-#pragma unroll
-            for (int c_idx = 0; c_idx < 8; c_idx++) {
-#pragma unroll
-                for (int r_idx = c_idx; r_idx < 8; r_idx++) {
-                    acc_Rx[k++] += vec[r_idx] * vec[c_idx];
-                }
-            }
-        }
-        barrier(CLK_LOCAL_MEM_FENCE);
     }
+    barrier(CLK_LOCAL_MEM_FENCE);
 
-    for (int chunk = 0; chunk < 6; chunk++) {
-        int start = chunk * 8;
-        int count = (start + 8 > 44) ? (44 - start) : 8;
-        for (int i = 0; i < count; i++) {
-            int elem = start + i;
-            smem[i][localId] = (elem < 36) ? acc_Rx[elem] : acc_rx[elem - 36];
-        }
-        barrier(CLK_LOCAL_MEM_FENCE);
-        if (localId < count) {
-            float sum = 0.0f;
+    half x_0, x_1, x_2, x_3, x_4, x_5, x_6, x_7, x_8;
+    const bool isValid = (x < width);
+    if (isValid) {
+        const int localX = localId + 1;
+        x_0 = blockValues[0][localX - 1];
+        x_1 = blockValues[0][localX];
+        x_2 = blockValues[0][localX + 1];
+        x_3 = blockValues[1][localX - 1];
+        x_4 = blockValues[1][localX];
+        x_5 = blockValues[1][localX + 1];
+        x_6 = blockValues[2][localX - 1];
+        x_7 = blockValues[2][localX];
+        x_8 = blockValues[2][localX + 1];
+        __local half8* rowPtr = (__local half8*) &RxLocal[localId][0];
+        *rowPtr = (half8)(x_0 * x_4, x_1 * x_4, x_2 * x_4, x_3 * x_4, x_5 * x_4, x_6 * x_4, x_7 * x_4, x_8 * x_4);
+    }
+    else
+        vstore_half8((float8)(0.0f), 0, (__local half*)&RxLocal[localId][0]);
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    //OpenCL optimized rx summation
+    const int col = localId & 7;
+    const int rowStart = (localId >> 3) * 8; 
+    half psum = 0.0h;
 #pragma unroll
-            for (int i = 0; i < 256; i++)
-                sum += smem[localId][i];
-            
-            const int elem = start + localId;
-            if (elem < 36)
-                atom_add(&Rx[elem], toScaledUlong(sum));
-            else
-                atom_add(&rx[elem - 36], toScaledUlong(sum));
-        }
-        barrier(CLK_LOCAL_MEM_FENCE);
+    for (int r = 0; r < 8; r++)
+        psum += RxLocal[rowStart + r][col];
+    rxPartial[localId >> 3][col] = (float)psum;
+    barrier(CLK_LOCAL_MEM_FENCE);
+    if (localId < 8) {
+        float sum = 0.0f;
+#pragma unroll
+        for (int i = 0; i < 32; i++)
+            sum += rxPartial[i][localId];
+        atom_add(&rx[localId], toScaledUlong(sum));
+    } //no barrier needed here
+
+    if (isValid) {
+        __local half8* rowPtr = (__local half8*) &RxLocal[localId][0];
+        rowPtr[0] = (half8)(x_0*x_0, x_0*x_1, x_0*x_2, x_0*x_3, x_0*x_5, x_0*x_6, x_0*x_7, x_0*x_8);
+        rowPtr[1] = (half8)(x_1*x_1, x_1*x_2, x_1*x_3, x_1*x_5, x_1*x_6, x_1*x_7, x_1*x_8, x_2*x_2);
+        rowPtr[2] = (half8)(x_2*x_3, x_2*x_5, x_2*x_6, x_2*x_7, x_2*x_8, x_3*x_3, x_3*x_5, x_3*x_6);
+        rowPtr[3] = (half8)(x_3*x_7, x_3*x_8, x_5*x_5, x_5*x_6, x_5*x_7, x_5*x_8, x_6*x_6, x_6*x_7);
+        rowPtr[4] = (half8)(x_6*x_8, x_7*x_7, x_7*x_8, x_8*x_8, 0.0h,    0.0h,    0.0h,    0.0h);
+    }
+    else {
+#pragma unroll
+        for(int v=0; v<5; v++)
+            vstore_half8((float8)(0.0f), 0, (__local half*)&RxLocal[localId][v*8]);
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    //OpenCL optimized Rx summation
+    //parallel partial summation with 252 threads active
+    const int flatId = localId;
+    if (flatId < 252) {
+        const int col = flatId % 36;
+        const int chunk = flatId / 36;
+        const int rowsPerChunk = 37;
+        const int startRow = chunk * rowsPerChunk;
+        const int endRow = min(startRow + rowsPerChunk, 256);
+        
+        float pSum = 0.0f;
+        for (int i = startRow; i < endRow; i++)
+            pSum += (float)RxLocal[i][col];
+        //smartly reuse rxPartial local memory here (for partial sum)
+        ((__local float*)rxPartial)[flatId] = pSum;
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    //final summation by the first 36 threads
+    if (flatId < 36) {
+        float totalSum = 0.0f;
+#pragma unroll
+        for (int k = 0; k < 7; k++)
+            totalSum += ((__local float*)rxPartial)[flatId + k * 36];
+        atom_add(&Rx[flatId], toScaledUlong(totalSum));
     }
 }
-
 #elif WINDOW_SIZE >= 5
 __kernel void me(
     __global const float* restrict input,
     volatile __global ulong* restrict Rx,
     volatile __global ulong* restrict rx,
-    const int width, const int height,
-    const int totalBlocksX, const int taskTotal) 
+    const int width,
+    const int height) 
 {
+    const int gx = get_group_id(0);
+    const int gy = get_group_id(1);
     const int localId = get_local_id(0);
-    const int gridTotal = get_num_groups(0);
     const float halfScaleFactor = 0.00392156862f;
 
     __local half blockValues[N_ROWS][BUFFER_COLS]; 
 
-#if WINDOW_SIZE == 5
-    #define ACC_SIZE 2
-#elif WINDOW_SIZE == 7
-    #define ACC_SIZE 5
-#elif WINDOW_SIZE == 9
-    #define ACC_SIZE 13
-#endif
-
-    float acc[ACC_SIZE];
-#pragma unroll
-    for (int i = 0; i < ACC_SIZE; i++)
-        acc[i] = 0.0f;
-
-    for (int taskIdx = get_group_id(0); taskIdx < taskTotal; taskIdx += gridTotal) {
-        const int gy = taskIdx / totalBlocksX;
-        const int gx = taskIdx % totalBlocksX;
-
-        if (gy >= height)
-            continue;
-
-        const int loadLimit = N_ROWS * BUFFER_COLS; 
-        const int radius = N_ROWS / 2;
-        const int baseGlobalCol = (gx * 256) - radius; 
-        const int baseGlobalRow = gy - radius;
-        
-        int r = localId % N_ROWS;
-        int c = localId / N_ROWS;
-        int idx = localId;
-        
-        while (idx < loadLimit) { 
-            const int gCol = clamp(baseGlobalCol + c, 0, width - 1);
-            const int gRow = clamp(baseGlobalRow + r, 0, height - 1);
-            blockValues[r][c] = input[gCol * height + gRow] * halfScaleFactor;
-            idx += 256;
-            c += COL_STEP;
-            r += ROW_STEP; 
-            if (r >= N_ROWS) {
-                r -= N_ROWS;
-                c += 1;
-            }
+    // load data
+    const int loadLimit = N_ROWS * BUFFER_COLS; 
+    const int radius = N_ROWS / 2;
+    const int baseGlobalCol = (gx * 256) - radius; 
+    const int baseGlobalRow = gy - radius;
+    
+    int r = localId % N_ROWS;
+    int c = localId / N_ROWS;
+    int idx = localId;
+    
+    while (idx < loadLimit) { 
+        const int gCol = clamp(baseGlobalCol + c, 0, (int)width - 1);
+        const int gRow = clamp(baseGlobalRow + r, 0, (int)height - 1);
+        blockValues[r][c] = input[gCol * height + gRow] * halfScaleFactor;
+        idx += 256;
+        c += COL_STEP;
+        r += ROW_STEP; 
+        if (r >= N_ROWS) {
+            r -= N_ROWS;
+            c += 1;
         }
-        barrier(CLK_LOCAL_MEM_FENCE);
-// NOTE: we must not unroll this, the compiler will panic (tested)
-        for (int i = 0; i < ACC_SIZE; i++) {
-            int k = localId + i * 256;
-            if (k < TOTAL_TASKS) {
-                float coeffSum = 0.0f;
-                if (k < BOUNDARY) { 
-                    const int2 coords = getPackedCoords(k);
-                    const int r_idx = coords.x; 
-                    const int c_idx = coords.y; 
-                    const int cacheRow = (r_idx >= CENTER_IDX) ? r_idx + 1 : r_idx;
-                    const int cacheCol = (c_idx >= CENTER_IDX) ? c_idx + 1 : c_idx;
-                    const int rowA = cacheRow / N_ROWS;
-                    const int shiftA = cacheRow % N_ROWS;
-                    const int rowB = cacheCol / N_ROWS;
-                    const int shiftB = cacheCol % N_ROWS;
-
-#pragma unroll
-                    for (int p = 0; p < 256; p += 4) {
-                        const float4 fa = vload_half4(0, (__local half*)&blockValues[rowA][p + shiftA]);
-                        const float4 fb = vload_half4(0, (__local half*)&blockValues[rowB][p + shiftB]);
-                        coeffSum += dot(fa, fb);
-                    }
-                } else {
-                    const int nIdx = k - BOUNDARY;
-                    const int cacheIdx = (nIdx >= CENTER_IDX) ? nIdx + 1 : nIdx;
-                    const int rowN = cacheIdx / N_ROWS;
-                    const int shiftN = cacheIdx % N_ROWS;
-#pragma unroll
-                    for (int p = 0; p < 256; p += 4) {
-                        const float4 fn = vload_half4(0, (__local half*)&blockValues[rowN][p + shiftN]);
-                        const float4 fc = vload_half4(0, (__local half*)&blockValues[ROW_CENTER][p + SHIFT_CENTER]);
-                        coeffSum += dot(fn, fc);
-                    }
-                }
-                acc[i] += coeffSum;
-            }
-        }
-        barrier(CLK_LOCAL_MEM_FENCE);
     }
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    // vectorized compute of Rx and rx
+    for (int k = localId; k < TOTAL_TASKS; k += 256) {
+        float coeffSum = 0.0f;
+
+        if (k < BOUNDARY) { 
+            // Rx
+            const int2 coords = getPackedCoords(k);
+            const int r_idx = coords.x; 
+            const int c_idx = coords.y; 
+            const int cacheRow = (r_idx >= CENTER_IDX) ? r_idx + 1 : r_idx;
+            const int cacheCol = (c_idx >= CENTER_IDX) ? c_idx + 1 : c_idx;
+            const int rowA = cacheRow / N_ROWS;
+            const int shiftA = cacheRow % N_ROWS;
+            const int rowB = cacheCol / N_ROWS;
+            const int shiftB = cacheCol % N_ROWS;
 
 #pragma unroll
-    for (int i = 0; i < ACC_SIZE; i++) {
-        int k = localId + i * 256;
-        if (k < BOUNDARY) {
-            const int2 coords = getPackedCoords(k);
-            atom_add(&Rx[SOLVER_IDX(coords.x, coords.y)], toScaledUlong(acc[i]));
-        } else if (k < TOTAL_TASKS) {
-            atom_add(&rx[k - BOUNDARY], toScaledUlong(acc[i]));
+            for (int p = 0; p < 256; p += 4) {
+                const float4 fa = vload_half4(0, (__local half*)&blockValues[rowA][p + shiftA]);
+                const float4 fb = vload_half4(0, (__local half*)&blockValues[rowB][p + shiftB]);
+                coeffSum += dot(fa, fb);
+            }
+            atom_add(&Rx[SOLVER_IDX(r_idx, c_idx)], toScaledUlong(coeffSum));
+            
+        } else {
+            // rx
+            const int nIdx = k - BOUNDARY;
+            const int cacheIdx = (nIdx >= CENTER_IDX) ? nIdx + 1 : nIdx;
+            const int rowN = cacheIdx / N_ROWS;
+            const int shiftN = cacheIdx % N_ROWS;
+#pragma unroll
+            for (int p = 0; p < 256; p += 4) {
+                const float4 fn = vload_half4(0, (__local half*)&blockValues[rowN][p + shiftN]);
+                const float4 fc = vload_half4(0, (__local half*)&blockValues[ROW_CENTER][p + SHIFT_CENTER]);
+                coeffSum += dot(fn, fc);
+            }
+            atom_add(&rx[nIdx], toScaledUlong(coeffSum));
         }
     }
 }
-#undef ACC_SIZE
 #undef N_ROWS
 #undef MAT_SIZE
 #undef COL_STEP
@@ -556,7 +541,7 @@ __kernel void compute_abs_normalized_mask(
 }
 
 )CLC"
-R"CLC(
+                                   R"CLC(
 
 __kernel void final_max_reduce(
     __global const float* restrict partials,
