@@ -18,9 +18,4 @@ void launchPitchedToFloatKernel(const uint8_t* ySrc, float* yDst, const int widt
     const dim3 gridSize((width + 31) / 32, (height + 31) / 32);
     pitchedToFloat<<<gridSize, blockSize, 0, stream>>>(ySrc, yDst, width, height, pitch);
 }
-unsigned int gridSize1DMeStridedCalculate() {
-    int numSMs;
-    cudaDeviceGetAttribute(&numSMs, cudaDevAttrMultiProcessorCount, 0);
-    return numSMs * 4;
-}
 } // namespace cuda_utils

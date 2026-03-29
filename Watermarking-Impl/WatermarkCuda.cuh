@@ -21,7 +21,16 @@ template <int p>
 class WatermarkCuda final : public WatermarkGPU<p> {
   public:
     WatermarkCuda<p>(const unsigned int rows, const unsigned int cols, const std::string& watermarkPassword, const float psnr)
-        : WatermarkGPU<p>(rows, cols, watermarkPassword, psnr), afStream(CudaStreamManager::getInstance().getAfStream()), gridOptimalMe(cuda_utils::gridSize1DMeStridedCalculate()) {
+        : WatermarkGPU<p>(rows, cols, watermarkPassword, psnr), afStream(CudaStreamManager::getInstance().getAfStream()) {
+        // calculate optimal grid size for ME kernel based on the number of SMs on the GPU
+        if constexpr (p == 3)
+            gridOptimalMe = cuda_utils::gridSize1DMeStridedCalculate(me_p3, meBlockSize.x);
+        else if constexpr (p == 5)
+            gridOptimalMe = cuda_utils::gridSize1DMeStridedCalculate(me_p5, meBlockSize.x);
+        else if constexpr (p == 7)
+            gridOptimalMe = cuda_utils::gridSize1DMeStridedCalculate(me_p7, meBlockSize.x);
+        else
+            gridOptimalMe = cuda_utils::gridSize1DMeStridedCalculate(me_p9, meBlockSize.x);
         // initialize ME kernel parameters based on image dims, we calculate total blocks in Y dimension and total tasks for optimal configuration
         constexpr unsigned int pixelsPerBlockY = (p == 3) ? (meBlockSize.x * 2) : meBlockSize.x;
         const unsigned int meTotalBlocksY = WatermarkBase::alignUp<pixelsPerBlockY>(this->baseRows) / pixelsPerBlockY;
@@ -117,7 +126,7 @@ class WatermarkCuda final : public WatermarkGPU<p> {
         const af::array errorSequence(this->baseRows, this->baseCols);
         // call error sequence kernel
         calculate_error_sequence<p><<<gridSize, windowBlockSize, 0, afStream>>>(image.device<float>(), nullptr, errorSequence.device<float>(), this->coefficients.template device<float>(),
-                                                                                       this->baseCols, this->baseRows, calculateAbs, this->stopFlag.template device<int>());
+                                                                                this->baseCols, this->baseRows, calculateAbs, this->stopFlag.template device<int>());
         // transfer ownership to arrayfire and return output array
         this->unlockArrays(image, errorSequence, this->coefficients, this->stopFlag);
         return errorSequence;
