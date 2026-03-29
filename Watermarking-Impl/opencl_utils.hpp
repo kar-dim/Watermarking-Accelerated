@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <stdexcept>
 #include <string>
+#include <unordered_map>
 
 /*!
  *  \brief  Helper utility functions related to OpenCL.
@@ -31,12 +32,14 @@ class KernelBuilder {
 // helper method to build opencl kernels from source
 cl::Program buildKernels(const int p);
 
-// cache for reusing opencl kernels (static/global opencl program for each p)
+// cache for reusing opencl kernels (static/global opencl program for each p) for each device
 template <int p>
 struct OpenCLKernelCache {
-    static cl::Program getProgram() {
-        static cl::Program program = buildKernels(p);
-        return program;
+    static cl::Program getProgram(const int deviceId) {
+        static std::unordered_map<int, cl::Program> programs;
+        if (programs.find(deviceId) == programs.end())
+            programs[deviceId] = buildKernels(p);
+        return programs[deviceId];
     }
 };
 

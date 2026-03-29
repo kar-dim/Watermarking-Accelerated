@@ -45,7 +45,7 @@ void BenchmarkWorker::run() {
 
     // initialize watermark environment (device index is used for OpenCL only)
     initializeEnvironment(deviceIndex);
-    buildOpenCLKernels(); // NO-OP for non-OpenCL backends, but we call it here to ensure any necessary pre-compilation is done before the benchmark loop starts
+    buildOpenCLKernels(deviceIndex); // NO-OP for non-OpenCL backends, but we call it here to ensure any necessary pre-compilation is done before the benchmark loop starts
 
     // check if the input directory which conntains the benchmark images is valid
     fs::path inputDir(inputFolder.toStdString());

@@ -19,7 +19,7 @@ class WatermarkOCL final : public WatermarkGPU<p> {
   public:
     WatermarkOCL<p>(const unsigned int rows, const unsigned int cols, const std::string& watermarkPassword, const float psnr)
         : WatermarkGPU<p>(rows, cols, watermarkPassword, psnr), texKernelDims{alignUp<windowLocalSize.first>(rows), alignUp<windowLocalSize.second>(cols)},
-          programs(cl_utils::OpenCLKernelCache<p>::getProgram()) {
+          programs(cl_utils::OpenCLKernelCache<p>::getProgram(af::getDevice())) {
         // calculate optimal grid size for ME kernel based on the number of SMs on the GPU
         gridOptimalMe = cl_utils::gridSizeMeCalculate(device, cl_utils::KernelBuilder(programs, "me").build());
         constexpr unsigned int pixelsPerBlockX = optimalLocalSize;

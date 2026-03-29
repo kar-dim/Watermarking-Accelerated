@@ -227,12 +227,12 @@ bool isOpenCLBackend() {
 #endif
 }
 
-void buildOpenCLKernels() {
+void buildOpenCLKernels(const int deviceId) {
 #if defined(_USE_OPENCL_)
-    cl_utils::OpenCLKernelCache<3>::getProgram();
-    cl_utils::OpenCLKernelCache<5>::getProgram();
-    cl_utils::OpenCLKernelCache<7>::getProgram();
-    cl_utils::OpenCLKernelCache<9>::getProgram();
+    cl_utils::OpenCLKernelCache<3>::getProgram(deviceId);
+    cl_utils::OpenCLKernelCache<5>::getProgram(deviceId);
+    cl_utils::OpenCLKernelCache<7>::getProgram(deviceId);
+    cl_utils::OpenCLKernelCache<9>::getProgram(deviceId);
 #endif
     // NO-OP else
 }
