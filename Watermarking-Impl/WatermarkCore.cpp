@@ -22,6 +22,9 @@
 #if defined(_USE_GPU_)
 #include <algorithm>
 #include <arrayfire.h>
+#if defined (_USE_OPENCL_)
+#include "opencl_utils.hpp"
+#endif
 #elif defined(_USE_EIGEN_)
 #include <cstring>
 #include <intrin.h>
@@ -222,6 +225,16 @@ bool isOpenCLBackend() {
 #else
     return false;
 #endif
+}
+
+void buildOpenCLKernels() {
+#if defined(_USE_OPENCL_)
+    cl_utils::OpenCLKernelCache<3>::getProgram();
+    cl_utils::OpenCLKernelCache<5>::getProgram();
+    cl_utils::OpenCLKernelCache<7>::getProgram();
+    cl_utils::OpenCLKernelCache<9>::getProgram();
+#endif
+    // NO-OP else
 }
 
 void updateSessionParams(ImageSession* s, const int p, const float psnr) {
