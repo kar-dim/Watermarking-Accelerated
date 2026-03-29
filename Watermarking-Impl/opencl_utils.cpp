@@ -38,16 +38,4 @@ unsigned int maxPow2WorkGroupSize(const cl::Device& device) {
         maxValidGroup >>= 1;
     return maxValidGroup;
 }
-
-unsigned int gridSizeMeCalculate(const cl::Device& device, const cl::Kernel& kernel) {
-    const size_t numComputeUnits = device.getInfo<CL_DEVICE_MAX_COMPUTE_UNITS>();
-    const size_t localMemPerCU = device.getInfo<CL_DEVICE_LOCAL_MEM_SIZE>();
-    const size_t kernelLocalMem = kernel.getWorkGroupInfo<CL_KERNEL_LOCAL_MEM_SIZE>(device);
-    int maxBlocksPerCU = 4;
-    if (kernelLocalMem > 0)
-        maxBlocksPerCU = std::min(maxBlocksPerCU, static_cast<int>(localMemPerCU / kernelLocalMem));
-    maxBlocksPerCU = std::max(1, maxBlocksPerCU);
-    // Compute Units * Max blocks per CU
-    return static_cast<unsigned int>(numComputeUnits * maxBlocksPerCU);
-}
 } // namespace cl_utils
