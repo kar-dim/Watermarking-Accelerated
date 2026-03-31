@@ -263,7 +263,7 @@ __kernel void apply_watermark_fused(
 }
 
 )CLC"
-                                   R"CLC(
+R"CLC(
 
 inline int2 getPackedCoords(const int k) {
     const int r = (int)((sqrt(1.0f + 8.0f * k) - 1.0f) / 2.0f);
@@ -319,7 +319,6 @@ __kernel void me(__global const float* restrict input,
     volatile __global ulong* restrict rx,
     const int width,
     const int height)
-
 {
     const int x = get_global_id(0);
     const int y = get_global_id(1);
@@ -395,11 +394,11 @@ __kernel void me(__global const float* restrict input,
 
     if (isValid) {
         __local half8* rowPtr = (__local half8*) &RxLocal[localId][0];
-        rowPtr[0] = (half8)(x_0*x_0, x_0*x_1, x_0*x_2, x_0*x_3, x_0*x_5, x_0*x_6, x_0*x_7, x_0*x_8);
-        rowPtr[1] = (half8)(x_1*x_1, x_1*x_2, x_1*x_3, x_1*x_5, x_1*x_6, x_1*x_7, x_1*x_8, x_2*x_2);
-        rowPtr[2] = (half8)(x_2*x_3, x_2*x_5, x_2*x_6, x_2*x_7, x_2*x_8, x_3*x_3, x_3*x_5, x_3*x_6);
-        rowPtr[3] = (half8)(x_3*x_7, x_3*x_8, x_5*x_5, x_5*x_6, x_5*x_7, x_5*x_8, x_6*x_6, x_6*x_7);
-        rowPtr[4] = (half8)(x_6*x_8, x_7*x_7, x_7*x_8, x_8*x_8, 0.0h,    0.0h,    0.0h,    0.0h);
+        rowPtr[0] = (half8)(x_0 * x_0, x_0 * x_1, x_0 * x_2, x_0 * x_3, x_0 * x_5, x_0 * x_6, x_0 * x_7, x_0 * x_8);
+        rowPtr[1] = (half8)(x_1 * x_1, x_1 * x_2, x_1 * x_3, x_1 * x_5, x_1 * x_6, x_1 * x_7, x_1 * x_8, x_2 * x_2);
+        rowPtr[2] = (half8)(x_2 * x_3, x_2 * x_5, x_2 * x_6, x_2 * x_7, x_2 * x_8, x_3 * x_3, x_3 * x_5, x_3 * x_6);
+        rowPtr[3] = (half8)(x_3 * x_7, x_3 * x_8, x_5 * x_5, x_5 * x_6, x_5 * x_7, x_5 * x_8, x_6 * x_6, x_6 * x_7);
+        rowPtr[4] = (half8)(x_6 * x_8, x_7 * x_7, x_7 * x_8, x_8 * x_8, 0.0h,    0.0h,    0.0h,    0.0h);
     }
     else {
 #pragma unroll
@@ -541,7 +540,7 @@ __kernel void compute_abs_normalized_mask(
 }
 
 )CLC"
-                                   R"CLC(
+R"CLC(
 
 __kernel void final_max_reduce(
     __global const float* restrict partials,
