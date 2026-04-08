@@ -169,9 +169,6 @@ string getDeviceName(const int deviceIndex) {
         af::setDevice(deviceIndex);
     // get the current device name
     return getCurrentAFDeviceName();
-    // swap back to the original device
-    if (deviceIndex >= 0)
-        af::setDevice(currentDevice);
 
     // for CPU name, call __cpuid
 #elif defined(_USE_EIGEN_)
