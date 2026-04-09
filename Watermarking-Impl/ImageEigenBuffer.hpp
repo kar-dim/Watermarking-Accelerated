@@ -15,7 +15,7 @@ class ImageEigenBuffer {
 
     // helper method to process the output (either assign or apply watermark, always float to uint8)
     template <bool EMBED>
-    void processOutput(ImageEigenOutputBuffer& output, const Eigen::ArrayXXf* uStrengthened = nullptr) const {
+    void processOutput(ImageEigenOutputBuffer& output, const Eigen::ArrayXXf* uStrengthened = nullptr, const float scale = 0.0f) const {
         auto finalize = [](const auto& expr) { return expr.round().cwiseMax(0).cwiseMin(255).template cast<uint8_t>(); };
         if (isRGB()) {
             auto& rgbOutput = output.getRGB();
@@ -23,13 +23,13 @@ class ImageEigenBuffer {
 #pragma omp parallel for
             for (int channel = 0; channel < 3; channel++) {
                 if constexpr (EMBED)
-                    rgbOutput[channel] = finalize(rgbInput[channel] + *uStrengthened);
+                    rgbOutput[channel] = finalize(rgbInput[channel] + scale * (*uStrengthened));
                 else
                     rgbOutput[channel] = finalize(rgbInput[channel]);
             }
         } else {
             if constexpr (EMBED)
-                output.getGray() = finalize(getGray() + *uStrengthened);
+                output.getGray() = finalize(getGray() + scale * (*uStrengthened));
             else
                 output.getGray() = finalize(getGray());
         }
@@ -58,8 +58,8 @@ class ImageEigenBuffer {
         return *this;
     }
 
-    // apply watermark (float to uint8)
-    void applyWatermark(const Eigen::ArrayXXf& uStrengthened, ImageEigenOutputBuffer& output) const { processOutput<true>(output, &uStrengthened); }
+    // apply watermark (float to uint8), the unscaled u = mask*w is multiplied by scale (fused)
+    void applyWatermark(const Eigen::ArrayXXf& uStrengthened, const float scale, ImageEigenOutputBuffer& output) const { processOutput<true>(output, &uStrengthened, scale); }
 
     // assign input to output (float to uint8)
     void assignTo(ImageEigenOutputBuffer& output) const { processOutput<false>(output, nullptr); }

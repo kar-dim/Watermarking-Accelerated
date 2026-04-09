@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <omp.h>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -47,13 +48,14 @@ class WatermarkEigen final : public WatermarkBase {
 
     // main watermark embedding method
     void makeWatermark(const ImageBuffer& inputGrayImage, const ImageBuffer& inputImage, ImageOutputBuffer& output, const MaskMethod maskType) override {
-        // compute the strengthened watermark, if it fails assign input to output and return
-        if (!computeStrengthenedWatermark(inputGrayImage.getGray(), maskType)) {
+        // compute the unscaled strengthened watermark and its scale factor, if it fails assign input to output and return
+        const auto scale = computeStrengthenedWatermark(inputGrayImage.getGray(), maskType);
+        if (!scale) {
             inputImage.assignTo(output);
             return;
         }
         // embed the watermark into the input image
-        inputImage.applyWatermark(uStrengthened, output);
+        inputImage.applyWatermark(uStrengthened, *scale, output);
     }
 
     // main watermark detection method
@@ -223,17 +225,18 @@ class WatermarkEigen final : public WatermarkBase {
         }
     }
 
-    // compute the strengthened watermark, calculated by multiplying the mask with the strengthened watermark (random matrix)
-    bool computeStrengthenedWatermark(const ArrayXXf& inputImage, MaskMethod maskType) {
+    // compute the unscaled strengthened watermark u = mask * w and return its scale factor on success.
+    // The scale is intentionally NOT applied here, it is fused later (in ImageEigenBuffer::processOutput)
+    std::optional<float> computeStrengthenedWatermark(const ArrayXXf& inputImage, MaskMethod maskType) {
         if (maskType == MaskMethod::NVF)
             computeCustomMask(inputImage);
         else {
             if (!computePredictionErrorData<maskCalcRequired>(inputImage))
-                return false;
+                return std::nullopt;
         }
         const auto& w = randomMatrix.getGray();
 
-        // optimized calculation of the strengthened watermark
+        // single fused pass: u = mask*w, accumulate sum of squares
         float sumSq = 0.0f;
 #pragma omp parallel for reduction(+ : sumSq)
         for (auto i = 0; i < mask.size(); i++) {
@@ -242,11 +245,8 @@ class WatermarkEigen final : public WatermarkBase {
             sumSq += u * u;
         }
         if (sumSq <= 1e-3f) // for flat images/frames
-            return false;
-
-        const float watermarkStrength = strengthFactor / std::sqrt(sumSq / (baseRows * baseCols));
-        uStrengthened *= watermarkStrength;
-        return true;
+            return std::nullopt;
+        return strengthFactor / std::sqrt(sumSq / totalPixels);
     }
 
     // compute Prediction error data (coefficients, error sequence), and if needed, prediction error mask
