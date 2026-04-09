@@ -22,8 +22,6 @@ class WatermarkEigen final : public WatermarkBase {
   private:
     enum class Op { ADD, SUB };
 
-    static constexpr bool maskCalcRequired = true;
-    static constexpr bool maskCalcNotRequired = false;
     static constexpr int pSquared = p * p;
     static constexpr int pad = p / 2;
     static constexpr int localSize = pSquared - 1;
@@ -64,30 +62,28 @@ class WatermarkEigen final : public WatermarkBase {
         const auto& watermarkedBuffer = inputImage.getGray();
         const auto& w = randomMatrix.getGray();
         if (maskType == MaskMethod::NVF) {
-            if (!computePredictionErrorData<maskCalcNotRequired>(watermarkedBuffer))
+            if (!computePredictionErrorData(watermarkedBuffer))
                 return 0.0f;
             computeCustomMask(watermarkedBuffer);
             u = mask * w;
         } else {
             // ME detect uses fused computations
-            const auto maxAbsOpt = computePredictionErrorData<maskCalcNotRequired>(watermarkedBuffer);
+            const auto maxAbsOpt = computePredictionErrorData(watermarkedBuffer);
             if (!maxAbsOpt)
                 return 0.0f;
 
             const float invMax = (*maxAbsOpt > 0.0f) ? (1.0f / *maxAbsOpt) : 0.0f;
 #pragma omp parallel for
-            for (auto i = 0; i < u.size(); i++)
+            for (int i = 0; i < u.size(); i++)
                 u(i) = std::abs(errorSequence(i)) * invMax * w(i);
         }
         computeErrorSequence(u, filteredEstimation);
         // optimized and fused correlation calculation using Eigen and OpenMP
-        float globalDot = 0.0;
-        float globalSqEz = 0.0;
-        float globalSqEu = 0.0;
+        float globalDot = 0.0f;
+        float globalSqEz = 0.0f;
+        float globalSqEu = 0.0f;
         const float* ezPtr = errorSequence.data();
         const float* euPtr = filteredEstimation.data();
-        const auto totalPixels = errorSequence.size();
-
 #pragma omp parallel reduction(+ : globalDot, globalSqEz, globalSqEu)
         {
             const int numThreads = omp_get_num_threads();
@@ -96,8 +92,8 @@ class WatermarkEigen final : public WatermarkBase {
             const auto start = tid * chunkSize;
             const auto actualSize = (tid == numThreads - 1) ? (totalPixels - start) : chunkSize;
             if (actualSize > 0) {
-                Map<const VectorXf> ezVec(ezPtr + start, actualSize);
-                Map<const VectorXf> euVec(euPtr + start, actualSize);
+                const Map<const VectorXf> ezVec(ezPtr + start, actualSize);
+                const Map<const VectorXf> euVec(euPtr + start, actualSize);
                 globalDot += ezVec.dot(euVec);
                 globalSqEz += ezVec.squaredNorm();
                 globalSqEu += euVec.squaredNorm();
@@ -145,7 +141,8 @@ class WatermarkEigen final : public WatermarkBase {
         if (hasCenterRegion) {
 #pragma omp parallel for
             for (int j = startCol; j < endCol; j++) {
-                double sum = 0.0, sumSq = 0.0;
+                double sum = 0.0;
+                double sumSq = 0.0;
                 for (int jj = -pad; jj <= pad; jj++)
                     for (int ii = -pad; ii <= pad; ii++)
                         computeCustomMaskSums<Op::ADD>(image(pad + ii, j + jj), sum, sumSq);
@@ -169,7 +166,8 @@ class WatermarkEigen final : public WatermarkBase {
 #pragma omp for collapse(2) nowait
                 for (int j = cStart; j < cEnd; j++) {
                     for (int i = rStart; i < rEnd; i++) {
-                        double sum = 0.0, sumSq = 0.0;
+                        double sum = 0.0;
+                        double sumSq = 0.0;
                         // for borders, we cannot slide, so we do the full O(p^2) sum
                         for (int jj = -pad; jj <= pad; jj++) {
                             for (int ii = -pad; ii <= pad; ii++) {
@@ -252,7 +250,7 @@ class WatermarkEigen final : public WatermarkBase {
             }
         } else {
             // ME: skip mask creation entirely, populate errorSequence and its max abs, fuse (abs(e)*invMax)*w
-            const auto maxAbsOpt = computePredictionErrorData<maskCalcNotRequired>(inputImage);
+            const auto maxAbsOpt = computePredictionErrorData(inputImage);
             if (!maxAbsOpt || *maxAbsOpt <= 0.0f)
                 return std::nullopt;
             const float invMax = 1.0f / *maxAbsOpt;
@@ -272,7 +270,6 @@ class WatermarkEigen final : public WatermarkBase {
 
     // compute Prediction error data (coefficients, error sequence), and if needed, prediction error mask,
     // returns the max absolute value of the computed error sequence
-    template <bool maskNeeded>
     std::optional<float> computePredictionErrorData(const ArrayXXf& image) {
         meMatrixData.setZero();
         // process CENTER region
@@ -312,17 +309,8 @@ class WatermarkEigen final : public WatermarkBase {
         // solve system and coefficients
         if (!meMatrixData.computeCoefficients())
             return std::nullopt;
-
         // calculate ex(i,j) AND its max abs in a single fused pass
-        const float maxAbs = computeErrorSequence(image, errorSequence);
-        if constexpr (maskNeeded) {
-            // single pass instead of two: maxCoeff is already known, just normalize
-            if (maxAbs > 0.0f)
-                mask = errorSequence.abs() / maxAbs;
-            else
-                mask.setZero();
-        }
-        return maxAbs;
+        return computeErrorSequence(image, errorSequence);
     }
 
     // computes the prediction error sequence of the input image and returns its max abs value,
