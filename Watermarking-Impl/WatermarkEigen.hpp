@@ -42,8 +42,8 @@ class WatermarkEigen final : public WatermarkBase {
 
   public:
     WatermarkEigen<p>(const unsigned int rows, const unsigned int cols, const std::string& watermarkPassword, const float psnr)
-        : WatermarkBase(rows, cols, watermarkPassword, psnr, initializeRandomMatrix), mask(rows, cols), errorSequence(rows, cols), filteredEstimation(rows, cols), u(rows, cols),
-          uStrengthened(rows, cols), meMatrixData(omp_get_max_threads(), rows) {}
+        : WatermarkBase(rows, cols, watermarkPassword, psnr, initializeRandomMatrix), errorSequence(rows, cols), filteredEstimation(rows, cols), u(rows, cols), uStrengthened(rows, cols),
+          meMatrixData(omp_get_max_threads(), rows) {}
 
     // main watermark embedding method
     void makeWatermark(const ImageBuffer& inputGrayImage, const ImageBuffer& inputImage, ImageOutputBuffer& output, const MaskMethod maskType) override {
@@ -60,18 +60,17 @@ class WatermarkEigen final : public WatermarkBase {
     // main watermark detection method
     float detectWatermark(const ImageBuffer& inputImage, MaskMethod maskType) override {
         const auto& watermarkedBuffer = inputImage.getGray();
-        const auto& w = randomMatrix.getGray();
         if (maskType == MaskMethod::NVF) {
             if (!computePredictionErrorData(watermarkedBuffer))
                 return 0.0f;
-            computeCustomMask(watermarkedBuffer);
-            u = mask * w;
+            // fused: NVF mask + (u = mask*w)
+            computeCustomMaskFused<false>(watermarkedBuffer, u);
         } else {
             // ME detect uses fused computations
             const auto maxAbsOpt = computePredictionErrorData(watermarkedBuffer);
             if (!maxAbsOpt)
                 return 0.0f;
-
+            const auto& w = randomMatrix.getGray();
             const float invMax = (*maxAbsOpt > 0.0f) ? (1.0f / *maxAbsOpt) : 0.0f;
 #pragma omp parallel for
             for (int i = 0; i < u.size(); i++)
@@ -104,7 +103,7 @@ class WatermarkEigen final : public WatermarkBase {
     }
 
   private:
-    ArrayXXf mask, errorSequence, filteredEstimation, u, uStrengthened;
+    ArrayXXf errorSequence, filteredEstimation, u, uStrengthened;
     PredictionErrorMatrixData<p> meMatrixData;
 
     // initialize the watermark random matrix into an Eigen buffer
@@ -127,55 +126,63 @@ class WatermarkEigen final : public WatermarkBase {
         }
     }
 
-    // helper method for custom mask calculation per pixel
-    inline void computeCustomMaskPixel(const double sum, const double sumSq, const int i, const int j) {
-        const double mean = sum / pSquared;
-        const double variance = (sumSq / pSquared) - (mean * mean);
-        const double maskValue = variance / (1.0 + variance);
-        mask(i, j) = std::clamp(static_cast<float>(maskValue), 0.0f, 1.0f);
-    }
-
-    // main method to compute the custom mask
-    void computeCustomMask(const ArrayXXf& image) {
+    // fused NVF mask computation: sliding window mask calc + u = mask*w, optionally accumulating sum of squares for the embedding
+    template <bool accumulate>
+    float computeCustomMaskFused(const ArrayXXf& image, ArrayXXf& uOut) {
+        float sumSqOut = 0.0f;
+        const auto& w = randomMatrix.getGray();
+        static constexpr double invPSquared = 1.0 / pSquared; // precompute the inverse to avoid division in the loop
+        auto emitPixel = [&](const double winSum, const double winSumSq, const int i, const int j) -> float {
+            const double mean = winSum * invPSquared;
+            const double variance = (winSumSq * invPSquared) - (mean * mean);
+            const double maskValue = variance / (1.0 + variance);
+            const float m = std::clamp(static_cast<float>(maskValue), 0.0f, 1.0f);
+            const float uVal = m * w(i, j);
+            uOut(i, j) = uVal;
+            if constexpr (accumulate)
+                return uVal * uVal;
+            else
+                return 0.0f;
+        };
         // process CENTER region
         if (hasCenterRegion) {
-#pragma omp parallel for
+#pragma omp parallel for reduction(+ : sumSqOut)
             for (int j = startCol; j < endCol; j++) {
-                double sum = 0.0;
-                double sumSq = 0.0;
+                double winSum = 0.0;
+                double winSumSq = 0.0;
                 for (int jj = -pad; jj <= pad; jj++)
                     for (int ii = -pad; ii <= pad; ii++)
-                        computeCustomMaskSums<Op::ADD>(image(pad + ii, j + jj), sum, sumSq);
-                computeCustomMaskPixel(sum, sumSq, pad, j);
+                        computeCustomMaskSums<Op::ADD>(image(pad + ii, j + jj), winSum, winSumSq);
+                sumSqOut += emitPixel(winSum, winSumSq, pad, j);
                 // slide window down for remaining center rows in this column
                 for (int i = startRow + 1; i < endRow; i++) {
                     // remove top row and add new bottom row
                     for (int jj = -pad; jj <= pad; jj++)
-                        computeCustomMaskSums<Op::SUB>(image(i - pad - 1, j + jj), sum, sumSq);
+                        computeCustomMaskSums<Op::SUB>(image(i - pad - 1, j + jj), winSum, winSumSq);
                     for (int jj = -pad; jj <= pad; jj++)
-                        computeCustomMaskSums<Op::ADD>(image(i + pad, j + jj), sum, sumSq);
-                    computeCustomMaskPixel(sum, sumSq, i, j);
+                        computeCustomMaskSums<Op::ADD>(image(i + pad, j + jj), winSum, winSumSq);
+                    sumSqOut += emitPixel(winSum, winSumSq, i, j);
                 }
             }
         }
 
         // process BORDER regions
-#pragma omp parallel
+#pragma omp parallel reduction(+ : sumSqOut)
         {
             auto processRect = [&](int rStart, int rEnd, int cStart, int cEnd) {
 #pragma omp for collapse(2) nowait
                 for (int j = cStart; j < cEnd; j++) {
                     for (int i = rStart; i < rEnd; i++) {
-                        double sum = 0.0;
-                        double sumSq = 0.0;
+                        double winSum = 0.0;
+                        double winSumSq = 0.0;
                         // for borders, we cannot slide, so we do the full O(p^2) sum
                         for (int jj = -pad; jj <= pad; jj++) {
                             for (int ii = -pad; ii <= pad; ii++) {
                                 const float val = clampedValue(image, i + ii, j + jj, baseRows, baseCols);
-                                computeCustomMaskSums<Op::ADD>(val, sum, sumSq);
+                                computeCustomMaskSums<Op::ADD>(val, winSum, winSumSq);
                             }
                         }
-                        computeCustomMaskPixel(sum, sumSq, i, j);
+                        sumSqOut += emitPixel(winSum, winSumSq, i, j);
                     }
                 }
             };
@@ -189,6 +196,7 @@ class WatermarkEigen final : public WatermarkBase {
             if (endCol < baseCols && hasCenterRegion)
                 processRect(startRow, endRow, endCol, baseCols);
         }
+        return sumSqOut;
     }
 
     // helper method to process the border pixels (clamp if out of bounds)
@@ -234,30 +242,23 @@ class WatermarkEigen final : public WatermarkBase {
 
     // compute the unscaled strengthened watermark u = mask * w and return its scale factor on success.
     // The scale is intentionally NOT applied here, it is fused later (in ImageEigenBuffer::processOutput).
-    // for ME we fuse (|errorSequence|/maxAbs)*w + sumSq, skipping two full image passes
+    // for ME we fuse (abs(errorSequence)/maxAbs)*w + sumSq, skipping two full image passes
     std::optional<float> computeStrengthenedWatermark(const ArrayXXf& inputImage, MaskMethod maskType) {
-        const auto& w = randomMatrix.getGray();
         float sumSq = 0.0f;
-
         if (maskType == MaskMethod::NVF) {
-            computeCustomMask(inputImage);
-            // fused: u = mask*w, accumulate sum of squares
-#pragma omp parallel for reduction(+ : sumSq)
-            for (auto i = 0; i < mask.size(); i++) {
-                float u = mask(i) * w(i);
-                uStrengthened(i) = u;
-                sumSq += u * u;
-            }
+            // fused NVF mask + u = mask*w + sumSq accumulation
+            sumSq = computeCustomMaskFused<true>(inputImage, uStrengthened);
         } else {
             // ME: skip mask creation entirely, populate errorSequence and its max abs, fuse (abs(e)*invMax)*w
             const auto maxAbsOpt = computePredictionErrorData(inputImage);
             if (!maxAbsOpt || *maxAbsOpt <= 0.0f)
                 return std::nullopt;
+            const auto& w = randomMatrix.getGray();
             const float invMax = 1.0f / *maxAbsOpt;
             const float* ePtr = errorSequence.data();
 #pragma omp parallel for reduction(+ : sumSq)
-            for (auto i = 0; i < errorSequence.size(); i++) {
-                // mask is calculated innline here, helps calculate u directly
+            for (int i = 0; i < errorSequence.size(); i++) {
+                // mask is calculated inline here, helps calculate u directly
                 const float u = std::abs(ePtr[i]) * invMax * w(i);
                 uStrengthened(i) = u;
                 sumSq += u * u;
@@ -364,12 +365,10 @@ class WatermarkEigen final : public WatermarkBase {
             borderMax = std::max(borderMax, outputErrorSequence.topRows(startRow).abs().maxCoeff());
         if (endRow < baseRows)
             borderMax = std::max(borderMax, outputErrorSequence.bottomRows(baseRows - endRow).abs().maxCoeff());
-        if (hasCenterRegion) {
-            if (startCol > 0)
-                borderMax = std::max(borderMax, outputErrorSequence.block(startRow, 0, stripHeight, startCol).abs().maxCoeff());
-            if (endCol < baseCols)
-                borderMax = std::max(borderMax, outputErrorSequence.block(startRow, endCol, stripHeight, baseCols - endCol).abs().maxCoeff());
-        }
+        if (startCol > 0 && hasCenterRegion)
+            borderMax = std::max(borderMax, outputErrorSequence.block(startRow, 0, stripHeight, startCol).abs().maxCoeff());
+        if (endCol < baseCols && hasCenterRegion)
+            borderMax = std::max(borderMax, outputErrorSequence.block(startRow, endCol, stripHeight, baseCols - endCol).abs().maxCoeff());
         return std::max(centerMax, borderMax);
     }
 };
