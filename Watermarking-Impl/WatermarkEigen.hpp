@@ -7,6 +7,7 @@
 #include "WatermarkBase.hpp"
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <omp.h>
 #include <optional>
 #include <string>
@@ -61,15 +62,23 @@ class WatermarkEigen final : public WatermarkBase {
     // main watermark detection method
     float detectWatermark(const ImageBuffer& inputImage, MaskMethod maskType) override {
         const auto& watermarkedBuffer = inputImage.getGray();
+        const auto& w = randomMatrix.getGray();
         if (maskType == MaskMethod::NVF) {
             if (!computePredictionErrorData<maskCalcNotRequired>(watermarkedBuffer))
                 return 0.0f;
             computeCustomMask(watermarkedBuffer);
+            u = mask * w;
         } else {
-            if (!computePredictionErrorData<maskCalcRequired>(watermarkedBuffer))
+            // ME detect uses fused computations
+            const auto maxAbsOpt = computePredictionErrorData<maskCalcNotRequired>(watermarkedBuffer);
+            if (!maxAbsOpt)
                 return 0.0f;
+
+            const float invMax = (*maxAbsOpt > 0.0f) ? (1.0f / *maxAbsOpt) : 0.0f;
+#pragma omp parallel for
+            for (auto i = 0; i < u.size(); i++)
+                u(i) = std::abs(errorSequence(i)) * invMax * w(i);
         }
-        u = mask * randomMatrix.getGray();
         computeErrorSequence(u, filteredEstimation);
         // optimized and fused correlation calculation using Eigen and OpenMP
         float globalDot = 0.0;
@@ -226,32 +235,45 @@ class WatermarkEigen final : public WatermarkBase {
     }
 
     // compute the unscaled strengthened watermark u = mask * w and return its scale factor on success.
-    // The scale is intentionally NOT applied here, it is fused later (in ImageEigenBuffer::processOutput)
+    // The scale is intentionally NOT applied here, it is fused later (in ImageEigenBuffer::processOutput).
+    // for ME we fuse (|errorSequence|/maxAbs)*w + sumSq, skipping two full image passes
     std::optional<float> computeStrengthenedWatermark(const ArrayXXf& inputImage, MaskMethod maskType) {
-        if (maskType == MaskMethod::NVF)
-            computeCustomMask(inputImage);
-        else {
-            if (!computePredictionErrorData<maskCalcRequired>(inputImage))
-                return std::nullopt;
-        }
         const auto& w = randomMatrix.getGray();
-
-        // single fused pass: u = mask*w, accumulate sum of squares
         float sumSq = 0.0f;
+
+        if (maskType == MaskMethod::NVF) {
+            computeCustomMask(inputImage);
+            // fused: u = mask*w, accumulate sum of squares
 #pragma omp parallel for reduction(+ : sumSq)
-        for (auto i = 0; i < mask.size(); i++) {
-            float u = mask(i) * w(i);
-            uStrengthened(i) = u;
-            sumSq += u * u;
+            for (auto i = 0; i < mask.size(); i++) {
+                float u = mask(i) * w(i);
+                uStrengthened(i) = u;
+                sumSq += u * u;
+            }
+        } else {
+            // ME: skip mask creation entirely, populate errorSequence and its max abs, fuse (abs(e)*invMax)*w
+            const auto maxAbsOpt = computePredictionErrorData<maskCalcNotRequired>(inputImage);
+            if (!maxAbsOpt || *maxAbsOpt <= 0.0f)
+                return std::nullopt;
+            const float invMax = 1.0f / *maxAbsOpt;
+            const float* ePtr = errorSequence.data();
+#pragma omp parallel for reduction(+ : sumSq)
+            for (auto i = 0; i < errorSequence.size(); i++) {
+                // mask is calculated innline here, helps calculate u directly
+                const float u = std::abs(ePtr[i]) * invMax * w(i);
+                uStrengthened(i) = u;
+                sumSq += u * u;
+            }
         }
         if (sumSq <= 1e-3f) // for flat images/frames
             return std::nullopt;
         return strengthFactor / std::sqrt(sumSq / totalPixels);
     }
 
-    // compute Prediction error data (coefficients, error sequence), and if needed, prediction error mask
+    // compute Prediction error data (coefficients, error sequence), and if needed, prediction error mask,
+    // returns the max absolute value of the computed error sequence
     template <bool maskNeeded>
-    bool computePredictionErrorData(const ArrayXXf& image) {
+    std::optional<float> computePredictionErrorData(const ArrayXXf& image) {
         meMatrixData.setZero();
         // process CENTER region
         if (hasCenterRegion) {
@@ -289,21 +311,26 @@ class WatermarkEigen final : public WatermarkBase {
 
         // solve system and coefficients
         if (!meMatrixData.computeCoefficients())
-            return false;
+            return std::nullopt;
 
-        // calculate ex(i,j)
-        computeErrorSequence(image, errorSequence);
+        // calculate ex(i,j) AND its max abs in a single fused pass
+        const float maxAbs = computeErrorSequence(image, errorSequence);
         if constexpr (maskNeeded) {
-            const auto errorSequenceAbs = errorSequence.abs();
-            mask = errorSequenceAbs / errorSequenceAbs.maxCoeff();
+            // single pass instead of two: maxCoeff is already known, just normalize
+            if (maxAbs > 0.0f)
+                mask = errorSequence.abs() / maxAbs;
+            else
+                mask.setZero();
         }
-        return true;
+        return maxAbs;
     }
 
-    // computes the prediction error sequence of the input image
-    void computeErrorSequence(const ArrayXXf& image, ArrayXXf& outputErrorSequence) {
+    // computes the prediction error sequence of the input image and returns its max abs value,
+    // The max abs reduction is fused into the per column loop, eliminating a separate full pass
+    float computeErrorSequence(const ArrayXXf& image, ArrayXXf& outputErrorSequence) {
         const auto& coefficients = meMatrixData.coefficients;
         const auto& offsets = meMatrixData.offsets;
+        float centerMax = 0.0f;
         // process CENTER region
         if (hasCenterRegion) {
             const float* imgData = image.data();
@@ -311,7 +338,7 @@ class WatermarkEigen final : public WatermarkBase {
             // calculate prediction error for center region using Eigen maps and OpenMP
             // optimized to calculate 8 neighbors at a time to fully utilize vectorization
             // and eigen lazy evaluation with big expression trees
-#pragma omp parallel for
+#pragma omp parallel for reduction(max : centerMax)
             for (int j = startCol; j < endCol; j++) {
                 const int colOffset = (j * baseRows) + startRow;
                 const Map<const VectorXf> imgBatch(imgData + colOffset, stripHeight);
@@ -337,9 +364,24 @@ class WatermarkEigen final : public WatermarkBase {
                                              Map<const VectorXf>(imgData + colOffset + offsets[k + 6], stripHeight) * coefficients(k + 6) +
                                              Map<const VectorXf>(imgData + colOffset + offsets[k + 7], stripHeight) * coefficients(k + 7));
                 }
+                // max abs reduction on the fly for each column fused here, no separate pass needed
+                centerMax = std::max(centerMax, errorBatch.cwiseAbs().maxCoeff());
             }
         }
         // process BORDER regions
         processBorder(image, [&](const int i, const int j, const LocalVector& neighbors, const int) { outputErrorSequence(i, j) = image(i, j) - neighbors.dot(coefficients); });
+        // border max via small Eigen block reductions
+        float borderMax = 0.0f;
+        if (startRow > 0)
+            borderMax = std::max(borderMax, outputErrorSequence.topRows(startRow).abs().maxCoeff());
+        if (endRow < baseRows)
+            borderMax = std::max(borderMax, outputErrorSequence.bottomRows(baseRows - endRow).abs().maxCoeff());
+        if (hasCenterRegion) {
+            if (startCol > 0)
+                borderMax = std::max(borderMax, outputErrorSequence.block(startRow, 0, stripHeight, startCol).abs().maxCoeff());
+            if (endCol < baseCols)
+                borderMax = std::max(borderMax, outputErrorSequence.block(startRow, endCol, stripHeight, baseCols - endCol).abs().maxCoeff());
+        }
+        return std::max(centerMax, borderMax);
     }
 };
