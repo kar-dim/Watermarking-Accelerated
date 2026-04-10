@@ -1,3 +1,4 @@
+
 # Efficient Image and Video Watermarking
 
 ![512](https://github.com/user-attachments/assets/6544f178-4f99-43ff-850c-9f40db478f35)
@@ -226,7 +227,7 @@ CPU/Eigen            |
 
  Benchmark screen | Result screen
 :-------------------------:|:-------------------------:
-![Watermarking-BenchUI_QTaFwyJDQY](https://github.com/user-attachments/assets/96776c9b-19d9-4cc4-970c-6ef1b87f35df) | <img width="542" height="624" alt="image" src="https://github.com/user-attachments/assets/0cff1358-b67c-4f25-b167-235dca5e8dc6" />
-![Watermarking-BenchUI_8FfBLuXMk7](https://github.com/user-attachments/assets/53adbc25-1f93-43be-810f-7e17069f1937) | <img width="566" height="624" alt="image" src="https://github.com/user-attachments/assets/27f89696-1616-4c9b-858e-776eb3e4ca25" />
+![Watermarking-BenchUI_QTaFwyJDQY](https://github.com/user-attachments/assets/96776c9b-19d9-4cc4-970c-6ef1b87f35df) | <img width="595" height="624" alt="image" src="https://github.com/user-attachments/assets/c58d8891-af1c-4473-bd0a-18a23d7a08cc" />
+![Watermarking-BenchUI_8FfBLuXMk7](https://github.com/user-attachments/assets/53adbc25-1f93-43be-810f-7e17069f1937) | <img width="621" height="624" alt="Watermarking-BenchUI_WEVkTJfXjA" src="https://github.com/user-attachments/assets/e3bd70d5-cc16-499a-b66a-0b79ec087e89" />
 
  
