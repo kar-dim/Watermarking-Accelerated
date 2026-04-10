@@ -280,26 +280,37 @@ class WatermarkEigen final : public WatermarkBase {
 #pragma omp parallel
             {
                 const int threadId = omp_get_thread_num();
-                auto& RxVec = meMatrixData.RxVec_all[threadId].mat;
-                auto& rx = meMatrixData.rx_all[threadId].mat;
+                auto& RxLocal = meMatrixData.RxAll[threadId].mat;
+                auto& rxLocal = meMatrixData.rxAll[threadId].mat;
+                if constexpr (p <= 5) {
+                    // small localSize (8, 24): dot-product loops, upper-triangle accumulation
 #pragma omp for
-                for (int j = startCol; j < endCol; j++) {
-                    const int colOffset = j * baseRows;
-                    const float* centerPtr = imgData + colOffset + startRow;
-                    const Map<const VectorXf> centerBatch(centerPtr, stripHeight);
-
-                    int k = 0;
-                    // rx(u) = sum(center * neighbor_u)
-                    // Rx(u, v) = sum(neighbor_u * neighbor_v)
-                    for (int u = 0; u < localSize; u++) {
-                        const float* neighborPtr = centerPtr + offsets[u];
-                        const Map<const VectorXf> neighborBatch(neighborPtr, stripHeight);
-                        rx(u) += neighborBatch.dot(centerBatch);
-                        for (int v = 0; v <= u; v++, k++) {
-                            const float* ptrV = centerPtr + offsets[v];
-                            const Map<const VectorXf> mapV(ptrV, stripHeight);
-                            RxVec(k) += neighborBatch.dot(mapV);
+                    for (int j = startCol; j < endCol; j++) {
+                        const int colOffset = j * baseRows;
+                        const float* centerPtr = imgData + colOffset + startRow;
+                        const Map<const VectorXf> centerBatch(centerPtr, stripHeight);
+                        for (int u = 0; u < localSize; u++) {
+                            const Map<const VectorXf> neighborBatch(centerPtr + offsets[u], stripHeight);
+                            rxLocal(u) += neighborBatch.dot(centerBatch);
+                            for (int v = 0; v <= u; v++)
+                                RxLocal(v, u) += neighborBatch.dot(Map<const VectorXf>(centerPtr + offsets[v], stripHeight));
                         }
+                    }
+                } else {
+                    // large localSize (48, 80), neighbor matrix N + SSYRK is faster
+                    // N allocated once (per thread) and reused across all columns assigned to this thread
+                    Eigen::MatrixXf N(stripHeight, localSize);
+#pragma omp for
+                    for (int j = startCol; j < endCol; j++) {
+                        const int colOffset = j * baseRows;
+                        const float* centerPtr = imgData + colOffset + startRow;
+                        const Map<const VectorXf> centerBatch(centerPtr, stripHeight);
+                        for (int u = 0; u < localSize; u++)
+                            N.col(u) = Map<const VectorXf>(centerPtr + offsets[u], stripHeight);
+                        // Rx += N^T * N  (SSYRK upper triangle only)
+                        RxLocal.template selfadjointView<Eigen::Upper>().rankUpdate(N.transpose());
+                        // rx += N^T * center
+                        rxLocal.noalias() += N.transpose() * centerBatch;
                     }
                 }
             }

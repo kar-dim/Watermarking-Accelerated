@@ -21,20 +21,18 @@ class PredictionErrorMatrixData {
     static constexpr int localSize = (p * p) - 1;
     static constexpr int center = p / 2;
     using LocalVector = Eigen::Matrix<float, localSize, 1>;
-    using LocalVectorDiag = Eigen::Matrix<float, localSize*(localSize + 1) / 2, 1>;
     using LocalMatrix = Eigen::Matrix<float, localSize, localSize>;
 
   public:
-    LocalVectorDiag RxVec;
     LocalVector coefficients, rx;
     LocalMatrix Rx;
-    std::vector<AlignedMatrix<LocalVectorDiag>> RxVec_all;
-    std::vector<AlignedMatrix<LocalVector>> rx_all;
+    std::vector<AlignedMatrix<LocalMatrix>> RxAll;
+    std::vector<AlignedMatrix<LocalVector>> rxAll;
     std::vector<int> offsets;
 
   public:
     // initialize prediction error matrix data (allocate memory) for a given number of threads
-    PredictionErrorMatrixData(const int numThreads, const int baseRows) : RxVec_all(numThreads), rx_all(numThreads) {
+    PredictionErrorMatrixData(const int numThreads, const int baseRows) : RxAll(numThreads), rxAll(numThreads) {
         offsets.reserve(localSize);
         for (int dj = 0; dj < p; dj++)
             for (int di = 0; di < p; di++) {
@@ -45,51 +43,34 @@ class PredictionErrorMatrixData {
             }
     }
 
-    // sets all Rx,rx matrices and vectors to zero
+    // sets all Rx, rx matrices and vectors to zero
     void setZero() {
-        RxVec.setZero();
         Rx.setZero();
         rx.setZero();
-        for (auto& rxVec : RxVec_all)
+        for (auto& RxMat : RxAll)
+            RxMat.mat.setZero();
+        for (auto& rxVec : rxAll)
             rxVec.mat.setZero();
-        for (auto& rx : rx_all)
-            rx.mat.setZero();
     }
 
-    // computes the prediction error matrices for each thread
+    // border pixels: rank 1 symmetric update (upper triangle) + rx accumulation
     void computePredictionErrorMatrices(const LocalVector& x_, const float pixelValue, const int index) {
-        // calculate Rx optimized by using a vector representing the lower-triangular only instead of a matrix
-        auto& currentRx = RxVec_all[index].mat;
-        for (int i = 0, k = 0; i < localSize; i++)
-            for (int j = 0; j <= i; j++, k++)
-                currentRx(k) += x_(i) * x_(j);
-        // calculate rx vector
-        rx_all[index].mat.noalias() += x_ * pixelValue;
+        RxAll[index].mat.template selfadjointView<Eigen::Upper>().rankUpdate(x_);
+        rxAll[index].mat.noalias() += x_ * pixelValue;
     }
 
-    // calculates the coefficients by reducing (sum) the Rx/rx matrices calculated by each thread, and reconstructing the full Rx matrix
+    // reduce thread local matrices, then solve Rx * coefficients = rx with Cholesky
     bool computeCoefficients() {
-        // reduction sums of Rx,rx of each thread
-        for (const auto& RxVal : RxVec_all)
-            RxVec.noalias() += RxVal.mat;
-        for (const auto& rxVal : rx_all)
-            rx.noalias() += rxVal.mat;
-        if (!RxVec.allFinite())
+        for (const auto& RxMat : RxAll)
+            Rx += RxMat.mat;
+        for (const auto& rxVec : rxAll)
+            rx.noalias() += rxVec.mat;
+        if (!Rx.allFinite() || !rx.allFinite())
             return false;
-
-        // Reconstruct full Rx matrix from the vector
-        for (int i = 0, k = 0; i < localSize; i++) {
-            for (int j = 0; j <= i; j++, k++) {
-                float value = RxVec(k);
-                Rx(i, j) = value;
-                Rx(j, i) = value;
-            }
-        }
-        // solve the linear system Rx * coefficients = rx for coefficients
-        Eigen::LLT<LocalMatrix> llt(Rx);
+        // Cholesky reads upper triangle only
+        Eigen::LLT<LocalMatrix> llt(Rx.template selfadjointView<Eigen::Upper>());
         if (llt.info() != Eigen::Success)
             return false;
-
         coefficients = llt.solve(rx);
         return true;
     }
