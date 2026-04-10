@@ -5,16 +5,14 @@
         <file>assets/theme_images/checkbox.png</file>
         <file alias="down_arrow.png">assets/theme_images/down_arrow.png</file>
         <file>assets/theme_images/handle.png</file>
-		<file>assets/fonts/TitilliumWeb-Regular.ttf</file>
+        <file>assets/fonts/TitilliumWeb-Regular.ttf</file>
     </qresource>
-	<qresource prefix="/samples">
+    <qresource prefix="/samples">
         <file alias="4k.png">../samples/images/4k.png</file>
-		<file alias="18x18.png">../samples/images/18x18.png</file>
-		<file alias="480p.png">../samples/images/480p.png</file>
-		<file alias="512.png">../samples/images/512.png</file>
-		<file alias="512_gray.png">../samples/images/512_gray.png</file>
-		<file alias="720p.png">../samples/images/720p.png</file>
-		<file alias="1080p.png">../samples/images/1080p.png</file>
-		<file alias="1080p_flat.png">../samples/images/1080p_flat.png</file>
+        <file alias="18x18.png">../samples/images/18x18.png</file>
+        <file alias="480p.png">../samples/images/480p.png</file>
+        <file alias="512.png">../samples/images/512.png</file>
+        <file alias="720p.png">../samples/images/720p.png</file>
+        <file alias="1080p.png">../samples/images/1080p.png</file>
     </qresource>
 </RCC>

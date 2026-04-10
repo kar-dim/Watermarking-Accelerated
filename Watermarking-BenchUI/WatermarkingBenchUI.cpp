@@ -136,7 +136,7 @@ void WatermarkingBenchUI::startBenchmark() {
         } else {
             // show the final score for both pipelines
             const QString backendName = QString::fromStdString(WatermarkCore::getDeviceName(deviceComboBox ? deviceComboBox->currentIndex() : -1));
-            const QString finalMessage = QString("<b>BENCHMARK COMPLETE</b><br>Hardware: %1<br>Avg Embed: <b>%2 FPS</b> | Avg Detect: <b>%3 FPS</b><br><br>SCORE: <b>%4</b>")
+            const QString finalMessage = QString("<b>BENCHMARK COMPLETE</b><br>Hardware: %1<br>GeoMean Embed: <b>%2 FPS</b> | GeoMean Detect: <b>%3 FPS</b><br><br>SCORE: <b>%4</b>")
                                              .arg(backendName)
                                              .arg(finalEmbedFps, 0, 'f', 1)
                                              .arg(finalDetectFps, 0, 'f', 1)

@@ -64,10 +64,9 @@ void BenchmarkWorker::run() {
     // initialize accumulators for the benchmark results and calculate total steps for progress tracking
     const int totalSteps = static_cast<int>(validFiles.size() * pValues.size() * psnrValues.size());
     int currentStep = 0;
-    int totalEmbedFrames = 0;
-    int totalDetectFrames = 0;
-    double totalEmbedTimeMs = 0.0;
-    double totalDetectTimeMs = 0.0;
+    double sumLogEmbedFps = 0.0;
+    double sumLogDetectFps = 0.0;
+    int cellCount = 0;
     // initialize with a fixed watermark seed and the first set of parameters (p, psnr)
     auto session = createImageSession("password12345", pValues[0], psnrValues[0]);
     // first image load while we set up the session
@@ -123,7 +122,7 @@ void BenchmarkWorker::run() {
         const int iterations = static_cast<int>(samples.size());
         const double avgMs = (iterations > 0) ? (totalTime / iterations) : 0.0;
         const double fps = (avgMs > 0.0) ? (1000.0 / avgMs) : 0.0;
-        return std::make_tuple(totalTime, avgMs, fps, result, iterations);
+        return std::make_tuple(avgMs, fps, result);
     };
 
     // main loop
@@ -148,7 +147,7 @@ void BenchmarkWorker::run() {
                     // update p and psnr in the session, this will trigger all necessary internal recalculations in the engine (e.g. random noise generation)
                     updateSessionParams(session.get(), p, psnr);
                     // EMBED BENCHMARK
-                    auto [tEmbed, avgEmbedMs, embedFps, dummy, iterEmbed] = measurePerformance([&]() {
+                    auto [avgEmbedMs, embedFps, dummy] = measurePerformance([&]() {
                         embedImage(session.get(), MaskMethod::ME);
                         return 0.0f;
                     });
@@ -157,14 +156,15 @@ void BenchmarkWorker::run() {
                     // necessary uint8 to float for detection
                     prepareDetectionImage(session.get(), MaskMethod::ME);
                     // DETECT BENCHMARK
-                    auto [tDetect, avgDetectMs, detectFps, currentCorrelation, iterDetect] = measurePerformance([&]() { return detectEmbeddedBuffer(session.get(), MaskMethod::ME); });
+                    auto [avgDetectMs, detectFps, currentCorrelation] = measurePerformance([&]() { return detectEmbeddedBuffer(session.get(), MaskMethod::ME); });
                     if (QThread::currentThread()->isInterruptionRequested())
                         return;
-                    // accumulate total times and frames for final score calculation at the end of the benchmark
-                    totalEmbedTimeMs += tEmbed;
-                    totalDetectTimeMs += tDetect;
-                    totalEmbedFrames += iterEmbed;
-                    totalDetectFrames += iterDetect;
+                    // accumulate log(fps) per cell for geometric mean score at the end
+                    if (embedFps > 0.0 && detectFps > 0.0) {
+                        sumLogEmbedFps += std::log(embedFps);
+                        sumLogDetectFps += std::log(detectFps);
+                        cellCount++;
+                    }
                     // GUI: convert the current watermarked image to a QImage format (interleaved RGB, transposed row-wise) for display in the GUI
                     // and emit current FPS and time for this specific frame and step completion to the GUI for display
                     emit resultReady(convertToQtFormat(session.get()), p, psnr, avgEmbedMs, avgDetectMs, embedFps, detectFps, currentFileName, currentCorrelation);
@@ -177,9 +177,10 @@ void BenchmarkWorker::run() {
             return;
         }
     }
-    // calculate final score (geomean average FPS of both pipelines)
-    const double finalEmbedFps = (totalEmbedTimeMs == 0.0) ? 0.0 : (totalEmbedFrames * 1000.0) / totalEmbedTimeMs;
-    const double finalDetectFps = (totalDetectTimeMs == 0.0) ? 0.0 : (totalDetectFrames * 1000.0) / totalDetectTimeMs;
+    // calculate final score: geometric mean of cell FPS across all (image * p * psnr) combinations
+    // geometric mean -> equal logarithmic weight to each cell
+    const double finalEmbedFps = (cellCount > 0) ? std::exp(sumLogEmbedFps / cellCount) : 0.0;
+    const double finalDetectFps = (cellCount > 0) ? std::exp(sumLogDetectFps / cellCount) : 0.0;
     const int finalScore = static_cast<int>(std::round(std::sqrt(finalEmbedFps * finalDetectFps) * 10.0));
     emit benchmarkFinished(finalEmbedFps, finalDetectFps, finalScore);
 }
