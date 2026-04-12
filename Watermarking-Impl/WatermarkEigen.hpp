@@ -72,7 +72,7 @@ class WatermarkEigen final : public WatermarkBase {
                 return 0.0f;
             const auto& w = randomMatrix.getGray();
             const float invMax = (*maxAbsOpt > 0.0f) ? (1.0f / *maxAbsOpt) : 0.0f;
-#pragma omp parallel for
+#pragma omp parallel for schedule(static)
             for (int i = 0; i < u.size(); i++)
                 u(i) = std::abs(errorSequence(i)) * invMax * w(i);
         }
@@ -146,7 +146,7 @@ class WatermarkEigen final : public WatermarkBase {
         };
         // process CENTER region
         if (hasCenterRegion) {
-#pragma omp parallel for reduction(+ : sumSqOut)
+#pragma omp parallel for schedule(static) reduction(+ : sumSqOut)
             for (int j = startCol; j < endCol; j++) {
                 double winSum = 0.0;
                 double winSumSq = 0.0;
@@ -170,7 +170,7 @@ class WatermarkEigen final : public WatermarkBase {
 #pragma omp parallel reduction(+ : sumSqOut)
         {
             auto processRect = [&](int rStart, int rEnd, int cStart, int cEnd) {
-#pragma omp for collapse(2) nowait
+#pragma omp for schedule(static) collapse(2) nowait
                 for (int j = cStart; j < cEnd; j++) {
                     for (int i = rStart; i < rEnd; i++) {
                         double winSum = 0.0;
@@ -209,7 +209,7 @@ class WatermarkEigen final : public WatermarkBase {
         auto processRect = [&](int rStart, int rEnd, int cStart, int cEnd) {
         // nowait: threads jump between borders immediately
         // collapse(2): handles thin strips efficiently
-#pragma omp for collapse(2) nowait
+#pragma omp for schedule(static) collapse(2) nowait
             for (int j = cStart; j < cEnd; j++) {
                 for (int i = rStart; i < rEnd; i++) {
                     // collect neighbors (clamped to avoid out of bounds)
@@ -253,7 +253,7 @@ class WatermarkEigen final : public WatermarkBase {
             const auto& w = randomMatrix.getGray();
             const float invMax = 1.0f / *maxAbsOpt;
             const float* ePtr = errorSequence.data();
-#pragma omp parallel for reduction(+ : sumSq)
+#pragma omp parallel for schedule(static) reduction(+ : sumSq)
             for (int i = 0; i < errorSequence.size(); i++) {
                 // mask is calculated inline here, helps calculate u directly
                 const float u = std::abs(ePtr[i]) * invMax * w(i);
@@ -281,7 +281,7 @@ class WatermarkEigen final : public WatermarkBase {
             if (hasCenterRegion) {
                 if constexpr (p <= 5) {
                     // small localSize (8, 24): dot-product loops, upper-triangle accumulation
-#pragma omp for nowait
+#pragma omp for schedule(static) nowait
                     for (int j = startCol; j < endCol; j++) {
                         const int colOffset = j * baseRows;
                         const float* centerPtr = imgData + colOffset + startRow;
@@ -297,7 +297,7 @@ class WatermarkEigen final : public WatermarkBase {
                     // large localSize (48, 80), neighbor matrix N + SSYRK is faster
                     // N allocated once (per thread) and reused across all columns assigned to this thread
                     Eigen::MatrixXf N(stripHeight, localSize);
-#pragma omp for nowait
+#pragma omp for schedule(static) nowait
                     for (int j = startCol; j < endCol; j++) {
                         const int colOffset = j * baseRows;
                         const float* centerPtr = imgData + colOffset + startRow;
@@ -336,7 +336,7 @@ class WatermarkEigen final : public WatermarkBase {
                 // calculate prediction error for center region using Eigen maps and OpenMP
                 // optimized to calculate 8 neighbors at a time to fully utilize vectorization
                 // and eigen lazy evaluation with big expression trees
-#pragma omp for reduction(max : centerMax)
+#pragma omp for schedule(static) reduction(max : centerMax)
                 for (int j = startCol; j < endCol; j++) {
                     const int colOffset = (j * baseRows) + startRow;
                     const Map<const VectorXf> imgBatch(imgData + colOffset, stripHeight);
