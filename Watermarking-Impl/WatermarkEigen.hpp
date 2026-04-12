@@ -199,9 +199,8 @@ class WatermarkEigen final : public WatermarkBase {
         return sumSqOut;
     }
 
-    // helper method to process the border pixels (clamp if out of bounds)
-    // by using a supplied function
-    // must be called from within an existing omp parallel region — uses omp for directly
+    // helper method to process the border pixels (clamp if out of bounds) by using a supplied function
+    // must be called from within an existing omp parallel region (uses "omp for" directly)
     template <typename Processor>
     void processBorder(const ArrayXXf& image, Processor&& processor) {
         const int threadId = omp_get_thread_num();
