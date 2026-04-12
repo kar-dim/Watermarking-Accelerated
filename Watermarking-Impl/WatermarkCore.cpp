@@ -346,7 +346,7 @@ VideoHandle initVideo(const VideoSettings& settings) {
     const int height = session->videoStream->codecpar->height;
     const int width = session->videoStream->codecpar->width;
     session->watermarkObj = createWatermarkObject(height, width, settings.watermarkPassword, settings.p, settings.psnr);
-    session->hostFrame = std::make_unique<HostMemory<uint8_t>>(session->useHwDecoder ? width * height * 3 / 2 : width * height);
+    session->hostFrame = std::make_unique<HostMemory<uint8_t>>(width * height * 3 / 2);
     session->inputFrame = ImageBuffer({height, width});
     session->watermarkedFrame = ImageOutputBuffer({height, width});
     session->grayFrame = Gray8Buffer({height, width});

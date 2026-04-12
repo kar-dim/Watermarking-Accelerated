@@ -447,13 +447,20 @@ void processAndWriteYPlane(const bool embedWatermark, const AVFrame* frame, Vide
 // writes the chroma planes (U and V) to the ffmpeg pipe, either assuming aligned pointers or not
 void writeChromaPlanes(const AVFrame* frame, VideoSession* s, FILE* ffmpegPipe) {
     const auto [height, width] = s->videoDims();
+    const int planeSize = width * height / 4;
+    const int chromaHeight = height / 2;
+    const int chromaWidth = width / 2;
+    // hostFrame tail (past the Y plane) used as a contiguous staging area for de-strided chroma
+    uint8_t* const chromaStaging = s->hostFrame.get()->get() + width * height;
     // lambda to write a single chroma plane
     auto writePlane = [&](const uint8_t* src, const int linesize) {
-        if (linesize != width / 2) {
-            for (int y = 0; y < height / 2; y++)
-                fwrite(src + y * linesize, 1, width / 2, ffmpegPipe);
+        if (linesize != chromaWidth) {
+            // de-stride into contiguous staging buffer, then one fwrite instead of chromaHeight fwrites
+            for (int y = 0; y < chromaHeight; y++)
+                memcpy(chromaStaging + y * chromaWidth, src + y * linesize, chromaWidth);
+            fwrite(chromaStaging, 1, planeSize, ffmpegPipe);
         } else
-            fwrite(src, 1, width * height / 4, ffmpegPipe);
+            fwrite(src, 1, planeSize, ffmpegPipe);
     };
     // write U
     writePlane(frame->data[1], frame->linesize[1]);
