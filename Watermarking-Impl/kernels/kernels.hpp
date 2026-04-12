@@ -604,7 +604,6 @@ __kernel void calculate_error_sequence_and_partial_corr_fused(
     __global float* restrict partialNormU,
     __global float* restrict partialNormZ,
     const int width, const int height,
-    const int calculateAbs,
     __constant int* restrict stopFlag)
 {
     const int x = get_global_id(1);
@@ -628,8 +627,7 @@ __kernel void calculate_error_sequence_and_partial_corr_fused(
     float threadNormZ = 0.0f;
 
     if (x < width && y < height && *stopFlag == 0) {
-        const float errorSeq = error_sequence_coeffs_filter(centerPtr, coeffs);
-        const float ez = calculateAbs ? fabs(errorSeq) : errorSeq;
+        const float ez = error_sequence_coeffs_filter(centerPtr, coeffs);
         const float eu = e_u[(x * height) + y];
         threadDot = eu * ez;
         threadNormU = eu * eu;

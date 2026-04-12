@@ -16,7 +16,7 @@
  */
 class WatermarkBase {
   protected:
-    using WatermarkLoader = std::function<ImageBuffer(std::vector<float>, const unsigned int, const unsigned int)>;
+    using WatermarkLoader = std::function<ImageBuffer(const std::vector<float>&, const unsigned int, const unsigned int)>;
 
     template <unsigned int ALIGNMENT>
     static constexpr unsigned int alignUp(const unsigned int x) {

@@ -193,18 +193,18 @@ ImageBuffer InternalUtils::rgb2gray(const ImageBuffer& rgbImage) {
 #endif
 }
 
-ImageBuffer InternalUtils::castToFloat(const ImageOutputBuffer& buffer) {
+ImageBuffer InternalUtils::castToFloatGray(const ImageOutputBuffer& buffer, const bool isRGB) {
+    constexpr float rPercent = 0.299f;
+    constexpr float gPercent = 0.587f;
+    constexpr float bPercent = 0.114f;
 #if defined(_USE_GPU_)
-    return buffer.as(f32);
+    return isRGB ? af::rgb2gray(buffer.as(f32), rPercent, gPercent, bPercent) : buffer.as(f32);
 #else
-    if (buffer.isRGB()) {
+    if (isRGB) {
         const auto& rgbU8 = buffer.getRGB();
-        EigenArrayRGB rgbFloat;
-#pragma omp parallel for
-        for (int channel = 0; channel < 3; channel++)
-            rgbFloat[channel] = rgbU8[channel].cast<float>();
-        return ImageBuffer(rgbFloat);
-    } else
+        return ImageBuffer((rgbU8[0].cast<float>() * rPercent + rgbU8[1].cast<float>() * gPercent + rgbU8[2].cast<float>() * bPercent).eval());
+    } else {
         return ImageBuffer(buffer.getGray().cast<float>());
+    }
 #endif
 }

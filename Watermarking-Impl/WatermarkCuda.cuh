@@ -184,7 +184,7 @@ class WatermarkCuda final : public WatermarkGPU<p> {
         // launch fused error sequence + partial correlation
         calculate_error_sequence_and_partial_corr_fused<p><<<gridSize, windowBlockSize, 0, afStream>>>(
             mask.device<float>(), this->randomMatrix.template device<float>(), e_u.device<float>(), this->coefficients.template device<float>(), dotPartial.device<float>(),
-            uNormPartial.device<float>(), zNormPartial.device<float>(), this->baseCols, this->baseRows, false, this->stopFlag.template device<int>());
+            uNormPartial.device<float>(), zNormPartial.device<float>(), this->baseCols, this->baseRows, this->stopFlag.template device<int>());
         // reduce partials and compute correlation
         const af::array correlationResult(1, f32);
         calculate_final_correlation<<<1, corrFinalBlockSize, 0, afStream>>>(dotPartial.device<float>(), uNormPartial.device<float>(), zNormPartial.device<float>(), correlationResult.device<float>(),

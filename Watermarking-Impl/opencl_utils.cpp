@@ -21,7 +21,7 @@ cl::Program buildKernels(const int p) {
     // compile opencl kernels
     try {
         program = cl::Program(context, kernels);
-        program.build(device, ("-cl-mad-enable -DWINDOW_SIZE=" + std::to_string(p)).c_str());
+        program.build(device, ("-cl-unsafe-math-optimizations -DWINDOW_SIZE=" + std::to_string(p)).c_str());
         return program;
     } catch (const cl::Error& e) {
         cout << "Could not build a kernel, Reason: " << e.what() << "\n\n";

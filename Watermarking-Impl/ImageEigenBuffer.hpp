@@ -14,24 +14,53 @@ class ImageEigenBuffer {
     std::variant<std::monostate, Eigen::ArrayXXf, EigenArrayRGB> data;
 
     // helper method to process the output (either assign or apply watermark, always float to uint8)
+    // parallelized over columns using Eigen Map so each thread gets Eigen's vectorized op
     template <bool EMBED>
     void processOutput(ImageEigenOutputBuffer& output, const Eigen::ArrayXXf* uStrengthened = nullptr, const float scale = 0.0f) const {
-        auto finalize = [](const auto& expr) { return expr.round().cwiseMax(0).cwiseMin(255).template cast<uint8_t>(); };
+        using FloatMap = Eigen::Map<const Eigen::ArrayXf>;
+        using U8Map = Eigen::Map<Eigen::Array<uint8_t, Eigen::Dynamic, 1>>;
+        auto finalize = [](const auto& expr) { return expr.round().cwiseMax(0.0f).cwiseMin(255.0f).template cast<uint8_t>(); };
+
         if (isRGB()) {
             auto& rgbOutput = output.getRGB();
-            const auto& rgbInput = getRGB();
-#pragma omp parallel for
-            for (int channel = 0; channel < 3; channel++) {
-                if constexpr (EMBED)
-                    rgbOutput[channel] = finalize(rgbInput[channel] + scale * (*uStrengthened));
-                else
-                    rgbOutput[channel] = finalize(rgbInput[channel]);
+            const auto& rgbIn = getRGB();
+            const int rows = static_cast<int>(rgbIn[0].rows());
+            const int cols = static_cast<int>(rgbIn[0].cols());
+#pragma omp parallel for schedule(static)
+            for (int col = 0; col < cols; col++) {
+                const int off = col * rows;
+                FloatMap r0(rgbIn[0].data() + off, rows);
+                FloatMap r1(rgbIn[1].data() + off, rows);
+                FloatMap r2(rgbIn[2].data() + off, rows);
+                U8Map o0(rgbOutput[0].data() + off, rows);
+                U8Map o1(rgbOutput[1].data() + off, rows);
+                U8Map o2(rgbOutput[2].data() + off, rows);
+                if constexpr (EMBED) {
+                    const auto u = FloatMap(uStrengthened->data() + off, rows) * scale;
+                    o0 = finalize(r0 + u);
+                    o1 = finalize(r1 + u);
+                    o2 = finalize(r2 + u);
+                } else {
+                    o0 = finalize(r0);
+                    o1 = finalize(r1);
+                    o2 = finalize(r2);
+                }
             }
         } else {
-            if constexpr (EMBED)
-                output.getGray() = finalize(getGray() + scale * (*uStrengthened));
-            else
-                output.getGray() = finalize(getGray());
+            const auto& grayIn = getGray();
+            auto& grayOut = output.getGray();
+            const int rows = static_cast<int>(grayIn.rows());
+            const int cols = static_cast<int>(grayIn.cols());
+#pragma omp parallel for schedule(static)
+            for (int col = 0; col < cols; col++) {
+                const int off = col * rows;
+                U8Map dst(grayOut.data() + off, rows);
+                FloatMap src(grayIn.data() + off, rows);
+                if constexpr (EMBED)
+                    dst = finalize(src + FloatMap(uStrengthened->data() + off, rows) * scale);
+                else
+                    dst = finalize(src);
+            }
         }
     }
 

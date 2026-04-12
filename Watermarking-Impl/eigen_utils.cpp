@@ -35,8 +35,7 @@ Gray8BufferIO eigenGrayToCimg(const Gray8Buffer& arrayGray) {
 #pragma omp parallel for
     for (int y = 0; y < rows; y++)
         for (int x = 0; x < cols; x++)
-            for (int channel = 0; channel < 3; channel++)
-                output(x, y) = arrayGray(y, x);
+            output(x, y) = arrayGray(y, x);
     return output;
 }
 

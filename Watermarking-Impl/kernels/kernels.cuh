@@ -245,7 +245,7 @@ __global__ void calculate_error_sequence(const float* __restrict__ inputA, const
 template <int p>
 __global__ void calculate_error_sequence_and_partial_corr_fused(const float* __restrict__ mask, const float* __restrict__ w, const float* __restrict__ e_u, const float* __restrict__ coeffs,
                                                                 float* __restrict__ partialDots, float* __restrict__ partialNormU, float* __restrict__ partialNormZ, const int width, const int height,
-                                                                const bool calculateAbs, const int* __restrict__ stopFlag) {
+                                                                const int* __restrict__ stopFlag) {
     constexpr int pad = p / 2;
     constexpr int coeffsSize = (p * p) - 1;
     constexpr int shDimFast = 32 + (2 * pad);
@@ -287,8 +287,7 @@ __global__ void calculate_error_sequence_and_partial_corr_fused(const float* __r
             }
         }
         // calculate the e_z pixel
-        const float errorSeq = region[shSlow][shFast] - dot;
-        const float ez = calculateAbs ? fabsf(errorSeq) : errorSeq;
+        const float ez = region[shSlow][shFast] - dot;
         // fused read of e_u and compute of correlation values
         const float eu = e_u[x * height + y];
         threadData.dot = eu * ez;

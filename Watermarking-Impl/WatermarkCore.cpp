@@ -22,7 +22,7 @@
 #if defined(_USE_GPU_)
 #include <algorithm>
 #include <arrayfire.h>
-#if defined (_USE_OPENCL_)
+#if defined(_USE_OPENCL_)
 #include "opencl_utils.hpp"
 #endif
 #elif defined(_USE_EIGEN_)
@@ -235,6 +235,8 @@ void buildOpenCLKernels(const int deviceId) {
 }
 
 void updateSessionParams(ImageSession* s, const int p, const float psnr) {
+    if (s->p == p && s->psnr == psnr)
+        return;
     s->p = p;
     s->psnr = psnr;
 #if defined(_USE_GPU_)
@@ -302,8 +304,7 @@ void embedImage(ImageSession* s, MaskMethod method) {
 // which is always a float buffer (grayscale), regardless of the original image format (RGB or grayscale)
 // used only when the input isn't already a float buffer, otherwise it is redundant
 void prepareDetectionImage(ImageSession* s, MaskMethod method) {
-    const auto floatBuffer = castToFloat(s->watermarkBuffer);
-    s->detectGrayBuffer = s->imgBuffer.isRGB ? ImageBuffer(InternalUtils::rgb2gray(floatBuffer)) : ImageBuffer(floatBuffer);
+    s->detectGrayBuffer = InternalUtils::castToFloatGray(s->watermarkBuffer, s->imgBuffer.isRGB);
 #if defined(_USE_GPU_)
     s->detectGrayBuffer.eval();
     af::sync();

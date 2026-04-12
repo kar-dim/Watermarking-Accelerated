@@ -180,7 +180,7 @@ class WatermarkOCL final : public WatermarkGPU<p> {
                 // launch fused rrror sequence + partial correlation
                 queue.enqueueNDRangeKernel(KernelBuilder(programs, "calculate_error_sequence_and_partial_corr_fused")
                                                .args(maskBuf.get(), wBuf.get(), euBuf.get(), coeffsBuf.get(), dotPartialBuf.get(), uNormPartialBuf.get(), zNormPartialBuf.get(), this->baseCols,
-                                                     this->baseRows, 0, stopFlagBuf.get())
+                                                     this->baseRows, stopFlagBuf.get())
                                                .build(),
                                            cl::NDRange(), cl::NDRange(this->texKernelDims.first, this->texKernelDims.second), cl::NDRange(windowLocalSize.first, windowLocalSize.second));
                 // reduce partials and compute correlation
