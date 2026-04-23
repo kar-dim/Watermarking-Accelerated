@@ -19,7 +19,7 @@ class ImageEigenBuffer {
     void processOutput(ImageEigenOutputBuffer& output, const Eigen::ArrayXXf* uStrengthened = nullptr, const float scale = 0.0f) const {
         using FloatMap = Eigen::Map<const Eigen::ArrayXf>;
         using U8Map = Eigen::Map<Eigen::Array<uint8_t, Eigen::Dynamic, 1>>;
-        auto finalize = [](const auto& expr) { return expr.round().cwiseMax(0.0f).cwiseMin(255.0f).template cast<uint8_t>(); };
+        auto finalize = [](const auto& expr) { return (expr + 0.5f).cwiseMax(0.0f).cwiseMin(255.0f).template cast<uint8_t>(); };
 
         if (isRGB()) {
             auto& rgbOutput = output.getRGB();
