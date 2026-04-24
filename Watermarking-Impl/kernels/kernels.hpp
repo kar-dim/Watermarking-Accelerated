@@ -342,8 +342,8 @@ __kernel void me(__global const float* restrict input,
     int c = localId / 3;
     int idx = localId;
     while (idx < totalPixels) {
-        int gCol = clamp(baseGlobalCol + c, 0, (int)width - 1);
-        int gRow = clamp(baseGlobalRow + r, 0, (int)height - 1);
+        const int gCol = clamp(baseGlobalCol + c, 0, width - 1);
+        const int gRow = clamp(baseGlobalRow + r, 0, height - 1);
         vstore_half(input[gCol * height + gRow] * halfScaleFactor, 0, &blockValues[r][c]);
         idx += 256;
         c += colStep;
@@ -460,8 +460,8 @@ __kernel void me(
     int idx = localId;
     
     while (idx < loadLimit) { 
-        const int gCol = clamp(baseGlobalCol + c, 0, (int)width - 1);
-        const int gRow = clamp(baseGlobalRow + r, 0, (int)height - 1);
+        const int gCol = clamp(baseGlobalCol + c, 0, width - 1);
+        const int gRow = clamp(baseGlobalRow + r, 0, height - 1);
         blockValues[r][c] = input[gCol * height + gRow] * halfScaleFactor;
         idx += 256;
         c += COL_STEP;

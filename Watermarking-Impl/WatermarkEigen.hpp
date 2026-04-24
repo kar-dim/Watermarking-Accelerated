@@ -144,31 +144,31 @@ class WatermarkEigen final : public WatermarkBase {
             else
                 return 0.0f;
         };
-        // process CENTER region
-        if (hasCenterRegion) {
-#pragma omp parallel for schedule(static) reduction(+ : sumSqOut)
-            for (int j = startCol; j < endCol; j++) {
-                double winSum = 0.0;
-                double winSumSq = 0.0;
-                for (int jj = -pad; jj <= pad; jj++)
-                    for (int ii = -pad; ii <= pad; ii++)
-                        computeCustomMaskSums<Op::ADD>(image(pad + ii, j + jj), winSum, winSumSq);
-                sumSqOut += emitPixel(winSum, winSumSq, pad, j);
-                // slide window down for remaining center rows in this column
-                for (int i = startRow + 1; i < endRow; i++) {
-                    // remove top row and add new bottom row
-                    for (int jj = -pad; jj <= pad; jj++)
-                        computeCustomMaskSums<Op::SUB>(image(i - pad - 1, j + jj), winSum, winSumSq);
-                    for (int jj = -pad; jj <= pad; jj++)
-                        computeCustomMaskSums<Op::ADD>(image(i + pad, j + jj), winSum, winSumSq);
-                    sumSqOut += emitPixel(winSum, winSumSq, i, j);
-                }
-            }
-        }
-
-        // process BORDER regions
+        // process CENTER and BORDER regions in a single thread team
 #pragma omp parallel reduction(+ : sumSqOut)
         {
+            if (hasCenterRegion) {
+#pragma omp for schedule(static) nowait
+                for (int j = startCol; j < endCol; j++) {
+                    double winSum = 0.0;
+                    double winSumSq = 0.0;
+                    for (int jj = -pad; jj <= pad; jj++)
+                        for (int ii = -pad; ii <= pad; ii++)
+                            computeCustomMaskSums<Op::ADD>(image(pad + ii, j + jj), winSum, winSumSq);
+                    sumSqOut += emitPixel(winSum, winSumSq, pad, j);
+                    // slide window down for remaining center rows in this column
+                    for (int i = startRow + 1; i < endRow; i++) {
+                        // remove top row and add new bottom row
+                        for (int jj = -pad; jj <= pad; jj++)
+                            computeCustomMaskSums<Op::SUB>(image(i - pad - 1, j + jj), winSum, winSumSq);
+                        for (int jj = -pad; jj <= pad; jj++)
+                            computeCustomMaskSums<Op::ADD>(image(i + pad, j + jj), winSum, winSumSq);
+                        sumSqOut += emitPixel(winSum, winSumSq, i, j);
+                    }
+                }
+            }
+
+            // process BORDER regions
             auto processRect = [&](int rStart, int rEnd, int cStart, int cEnd) {
 #pragma omp for schedule(static) collapse(2) nowait
                 for (int j = cStart; j < cEnd; j++) {
@@ -336,7 +336,7 @@ class WatermarkEigen final : public WatermarkBase {
                 // calculate prediction error for center region using Eigen maps and OpenMP
                 // optimized to calculate 8 neighbors at a time to fully utilize vectorization
                 // and eigen lazy evaluation with big expression trees
-#pragma omp for schedule(static) reduction(max : centerMax)
+#pragma omp for schedule(static) reduction(max : centerMax) nowait
                 for (int j = startCol; j < endCol; j++) {
                     const int colOffset = (j * baseRows) + startRow;
                     const Map<const VectorXf> imgBatch(imgData + colOffset, stripHeight);

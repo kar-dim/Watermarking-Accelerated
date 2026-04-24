@@ -102,8 +102,8 @@ __device__ __forceinline__ void fillBlockStripVertical(half blockValues[p][Strip
     while (idx < totalPixels) {
         const int r = idx % StripHeight;
         const int c = idx / StripHeight;
-        const int globalCol = clamp(width - 1, 0, baseGlobalCol + c);
-        const int globalRow = clamp(height - 1, 0, baseGlobalRow + r);
+        const int globalCol = clamp(baseGlobalCol + c, 0, width - 1);
+        const int globalRow = clamp(baseGlobalRow + r, 0, height - 1);
         blockValues[c][r] = __float2half(input[(globalCol * height) + globalRow] * scaleFactor);
         idx += blockSize;
     }
