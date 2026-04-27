@@ -227,7 +227,7 @@ CPU/Eigen            |
 
  Benchmark screen | Result screen
 :-------------------------:|:-------------------------:
-![Watermarking-BenchUI_QTaFwyJDQY](https://github.com/user-attachments/assets/96776c9b-19d9-4cc4-970c-6ef1b87f35df) | <img width="595" height="624" alt="image" src="https://github.com/user-attachments/assets/c58d8891-af1c-4473-bd0a-18a23d7a08cc" />
-![Watermarking-BenchUI_8FfBLuXMk7](https://github.com/user-attachments/assets/53adbc25-1f93-43be-810f-7e17069f1937) | <img width="621" height="624" alt="Watermarking-BenchUI_WEVkTJfXjA" src="https://github.com/user-attachments/assets/e3bd70d5-cc16-499a-b66a-0b79ec087e89" />
+![Watermarking-BenchUI_QTaFwyJDQY](https://github.com/user-attachments/assets/96776c9b-19d9-4cc4-970c-6ef1b87f35df) | ![Benchmark 9 CPU](benchmarks/9.png)
+![Watermarking-BenchUI_8FfBLuXMk7](https://github.com/user-attachments/assets/53adbc25-1f93-43be-810f-7e17069f1937) | ![Benchmark 8 GPU](benchmarks/8.png)
 
  
