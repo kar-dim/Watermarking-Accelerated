@@ -1,5 +1,14 @@
 #pragma once
-#if defined(_USE_GPU_)
+#if defined(_USE_CUDA_)
+#include "GpuArray.hpp"
+#include "cimg_init.h"
+using ImageBuffer = GpuArray<float>;
+using ImageOutputBuffer = GpuArray<uint8_t>;
+using Gray8Buffer = GpuArray<uint8_t>;
+using Gray16Buffer = GpuArray<uint16_t>;
+using Gray8BufferIO = cimg_library::CImg<uint8_t>;
+using FloatBufferIO = cimg_library::CImg<float>;
+#elif defined(_USE_OPENCL_)
 #include <arrayfire.h>
 using ImageBuffer = af::array;
 using ImageOutputBuffer = af::array;

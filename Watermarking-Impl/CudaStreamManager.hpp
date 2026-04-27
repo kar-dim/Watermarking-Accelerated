@@ -1,6 +1,4 @@
 #pragma once
-#include <af/cuda.h>
-#include <arrayfire.h>
 #include <cuda_runtime.h>
 
 /*!
@@ -14,8 +12,8 @@ class CudaStreamManager {
         return instance;
     }
 
-    cudaStream_t getCustomStream() const { return m_stream; }
-    cudaStream_t getAfStream() const { return m_afStream; }
+    cudaStream_t getComputeStream() const { return m_computeStream; }
+    cudaStream_t getTransferStream() const { return m_transferStream; }
 
     CudaStreamManager(const CudaStreamManager&) = delete;
     CudaStreamManager& operator=(const CudaStreamManager&) = delete;
@@ -23,16 +21,18 @@ class CudaStreamManager {
     CudaStreamManager& operator=(CudaStreamManager&&) = delete;
 
   private:
-    cudaStream_t m_stream;
-    cudaStream_t m_afStream;
+    cudaStream_t m_computeStream;
+    cudaStream_t m_transferStream;
 
     CudaStreamManager() {
-        cudaStreamCreate(&m_stream);
-        m_afStream = afcu::getStream(afcu::getNativeId(af::getDevice()));
+        cudaStreamCreate(&m_computeStream);
+        cudaStreamCreate(&m_transferStream);
     }
 
     ~CudaStreamManager() {
-        if (m_stream)
-            cudaStreamDestroy(m_stream);
+        if (m_computeStream)
+            cudaStreamDestroy(m_computeStream);
+        if (m_transferStream)
+            cudaStreamDestroy(m_transferStream);
     }
 };

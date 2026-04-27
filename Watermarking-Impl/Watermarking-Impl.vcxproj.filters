@@ -10,12 +10,8 @@
     <ClInclude Include="CudaStreamManager.hpp">
       <Filter>Header Files\cuda</Filter>
     </ClInclude>
-    <ClCompile Include="utils.cpp">
-      <Filter>Source Files\util</Filter>
-    </ClCompile>
-    <ClCompile Include="video_utils.cpp">
-      <Filter>Source Files\util</Filter>
-    </ClCompile>
+    <CudaCompile Include="utils.cpp" />
+    <CudaCompile Include="video_utils.cpp" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Header Files">

@@ -18,4 +18,11 @@ void launchPitchedToFloatKernel(const uint8_t* ySrc, float* yDst, const int widt
     const dim3 gridSize((width + 31) / 32, (height + 31) / 32);
     pitchedToFloat<<<gridSize, blockSize, 0, stream>>>(ySrc, yDst, width, height, pitch);
 }
+
+// transpose column-major uint8 to row-major uint8
+void launchColMajorToRowMajorU8Kernel(const uint8_t* src, uint8_t* dst, const int width, const int height, const cudaStream_t stream) {
+    constexpr dim3 blockSize(32, 32);
+    const dim3 gridSize((width + 31) / 32, (height + 31) / 32);
+    colMajorToRowMajorU8<<<gridSize, blockSize, 0, stream>>>(src, dst, width, height);
+}
 } // namespace cuda_utils

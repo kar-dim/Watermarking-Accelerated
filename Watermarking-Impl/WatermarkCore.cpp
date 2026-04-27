@@ -19,12 +19,15 @@
 #include <utility>
 #include <vector>
 
-#if defined(_USE_GPU_)
+#if defined(_USE_CUDA_)
+#include "CudaStreamManager.hpp"
+#include "GpuArray.hpp"
+#include <algorithm>
+#include <cuda_runtime.h>
+#elif defined(_USE_OPENCL_)
 #include <algorithm>
 #include <arrayfire.h>
-#if defined(_USE_OPENCL_)
 #include "opencl_utils.hpp"
-#endif
 #elif defined(_USE_EIGEN_)
 #include <cstring>
 #include <intrin.h>
@@ -76,9 +79,13 @@ void ExportedImageDeleter::operator()(ExportedImage* p) const { delete p; }
 
 ExportHandle createReusableExportBuffer() { return ExportHandle(new ExportedImage()); }
 
-// copy data (arrayfire is copy on write, and for eigen we copy into an already allocated buffer)
+// copy data to the export buffer (D2D clone for CUDA, CoW copy for OpenCL, shallow copy for Eigen)
 void exportForSave(const ImageSession* s, ExportedImage* p, MaskMethod method) {
+#if defined(_USE_CUDA_)
+    p->finalPixels = s->watermarkBuffer.clone();
+#else
     p->finalPixels = s->watermarkBuffer;
+#endif
     p->alpha = s->imgBuffer.alphaChannel;
 }
 
@@ -90,15 +97,21 @@ void flushToDiskAsync(ExportedImage* handle, const string& outPath, MaskMethod m
 
 // INTERNAL HELPERS
 namespace {
-// get the current arrayfire device (opencl, cuda)
-#if defined(_USE_GPU_)
-string getCurrentAFDeviceName() {
+#if defined(_USE_OPENCL_)
+string getCurrentOCLDeviceName() {
     char name[256] = {0}, p[256] = {0}, t[256] = {0}, c[256] = {0};
     af::deviceInfo(name, p, t, c);
-    // arrayfire puts underscores instead of spaces, we replace them with spaces
     string cleanName(name);
     std::replace(cleanName.begin(), cleanName.end(), '_', ' ');
     return cleanName;
+}
+#elif defined(_USE_CUDA_)
+string getCUDADeviceName(int deviceIndex = -1) {
+    if (deviceIndex < 0)
+        cudaGetDevice(&deviceIndex);
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, deviceIndex);
+    return string(prop.name);
 }
 #endif
 // generic method taking the underlying ImageOutputBuffer directly
@@ -123,8 +136,14 @@ const uint8_t* extractPixelData(const ImageOutputBuffer& buffer, int& width, int
         channels = 1;
         return gray.data();
     }
-#elif defined(_USE_GPU_)
-    // ArrayFire needs to pull the data to host RAM
+#elif defined(_USE_CUDA_)
+    width = static_cast<int>(buffer.cols());
+    height = static_cast<int>(buffer.rows());
+    channels = static_cast<int>(buffer.channels());
+    hostBuffer.resize(static_cast<size_t>(width) * height * channels);
+    buffer.toHost(hostBuffer.data());
+    return hostBuffer.data();
+#elif defined(_USE_OPENCL_)
     width = static_cast<int>(buffer.dims(1));
     height = static_cast<int>(buffer.dims(0));
     channels = static_cast<int>(buffer.dims(2));
@@ -138,7 +157,7 @@ const uint8_t* extractPixelData(const ImageOutputBuffer& buffer, int& width, int
 // main function to get the data from the image session buffer (column-wise) directly, it also fills the width, height and channels parameters for the caller
 const uint8_t* getSessionPixelData(const ImageSession* session, int& width, int& height, int& channels) { return extractPixelData(session->watermarkBuffer, width, height, channels); }
 
-// initialization, including OpenCL device setup and ArrayFire info display, as well as OpenMP thread pool initialization
+// initialization, including device setup, info display, and OpenMP thread pool initialization
 bool initializeEnvironment(const int openclDevice) {
     bool deviceSetSuccess = true;
 #if defined(_USE_OPENCL_)
@@ -149,10 +168,15 @@ bool initializeEnvironment(const int openclDevice) {
         af::setDevice(0);
         deviceSetSuccess = false;
     }
-#endif
-#if defined(_USE_GPU_)
     af::info();
     std::cout << "\n";
+#elif defined(_USE_CUDA_)
+    int device = 0;
+    cudaGetDevice(&device);
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, device);
+    std::cout << "CUDA Device [" << device << "]: " << prop.name
+              << " (Compute " << prop.major << "." << prop.minor << ")\n\n";
 #endif
 #pragma omp parallel
     {}
@@ -162,15 +186,15 @@ bool initializeEnvironment(const int openclDevice) {
 
 // helper function to get the device name (GPU or CPU)
 string getDeviceName(const int deviceIndex) {
-#if defined(_USE_GPU_)
+#if defined(_USE_CUDA_)
+    return getCUDADeviceName(deviceIndex);
+#elif defined(_USE_OPENCL_)
     const int currentDevice = af::getDevice();
-    // swap to the requested device in order to get its name
     if (deviceIndex >= 0)
         af::setDevice(deviceIndex);
-    // get the current device name
-    return getCurrentAFDeviceName();
-
-    // for CPU name, call __cpuid
+    const string name = getCurrentOCLDeviceName();
+    af::setDevice(currentDevice);
+    return name;
 #elif defined(_USE_EIGEN_)
 #ifdef _WIN32
     int CPUInfo[4] = {-1};
@@ -195,20 +219,23 @@ string getDeviceName(const int deviceIndex) {
 #endif
 }
 
-// get the list of available arrayfire devices
+// get the list of available GPU devices
 std::vector<string> getAvailableDevices() {
     std::vector<string> devices;
-#if defined(_USE_GPU_)
+#if defined(_USE_CUDA_)
+    int count = 0;
+    cudaGetDeviceCount(&count);
+    for (int i = 0; i < count; i++)
+        devices.push_back(getCUDADeviceName(i));
+#elif defined(_USE_OPENCL_)
     const int currentDevice = af::getDevice();
     const int count = af::getDeviceCount();
-    // swap to each device returned by arrayfire in order to get its name
     for (int i = 0; i < count; i++) {
         try {
             af::setDevice(i);
-            devices.push_back(getCurrentAFDeviceName());
+            devices.push_back(getCurrentOCLDeviceName());
         } catch (...) { devices.push_back("Unknown GPU Device " + std::to_string(i)); }
     }
-    // swap back to the original device
     af::setDevice(currentDevice);
 #elif defined(_USE_EIGEN_)
     devices.push_back(getDeviceName());
@@ -239,7 +266,7 @@ void updateSessionParams(ImageSession* s, const int p, const float psnr) {
         return;
     s->p = p;
     s->psnr = psnr;
-#if defined(_USE_GPU_)
+#if defined(_USE_OPENCL_)
     if (s->watermarkObj)
         af::deviceGC();
 #endif
@@ -272,9 +299,7 @@ void bindPreloadedImage(ImageSession* s, PreloadedHandle preloadedData) {
     auto& [rgb, img, alpha, rows, cols, isRGB] = s->imgBuffer;
     // lazy initialization of the watermark object and buffers, only if dimensions change or not initialized yet
     if (!s->watermarkObj || s->currentRows != rows || s->currentCols != cols) {
-        // for GPU backends we need to clear the previous allocations to free GPU memory before creating a new one,
-        // otherwise we might run out of memory (ArrayFire's memory manager is greedy)
-#if defined(_USE_GPU_)
+#if defined(_USE_OPENCL_)
         if (s->watermarkObj)
             af::deviceGC();
 #endif
@@ -293,10 +318,16 @@ void loadImage(ImageSession* session, const string& imagePath) { bindPreloadedIm
 // main function to embed the watermark into the loaded image, it calls the makeWatermark method of the watermark object,
 // which implements the actual embedding algorithm based on the specified mask method (NVF or ME)
 void embedImage(ImageSession* s, MaskMethod method) {
+#if defined(_USE_CUDA_)
+    // for grayscale CUDA images, rgbImage is empty — pass the gray image for both params
+    const auto& inputImg = s->imgBuffer.isRGB ? s->imgBuffer.rgbImage : s->imgBuffer.image;
+    s->watermarkObj->makeWatermark(s->imgBuffer.image, inputImg, s->watermarkBuffer, method);
+#else
     s->watermarkObj->makeWatermark(s->imgBuffer.image, s->imgBuffer.rgbImage, s->watermarkBuffer, method);
-#if defined(_USE_GPU_)
+#if defined(_USE_OPENCL_)
     s->watermarkBuffer.eval();
     af::sync();
+#endif
 #endif
 }
 
@@ -305,7 +336,7 @@ void embedImage(ImageSession* s, MaskMethod method) {
 // used only when the input isn't already a float buffer, otherwise it is redundant
 void prepareDetectionImage(ImageSession* s, MaskMethod method) {
     s->detectGrayBuffer = InternalUtils::castToFloatGray(s->watermarkBuffer, s->imgBuffer.isRGB);
-#if defined(_USE_GPU_)
+#if defined(_USE_OPENCL_)
     s->detectGrayBuffer.eval();
     af::sync();
 #endif
@@ -347,9 +378,11 @@ VideoHandle initVideo(const VideoSettings& settings) {
     const int width = session->videoStream->codecpar->width;
     session->watermarkObj = createWatermarkObject(height, width, settings.watermarkPassword, settings.p, settings.psnr);
     session->hostFrame = std::make_unique<HostMemory<uint8_t>>(width * height * 3 / 2);
+#if defined(_USE_OPENCL_)
     session->inputFrame = ImageBuffer({height, width});
     session->watermarkedFrame = ImageOutputBuffer({height, width});
     session->grayFrame = Gray8Buffer({height, width});
+#endif
     return VideoHandle(session);
 }
 

@@ -88,28 +88,21 @@ AVCodecContextPtr openDecoderHWAccel(const AVCodecParameters* inputCodecParams, 
 
 // embed watermark in a video frame by using CUDA hardware acceleration
 void embedWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe) {
-    const auto afStream = CudaStreamManager::getInstance().getAfStream();
-    const auto videoStream = CudaStreamManager::getInstance().getCustomStream();
+    const auto stream = CudaStreamManager::getInstance().getComputeStream();
     const auto [height, width] = s->videoDims();
-    const ImageBuffer lumaBuffer(height, width, f32);
-    const ImageBuffer chromaBuffer(width, height / 2, u8);
-    // launch NV12 to YUV420 kernel (for UV planes)
-    cuda_utils::launchNV12ToYUV420pKernel(frame->data[1], frame->linesize[1], chromaBuffer.device<uint8_t>(), width / 2, height / 2, afStream);
-    chromaBuffer.unlock();
+    GpuArray<uint8_t> chromaBuffer(static_cast<unsigned int>(width * height / 2), stream);
+    // launch NV12 to YUV420 kernel (for UV planes) and copy chroma to host
+    cuda_utils::launchNV12ToYUV420pKernel(frame->data[1], frame->linesize[1], chromaBuffer.data(), width / 2, height / 2, stream);
+    chromaBuffer.toHostAsync(s->hostFrame.get()->get() + width * height);
 
     if (framesCount % s->settings.watermarkInterval == 0) {
-        // overlap kernel and host copy
-        cuda_utils::launchPitchedToFloatKernel(frame->data[0], lumaBuffer.device<float>(), width, height, frame->linesize[0], videoStream);
-        chromaBuffer.host(s->hostFrame.get()->get() + (width * height));
-        cudaStreamSynchronize(videoStream);
-        // write Y + UV packed
+        GpuArray<float> lumaBuffer(static_cast<unsigned int>(height), static_cast<unsigned int>(width), stream);
+        cuda_utils::launchPitchedToFloatKernel(frame->data[0], lumaBuffer.data(), width, height, frame->linesize[0], stream);
+        cudaStreamSynchronize(stream);
         embedAndWriteFrame(s, lumaBuffer, width * height * 3 / 2, ffmpegPipe);
     } else {
-        // try to overlap the two D2H copies
-        cudaMemcpy2DAsync(s->hostFrame.get()->get(), width, frame->data[0], frame->linesize[0], width, height, cudaMemcpyDeviceToHost, videoStream);
-        chromaBuffer.host(s->hostFrame.get()->get() + (width * height));
-        cudaStreamSynchronize(videoStream);
-        // write Y + UV packed
+        cudaMemcpy2DAsync(s->hostFrame.get()->get(), width, frame->data[0], frame->linesize[0], width, height, cudaMemcpyDeviceToHost, stream);
+        cudaStreamSynchronize(stream);
         fwrite(s->hostFrame.get()->get(), 1, width * height * 3 / 2, ffmpegPipe);
     }
     framesCount++;
@@ -125,10 +118,9 @@ void detectWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* fr
     }
     // detect watermark after watermarkInterval frames
     const auto [height, width] = s->videoDims();
-    const auto afStream = CudaStreamManager::getInstance().getAfStream();
-    const ImageBuffer lumaBuffer(height, width, f32);
-    cuda_utils::launchPitchedToFloatKernel(frame->data[0], lumaBuffer.device<float>(), width, height, frame->linesize[0], afStream);
-    lumaBuffer.unlock();
+    const auto stream = CudaStreamManager::getInstance().getComputeStream();
+    GpuArray<float> lumaBuffer(static_cast<unsigned int>(height), static_cast<unsigned int>(width), stream);
+    cuda_utils::launchPitchedToFloatKernel(frame->data[0], lumaBuffer.data(), width, height, frame->linesize[0], stream);
     float correlation = s->watermarkObj->detectWatermark(lumaBuffer, MaskMethod::ME);
     cout << "Correlation for frame: " << (framesCount + 1) << ": " << correlation << "\n";
     framesCount++;
@@ -173,7 +165,13 @@ void filterFrame(AVFramePtr& frame, AVFramePtr& filteredFrame, const VideoSessio
 // load an uint8_t buffer into a GPU or Eigen buffer
 void loadInputFrame(VideoSession* s, const uint8_t* hostPtr) {
     const auto [height, width] = s->videoDims();
-#if defined(_USE_GPU_)
+#if defined(_USE_CUDA_)
+    const auto stream = CudaStreamManager::getInstance().getComputeStream();
+    // upload host uint8 row-major to GPU, then use existing kernel to convert to column-major float
+    GpuArray<uint8_t> hostGpu(static_cast<unsigned int>(height), static_cast<unsigned int>(width), hostPtr, stream);
+    s->inputFrame = GpuArray<float>(static_cast<unsigned int>(height), static_cast<unsigned int>(width), stream);
+    cuda_utils::launchPitchedToFloatKernel(hostGpu.data(), s->inputFrame.data(), width, height, width, stream);
+#elif defined(_USE_OPENCL_)
     s->inputFrame = Gray8Buffer(width, height, hostPtr, afHost).T().as(f32);
 #else
     s->inputFrame = Map<const Gray8Buffer>(hostPtr, width, height).transpose().template cast<float>();
@@ -279,7 +277,15 @@ bool initFilterGraph(VideoSession* s) {
 // helper method to embed the watermark in the video frame and write it to the ffmpeg pipe
 void embedAndWriteFrame(VideoSession* s, const ImageBuffer& buffer, const int elements, FILE* ffmpegPipe) {
     s->watermarkObj->makeWatermark(buffer, buffer, s->watermarkedFrame, MaskMethod::ME);
-#if defined(_USE_GPU_)
+#if defined(_USE_CUDA_)
+    {
+        const auto stream = CudaStreamManager::getInstance().getComputeStream();
+        GpuArray<uint8_t> rowMajorOut(s->watermarkedFrame.rows(), s->watermarkedFrame.cols(), stream);
+        cuda_utils::launchColMajorToRowMajorU8Kernel(s->watermarkedFrame.data(), rowMajorOut.data(), static_cast<int>(s->watermarkedFrame.cols()), static_cast<int>(s->watermarkedFrame.rows()), stream);
+        rowMajorOut.toHost(s->hostFrame.get()->get());
+    }
+    fwrite(s->hostFrame.get()->get(), 1, elements, ffmpegPipe);
+#elif defined(_USE_OPENCL_)
     s->watermarkedFrame.T().host(s->hostFrame.get()->get());
     fwrite(s->hostFrame.get()->get(), 1, elements, ffmpegPipe);
 #elif defined(_USE_EIGEN_)

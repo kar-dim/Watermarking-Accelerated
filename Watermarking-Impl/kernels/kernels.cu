@@ -595,6 +595,23 @@ __global__ void nV12ToYUV420p(const uint8_t* __restrict__ uvSrc, const int uvPit
     uvDst[uvWidth * uvHeight + idx] = src[1];
 }
 
+__global__ void colMajorToRowMajorU8(const uint8_t* __restrict__ src, uint8_t* __restrict__ dst, const int width, const int height) {
+    __shared__ uint8_t tile[32][33]; // +1 avoids shared-memory bank conflicts
+
+    // load phase: coalesced column-major reads (threadIdx.x strides along row dimension)
+    const int col = blockIdx.x * 32 + threadIdx.y;
+    const int row = blockIdx.y * 32 + threadIdx.x;
+    if (col < width && row < height)
+        tile[threadIdx.x][threadIdx.y] = src[col * height + row];
+    __syncthreads();
+
+    // store phase: coalesced row-major writes (threadIdx.x strides along col dimension)
+    const int outRow = blockIdx.y * 32 + threadIdx.y;
+    const int outCol = blockIdx.x * 32 + threadIdx.x;
+    if (outRow < height && outCol < width)
+        dst[outRow * width + outCol] = tile[threadIdx.y][threadIdx.x];
+}
+
 __global__ void pitchedToFloat(const uint8_t* __restrict__ input, float* __restrict__ output, const int width, const int height, const int pitch) {
 
     __shared__ float tile[32][33]; // 32x32 tile, +1 to avoid bank conflicts

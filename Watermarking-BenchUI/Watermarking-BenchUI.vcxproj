@@ -192,20 +192,14 @@
     <PostBuildEvent>
       <Command>xcopy "$(SolutionDir)Watermarking-Impl\libs\ffmpeg\bin\*.dll" "$(OutDir)Watermarking-BenchUI" /y /D
 xcopy "$(SolutionDir)Watermarking-Impl\libs\ffmpeg\bin\ffmpeg.exe" "$(OutDir)Watermarking-BenchUI" /y /D
-xcopy "$(AF_PATH)\lib\FreeImage.dll" "$(OutDir)Watermarking-BenchUI" /y /D
-xcopy "$(AF_PATH)\lib\afcuda.dll" "$(OutDir)Watermarking-BenchUI" /y /D
-xcopy "$(AF_PATH)\lib\cublas64_12.dll" "$(OutDir)Watermarking-BenchUI" /y /D
-xcopy "$(AF_PATH)\lib\cublasLt64_12.dll" "$(OutDir)Watermarking-BenchUI" /y /D
-xcopy "$(AF_PATH)\lib\cusparse64_12.dll" "$(OutDir)Watermarking-BenchUI" /y /D
-xcopy "$(AF_PATH)\lib\cufft64_11.dll" "$(OutDir)Watermarking-BenchUI" /y /D
-xcopy "$(AF_PATH)\lib\cusolver64_11.dll" "$(OutDir)Watermarking-BenchUI" /y /D
-xcopy "$(AF_PATH)\lib\nvJitLink_120_0.dll" "$(OutDir)Watermarking-BenchUI" /y /D
-xcopy "$(AF_PATH)\lib\nvrtc64_120_0.dll" "$(OutDir)Watermarking-BenchUI" /y /D
-xcopy "$(AF_PATH)\lib\nvrtc-builtins64_128.dll" "$(OutDir)Watermarking-BenchUI" /y /D</Command>
+xcopy "$(SolutionDir)Watermarking-Impl\libs\libpng\bin\libpng16.dll" "$(OutDir)Watermarking-BenchUI" /y /D
+xcopy "$(SolutionDir)Watermarking-Impl\libs\zlib\bin\zlib1.dll" "$(OutDir)Watermarking-BenchUI" /y /D
+xcopy "$(SolutionDir)Watermarking-Impl\libs\libjpeg\bin\release\jpeg62.dll" "$(OutDir)Watermarking-BenchUI" /y /D
+xcopy "$(SolutionDir)Watermarking-Impl\libs\libtiff\bin\tiff.dll" "$(OutDir)Watermarking-BenchUI" /y /D</Command>
     </PostBuildEvent>
     <Link>
-      <AdditionalLibraryDirectories>$(AF_PATH)\lib;$(SolutionDir)Watermarking-Impl\libs\ffmpeg\lib;$(CUDA_PATH)\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>cudart_static.lib;cuda.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;afcuda.lib;avutil.lib;avformat.lib;swscale.lib;avcodec.lib;avfilter.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(SolutionDir)Watermarking-Impl\libs\zlib\lib;$(SolutionDir)Watermarking-Impl\libs\libpng\lib;$(SolutionDir)Watermarking-Impl\libs\libjpeg\lib;$(SolutionDir)Watermarking-Impl\libs\libwebp\lib;$(SolutionDir)Watermarking-Impl\libs\libtiff\lib;$(SolutionDir)Watermarking-Impl\libs\ffmpeg\lib;$(CUDA_PATH)\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>cudart_static.lib;cuda.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;zlibd.lib;libpng16d.lib;jpeg.lib;libwebp.lib;tiff.lib;avutil.lib;avformat.lib;swscale.lib;avcodec.lib;avfilter.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <IgnoreSpecificDefaultLibraries>LIBCMT</IgnoreSpecificDefaultLibraries>
       <EntryPointSymbol>WinMainCRTStartup</EntryPointSymbol>
     </Link>
@@ -226,20 +220,14 @@ xcopy "$(AF_PATH)\lib\nvrtc-builtins64_128.dll" "$(OutDir)Watermarking-BenchUI" 
     <PostBuildEvent>
       <Command>xcopy "$(SolutionDir)Watermarking-Impl\libs\ffmpeg\bin\*.dll" "$(OutDir)Watermarking-BenchUI" /y /D
 xcopy "$(SolutionDir)Watermarking-Impl\libs\ffmpeg\bin\ffmpeg.exe" "$(OutDir)Watermarking-BenchUI" /y /D
-xcopy "$(AF_PATH)\lib\FreeImage.dll" "$(OutDir)Watermarking-BenchUI" /y /D
-xcopy "$(AF_PATH)\lib\afcuda.dll" "$(OutDir)Watermarking-BenchUI" /y /D
-xcopy "$(AF_PATH)\lib\cublas64_12.dll" "$(OutDir)Watermarking-BenchUI" /y /D
-xcopy "$(AF_PATH)\lib\cublasLt64_12.dll" "$(OutDir)Watermarking-BenchUI" /y /D
-xcopy "$(AF_PATH)\lib\cusparse64_12.dll" "$(OutDir)Watermarking-BenchUI" /y /D
-xcopy "$(AF_PATH)\lib\cufft64_11.dll" "$(OutDir)Watermarking-BenchUI" /y /D
-xcopy "$(AF_PATH)\lib\cusolver64_11.dll" "$(OutDir)Watermarking-BenchUI" /y /D
-xcopy "$(AF_PATH)\lib\nvJitLink_120_0.dll" "$(OutDir)Watermarking-BenchUI" /y /D
-xcopy "$(AF_PATH)\lib\nvrtc64_120_0.dll" "$(OutDir)Watermarking-BenchUI" /y /D
-xcopy "$(AF_PATH)\lib\nvrtc-builtins64_128.dll" "$(OutDir)Watermarking-BenchUI" /y /D</Command>
+xcopy "$(SolutionDir)Watermarking-Impl\libs\libpng\bin\libpng16.dll" "$(OutDir)Watermarking-BenchUI" /y /D
+xcopy "$(SolutionDir)Watermarking-Impl\libs\zlib\bin\zlib1.dll" "$(OutDir)Watermarking-BenchUI" /y /D
+xcopy "$(SolutionDir)Watermarking-Impl\libs\libjpeg\bin\release\jpeg62.dll" "$(OutDir)Watermarking-BenchUI" /y /D
+xcopy "$(SolutionDir)Watermarking-Impl\libs\libtiff\bin\tiff.dll" "$(OutDir)Watermarking-BenchUI" /y /D</Command>
     </PostBuildEvent>
     <Link>
-      <AdditionalLibraryDirectories>$(AF_PATH)\lib;$(SolutionDir)Watermarking-Impl\libs\ffmpeg\lib;$(CUDA_PATH)\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>$(CoreLibraryDependencies); cudart_static.lib;cuda.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;afcuda.lib;avutil.lib;avformat.lib;swscale.lib;avcodec.lib;avfilter.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(SolutionDir)Watermarking-Impl\libs\zlib\lib;$(SolutionDir)Watermarking-Impl\libs\libpng\lib;$(SolutionDir)Watermarking-Impl\libs\libjpeg\lib;$(SolutionDir)Watermarking-Impl\libs\libwebp\lib;$(SolutionDir)Watermarking-Impl\libs\libtiff\lib;$(SolutionDir)Watermarking-Impl\libs\ffmpeg\lib;$(CUDA_PATH)\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>$(CoreLibraryDependencies);cudart_static.lib;cuda.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;zlib.lib;libpng16.lib;jpeg.lib;libwebp.lib;tiff.lib;avutil.lib;avformat.lib;swscale.lib;avcodec.lib;avfilter.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <IgnoreSpecificDefaultLibraries>LIBCMT</IgnoreSpecificDefaultLibraries>
       <EntryPointSymbol>WinMainCRTStartup</EntryPointSymbol>
     </Link>
@@ -260,21 +248,15 @@ xcopy "$(AF_PATH)\lib\nvrtc-builtins64_128.dll" "$(OutDir)Watermarking-BenchUI" 
     <PostBuildEvent>
       <Command>xcopy "$(SolutionDir)Watermarking-Impl\libs\ffmpeg\bin\*.dll" "$(OutDir)Watermarking-BenchUI" /y /D
 xcopy "$(SolutionDir)Watermarking-Impl\libs\ffmpeg\bin\ffmpeg.exe" "$(OutDir)Watermarking-BenchUI" /y /D
-xcopy "$(AF_PATH)\lib\FreeImage.dll" "$(OutDir)Watermarking-BenchUI" /y /D
-xcopy "$(AF_PATH)\lib\afcuda.dll" "$(OutDir)Watermarking-BenchUI" /y /D
-xcopy "$(AF_PATH)\lib\cublas64_12.dll" "$(OutDir)Watermarking-BenchUI" /y /D
-xcopy "$(AF_PATH)\lib\cublasLt64_12.dll" "$(OutDir)Watermarking-BenchUI" /y /D
-xcopy "$(AF_PATH)\lib\cusparse64_12.dll" "$(OutDir)Watermarking-BenchUI" /y /D
-xcopy "$(AF_PATH)\lib\cufft64_11.dll" "$(OutDir)Watermarking-BenchUI" /y /D
-xcopy "$(AF_PATH)\lib\cusolver64_11.dll" "$(OutDir)Watermarking-BenchUI" /y /D
-xcopy "$(AF_PATH)\lib\nvJitLink_120_0.dll" "$(OutDir)Watermarking-BenchUI" /y /D
-xcopy "$(AF_PATH)\lib\nvrtc64_120_0.dll" "$(OutDir)Watermarking-BenchUI" /y /D
-xcopy "$(AF_PATH)\lib\nvrtc-builtins64_128.dll" "$(OutDir)Watermarking-BenchUI" /y /D
+xcopy "$(SolutionDir)Watermarking-Impl\libs\libpng\bin\libpng16.dll" "$(OutDir)Watermarking-BenchUI" /y /D
+xcopy "$(SolutionDir)Watermarking-Impl\libs\zlib\bin\zlib1.dll" "$(OutDir)Watermarking-BenchUI" /y /D
+xcopy "$(SolutionDir)Watermarking-Impl\libs\libjpeg\bin\release\jpeg62.dll" "$(OutDir)Watermarking-BenchUI" /y /D
+xcopy "$(SolutionDir)Watermarking-Impl\libs\libtiff\bin\tiff.dll" "$(OutDir)Watermarking-BenchUI" /y /D
 </Command>
     </PostBuildEvent>
     <Link>
-      <AdditionalLibraryDirectories>$(AF_PATH)\lib;$(SolutionDir)Watermarking-Impl\libs\ffmpeg\lib;$(CUDA_PATH)\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>$(CoreLibraryDependencies);cudart_static.lib;cuda.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;afcuda.lib;avutil.lib;avformat.lib;swscale.lib;avcodec.lib;avfilter.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(SolutionDir)Watermarking-Impl\libs\zlib\lib;$(SolutionDir)Watermarking-Impl\libs\libpng\lib;$(SolutionDir)Watermarking-Impl\libs\libjpeg\lib;$(SolutionDir)Watermarking-Impl\libs\libwebp\lib;$(SolutionDir)Watermarking-Impl\libs\libtiff\lib;$(SolutionDir)Watermarking-Impl\libs\ffmpeg\lib;$(CUDA_PATH)\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>$(CoreLibraryDependencies);cudart_static.lib;cuda.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;zlib.lib;libpng16.lib;jpeg.lib;libwebp.lib;tiff.lib;avutil.lib;avformat.lib;swscale.lib;avcodec.lib;avfilter.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <IgnoreSpecificDefaultLibraries>LIBCMT</IgnoreSpecificDefaultLibraries>
       <EntryPointSymbol>WinMainCRTStartup</EntryPointSymbol>
     </Link>
