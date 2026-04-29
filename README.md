@@ -35,8 +35,8 @@ Implementations are optimized for maximum performance:
 - GPU implementation: Provides both OpenCL and CUDA backends. Specifically for CUDA, we use warp shuffle techniques, CUB, Tensor Cores and Grid-Stride reduction loops to improve performance wherever applicable. All CUDA/OpenCL core kernels are 100% custom-built for maximum hardware utilization.
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/c1a3acea-3e4b-4584-9f96-500167f78368" width="50%" height="50%"/>
-  <img width="404" height="244" alt="ffmpeg nvidia" src="https://github.com/user-attachments/assets/6204c67e-6262-4f35-9518-e78d891efd26" />
+  <img src="https://github.com/user-attachments/assets/c1a3acea-3e4b-4584-9f96-500167f78368" width="33%" />
+  <img alt="ffmpeg nvidia" src="https://github.com/user-attachments/assets/6204c67e-6262-4f35-9518-e78d891efd26" width="33%" />
 </p>
 
 # Run the pre-built binaries
@@ -164,7 +164,7 @@ We bundle all necessary DLLs with the prebuilt binaries so the application runs 
 
 | Backend | Dependencies |
 |---------|--------------|
-| **All** |	`FFmpeg (all libav*.dll binaries)`, `zlib1.dll`, `libpng16.dll`, `jpeg62.dll`, `tiff.dll`, `libwebp.lib` (static lib) |
+| **All** |	`FFmpeg (all libav*.dll)`, `zlib1.dll`, `libpng16.dll`, `jpeg62.dll`, `tiff.dll`, `libwebp.lib` (static lib) |
 | **CUDA** |  `cudart_static.lib`, `cuda.lib` |
 | **OpenCL** | `OpenCL.lib` |
 | **Eigen** | No extra library dependency required |
