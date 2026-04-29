@@ -176,8 +176,8 @@ class WatermarkCuda final : public WatermarkBase {
     // solve Rx*a = rx via Cholesky decomposition to get prediction coefficients
     void launchCholeskySolver(CudaArray<uint64_t>& Rx, CudaArray<uint64_t>& rx) {
         if constexpr (p <= 5)
-            cholesky_solver<p><<<1, 1, 0, stream>>>(Rx.data(), rx.data(), const_cast<float*>(this->coefficients.data()), const_cast<int32_t*>(this->stopFlag.data()));
+            cholesky_solver<p><<<1, 1, 0, stream>>>(Rx.data(), rx.data(), this->coefficients.data(), this->stopFlag.data());
         else
-            cholesky_solver_parallel<p><<<1, 32, 0, stream>>>(Rx.data(), rx.data(), const_cast<float*>(this->coefficients.data()), const_cast<int32_t*>(this->stopFlag.data()));
+            cholesky_solver_parallel<p><<<1, 32, 0, stream>>>(Rx.data(), rx.data(), this->coefficients.data(), this->stopFlag.data());
     }
 };

@@ -350,6 +350,7 @@
     </CudaCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="WatermarkBase.cpp" />
     <ClCompile Include="WatermarkCore.cpp" />
     <CudaCompile Include="cuda_utils.cu">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='OPENCL_Release|x64'">true</ExcludedFromBuild>
