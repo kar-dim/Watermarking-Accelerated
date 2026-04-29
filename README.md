@@ -32,7 +32,7 @@ The repository contains all required source code and dependencies needed to repr
 
 Implementations are optimized for maximum performance:
 - CPU implementation: Uses the ```Eigen``` library for linear algebra operations combined with efficient use of ```OpenMP``` multithreading (reductions, parallel loops). The application utilizes all available logical (or physical, specifically on video embedding) CPU cores for maximum performance. The project is configured to use ```clang``` compiler (clang-cl toolset) instead of MSVC, because it optimizes much better the heavily templated Eigen code.
-- GPU implementation: Provides both OpenCL and CUDA backends. The ```ArrayFire``` library is also used for backend abstraction and memory management. Specifically for CUDA, we use warp shuffle techniques, CUB, Tensor Cores and Grid-Stride reduction loops to improve performance wherever applicable. Note: ArrayFire is utilized strictly as a high-performance VRAM memory pool and I/O handler. All CUDA/OpenCL core kernels are 100% custom-built for maximum hardware utilization.
+- GPU implementation: Provides both OpenCL and CUDA backends. Specifically for CUDA, we use warp shuffle techniques, CUB, Tensor Cores and Grid-Stride reduction loops to improve performance wherever applicable. All CUDA/OpenCL core kernels are 100% custom-built for maximum hardware utilization.
 
 <p align="center">
   <img src="https://github.com/user-attachments/assets/c1a3acea-3e4b-4584-9f96-500167f78368" width="50%" height="50%"/>
@@ -160,26 +160,24 @@ The solution provides multiple build configurations, each targeting a specific b
 4. In the **Solution Configurations** dropdown (top toolbar), select your configuration (e.g. `CUDA_Release`) or select `Batch Build` and select what configurations you want to build.
 5. Build the solution via **Build > Build Solution**.
 
-We bundle all necessary DLLs with the prebuilt binaries so the application runs out-of-the-box without requiring a local ArrayFire or CImg development environment.
+We bundle all necessary DLLs with the prebuilt binaries so the application runs out-of-the-box.
 
 | Backend | Dependencies |
 |---------|--------------|
-| **All** |	`FFmpeg (all libav*.dll binaries)` |
-| **CUDA** | `FreeImage.dll`, `afcuda.dll`, `cublas64_12.dll`, `cublasLt64_12.dll`, `cufft64_11.dll`, `cusolver64_11.dll`, `cusparse64_12.dll`, `nvrtc64_120_0.dll`, `nvJitLink_120_0.dll` |
-| **OpenCL** | `FreeImage.dll`, `afopencl.dll`, `mkl_rt.2.dll` |
-| **Eigen** | `zlib1.dll`, `libpng16.dll`, `jpeg62.dll`, `tiff.dll`, `libomp.dll`, `libwebp.lib` (static lib) |
+| **All** |	`FFmpeg (all libav*.dll binaries)`, `zlib1.dll`, `libpng16.dll`, `jpeg62.dll`, `tiff.dll`, `libwebp.lib` (static lib) |
+| **CUDA** |  `cudart_static.lib`, `cuda.lib` |
+| **OpenCL** | `OpenCL.lib` |
+| **Eigen** | No extra library dependency required |
 
 **NOTES:**
 - OpenCL implementation: The [OpenCL Headers](https://github.com/KhronosGroup/OpenCL-Headers), [OpenCL C++ Bindings](https://github.com/KhronosGroup/OpenCL-CLHPP) and [OpenCL Library file](https://github.com/KhronosGroup/OpenCL-SDK) are already included and configured for this project.
-- CUDA implementation: NVIDIA CUDA Toolkit is required for building. Minimum supported GPUs with Compute Capability 7.0 (sm_75) or newer, CUDA Toolkit 10.0 or newer.
-- CPU Implementation: Image libraries (libjpeg, libpng, libtiff etc) are included and utilized internally by CImg for loading and saving of images.
-- ArrayFire should be installed globally, with default installation options. Environment Variable "AF_PATH" will be defined automatically.
+- CUDA implementation: NVIDIA CUDA Toolkit is required for building. Minimum supported GPUs with Compute Capability 7.0 (sm_75) or newer, CUDA Toolkit 12.4 or newer preferred.
+- Image libraries (libjpeg, libpng, libtiff etc) are included and utilized internally by CImg for loading and saving of images for all backends.
 - FFmpeg must exist on system PATH (Pre-build binaries already include FFmpeg binaries and DLLs).
 
 # Libraries/Tools Used
 
 - [Eigen](https://eigen.tuxfamily.org/index.php?title=Main_Page): A C++ template library for linear algebra.
-- [ArrayFire](https://arrayfire.org): A C++ library for fast GPU computing.
 - [FFmpeg](https://www.ffmpeg.org/): A complete, cross-platform solution to record, convert and stream audio and video.
 - [CImg](https://cimg.eu/): A C++ library for image processing.
 - [inih](https://github.com/jtilly/inih): A lightweight C++ library for parsing .ini configuration files.
