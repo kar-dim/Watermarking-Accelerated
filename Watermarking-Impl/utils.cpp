@@ -148,20 +148,34 @@ ImageBuffer cimgRgbToGpuGray(const FloatBufferIO& img, cl_command_queue queue) {
 #endif
 
 void InternalUtils::saveImage(const string& imagePath, const string& suffix, const ImageOutputBuffer& watermark, const std::optional<Gray8BufferIO>& alphaChannel) {
-#if defined(_USE_GPU_)
+#if defined(_USE_CUDA_)
     const string watermarkedFile = CommonUtils::addSuffixBeforeExtension(imagePath, suffix);
     const int rows = watermark.getRows();
     const int cols = watermark.getCols();
     const int channels = watermark.getChannels();
-    const int planeSize = rows * cols;
-    std::vector<uint8_t> hostData(watermark.size());
-    watermark.toHost(hostData.data());
     const bool hasAlpha = alphaChannel.has_value();
+    auto stream = CudaStreamManager::getInstance().getComputeStream();
+    CudaArray<uint8_t> rowMajor(rows, cols, channels, stream);
+    cuda_utils::launchColMajorToRowMajorU8Kernel(watermark.data(), rowMajor.data(), cols, rows, channels, stream);
     Gray8BufferIO output(cols, rows, 1, hasAlpha ? channels + 1 : channels);
-    for (int ch = 0; ch < channels; ch++)
+    rowMajor.toHost(output.data());
+    if (hasAlpha)
         for (int c = 0; c < cols; c++)
             for (int r = 0; r < rows; r++)
-                output(c, r, 0, ch) = hostData[r + c * rows + ch * planeSize];
+                output(c, r, 0, channels) = (*alphaChannel)(c, r);
+    saveCimgByExtension(output, watermarkedFile);
+#elif defined(_USE_OPENCL_)
+    const string watermarkedFile = CommonUtils::addSuffixBeforeExtension(imagePath, suffix);
+    const int rows = watermark.getRows();
+    const int cols = watermark.getCols();
+    const int channels = watermark.getChannels();
+    const bool hasAlpha = alphaChannel.has_value();
+    auto& mgr = OclQueueManager::getInstance();
+    OclArray<uint8_t> rowMajor(static_cast<unsigned int>(rows), static_cast<unsigned int>(cols), static_cast<unsigned int>(channels), mgr.getQueueRaw());
+    auto& q = mgr.getQueue();
+    cl_utils::launchColMajorToRowMajorU8(watermark.clBuffer(), rowMajor.clBuffer(), cols, rows, channels, q);
+    Gray8BufferIO output(cols, rows, 1, hasAlpha ? channels + 1 : channels);
+    rowMajor.toHost(output.data());
     if (hasAlpha)
         for (int c = 0; c < cols; c++)
             for (int r = 0; r < rows; r++)

@@ -43,6 +43,7 @@ void loadImage(ImageSession* session, const std::string& imagePath);
 void bindPreloadedImage(ImageSession* session, PreloadedHandle preloadedData);
 std::pair<int, int> getImageDims(const ImageSession* s);
 void embedImage(ImageSession* session, MaskMethod method);
+void finish();
 void prepareDetectionImage(ImageSession* session, MaskMethod method);
 float detectLoadedImage(const ImageSession* session, MaskMethod method);
 float detectEmbeddedBuffer(const ImageSession* session, MaskMethod method);

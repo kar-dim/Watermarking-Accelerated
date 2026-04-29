@@ -59,12 +59,13 @@ class OclQueueManager {
         mgr.device = gpus[deviceIndex].second;
         mgr.ctx = cl::Context(mgr.device);
         mgr.queue = cl::CommandQueue(mgr.ctx, mgr.device, 0);
+        mgr.pool.setCapacity(mgr.device.getInfo<CL_DEVICE_GLOBAL_MEM_SIZE>());
     }
 
     static OclQueueManager& getInstance() {
         auto& mgr = instance();
         if (!mgr.queue.get())
-            throw std::runtime_error("OclQueueManager not initialized — call initialize() first.");
+            throw std::runtime_error("OclQueueManager not initialized, call initialize() first.");
         return mgr;
     }
 

@@ -149,6 +149,7 @@ void BenchmarkWorker::run() {
                     // EMBED BENCHMARK
                     auto [avgEmbedMs, embedFps, dummy] = measurePerformance([&]() {
                         embedImage(session.get(), MaskMethod::ME);
+                        finish();
                         return 0.0f;
                     });
                     if (QThread::currentThread()->isInterruptionRequested())

@@ -597,12 +597,13 @@ __global__ void nV12ToYUV420p(const uint8_t* __restrict__ uvSrc, const int uvPit
 
 __global__ void colMajorToRowMajorU8(const uint8_t* __restrict__ src, uint8_t* __restrict__ dst, const int width, const int height) {
     __shared__ uint8_t tile[32][33];
+    const int planeOffset = blockIdx.z * width * height;
     const int col = blockIdx.x * 32 + threadIdx.y;
     const int row = blockIdx.y * 32 + threadIdx.x;
 #pragma unroll
     for (int i = 0; i < 32; i += 8) {
         if ((col + i) < width && row < height)
-            tile[threadIdx.x][threadIdx.y + i] = src[(col + i) * height + row];
+            tile[threadIdx.x][threadIdx.y + i] = src[planeOffset + (col + i) * height + row];
     }
     __syncthreads();
     const int outRow = blockIdx.y * 32 + threadIdx.y;
@@ -610,7 +611,7 @@ __global__ void colMajorToRowMajorU8(const uint8_t* __restrict__ src, uint8_t* _
 #pragma unroll
     for (int i = 0; i < 32; i += 8) {
         if ((outRow + i) < height && outCol < width)
-            dst[(outRow + i) * width + outCol] = tile[threadIdx.y + i][threadIdx.x];
+            dst[planeOffset + (outRow + i) * width + outCol] = tile[threadIdx.y + i][threadIdx.x];
     }
 }
 

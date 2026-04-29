@@ -62,10 +62,10 @@ void launchRowMajorToColMajorFloat(const cl::Buffer& src, const cl::Buffer& dst,
     queue.enqueueNDRangeKernel(KernelBuilder(UtilityKernelCache::getProgram(), "row_major_to_col_major_float").args(src, dst, width, height).build(), cl::NullRange,
                                cl::NDRange(((width + (blockSize - 1)) / blockSize) * blockSize, ((height + (blockSize - 1)) / blockSize) * blockSize, channels), cl::NDRange(blockSize, blockSize, 1));
 }
-void launchColMajorToRowMajorU8(const cl::Buffer& src, const cl::Buffer& dst, const int width, const int height, cl::CommandQueue& queue) {
+void launchColMajorToRowMajorU8(const cl::Buffer& src, const cl::Buffer& dst, const int width, const int height, const int channels, cl::CommandQueue& queue) {
     constexpr int blockSize = 16;
     queue.enqueueNDRangeKernel(KernelBuilder(UtilityKernelCache::getProgram(), "col_major_to_row_major_u8").args(src, dst, width, height).build(), cl::NullRange,
-                               cl::NDRange(((width + (blockSize - 1)) / blockSize) * blockSize, ((height + (blockSize - 1)) / blockSize) * blockSize), cl::NDRange(blockSize, blockSize));
+                               cl::NDRange(((width + (blockSize - 1)) / blockSize) * blockSize, ((height + (blockSize - 1)) / blockSize) * blockSize, channels), cl::NDRange(blockSize, blockSize, 1));
 }
 void launchPitchedToFloat(const cl::Buffer& src, const cl::Buffer& dst, const int width, const int height, const int pitch, cl::CommandQueue& queue) {
     constexpr int blockSize = 16;

@@ -1,21 +1,20 @@
 #pragma once
-#include "opencl_init.h"
-#include <cstddef>
+#include <cuda_runtime.h>
 #include <mutex>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
 
 /*!
- *  \brief  Free-list memory pool for OpenCL cl_mem buffers. Allocations are rounded up to the next
+ *  \brief  Free-list memory pool for CUDA device pointers, allocations are rounded up to the next
  *          power of 2 so that images with similar dimensions are put in the same "bucket",
  *          a maximum capacity cap, set based on available VRAM prevents overflow to RAM.
- *          Owned by OclQueueManager. reset() is called automatically on device/context switch
+ *          Owned by CudaStreamManager.
  *  \author Dimitris Karatzas
  */
-class OclMemPool {
+class CudaMemPool {
   private:
-    std::unordered_multimap<size_t, cl_mem> memList;
+    std::unordered_multimap<size_t, void*> memList;
     size_t pooledBytes = 0;
     size_t maxPoolBytes = 0;
     std::mutex mtx;
@@ -34,48 +33,51 @@ class OclMemPool {
     }
 
   public:
-    OclMemPool() = default;
-    ~OclMemPool() { reset(); }
+    CudaMemPool() = default;
+    ~CudaMemPool() {
+        for (auto& [sz, ptr] : memList)
+            cudaFree(ptr);
+    }
 
-    OclMemPool(const OclMemPool&) = delete;
-    OclMemPool& operator=(const OclMemPool&) = delete;
+    CudaMemPool(const CudaMemPool&) = delete;
+    CudaMemPool& operator=(const CudaMemPool&) = delete;
 
     void setCapacity(const size_t vramBytes) { maxPoolBytes = static_cast<size_t>(vramBytes * 0.95); }
 
-    cl_mem acquire(const size_t bytes, cl_context ctx) {
+    void* acquire(const size_t bytes, cudaStream_t stream) {
         const size_t rounded = roundUpPow2(bytes);
         std::lock_guard lock(mtx);
         auto it = memList.find(rounded);
         if (it != memList.end()) {
-            cl_mem m = it->second;
+            void* ptr = it->second;
             pooledBytes -= rounded;
             memList.erase(it);
-            return m;
+            return ptr;
         }
-        cl_int err;
-        cl_mem m = clCreateBuffer(ctx, CL_MEM_READ_WRITE, rounded, nullptr, &err);
-        if (err != CL_SUCCESS)
-            throw std::runtime_error("clCreateBuffer failed: " + std::to_string(err));
-        return m;
+        void* ptr = nullptr;
+        cudaError_t err = cudaMallocAsync(&ptr, rounded, stream);
+        if (err != cudaSuccess)
+            throw std::runtime_error("cudaMallocAsync failed: " + std::string(cudaGetErrorString(err)));
+        return ptr;
     }
 
-    void release(const size_t bytes, cl_mem m) {
-        if (!m)
+    void release(const size_t bytes, void* ptr, cudaStream_t stream) {
+        if (!ptr)
             return;
         const size_t rounded = roundUpPow2(bytes);
         std::lock_guard lock(mtx);
         if (maxPoolBytes > 0 && pooledBytes + rounded > maxPoolBytes) {
-            clReleaseMemObject(m);
+            cudaFreeAsync(ptr, stream);
             return;
         }
         pooledBytes += rounded;
-        memList.emplace(rounded, m);
+        memList.emplace(rounded, ptr);
     }
 
-    void reset() {
+    void reset(cudaStream_t stream) {
         std::lock_guard lock(mtx);
-        for (auto& [sz, m] : memList)
-            clReleaseMemObject(m);
+        for (auto& [sz, ptr] : memList)
+            cudaFreeAsync(ptr, stream);
         memList.clear();
         pooledBytes = 0;
     }

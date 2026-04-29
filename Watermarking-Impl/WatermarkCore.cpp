@@ -292,17 +292,18 @@ void loadImage(ImageSession* session, const string& imagePath) { bindPreloadedIm
 // which implements the actual embedding algorithm based on the specified mask method (NVF or ME)
 void embedImage(ImageSession* s, MaskMethod method) {
 #if defined(_USE_GPU_)
-    // for GPU builds, rgbImage may be empty for grayscale — fall back to gray
     const auto& inputImg = s->imgBuffer.isRGB ? s->imgBuffer.rgbImage : s->imgBuffer.image;
     s->watermarkObj->makeWatermark(s->imgBuffer.image, inputImg, s->watermarkBuffer, method);
-    // sync so benchmarks measure the full operation, not just kernel launches
-#if defined(_USE_CUDA_)
-    cudaStreamSynchronize(CudaStreamManager::getInstance().getComputeStream());
-#else
-    OclQueueManager::getInstance().finish();
-#endif
 #else
     s->watermarkObj->makeWatermark(s->imgBuffer.image, s->imgBuffer.rgbImage, s->watermarkBuffer, method);
+#endif
+}
+
+void finish() {
+#if defined(_USE_CUDA_)
+    cudaStreamSynchronize(CudaStreamManager::getInstance().getComputeStream());
+#elif defined(_USE_OPENCL_)
+    OclQueueManager::getInstance().finish();
 #endif
 }
 

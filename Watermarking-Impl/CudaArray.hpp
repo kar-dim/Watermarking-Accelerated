@@ -1,4 +1,5 @@
 #pragma once
+#include "CudaStreamManager.hpp"
 #include <cuda_runtime.h>
 
 /*!
@@ -18,7 +19,14 @@ class CudaArray {
 
     void alloc() {
         if (size() > 0)
-            cudaMallocAsync(&ptr_, bytes(), stream);
+            ptr_ = static_cast<T*>(CudaStreamManager::getInstance().getPool().acquire(bytes(), stream));
+    }
+
+    void freeArray() {
+        if (ptr_) {
+            CudaStreamManager::getInstance().getPool().release(bytes(), ptr_, stream);
+            ptr_ = nullptr;
+        }
     }
 
   public:
@@ -40,10 +48,7 @@ class CudaArray {
         cudaMemcpyAsync(ptr_, hostData, bytes(), cudaMemcpyHostToDevice, stream);
     }
 
-    ~CudaArray() {
-        if (ptr_)
-            cudaFreeAsync(ptr_, stream);
-    }
+    ~CudaArray() { freeArray(); }
 
     CudaArray(const CudaArray&) = delete;
     CudaArray& operator=(const CudaArray&) = delete;
@@ -56,8 +61,7 @@ class CudaArray {
 
     CudaArray& operator=(CudaArray&& o) noexcept {
         if (this != &o) {
-            if (ptr_)
-                cudaFreeAsync(ptr_, stream);
+            freeArray();
             ptr_ = o.ptr_;
             rows = o.rows;
             cols = o.cols;
@@ -123,11 +127,5 @@ class CudaArray {
         if (ptr_)
             cudaMemcpyAsync(copy.ptr_, ptr_, bytes(), cudaMemcpyDeviceToDevice, stream);
         return copy;
-    }
-
-    static void trimMemoryPool() {
-        cudaMemPool_t pool;
-        cudaDeviceGetDefaultMemPool(&pool, 0);
-        cudaMemPoolTrimTo(pool, 0);
     }
 };

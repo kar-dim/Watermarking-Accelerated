@@ -1,8 +1,9 @@
 #pragma once
+#include "CudaMemPool.hpp"
 #include <cuda_runtime.h>
 
 /*!
- *  \brief  Simple helper utility class for handling CUDA streams.
+ *  \brief  Singleton that owns CUDA streams and the shared memory pool
  *  \author Dimitris Karatzas
  */
 class CudaStreamManager {
@@ -12,8 +13,9 @@ class CudaStreamManager {
         return instance;
     }
 
-    cudaStream_t getComputeStream() const { return m_computeStream; }
-    cudaStream_t getTransferStream() const { return m_transferStream; }
+    cudaStream_t getComputeStream() const { return computeStream; }
+    cudaStream_t getTransferStream() const { return transferStream; }
+    CudaMemPool& getPool() { return pool; }
 
     CudaStreamManager(const CudaStreamManager&) = delete;
     CudaStreamManager& operator=(const CudaStreamManager&) = delete;
@@ -21,18 +23,23 @@ class CudaStreamManager {
     CudaStreamManager& operator=(CudaStreamManager&&) = delete;
 
   private:
-    cudaStream_t m_computeStream;
-    cudaStream_t m_transferStream;
+    cudaStream_t computeStream;
+    cudaStream_t transferStream;
+    CudaMemPool pool;
 
     CudaStreamManager() {
-        cudaStreamCreate(&m_computeStream);
-        cudaStreamCreate(&m_transferStream);
+        cudaStreamCreate(&computeStream);
+        cudaStreamCreate(&transferStream);
+        size_t free = 0, total = 0;
+        cudaMemGetInfo(&free, &total);
+        pool.setCapacity(total);
     }
 
     ~CudaStreamManager() {
-        if (m_computeStream)
-            cudaStreamDestroy(m_computeStream);
-        if (m_transferStream)
-            cudaStreamDestroy(m_transferStream);
+        pool.reset(computeStream);
+        if (computeStream)
+            cudaStreamDestroy(computeStream);
+        if (transferStream)
+            cudaStreamDestroy(transferStream);
     }
 };

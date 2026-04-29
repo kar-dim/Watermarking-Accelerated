@@ -1,4 +1,5 @@
 #pragma once
+#include "buffer.hpp"
 #include "cuda_utils.hpp"
 #include "CudaArray.hpp"
 #include "CudaStreamManager.hpp"
@@ -15,8 +16,7 @@
 #include <vector>
 
 /*!
- *  \brief  Functions for watermark computation and detection, CUDA implementation.
- *          All scratch buffers are preallocated in the constructor with zero cudaMallocAsync/cudaFreeAsync calls per frame
+ *  \brief  Functions for watermark computation and detection, CUDA implementation
  *  \author Dimitris Karatzas
  */
 template <int p>
@@ -36,8 +36,9 @@ class WatermarkCuda final : public WatermarkBase {
         constexpr unsigned int pixelsPerBlockY = (p == 3) ? (meBlockSize.x * 2) : meBlockSize.x;
         const unsigned int meTotalBlocksY = WatermarkBase::alignUp<pixelsPerBlockY>(this->baseRows) / pixelsPerBlockY;
         meParams = {meTotalBlocksY, meTotalBlocksY * this->baseCols};
+        const dim3 corrGrid = cuda_utils::gridSizeCalculate(windowBlockSize, this->baseCols, this->baseRows);
+        corrNumBlocks = corrGrid.x * corrGrid.y;
         initializeCubStorage();
-        initializePreallocatedBuffers();
     }
 
     // Embed: compute strengthened watermark u (via NVF or ME mask), then apply to all channels of inputImage
@@ -46,7 +47,8 @@ class WatermarkCuda final : public WatermarkBase {
         if (output.empty() || output.getRows() != this->baseRows || output.getCols() != this->baseCols || output.getChannels() != inputImage.getChannels())
             output = CudaArray<uint8_t>(this->baseRows, this->baseCols, inputImage.getChannels(), stream);
 
-        sumSq.fillZero();
+        CudaArray<float> u(this->baseRows, this->baseCols, stream);
+        CudaArray<uint64_t> sumSq = CudaArray<uint64_t>::zeros(1, stream);
 
         if (maskType == MaskMethod::NVF) {
             // fused NVF: local variance mask x watermark -> strengthened watermark u + sum(u^2)
@@ -54,14 +56,18 @@ class WatermarkCuda final : public WatermarkBase {
             nvf_u_and_sumsq_fused<p><<<gridSize, windowBlockSize, 0, stream>>>(inputGrayImage.data(), this->randomMatrix.data(), u.data(), sumSq.data(), this->baseCols, this->baseRows);
         } else {
             // ME path: solve prediction error model, compute error sequence, normalize, fuse with watermark
-            Rx.fillZero();
-            rx.fillZero();
-            launchMeKernel(inputGrayImage.data());
-            launchCholeskySolver();
+            constexpr unsigned int RxSize = static_cast<unsigned int>((localSize * (localSize + 1)) / 2);
+            constexpr unsigned int rxSize = static_cast<unsigned int>(localSize);
+            CudaArray<uint64_t> Rx = CudaArray<uint64_t>::zeros(RxSize, stream);
+            CudaArray<uint64_t> rx = CudaArray<uint64_t>::zeros(rxSize, stream);
+            launchMeKernel(inputGrayImage.data(), Rx, rx);
+            launchCholeskySolver(Rx, rx);
             const dim3 errorGridSize = cuda_utils::gridSizeCalculate(windowBlockSize, this->baseCols, this->baseRows);
+            CudaArray<float> errorSeq(this->baseRows, this->baseCols, stream);
             calculate_error_sequence<p><<<errorGridSize, windowBlockSize, 0, stream>>>(inputGrayImage.data(), nullptr, errorSeq.data(), this->coefficients.data(), this->baseCols, this->baseRows, true,
                                                                                        this->stopFlag.data());
             // max-reduce for normalization
+            CudaArray<float> errorSeqMax(1, stream);
             reduceMaxCub(errorSeq.data(), errorSeqMax.data());
             // fused ME: normalized error x watermark -> strengthened watermark u + sum(u^2)
             const int blocksComputeU = cuda_utils::gridSize1DStridedCalculate(this->totalPixels, strWatermarkBlockSize);
@@ -76,18 +82,23 @@ class WatermarkCuda final : public WatermarkBase {
     // Detect: compute prediction error, detection mask, then correlate with watermark
     float detectWatermark(const ImageBuffer& inputImage, const MaskMethod maskType) override {
         // solve prediction error model (Rx, rx -> coefficients via Cholesky)
-        Rx.fillZero();
-        rx.fillZero();
-        launchMeKernel(inputImage.data());
-        launchCholeskySolver();
+        constexpr unsigned int RxSize = static_cast<unsigned int>((localSize * (localSize + 1)) / 2);
+        constexpr unsigned int rxSize = static_cast<unsigned int>(localSize);
+        CudaArray<uint64_t> Rx = CudaArray<uint64_t>::zeros(RxSize, stream);
+        CudaArray<uint64_t> rx = CudaArray<uint64_t>::zeros(rxSize, stream);
+        launchMeKernel(inputImage.data(), Rx, rx);
+        launchCholeskySolver(Rx, rx);
 
         const dim3 windowGrid = cuda_utils::gridSizeCalculate(windowBlockSize, this->baseCols, this->baseRows);
 
         // compute prediction error sequence (non-abs, needed for correlation sign)
+        CudaArray<float> errorSeq(this->baseRows, this->baseCols, stream);
         calculate_error_sequence<p>
             <<<windowGrid, windowBlockSize, 0, stream>>>(inputImage.data(), nullptr, errorSeq.data(), this->coefficients.data(), this->baseCols, this->baseRows, false, this->stopFlag.data());
 
         // compute detection mask (ME: abs-normalized error, NVF: local variance)
+        CudaArray<float> mask(this->baseRows, this->baseCols, stream);
+        CudaArray<float> errorSeqMax(1, stream);
         if (maskType == MaskMethod::ME) {
             reduceMaxCub(thrust::make_transform_iterator(errorSeq.data(), AbsTransformOp{}), errorSeqMax.data());
             const int gridSize = cuda_utils::gridSize1DStridedCalculate(this->totalPixels, maskNormalizationBlockSize);
@@ -97,10 +108,14 @@ class WatermarkCuda final : public WatermarkBase {
         }
 
         // fused: recompute error sequence from (mask x watermark), accumulate partial dot / normU / normZ
+        CudaArray<float> dotPartial(corrNumBlocks, stream);
+        CudaArray<float> uNormPartial(corrNumBlocks, stream);
+        CudaArray<float> zNormPartial(corrNumBlocks, stream);
         calculate_error_sequence_and_partial_corr_fused<p><<<windowGrid, windowBlockSize, 0, stream>>>(mask.data(), this->randomMatrix.data(), errorSeq.data(), this->coefficients.data(),
                                                                                                        dotPartial.data(), uNormPartial.data(), zNormPartial.data(), this->baseCols, this->baseRows,
                                                                                                        this->stopFlag.data());
         // reduce partials -> final normalized correlation
+        CudaArray<float> corrResult(1, stream);
         calculate_final_correlation<<<1, corrFinalBlockSize, 0, stream>>>(dotPartial.data(), uNormPartial.data(), zNormPartial.data(), corrResult.data(), corrNumBlocks);
 
         const float correlation = corrResult.scalar();
@@ -126,19 +141,6 @@ class WatermarkCuda final : public WatermarkBase {
     unsigned int corrNumBlocks;
     CudaArray<uint8_t> cubTempStorage;
 
-    // preallocated scratch buffers, shared across embed and detect paths
-    CudaArray<float> u;
-    CudaArray<uint64_t> sumSq;
-    CudaArray<uint64_t> Rx;
-    CudaArray<uint64_t> rx;
-    CudaArray<float> errorSeq;
-    CudaArray<float> errorSeqMax;
-    CudaArray<float> mask;
-    CudaArray<float> dotPartial;
-    CudaArray<float> uNormPartial;
-    CudaArray<float> zNormPartial;
-    CudaArray<float> corrResult;
-
     static ImageBuffer initializeRandomMatrix(const std::vector<float>& watermarkVec, const unsigned int rows, const unsigned int cols) {
         return ImageBuffer(rows, cols, watermarkVec.data(), CudaStreamManager::getInstance().getComputeStream());
     }
@@ -153,25 +155,6 @@ class WatermarkCuda final : public WatermarkBase {
         cubTempStorage = CudaArray<uint8_t>(static_cast<unsigned int>(std::max(tmpBytesTransform, tmpBytesRaw)), stream);
     }
 
-    void initializePreallocatedBuffers() {
-        constexpr unsigned int RxSize = static_cast<unsigned int>((localSize * (localSize + 1)) / 2);
-        constexpr unsigned int rxSize = static_cast<unsigned int>(localSize);
-        const dim3 corrGrid = cuda_utils::gridSizeCalculate(windowBlockSize, this->baseCols, this->baseRows);
-        corrNumBlocks = corrGrid.x * corrGrid.y;
-
-        u = CudaArray<float>(this->baseRows, this->baseCols, stream);
-        sumSq = CudaArray<uint64_t>(1, stream);
-        Rx = CudaArray<uint64_t>(RxSize, stream);
-        rx = CudaArray<uint64_t>(rxSize, stream);
-        errorSeq = CudaArray<float>(this->baseRows, this->baseCols, stream);
-        errorSeqMax = CudaArray<float>(1, stream);
-        mask = CudaArray<float>(this->baseRows, this->baseCols, stream);
-        dotPartial = CudaArray<float>(corrNumBlocks, stream);
-        uNormPartial = CudaArray<float>(corrNumBlocks, stream);
-        zNormPartial = CudaArray<float>(corrNumBlocks, stream);
-        corrResult = CudaArray<float>(1, stream);
-    }
-
     template <typename InputIteratorT>
     void reduceMaxCub(InputIteratorT in, float* out) const {
         size_t tmpStorageBytes = cubTempStorage.bytes();
@@ -179,7 +162,7 @@ class WatermarkCuda final : public WatermarkBase {
     }
 
     // dispatch the correct ME kernel variant based on prediction order p
-    void launchMeKernel(const float* imageData) {
+    void launchMeKernel(const float* imageData, CudaArray<uint64_t>& Rx, CudaArray<uint64_t>& rx) {
         if constexpr (p == 3)
             me_p3<<<gridOptimalMe, meBlockSize.x, 0, stream>>>(imageData, Rx.data(), rx.data(), this->baseCols, this->baseRows, meParams.x, meParams.y);
         else if constexpr (p == 5)
@@ -191,7 +174,7 @@ class WatermarkCuda final : public WatermarkBase {
     }
 
     // solve Rx*a = rx via Cholesky decomposition to get prediction coefficients
-    void launchCholeskySolver() {
+    void launchCholeskySolver(CudaArray<uint64_t>& Rx, CudaArray<uint64_t>& rx) {
         if constexpr (p <= 5)
             cholesky_solver<p><<<1, 1, 0, stream>>>(Rx.data(), rx.data(), const_cast<float*>(this->coefficients.data()), const_cast<int32_t*>(this->stopFlag.data()));
         else

@@ -157,7 +157,12 @@ static int testForImageSingle(const INIReader& inir, const int p, const float ps
     // helper lambda for embedding and detection benchmarks
     auto runWatermarkingProcess = [&](MaskMethod method, const string& name) {
         // embed
-        const double embedTime = executionTime([&]() { embedImage(s.get(), method); }, loops);
+        const double embedTime = executionTime(
+            [&]() {
+                embedImage(s.get(), method);
+                finish();
+            },
+            loops);
         cout << std::format("Calculation of {} mask (p = {}, PSNR = {}dB)\n{}\n\n", name, p, psnr, formatExecutionTime(showFps, embedTime / loops));
         // prepare buffer for detection (convert to float)
         prepareDetectionImage(s.get(), method);

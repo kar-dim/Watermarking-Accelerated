@@ -81,8 +81,8 @@ unsigned int maxPow2WorkGroupSize(const cl::Device& device);
 // coalesced tiled transpose: row-major float -> column-major float on GPU, supports multi-channel via 3D grid
 void launchRowMajorToColMajorFloat(const cl::Buffer& src, const cl::Buffer& dst, const int width, const int height, const int channels, cl::CommandQueue& queue);
 
-// coalesced tiled transpose: column-major uchar -> row-major uchar on GPU (port of CUDA kernel)
-void launchColMajorToRowMajorU8(const cl::Buffer& src, const cl::Buffer& dst, const int width, const int height, cl::CommandQueue& queue);
+// coalesced tiled transpose: column-major uchar -> row-major uchar on GPU, multichannel via z-dimension
+void launchColMajorToRowMajorU8(const cl::Buffer& src, const cl::Buffer& dst, const int width, const int height, const int channels, cl::CommandQueue& queue);
 
 // coalesced tiled transpose: row-major uchar (with pitch) -> column-major float on GPU (port of CUDA pitchedToFloat kernel)
 void launchPitchedToFloat(const cl::Buffer& src, const cl::Buffer& dst, const int width, const int height, const int pitch, cl::CommandQueue& queue);

@@ -289,7 +289,7 @@ void embedAndWriteFrame(VideoSession* s, const ImageBuffer& buffer, const int el
     {
         const auto stream = CudaStreamManager::getInstance().getComputeStream();
         CudaArray<uint8_t> rowMajorOut(s->watermarkedFrame.getRows(), s->watermarkedFrame.getCols(), stream);
-        cuda_utils::launchColMajorToRowMajorU8Kernel(s->watermarkedFrame.data(), rowMajorOut.data(), static_cast<int>(s->watermarkedFrame.getCols()), static_cast<int>(s->watermarkedFrame.getRows()), stream);
+        cuda_utils::launchColMajorToRowMajorU8Kernel(s->watermarkedFrame.data(), rowMajorOut.data(), static_cast<int>(s->watermarkedFrame.getCols()), static_cast<int>(s->watermarkedFrame.getRows()), 1, stream);
         rowMajorOut.toHost(s->hostFrame.get()->get());
     }
     fwrite(s->hostFrame.get()->get(), 1, elements, ffmpegPipe);
@@ -299,7 +299,7 @@ void embedAndWriteFrame(VideoSession* s, const ImageBuffer& buffer, const int el
         auto& mgr = OclQueueManager::getInstance();
         OclArray<uint8_t> rowMajorOut(static_cast<unsigned int>(height), static_cast<unsigned int>(width), mgr.getQueueRaw());
         auto& q = mgr.getQueue();
-        cl_utils::launchColMajorToRowMajorU8(s->watermarkedFrame.clBuffer(), rowMajorOut.clBuffer(), width, height, q);
+        cl_utils::launchColMajorToRowMajorU8(s->watermarkedFrame.clBuffer(), rowMajorOut.clBuffer(), width, height, 1, q);
         rowMajorOut.toHost(s->hostFrame.get()->get());
     }
     fwrite(s->hostFrame.get()->get(), 1, elements, ffmpegPipe);

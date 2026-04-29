@@ -156,5 +156,8 @@
     <ClInclude Include="CudaArray.hpp">
       <Filter>Header Files\cuda</Filter>
     </ClInclude>
+    <ClInclude Include="CudaMemPool.hpp">
+      <Filter>Header Files\cuda</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>
