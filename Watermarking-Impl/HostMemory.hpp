@@ -3,7 +3,7 @@
 #include <cuda_runtime.h>
 #elif defined(_USE_OPENCL_)
 #include "opencl_init.h"
-#include <af/opencl.h>
+#include "OclQueueManager.hpp"
 #elif defined(_USE_EIGEN_)
 #include <memory>
 #endif
@@ -19,7 +19,8 @@ class HostMemory {
 #if defined(_USE_CUDA_)
         cudaHostAlloc(&ptr, size * sizeof(T), cudaHostAllocDefault);
 #elif defined(_USE_OPENCL_)
-        pinnedBuffer = cl::Buffer(cl::Context(afcl::getContext(true)), CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR, size * sizeof(T));
+        queue = OclQueueManager::getInstance().getQueue();
+        pinnedBuffer = cl::Buffer(OclQueueManager::getInstance().getContext(), CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR, size * sizeof(T));
         ptr = static_cast<T*>(queue.enqueueMapBuffer(pinnedBuffer, CL_TRUE, CL_MAP_WRITE, 0, size * sizeof(T)));
 #elif defined(_USE_EIGEN_)
         pinnedBuffer = std::make_unique<T[]>(size);
@@ -42,8 +43,8 @@ class HostMemory {
     T* ptr = nullptr;
 
 #if defined(_USE_OPENCL_)
+    cl::CommandQueue queue;
     cl::Buffer pinnedBuffer;
-    cl::CommandQueue queue{afcl::getQueue(true)};
 #elif defined(_USE_EIGEN_)
     std::unique_ptr<T[]> pinnedBuffer;
 #endif

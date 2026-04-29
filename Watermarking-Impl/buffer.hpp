@@ -1,24 +1,29 @@
 #pragma once
+#include "cimg_init.h"
+#include <cstdint>
 #if defined(_USE_CUDA_)
 #include "GpuArray.hpp"
-#include "cimg_init.h"
+#include <cuda_runtime.h>
+using QueueHandle = cudaStream_t;
 using ImageBuffer = GpuArray<float>;
 using ImageOutputBuffer = GpuArray<uint8_t>;
 using Gray8Buffer = GpuArray<uint8_t>;
 using Gray16Buffer = GpuArray<uint16_t>;
+using FlagBuffer = GpuArray<int32_t>;
 using Gray8BufferIO = cimg_library::CImg<uint8_t>;
 using FloatBufferIO = cimg_library::CImg<float>;
 #elif defined(_USE_OPENCL_)
-#include <arrayfire.h>
-using ImageBuffer = af::array;
-using ImageOutputBuffer = af::array;
-using Gray8Buffer = af::array;
-using Gray16Buffer = af::array;
-using Gray8BufferIO = af::array;
-using FloatBufferIO = af::array;
+#include "OclArray.hpp"
+#include "opencl_init.h"
+using QueueHandle = cl_command_queue;
+using ImageBuffer = OclArray<float>;
+using ImageOutputBuffer = OclArray<uint8_t>;
+using Gray8Buffer = OclArray<uint8_t>;
+using Gray16Buffer = OclArray<uint16_t>;
+using FlagBuffer = OclArray<int32_t>;
+using Gray8BufferIO = cimg_library::CImg<uint8_t>;
+using FloatBufferIO = cimg_library::CImg<float>;
 #elif defined(_USE_EIGEN_)
-#include <cstdint>
-#include "cimg_init.h"
 #include "ImageEigenBuffer.hpp"
 #include "ImageEigenOutputBuffer.hpp"
 #include <Eigen/Core>

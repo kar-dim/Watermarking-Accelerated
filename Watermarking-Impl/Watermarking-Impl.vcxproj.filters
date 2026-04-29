@@ -78,6 +78,15 @@
     <ClInclude Include="opencl_utils.hpp">
       <Filter>Header Files\opencl</Filter>
     </ClInclude>
+    <ClInclude Include="OclMemPool.hpp">
+      <Filter>Header Files\opencl</Filter>
+    </ClInclude>
+    <ClInclude Include="OclQueueManager.hpp">
+      <Filter>Header Files\opencl</Filter>
+    </ClInclude>
+    <ClInclude Include="OclArray.hpp">
+      <Filter>Header Files\opencl</Filter>
+    </ClInclude>
     <ClInclude Include="WatermarkOCL.hpp">
       <Filter>Header Files\opencl</Filter>
     </ClInclude>
@@ -99,12 +108,6 @@
     <ClInclude Include="ImageEigenBuffer.hpp">
       <Filter>Header Files\eigen</Filter>
     </ClInclude>
-    <ClInclude Include="WatermarkGpu.hpp">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="cimg_init.h">
-      <Filter>Header Files\eigen</Filter>
-    </ClInclude>
     <ClInclude Include="PredictionErrorMatrixData.hpp">
       <Filter>Header Files\eigen</Filter>
     </ClInclude>
@@ -115,6 +118,9 @@
       <Filter>Header Files\cuda</Filter>
     </ClInclude>
     <ClInclude Include="kernels\kernels.hpp">
+      <Filter>Header Files\opencl</Filter>
+    </ClInclude>
+    <ClInclude Include="kernels\utility_kernels.hpp">
       <Filter>Header Files\opencl</Filter>
     </ClInclude>
     <ClInclude Include="HostMemory.hpp">
@@ -144,8 +150,8 @@
     <ClInclude Include="WatermarkCrypto.hpp">
       <Filter>Header Files\util</Filter>
     </ClInclude>
-    <ClInclude Include="AfclBuffer.hpp">
-      <Filter>Header Files\opencl</Filter>
+    <ClInclude Include="cimg_init.h">
+      <Filter>Header Files\util</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

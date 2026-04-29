@@ -62,7 +62,7 @@
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <WarningLevel>Level3</WarningLevel>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
-      <AdditionalIncludeDirectories>$(SolutionDir)Watermarking-Impl\include;$(SolutionDir)Watermarking-Impl\libs\inih;$(ProjectDir)libs\googletest-1.17.0\include;$(CUDA_PATH)\include;$(AF_PATH)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)Watermarking-Impl\include;$(SolutionDir)Watermarking-Impl\libs\inih;$(ProjectDir)libs\googletest-1.17.0\include;$(CUDA_PATH)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
@@ -77,8 +77,10 @@
       <IgnoreSpecificDefaultLibraries>LIBCMT</IgnoreSpecificDefaultLibraries>
     </Link>
     <PostBuildEvent>
-      <Command>xcopy "$(AF_PATH)\lib\FreeImage.dll" "$(OutDir)" /y /D
-xcopy "$(AF_PATH)\lib\afcuda.dll" "$(OutDir)" /y /D</Command>
+      <Command>xcopy "$(SolutionDir)Watermarking-Impl\libs\libpng\bin\libpng16.dll" "$(OutDir)" /y /D
+xcopy "$(SolutionDir)Watermarking-Impl\libs\zlib\bin\zlib1.dll" "$(OutDir)" /y /D
+xcopy "$(SolutionDir)Watermarking-Impl\libs\libjpeg\bin\release\jpeg62.dll" "$(OutDir)" /y /D
+xcopy "$(SolutionDir)Watermarking-Impl\libs\libtiff\bin\tiff.dll" "$(OutDir)" /y /D</Command>
     </PostBuildEvent>
     <CudaCompile>
       <AdditionalOptions>-diag-suppress 1388 --std c++20 %(AdditionalOptions)</AdditionalOptions>
@@ -126,7 +128,7 @@ xcopy "$(SolutionDir)Watermarking-Impl\libs\libtiff\bin\tiff.dll" "$(SolutionDir
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <WarningLevel>Level3</WarningLevel>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
-      <AdditionalIncludeDirectories>$(SolutionDir)Watermarking-Impl\include;$(SolutionDir)Watermarking-Impl\libs\opencl\include;$(SolutionDir)Watermarking-Impl\libs\inih;$(ProjectDir)libs\googletest-1.17.0\include;$(AF_PATH)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)Watermarking-Impl\include;$(SolutionDir)Watermarking-Impl\libs\opencl\include;$(SolutionDir)Watermarking-Impl\libs\inih;$(ProjectDir)libs\googletest-1.17.0\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
@@ -136,13 +138,15 @@ xcopy "$(SolutionDir)Watermarking-Impl\libs\libtiff\bin\tiff.dll" "$(SolutionDir
       <SubSystem>Console</SubSystem>
       <OptimizeReferences>true</OptimizeReferences>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
-      <AdditionalLibraryDirectories>$(AF_PATH)\lib;$(SolutionDir)x64\OPENCL_Release;$(SolutionDir)Watermarking-Impl\libs\opencl\lib;$(ProjectDir)libs\googletest-1.17.0\lib;$(SolutionDir)Watermarking-Impl\libs\ffmpeg\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>afopencl.lib;OpenCL.lib;Watermarking-Impl.lib;gtest.lib;gtest_main.lib;avutil.lib;avformat.lib;swscale.lib;avcodec.lib;avfilter.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(SolutionDir)Watermarking-Impl\libs\zlib\lib;$(SolutionDir)Watermarking-Impl\libs\libpng\lib;$(SolutionDir)Watermarking-Impl\libs\libjpeg\lib;$(SolutionDir)Watermarking-Impl\libs\libwebp\lib;$(SolutionDir)Watermarking-Impl\libs\libtiff\lib;$(SolutionDir)x64\OPENCL_Release;$(SolutionDir)Watermarking-Impl\libs\opencl\lib;$(ProjectDir)libs\googletest-1.17.0\lib;$(SolutionDir)Watermarking-Impl\libs\ffmpeg\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>zlib.lib;libpng16.lib;jpeg.lib;libwebp.lib;tiff.lib;OpenCL.lib;Watermarking-Impl.lib;gtest.lib;gtest_main.lib;avutil.lib;avformat.lib;swscale.lib;avcodec.lib;avfilter.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <IgnoreSpecificDefaultLibraries>LIBCMT</IgnoreSpecificDefaultLibraries>
     </Link>
     <PostBuildEvent>
-      <Command>xcopy "$(AF_PATH)\lib\afopencl.dll" "$(OutDir)" /y /D
-xcopy "$(AF_PATH)\lib\FreeImage.dll" "$(OutDir)" /y /D
-xcopy "$(AF_PATH)\lib\mkl_rt.2.dll" "$(OutDir)" /y /D
+      <Command>xcopy "$(SolutionDir)Watermarking-Impl\libs\libpng\bin\libpng16.dll" "$(OutDir)" /y /D
+xcopy "$(SolutionDir)Watermarking-Impl\libs\zlib\bin\zlib1.dll" "$(OutDir)" /y /D
+xcopy "$(SolutionDir)Watermarking-Impl\libs\libjpeg\bin\release\jpeg62.dll" "$(OutDir)" /y /D
+xcopy "$(SolutionDir)Watermarking-Impl\libs\libtiff\bin\tiff.dll" "$(OutDir)" /y /D
 </Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>

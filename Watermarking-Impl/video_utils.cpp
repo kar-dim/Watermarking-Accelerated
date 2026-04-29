@@ -26,6 +26,10 @@ extern "C" {
 #include "libavutil/buffer.h"
 #include "libavutil/hwcontext_cuda.h"
 }
+#elif defined(_USE_OPENCL_)
+#include "OclQueueManager.hpp"
+#include "OclArray.hpp"
+#include "opencl_utils.hpp"
 #endif
 
 extern "C" {
@@ -72,7 +76,7 @@ AVCodecContextPtr openDecoderHWAccel(const AVCodecParameters* inputCodecParams, 
     if (avcodec_parameters_to_context(ctx.get(), inputCodecParams) < 0)
         return openSoftwareDecoder(inputCodecParams);
     AVBufferRef* raw_hw_device_ctx = nullptr;
-    if (av_hwdevice_ctx_create(&raw_hw_device_ctx, AV_HWDEVICE_TYPE_CUDA, NULL, NULL, AV_CUDA_USE_CURRENT_CONTEXT) < 0)
+    if (av_hwdevice_ctx_create(&raw_hw_device_ctx, AV_HWDEVICE_TYPE_CUDA, NULL, NULL, AV_CUDA_USE_PRIMARY_CONTEXT) < 0)
         return openSoftwareDecoder(inputCodecParams);
     AVBufferRefPtr hw_device_ctx(raw_hw_device_ctx);
     if (av_hwdevice_ctx_init(hw_device_ctx.get()) < 0)
@@ -167,12 +171,16 @@ void loadInputFrame(VideoSession* s, const uint8_t* hostPtr) {
     const auto [height, width] = s->videoDims();
 #if defined(_USE_CUDA_)
     const auto stream = CudaStreamManager::getInstance().getComputeStream();
-    // upload host uint8 row-major to GPU, then use existing kernel to convert to column-major float
+    // upload host uint8 row-major to GPU, then use pitchedToFloat kernel (stride=width) to convert to column-major float
     GpuArray<uint8_t> hostGpu(static_cast<unsigned int>(height), static_cast<unsigned int>(width), hostPtr, stream);
     s->inputFrame = GpuArray<float>(static_cast<unsigned int>(height), static_cast<unsigned int>(width), stream);
     cuda_utils::launchPitchedToFloatKernel(hostGpu.data(), s->inputFrame.data(), width, height, width, stream);
 #elif defined(_USE_OPENCL_)
-    s->inputFrame = Gray8Buffer(width, height, hostPtr, afHost).T().as(f32);
+    auto& mgr = OclQueueManager::getInstance();
+    auto queue = mgr.getQueueRaw();
+    OclArray<uint8_t> hostGpu(static_cast<unsigned int>(height), static_cast<unsigned int>(width), hostPtr, queue);
+    s->inputFrame = OclArray<float>(static_cast<unsigned int>(height), static_cast<unsigned int>(width), queue);
+    cl_utils::launchPitchedToFloat(hostGpu.clBuffer(), s->inputFrame.clBuffer(), width, height, width, mgr.getQueue());
 #else
     s->inputFrame = Map<const Gray8Buffer>(hostPtr, width, height).transpose().template cast<float>();
 #endif
@@ -280,13 +288,20 @@ void embedAndWriteFrame(VideoSession* s, const ImageBuffer& buffer, const int el
 #if defined(_USE_CUDA_)
     {
         const auto stream = CudaStreamManager::getInstance().getComputeStream();
-        GpuArray<uint8_t> rowMajorOut(s->watermarkedFrame.rows(), s->watermarkedFrame.cols(), stream);
-        cuda_utils::launchColMajorToRowMajorU8Kernel(s->watermarkedFrame.data(), rowMajorOut.data(), static_cast<int>(s->watermarkedFrame.cols()), static_cast<int>(s->watermarkedFrame.rows()), stream);
+        GpuArray<uint8_t> rowMajorOut(s->watermarkedFrame.getRows(), s->watermarkedFrame.getCols(), stream);
+        cuda_utils::launchColMajorToRowMajorU8Kernel(s->watermarkedFrame.data(), rowMajorOut.data(), static_cast<int>(s->watermarkedFrame.getCols()), static_cast<int>(s->watermarkedFrame.getRows()), stream);
         rowMajorOut.toHost(s->hostFrame.get()->get());
     }
     fwrite(s->hostFrame.get()->get(), 1, elements, ffmpegPipe);
 #elif defined(_USE_OPENCL_)
-    s->watermarkedFrame.T().host(s->hostFrame.get()->get());
+    {
+        const auto [height, width] = s->videoDims();
+        auto& mgr = OclQueueManager::getInstance();
+        OclArray<uint8_t> rowMajorOut(static_cast<unsigned int>(height), static_cast<unsigned int>(width), mgr.getQueueRaw());
+        auto& q = mgr.getQueue();
+        cl_utils::launchColMajorToRowMajorU8(s->watermarkedFrame.clBuffer(), rowMajorOut.clBuffer(), width, height, q);
+        rowMajorOut.toHost(s->hostFrame.get()->get());
+    }
     fwrite(s->hostFrame.get()->get(), 1, elements, ffmpegPipe);
 #elif defined(_USE_EIGEN_)
     s->grayFrame = s->watermarkedFrame.getGray().transpose();

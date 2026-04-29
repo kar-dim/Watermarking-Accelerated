@@ -678,3 +678,6 @@ __global__ void pitchedToFloat(const uint8_t* __restrict__ input, float* __restr
 
 // used for converting column-major uint8 GPU array back to row-major uint8, used when writing watermarked frames to FFmpeg pipe
 __global__ void colMajorToRowMajorU8(const uint8_t* __restrict__ src, uint8_t* __restrict__ dst, const int width, const int height);
+
+// used for converting row-major float (CImg) to column-major float (GpuArray), coalesced tiled transpose
+__global__ void rowMajorToColMajorFloat(const float* __restrict__ src, float* __restrict__ dst, const int width, const int height);

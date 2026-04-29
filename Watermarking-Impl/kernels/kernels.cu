@@ -596,20 +596,22 @@ __global__ void nV12ToYUV420p(const uint8_t* __restrict__ uvSrc, const int uvPit
 }
 
 __global__ void colMajorToRowMajorU8(const uint8_t* __restrict__ src, uint8_t* __restrict__ dst, const int width, const int height) {
-    __shared__ uint8_t tile[32][33]; // +1 avoids shared-memory bank conflicts
-
-    // load phase: coalesced column-major reads (threadIdx.x strides along row dimension)
+    __shared__ uint8_t tile[32][33];
     const int col = blockIdx.x * 32 + threadIdx.y;
     const int row = blockIdx.y * 32 + threadIdx.x;
-    if (col < width && row < height)
-        tile[threadIdx.x][threadIdx.y] = src[col * height + row];
+#pragma unroll
+    for (int i = 0; i < 32; i += 8) {
+        if ((col + i) < width && row < height)
+            tile[threadIdx.x][threadIdx.y + i] = src[(col + i) * height + row];
+    }
     __syncthreads();
-
-    // store phase: coalesced row-major writes (threadIdx.x strides along col dimension)
     const int outRow = blockIdx.y * 32 + threadIdx.y;
     const int outCol = blockIdx.x * 32 + threadIdx.x;
-    if (outRow < height && outCol < width)
-        dst[outRow * width + outCol] = tile[threadIdx.y][threadIdx.x];
+#pragma unroll
+    for (int i = 0; i < 32; i += 8) {
+        if ((outRow + i) < height && outCol < width)
+            dst[(outRow + i) * width + outCol] = tile[threadIdx.y + i][threadIdx.x];
+    }
 }
 
 __global__ void pitchedToFloat(const uint8_t* __restrict__ input, float* __restrict__ output, const int width, const int height, const int pitch) {
@@ -637,5 +639,25 @@ __global__ void pitchedToFloat(const uint8_t* __restrict__ input, float* __restr
         // read from transposed shared memory coordinates (+1 in the stride to avoid bank conflicts) and write to global memory transposed
         if (dstX < height && (dstY + i) < width)
             output[(dstY + i) * height + dstX] = tile[threadIdx.x][threadIdx.y + i];
+    }
+}
+
+__global__ void rowMajorToColMajorFloat(const float* __restrict__ src, float* __restrict__ dst, const int width, const int height) {
+    __shared__ float tile[32][33];
+    const int planeOffset = blockIdx.z * width * height;
+    const int col = blockIdx.x * 32 + threadIdx.x;
+    const int row = blockIdx.y * 32 + threadIdx.y;
+#pragma unroll
+    for (int i = 0; i < 32; i += 8) {
+        if (col < width && (row + i) < height)
+            tile[threadIdx.y + i][threadIdx.x] = src[planeOffset + (row + i) * width + col];
+    }
+    __syncthreads();
+    const int outRow = blockIdx.y * 32 + threadIdx.x;
+    const int outCol = blockIdx.x * 32 + threadIdx.y;
+#pragma unroll
+    for (int i = 0; i < 32; i += 8) {
+        if (outRow < height && (outCol + i) < width)
+            dst[planeOffset + outRow + (outCol + i) * height] = tile[threadIdx.x][threadIdx.y + i];
     }
 }

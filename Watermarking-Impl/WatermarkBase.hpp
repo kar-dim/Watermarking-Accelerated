@@ -89,7 +89,7 @@ class WatermarkBase {
                     randomNums[idx + 1] = z1;
             }
         }
-        // load the random values in the corresponding backend buffer (ArrayFire array, Eigen Array etc)
+        // load the random values in the corresponding backend buffer (GPU array, Eigen Array etc)
         return loader(randomNums, baseRows, baseCols);
     }
 };

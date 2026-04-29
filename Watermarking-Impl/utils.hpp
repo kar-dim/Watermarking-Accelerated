@@ -9,7 +9,7 @@
 #include <string>
 
 /*!
- *  \brief  Helper functions dealing with ArrayFire/Eigen types, image loading/saving, and watermark object creation (internal)
+ *  \brief  Helper functions dealing with GPU/Eigen types, image loading/saving, and watermark object creation (internal)
  *  \author Dimitris Karatzas
  */
 namespace InternalUtils {

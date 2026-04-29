@@ -11,11 +11,18 @@
 #include <stdexcept>
 #include <string>
 #if defined(_USE_OPENCL_)
+#include "OclQueueManager.hpp"
+#include "OclArray.hpp"
+#include "opencl_utils.hpp"
 #include "WatermarkOCL.hpp"
+#include <algorithm>
+#include <cctype>
+#include <vector>
 #elif defined(_USE_CUDA_)
 #include "CudaStreamManager.hpp"
 #include "GpuArray.hpp"
 #include "WatermarkCuda.cuh"
+#include "cuda_utils.hpp"
 #include <algorithm>
 #include <cctype>
 #include <vector>
@@ -31,8 +38,7 @@
 using std::string;
 using namespace CommonUtils;
 
-// save a CImg image selecting the correct encoder by file extension (shared by CUDA and Eigen builds)
-#if defined(_USE_CUDA_) || defined(_USE_EIGEN_)
+// save a CImg image selecting the correct encoder by file extension
 namespace {
 void saveCimgByExtension(const Gray8BufferIO& cimgToSave, const string& path) {
     string extension = path.substr(path.find_last_of('.') + 1);
@@ -50,53 +56,103 @@ void saveCimgByExtension(const Gray8BufferIO& cimgToSave, const string& path) {
     else
         throw std::runtime_error("Unsupported image format: " + extension);
 }
-} // namespace
-#endif
 
-// CUDA helpers for CImg <-> GPU array conversion (column-major)
-#if defined(_USE_CUDA_)
+// standard ITU-R 601 Luma coefficients for RGB to Grayscale conversion
+constexpr float kRW = 0.299f;
+constexpr float kGW = 0.587f;
+constexpr float kBW = 0.114f;
+} // namespace
+
+// GPU helpers for CImg (row-major) <-> GPU array (column-major) conversion
+#if defined(_USE_GPU_)
 namespace {
-GpuArray<float> cimgGrayToGpu(const FloatBufferIO& img, cudaStream_t stream) {
+
+#if defined(_USE_CUDA_)
+// For CUDA: upload the raw row-major CImg data to a temp GPU buffer, then transpose in-place on GPU.
+// This avoids CPU-side std::vector allocation and uses a coalesced tiled transpose kernel.
+ImageBuffer cimgGrayToGpu(const FloatBufferIO& img, cudaStream_t stream) {
     const int rows = img.height();
     const int cols = img.width();
-    std::vector<float> colMajor(rows * cols);
-    for (int c = 0; c < cols; c++)
-        for (int r = 0; r < rows; r++)
-            colMajor[r + c * rows] = img(c, r);
-    return GpuArray<float>(rows, cols, colMajor.data(), stream);
+    GpuArray<float> rowMajor(rows, cols, img.data(), stream);
+    GpuArray<float> colMajor(rows, cols, stream);
+    cuda_utils::launchRowMajorToColMajorFloatKernel(rowMajor.data(), colMajor.data(), cols, rows, 1, stream);
+    return colMajor;
 }
 
-GpuArray<float> cimgRgbToGpu(const FloatBufferIO& img, cudaStream_t stream) {
+ImageBuffer cimgRgbToGpu(const FloatBufferIO& img, cudaStream_t stream) {
+    const int rows = img.height();
+    const int cols = img.width();
+    GpuArray<float> rowMajor(rows, cols, 3, img.data(), stream);
+    GpuArray<float> colMajor(rows, cols, 3, stream);
+    cuda_utils::launchRowMajorToColMajorFloatKernel(rowMajor.data(), colMajor.data(), cols, rows, 3, stream);
+    return colMajor;
+}
+
+ImageBuffer cimgRgbToGpuGray(const FloatBufferIO& img, cudaStream_t stream) {
     const int rows = img.height();
     const int cols = img.width();
     const int planeSize = rows * cols;
-    std::vector<float> colMajor(planeSize * 3);
-    for (int ch = 0; ch < 3; ch++)
-        for (int c = 0; c < cols; c++)
-            for (int r = 0; r < rows; r++)
-                colMajor[r + c * rows + ch * planeSize] = img(c, r, 0, ch);
-    return GpuArray<float>(rows, cols, 3, colMajor.data(), stream);
+    std::vector<float> gray(planeSize);
+    const float* R = img.data();
+    const float* G = R + planeSize;
+    const float* B = G + planeSize;
+    for (int i = 0; i < planeSize; i++)
+        gray[i] = R[i] * kRW + G[i] * kGW + B[i] * kBW;
+    GpuArray<float> rowMajorGray(rows, cols, gray.data(), stream);
+    GpuArray<float> colMajorGray(rows, cols, stream);
+    cuda_utils::launchRowMajorToColMajorFloatKernel(rowMajorGray.data(), colMajorGray.data(), cols, rows, 1, stream);
+    return colMajorGray;
 }
 
-GpuArray<float> cimgRgbToGpuGray(const FloatBufferIO& img, cudaStream_t stream) {
-    constexpr float rW = 0.299f, gW = 0.587f, bW = 0.114f;
+#elif defined(_USE_OPENCL_)
+// For OCL: upload raw row-major CImg data to GPU, then transpose with a coalesced tiled kernel (mirrors CUDA path).
+ImageBuffer cimgGrayToGpu(const FloatBufferIO& img, cl_command_queue queue) {
     const int rows = img.height();
     const int cols = img.width();
-    std::vector<float> colMajor(rows * cols);
-    for (int c = 0; c < cols; c++)
-        for (int r = 0; r < rows; r++)
-            colMajor[r + c * rows] = img(c, r, 0, 0) * rW + img(c, r, 0, 1) * gW + img(c, r, 0, 2) * bW;
-    return GpuArray<float>(rows, cols, colMajor.data(), stream);
+    OclArray<float> rowMajor(rows, cols, img.data(), queue);
+    OclArray<float> colMajor(rows, cols, queue);
+    auto& q = OclQueueManager::getInstance().getQueue();
+    cl_utils::launchRowMajorToColMajorFloat(rowMajor.clBuffer(), colMajor.clBuffer(), cols, rows, 1, q);
+    return colMajor;
 }
+
+ImageBuffer cimgRgbToGpu(const FloatBufferIO& img, cl_command_queue queue) {
+    const int rows = img.height();
+    const int cols = img.width();
+    OclArray<float> rowMajor(rows, cols, 3, img.data(), queue);
+    OclArray<float> colMajor(rows, cols, 3, queue);
+    auto& q = OclQueueManager::getInstance().getQueue();
+    cl_utils::launchRowMajorToColMajorFloat(rowMajor.clBuffer(), colMajor.clBuffer(), cols, rows, 3, q);
+    return colMajor;
+}
+
+ImageBuffer cimgRgbToGpuGray(const FloatBufferIO& img, cl_command_queue queue) {
+    const int rows = img.height();
+    const int cols = img.width();
+    const int planeSize = rows * cols;
+    std::vector<float> gray(planeSize);
+    const float* R = img.data();
+    const float* G = R + planeSize;
+    const float* B = G + planeSize;
+    for (int i = 0; i < planeSize; i++)
+        gray[i] = R[i] * kRW + G[i] * kGW + B[i] * kBW;
+    OclArray<float> rowMajorGray(rows, cols, gray.data(), queue);
+    OclArray<float> colMajorGray(rows, cols, queue);
+    auto& q = OclQueueManager::getInstance().getQueue();
+    cl_utils::launchRowMajorToColMajorFloat(rowMajorGray.clBuffer(), colMajorGray.clBuffer(), cols, rows, 1, q);
+    return colMajorGray;
+}
+#endif
+
 } // namespace
 #endif
 
 void InternalUtils::saveImage(const string& imagePath, const string& suffix, const ImageOutputBuffer& watermark, const std::optional<Gray8BufferIO>& alphaChannel) {
-#if defined(_USE_CUDA_)
+#if defined(_USE_GPU_)
     const string watermarkedFile = CommonUtils::addSuffixBeforeExtension(imagePath, suffix);
-    const int rows = watermark.rows();
-    const int cols = watermark.cols();
-    const int channels = watermark.channels();
+    const int rows = watermark.getRows();
+    const int cols = watermark.getCols();
+    const int channels = watermark.getChannels();
     const int planeSize = rows * cols;
     std::vector<uint8_t> hostData(watermark.size());
     watermark.toHost(hostData.data());
@@ -115,9 +171,6 @@ void InternalUtils::saveImage(const string& imagePath, const string& suffix, con
     const string watermarkedFile = CommonUtils::addSuffixBeforeExtension(imagePath, suffix);
     const auto cimgToSave = watermark.isRGB() ? eigen_utils::eigenRgbToCimg(watermark.getRGB(), alphaChannel) : eigen_utils::eigenGrayToCimg(watermark.getGray());
     saveCimgByExtension(cimgToSave, watermarkedFile);
-#elif defined(_USE_OPENCL_)
-    const ImageBuffer& arrayToSave = alphaChannel.has_value() ? af::join(2, watermark, *alphaChannel).as(u8) : watermark.as(u8);
-    af::saveImageNative(CommonUtils::addSuffixBeforeExtension(imagePath, suffix).c_str(), arrayToSave);
 #endif
 }
 
@@ -146,35 +199,6 @@ std::unique_ptr<WatermarkBase> InternalUtils::createWatermarkObject(const unsign
 }
 
 void InternalUtils::rotate(FloatBufferIO& img, const uint16_t orientation) {
-#if defined(_USE_OPENCL_)
-    switch (orientation) {
-    case 2: img = af::flip(img, 1); break;
-    case 3:
-        img = af::flip(img, 0);
-        img = af::flip(img, 1);
-        break;
-    case 4: img = af::flip(img, 0); break;
-    case 5:
-        img = af::flip(img, 1);
-        img = af::reorder(img, 1, 0, 2);
-        img = af::flip(img, 0);
-        break;
-    case 6:
-        img = af::reorder(img, 1, 0, 2);
-        img = af::flip(img, 1);
-        break;
-    case 7:
-        img = af::flip(img, 1);
-        img = af::reorder(img, 1, 0, 2);
-        img = af::flip(img, 1);
-        break;
-    case 8:
-        img = af::reorder(img, 1, 0, 2);
-        img = af::flip(img, 0);
-        break;
-    default: break;
-    }
-#else
     switch (orientation) {
     case 2: img.mirror('x'); break;
     case 3: img.rotate(180); break;
@@ -191,7 +215,6 @@ void InternalUtils::rotate(FloatBufferIO& img, const uint16_t orientation) {
     case 8: img.rotate(270); break;
     default: break;
     }
-#endif
 }
 
 ImageFileBuffer InternalUtils::loadImage(const string& imageFile) {
@@ -222,7 +245,6 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile) {
     case 4: {
         alphaChannel.emplace(cimgRgb.get_shared_channel(3));
         auto rgbView = cimgRgb.get_shared_channels(0, 2);
-        // zero RGB where alpha is zero
         for (int y = 0; y < cimgRgb.height(); y++)
             for (int x = 0; x < cimgRgb.width(); x++)
                 if ((*alphaChannel)(x, y) == 0)
@@ -239,24 +261,41 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile) {
     }
     cudaStreamSynchronize(stream);
 #elif defined(_USE_OPENCL_)
-    rgbImage = af::loadImageNative(imageFile.c_str()).as(f32);
-    InternalUtils::rotate(rgbImage, exif.Orientation);
-    switch (rgbImage.dims(2)) {
-    case 1: image = rgbImage; break;
-    case 3: image = InternalUtils::rgb2gray(rgbImage); break;
+    auto cimgRgb = FloatBufferIO(imageFile.c_str());
+    InternalUtils::rotate(cimgRgb, exif.Orientation);
+    auto queue = OclQueueManager::getInstance().getQueueRaw();
+
+    switch (cimgRgb.spectrum()) {
+    case 1:
+        image = cimgGrayToGpu(cimgRgb, queue);
+        rows = cimgRgb.height();
+        cols = cimgRgb.width();
+        break;
+    case 3:
+        rgbImage = cimgRgbToGpu(cimgRgb, queue);
+        image = cimgRgbToGpuGray(cimgRgb, queue);
+        rows = cimgRgb.height();
+        cols = cimgRgb.width();
+        isRGB = true;
+        break;
     case 4: {
-        const af::array alpha = rgbImage(af::span, af::span, 3);
-        alphaChannel.emplace(alpha.as(u8));
-        rgbImage = rgbImage(af::span, af::span, af::seq(0, 2)) * (af::tile(alpha, 1, 1, 3) != 0);
-        image = InternalUtils::rgb2gray(rgbImage);
+        alphaChannel.emplace(cimgRgb.get_shared_channel(3));
+        auto rgbView = cimgRgb.get_shared_channels(0, 2);
+        for (int y = 0; y < cimgRgb.height(); y++)
+            for (int x = 0; x < cimgRgb.width(); x++)
+                if ((*alphaChannel)(x, y) == 0)
+                    for (int ch = 0; ch < 3; ch++)
+                        rgbView(x, y, 0, ch) = 0.0f;
+        rgbImage = cimgRgbToGpu(rgbView, queue);
+        image = cimgRgbToGpuGray(rgbView, queue);
+        rows = cimgRgb.height();
+        cols = cimgRgb.width();
+        isRGB = true;
         break;
     }
     default: throw std::runtime_error("Invalid image dimensions");
     }
-    rows = static_cast<unsigned int>(image.dims(0));
-    cols = static_cast<unsigned int>(image.dims(1));
-    isRGB = rgbImage.dims(2) == 3;
-    af::sync();
+    clFinish(queue);
 #elif defined(_USE_EIGEN_)
     auto cimgRgb = FloatBufferIO(imageFile.c_str());
     InternalUtils::rotate(cimgRgb, exif.Orientation);
@@ -288,49 +327,46 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile) {
 }
 
 ImageBuffer InternalUtils::rgb2gray(const ImageBuffer& rgbImage) {
-    constexpr float rPercent = 0.299f;
-    constexpr float gPercent = 0.587f;
-    constexpr float bPercent = 0.114f;
-#if defined(_USE_CUDA_)
-    const unsigned int totalPixels = rgbImage.rows() * rgbImage.cols();
+#if defined(_USE_GPU_)
+    const unsigned int totalPixels = rgbImage.getRows() * rgbImage.getCols();
     std::vector<float> hostRgb(rgbImage.size());
     rgbImage.toHost(hostRgb.data());
     std::vector<float> gray(totalPixels);
     for (unsigned int i = 0; i < totalPixels; i++)
-        gray[i] = hostRgb[i] * rPercent + hostRgb[i + totalPixels] * gPercent + hostRgb[i + 2 * totalPixels] * bPercent;
-    return GpuArray<float>(rgbImage.rows(), rgbImage.cols(), gray.data(), CudaStreamManager::getInstance().getComputeStream());
-#elif defined(_USE_OPENCL_)
-    return af::rgb2gray(rgbImage, rPercent, gPercent, bPercent);
+        gray[i] = hostRgb[i] * kRW + hostRgb[i + totalPixels] * kGW + hostRgb[i + 2 * totalPixels] * kBW;
+#if defined(_USE_CUDA_)
+    return GpuArray<float>(rgbImage.getRows(), rgbImage.getCols(), gray.data(), CudaStreamManager::getInstance().getComputeStream());
+#else
+    return OclArray<float>(rgbImage.getRows(), rgbImage.getCols(), gray.data(), OclQueueManager::getInstance().getQueueRaw());
+#endif
 #elif defined(_USE_EIGEN_)
     const auto& rgb = rgbImage.getRGB();
-    return ((rgb[0] * rPercent) + (rgb[1] * gPercent) + (rgb[2] * bPercent)).eval();
+    return ((rgb[0] * kRW) + (rgb[1] * kGW) + (rgb[2] * kBW)).eval();
 #endif
 }
 
 ImageBuffer InternalUtils::castToFloatGray(const ImageOutputBuffer& buffer, const bool isRGB) {
-    constexpr float rPercent = 0.299f;
-    constexpr float gPercent = 0.587f;
-    constexpr float bPercent = 0.114f;
-#if defined(_USE_CUDA_)
-    auto stream = CudaStreamManager::getInstance().getComputeStream();
-    const unsigned int totalPixels = buffer.rows() * buffer.cols();
+#if defined(_USE_GPU_)
+    const unsigned int totalPixels = buffer.getRows() * buffer.getCols();
     std::vector<uint8_t> hostU8(buffer.size());
     buffer.toHost(hostU8.data());
     std::vector<float> hostF(totalPixels);
     if (isRGB) {
         for (unsigned int i = 0; i < totalPixels; i++)
-            hostF[i] = static_cast<float>(hostU8[i]) * rPercent + static_cast<float>(hostU8[i + totalPixels]) * gPercent + static_cast<float>(hostU8[i + 2 * totalPixels]) * bPercent;
+            hostF[i] = static_cast<float>(hostU8[i]) * kRW + static_cast<float>(hostU8[i + totalPixels]) * kGW + static_cast<float>(hostU8[i + 2 * totalPixels]) * kBW;
     } else {
         for (unsigned int i = 0; i < buffer.size(); i++)
             hostF[i] = static_cast<float>(hostU8[i]);
     }
-    return GpuArray<float>(buffer.rows(), buffer.cols(), hostF.data(), stream);
-#elif defined(_USE_OPENCL_)
-    return isRGB ? af::rgb2gray(buffer.as(f32), rPercent, gPercent, bPercent) : buffer.as(f32);
+#if defined(_USE_CUDA_)
+    return GpuArray<float>(buffer.getRows(), buffer.getCols(), hostF.data(), CudaStreamManager::getInstance().getComputeStream());
+#else
+    return OclArray<float>(buffer.getRows(), buffer.getCols(), hostF.data(), OclQueueManager::getInstance().getQueueRaw());
+#endif
 #else
     if (isRGB) {
         const auto& rgbU8 = buffer.getRGB();
-        return ImageBuffer((rgbU8[0].cast<float>() * rPercent + rgbU8[1].cast<float>() * gPercent + rgbU8[2].cast<float>() * bPercent).eval());
+        return ImageBuffer((rgbU8[0].cast<float>() * kRW + rgbU8[1].cast<float>() * kGW + rgbU8[2].cast<float>() * kBW).eval());
     } else {
         return ImageBuffer(buffer.getGray().cast<float>());
     }

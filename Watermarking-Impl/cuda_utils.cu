@@ -21,8 +21,14 @@ void launchPitchedToFloatKernel(const uint8_t* ySrc, float* yDst, const int widt
 
 // transpose column-major uint8 to row-major uint8
 void launchColMajorToRowMajorU8Kernel(const uint8_t* src, uint8_t* dst, const int width, const int height, const cudaStream_t stream) {
-    constexpr dim3 blockSize(32, 32);
+    constexpr dim3 blockSize(32, 8);
     const dim3 gridSize((width + 31) / 32, (height + 31) / 32);
     colMajorToRowMajorU8<<<gridSize, blockSize, 0, stream>>>(src, dst, width, height);
+}
+// transpose row-major float (CImg) to column-major float (GpuArray)
+void launchRowMajorToColMajorFloatKernel(const float* src, float* dst, const int width, const int height, const int channels, const cudaStream_t stream) {
+    constexpr dim3 blockSize(32, 8);
+    const dim3 gridSize((width + 31) / 32, (height + 31) / 32, channels);
+    rowMajorToColMajorFloat<<<gridSize, blockSize, 0, stream>>>(src, dst, width, height);
 }
 } // namespace cuda_utils

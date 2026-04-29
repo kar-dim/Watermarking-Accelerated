@@ -1,6 +1,8 @@
 #pragma once
 #include "opencl_init.h"
+#include "OclQueueManager.hpp"
 #include <algorithm>
+#include <cstdint>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -29,22 +31,61 @@ class KernelBuilder {
     cl::Kernel build() const;
 };
 
-// helper method to build opencl kernels from source
+// helper method to build watermark opencl kernels from source (requires WINDOW_SIZE=p)
 cl::Program buildKernels(const int p);
 
+// helper method to build utility opencl kernels from source (no WINDOW_SIZE dependency)
+cl::Program buildUtilityKernels();
+
 // cache for reusing opencl kernels (static/global opencl program for each p) for each device
+// automatically invalidates when OclQueueManager's context generation changes (device switch)
 template <int p>
 struct OpenCLKernelCache {
-    static cl::Program getProgram(const int deviceId) {
+    static cl::Program getProgram() {
         static std::unordered_map<int, cl::Program> programs;
+        static uint32_t cachedGeneration = 0;
+        auto& mgr = OclQueueManager::getInstance();
+        const uint32_t currentGen = mgr.getContextGeneration();
+        if (cachedGeneration != currentGen) {
+            programs.clear();
+            cachedGeneration = currentGen;
+        }
+        const int deviceId = mgr.getDeviceIndex();
         if (programs.find(deviceId) == programs.end())
             programs[deviceId] = buildKernels(p);
         return programs[deviceId];
     }
 };
 
+// cache for utility kernels (transpose, etc) it is per device, not per p
+struct UtilityKernelCache {
+    static cl::Program getProgram() {
+        static std::unordered_map<int, cl::Program> programs;
+        static uint32_t cachedGeneration = 0;
+        auto& mgr = OclQueueManager::getInstance();
+        const uint32_t currentGen = mgr.getContextGeneration();
+        if (cachedGeneration != currentGen) {
+            programs.clear();
+            cachedGeneration = currentGen;
+        }
+        const int deviceId = mgr.getDeviceIndex();
+        if (programs.find(deviceId) == programs.end())
+            programs[deviceId] = buildUtilityKernels();
+        return programs[deviceId];
+    }
+};
+
 // calculate the maximum power of two work group size for a device
 unsigned int maxPow2WorkGroupSize(const cl::Device& device);
+
+// coalesced tiled transpose: row-major float -> column-major float on GPU, supports multi-channel via 3D grid
+void launchRowMajorToColMajorFloat(const cl::Buffer& src, const cl::Buffer& dst, const int width, const int height, const int channels, cl::CommandQueue& queue);
+
+// coalesced tiled transpose: column-major uchar -> row-major uchar on GPU (port of CUDA kernel)
+void launchColMajorToRowMajorU8(const cl::Buffer& src, const cl::Buffer& dst, const int width, const int height, cl::CommandQueue& queue);
+
+// coalesced tiled transpose: row-major uchar (with pitch) -> column-major float on GPU (port of CUDA pitchedToFloat kernel)
+void launchPitchedToFloat(const cl::Buffer& src, const cl::Buffer& dst, const int width, const int height, const int pitch, cl::CommandQueue& queue);
 
 // helper method to calculate the number of local groups needed for a specific number of elements and local size, with a maximum of 2560 blocks (used for grid-stride kernels only)
 inline int calculateLocalGroupsNumber(const int N, const int localSize) { return std::min((N + localSize - 1) / localSize, 2560); }

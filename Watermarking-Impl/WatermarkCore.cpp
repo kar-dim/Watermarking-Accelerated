@@ -26,7 +26,7 @@
 #include <cuda_runtime.h>
 #elif defined(_USE_OPENCL_)
 #include <algorithm>
-#include <arrayfire.h>
+#include "OclQueueManager.hpp"
 #include "opencl_utils.hpp"
 #elif defined(_USE_EIGEN_)
 #include <cstring>
@@ -79,9 +79,9 @@ void ExportedImageDeleter::operator()(ExportedImage* p) const { delete p; }
 
 ExportHandle createReusableExportBuffer() { return ExportHandle(new ExportedImage()); }
 
-// copy data to the export buffer (D2D clone for CUDA, CoW copy for OpenCL, shallow copy for Eigen)
+// copy data to the export buffer (D2D clone for GPU builds, shallow copy for Eigen)
 void exportForSave(const ImageSession* s, ExportedImage* p, MaskMethod method) {
-#if defined(_USE_CUDA_)
+#if defined(_USE_GPU_)
     p->finalPixels = s->watermarkBuffer.clone();
 #else
     p->finalPixels = s->watermarkBuffer;
@@ -98,12 +98,13 @@ void flushToDiskAsync(ExportedImage* handle, const string& outPath, MaskMethod m
 // INTERNAL HELPERS
 namespace {
 #if defined(_USE_OPENCL_)
-string getCurrentOCLDeviceName() {
-    char name[256] = {0}, p[256] = {0}, t[256] = {0}, c[256] = {0};
-    af::deviceInfo(name, p, t, c);
-    string cleanName(name);
-    std::replace(cleanName.begin(), cleanName.end(), '_', ' ');
-    return cleanName;
+string getOCLDeviceName(int deviceIndex = -1) {
+    const auto devices = OclQueueManager::enumerateDevices();
+    if (deviceIndex < 0)
+        deviceIndex = OclQueueManager::getInstance().getDeviceIndex();
+    if (deviceIndex >= 0 && deviceIndex < static_cast<int>(devices.size()))
+        return devices[deviceIndex];
+    return "Unknown OpenCL Device";
 }
 #elif defined(_USE_CUDA_)
 string getCUDADeviceName(int deviceIndex = -1) {
@@ -117,7 +118,14 @@ string getCUDADeviceName(int deviceIndex = -1) {
 // generic method taking the underlying ImageOutputBuffer directly
 const uint8_t* extractPixelData(const ImageOutputBuffer& buffer, int& width, int& height, int& channels) {
     static std::vector<uint8_t> hostBuffer;
-#if defined(_USE_EIGEN_)
+#if defined(_USE_GPU_)
+    width = static_cast<int>(buffer.getCols());
+    height = static_cast<int>(buffer.getRows());
+    channels = static_cast<int>(buffer.getChannels());
+    hostBuffer.resize(static_cast<size_t>(width) * height * channels);
+    buffer.toHost(hostBuffer.data());
+    return hostBuffer.data();
+#else
     if (buffer.isRGB()) {
         const auto& rgb = buffer.getRGB();
         width = rgb[0].cols();
@@ -136,20 +144,6 @@ const uint8_t* extractPixelData(const ImageOutputBuffer& buffer, int& width, int
         channels = 1;
         return gray.data();
     }
-#elif defined(_USE_CUDA_)
-    width = static_cast<int>(buffer.cols());
-    height = static_cast<int>(buffer.rows());
-    channels = static_cast<int>(buffer.channels());
-    hostBuffer.resize(static_cast<size_t>(width) * height * channels);
-    buffer.toHost(hostBuffer.data());
-    return hostBuffer.data();
-#elif defined(_USE_OPENCL_)
-    width = static_cast<int>(buffer.dims(1));
-    height = static_cast<int>(buffer.dims(0));
-    channels = static_cast<int>(buffer.dims(2));
-    hostBuffer.resize(width * height * channels);
-    buffer.host(hostBuffer.data());
-    return hostBuffer.data();
 #endif
 }
 } // end anonymous namespace
@@ -162,21 +156,20 @@ bool initializeEnvironment(const int openclDevice) {
     bool deviceSetSuccess = true;
 #if defined(_USE_OPENCL_)
     try {
-        af::setDevice(openclDevice);
+        OclQueueManager::initialize(openclDevice);
     } catch (...) {
-        std::cout << "NOTE: Invalid OpenCL device, using default 0\n";
-        af::setDevice(0);
+        std::cout << "NOTE: Invalid OpenCL device index, using default 0\n";
+        OclQueueManager::initialize(0);
         deviceSetSuccess = false;
     }
-    af::info();
-    std::cout << "\n";
+    const auto& dev = OclQueueManager::getInstance().getDevice();
+    std::cout << "OpenCL Device [" << OclQueueManager::getInstance().getDeviceIndex() << "]: " << dev.getInfo<CL_DEVICE_NAME>() << "\n\n";
 #elif defined(_USE_CUDA_)
     int device = 0;
     cudaGetDevice(&device);
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, device);
-    std::cout << "CUDA Device [" << device << "]: " << prop.name
-              << " (Compute " << prop.major << "." << prop.minor << ")\n\n";
+    std::cout << "CUDA Device [" << device << "]: " << prop.name << " (Compute " << prop.major << "." << prop.minor << ")\n\n";
 #endif
 #pragma omp parallel
     {}
@@ -189,12 +182,7 @@ string getDeviceName(const int deviceIndex) {
 #if defined(_USE_CUDA_)
     return getCUDADeviceName(deviceIndex);
 #elif defined(_USE_OPENCL_)
-    const int currentDevice = af::getDevice();
-    if (deviceIndex >= 0)
-        af::setDevice(deviceIndex);
-    const string name = getCurrentOCLDeviceName();
-    af::setDevice(currentDevice);
-    return name;
+    return getOCLDeviceName(deviceIndex);
 #elif defined(_USE_EIGEN_)
 #ifdef _WIN32
     int CPUInfo[4] = {-1};
@@ -228,17 +216,9 @@ std::vector<string> getAvailableDevices() {
     for (int i = 0; i < count; i++)
         devices.push_back(getCUDADeviceName(i));
 #elif defined(_USE_OPENCL_)
-    const int currentDevice = af::getDevice();
-    const int count = af::getDeviceCount();
-    for (int i = 0; i < count; i++) {
-        try {
-            af::setDevice(i);
-            devices.push_back(getCurrentOCLDeviceName());
-        } catch (...) { devices.push_back("Unknown GPU Device " + std::to_string(i)); }
-    }
-    af::setDevice(currentDevice);
+    devices = OclQueueManager::enumerateDevices();
 #elif defined(_USE_EIGEN_)
-    devices.push_back(getDeviceName());
+    devices.push_back(getDeviceName(0));
 #endif
     return devices;
 }
@@ -251,12 +231,13 @@ bool isOpenCLBackend() {
 #endif
 }
 
-void buildOpenCLKernels(const int deviceId) {
+void buildOpenCLKernels() {
 #if defined(_USE_OPENCL_)
-    cl_utils::OpenCLKernelCache<3>::getProgram(deviceId);
-    cl_utils::OpenCLKernelCache<5>::getProgram(deviceId);
-    cl_utils::OpenCLKernelCache<7>::getProgram(deviceId);
-    cl_utils::OpenCLKernelCache<9>::getProgram(deviceId);
+    cl_utils::OpenCLKernelCache<3>::getProgram();
+    cl_utils::OpenCLKernelCache<5>::getProgram();
+    cl_utils::OpenCLKernelCache<7>::getProgram();
+    cl_utils::OpenCLKernelCache<9>::getProgram();
+    cl_utils::UtilityKernelCache::getProgram();
 #endif
     // NO-OP else
 }
@@ -266,10 +247,6 @@ void updateSessionParams(ImageSession* s, const int p, const float psnr) {
         return;
     s->p = p;
     s->psnr = psnr;
-#if defined(_USE_OPENCL_)
-    if (s->watermarkObj)
-        af::deviceGC();
-#endif
     s->watermarkObj = createWatermarkObject(s->currentRows, s->currentCols, s->watermarkPassword, s->p, s->psnr);
 }
 
@@ -299,10 +276,6 @@ void bindPreloadedImage(ImageSession* s, PreloadedHandle preloadedData) {
     auto& [rgb, img, alpha, rows, cols, isRGB] = s->imgBuffer;
     // lazy initialization of the watermark object and buffers, only if dimensions change or not initialized yet
     if (!s->watermarkObj || s->currentRows != rows || s->currentCols != cols) {
-#if defined(_USE_OPENCL_)
-        if (s->watermarkObj)
-            af::deviceGC();
-#endif
         s->watermarkObj = createWatermarkObject(rows, cols, s->watermarkPassword, s->p, s->psnr);
         s->currentRows = rows;
         s->currentCols = cols;
@@ -318,16 +291,18 @@ void loadImage(ImageSession* session, const string& imagePath) { bindPreloadedIm
 // main function to embed the watermark into the loaded image, it calls the makeWatermark method of the watermark object,
 // which implements the actual embedding algorithm based on the specified mask method (NVF or ME)
 void embedImage(ImageSession* s, MaskMethod method) {
-#if defined(_USE_CUDA_)
-    // for grayscale CUDA images, rgbImage is empty — pass the gray image for both params
+#if defined(_USE_GPU_)
+    // for GPU builds, rgbImage may be empty for grayscale — fall back to gray
     const auto& inputImg = s->imgBuffer.isRGB ? s->imgBuffer.rgbImage : s->imgBuffer.image;
     s->watermarkObj->makeWatermark(s->imgBuffer.image, inputImg, s->watermarkBuffer, method);
+    // sync so benchmarks measure the full operation, not just kernel launches
+#if defined(_USE_CUDA_)
+    cudaStreamSynchronize(CudaStreamManager::getInstance().getComputeStream());
+#else
+    OclQueueManager::getInstance().finish();
+#endif
 #else
     s->watermarkObj->makeWatermark(s->imgBuffer.image, s->imgBuffer.rgbImage, s->watermarkBuffer, method);
-#if defined(_USE_OPENCL_)
-    s->watermarkBuffer.eval();
-    af::sync();
-#endif
 #endif
 }
 
@@ -336,9 +311,11 @@ void embedImage(ImageSession* s, MaskMethod method) {
 // used only when the input isn't already a float buffer, otherwise it is redundant
 void prepareDetectionImage(ImageSession* s, MaskMethod method) {
     s->detectGrayBuffer = InternalUtils::castToFloatGray(s->watermarkBuffer, s->imgBuffer.isRGB);
-#if defined(_USE_OPENCL_)
-    s->detectGrayBuffer.eval();
-    af::sync();
+    // sync so benchmarks measure completion, not just the async upload
+#if defined(_USE_CUDA_)
+    cudaStreamSynchronize(CudaStreamManager::getInstance().getComputeStream());
+#elif defined(_USE_OPENCL_)
+    OclQueueManager::getInstance().finish();
 #endif
 }
 
@@ -378,11 +355,6 @@ VideoHandle initVideo(const VideoSettings& settings) {
     const int width = session->videoStream->codecpar->width;
     session->watermarkObj = createWatermarkObject(height, width, settings.watermarkPassword, settings.p, settings.psnr);
     session->hostFrame = std::make_unique<HostMemory<uint8_t>>(width * height * 3 / 2);
-#if defined(_USE_OPENCL_)
-    session->inputFrame = ImageBuffer({height, width});
-    session->watermarkedFrame = ImageOutputBuffer({height, width});
-    session->grayFrame = Gray8Buffer({height, width});
-#endif
     return VideoHandle(session);
 }
 

@@ -21,6 +21,10 @@
       <Configuration>EIGEN_Release</Configuration>
       <Platform>x64</Platform>
     </ProjectConfiguration>
+    <ProjectConfiguration Include="OPENCL_Debug|x64">
+      <Configuration>OPENCL_Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
     <ProjectConfiguration Include="OPENCL_Release|x64">
       <Configuration>OPENCL_Release</Configuration>
       <Platform>x64</Platform>
@@ -32,6 +36,7 @@
     <WindowsTargetPlatformVersion Condition="'$(Configuration)|$(Platform)'=='CUDA_Debug|x64'">10.0</WindowsTargetPlatformVersion>
     <WindowsTargetPlatformVersion Condition="'$(Configuration)|$(Platform)'=='EIGEN_Debug|x64'">10.0</WindowsTargetPlatformVersion>
     <WindowsTargetPlatformVersion Condition="'$(Configuration)|$(Platform)'=='OPENCL_Release|x64'">10.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion Condition="'$(Configuration)|$(Platform)'=='OPENCL_Debug|x64'">10.0</WindowsTargetPlatformVersion>
     <WindowsTargetPlatformVersion Condition="'$(Configuration)|$(Platform)'=='EIGEN_Release|x64'">10.0</WindowsTargetPlatformVersion>
     <WindowsTargetPlatformVersion Condition="'$(Configuration)|$(Platform)'=='CUDA_ReleaseDist|x64'">10.0</WindowsTargetPlatformVersion>
     <WindowsTargetPlatformVersion Condition="'$(Configuration)|$(Platform)'=='CUDA_Release|x64'">10.0</WindowsTargetPlatformVersion>
@@ -55,6 +60,12 @@
     <PlatformToolset>v143</PlatformToolset>
     <UseDebugLibraries>false</UseDebugLibraries>
     <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='OPENCL_Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
     <CharacterSet>Unicode</CharacterSet>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='EIGEN_Release|x64'" Label="Configuration">
@@ -109,6 +120,15 @@
     <QtDeployCopyFiles>true</QtDeployCopyFiles>
     <QtDeployDir>@(_-->'%(OutDir)')Watermarking-BenchUI</QtDeployDir>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='OPENCL_Debug|x64'" Label="QtSettings">
+    <QtInstall>6.8.0_msvc2022_64</QtInstall>
+    <QtModules>core;gui;widgets</QtModules>
+    <QtBuildConfig>debug</QtBuildConfig>
+    <QtDeployDebugRelease>debug</QtDeployDebugRelease>
+    <QtDeploy>true</QtDeploy>
+    <QtDeployCopyFiles>true</QtDeployCopyFiles>
+    <QtDeployDir>@(_-->'%(OutDir)')Watermarking-BenchUI</QtDeployDir>
+  </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='EIGEN_Release|x64'" Label="QtSettings">
     <QtInstall>6.8.0_msvc2022_64</QtInstall>
     <QtModules>core;gui;widgets</QtModules>
@@ -153,6 +173,10 @@
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="$(QtMsBuild)\Qt.props" />
   </ImportGroup>
+  <ImportGroup Condition="'$(Configuration)|$(Platform)'=='OPENCL_Debug|x64'" Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="$(QtMsBuild)\Qt.props" />
+  </ImportGroup>
   <ImportGroup Condition="'$(Configuration)|$(Platform)'=='EIGEN_Release|x64'" Label="PropertySheets">
     <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
     <Import Project="$(QtMsBuild)\Qt.props" />
@@ -171,6 +195,7 @@
     <LinkIncremental>false</LinkIncremental>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='OPENCL_Release|x64'" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='OPENCL_Debug|x64'" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='EIGEN_Release|x64'">
     <LinkIncremental>false</LinkIncremental>
   </PropertyGroup>
@@ -320,6 +345,11 @@ xcopy "$(SolutionDir)Watermarking-Impl\libs\ffmpeg\bin\ffmpeg.exe" "$(OutDir)Wat
       <LanguageStandard>stdcpp20</LanguageStandard>
     </ClCompile>
   </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='OPENCL_Debug|x64'">
+    <ClCompile>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+    </ClCompile>
+  </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='OPENCL_Release|x64'">
     <ClCompile>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
@@ -330,13 +360,37 @@ xcopy "$(SolutionDir)Watermarking-Impl\libs\ffmpeg\bin\ffmpeg.exe" "$(OutDir)Wat
     </ClCompile>
     <PostBuildEvent>
       <Command>xcopy "$(SolutionDir)Watermarking-Impl\libs\ffmpeg\bin\*.dll" "$(OutDir)Watermarking-BenchUI" /y /D
-xcopy "$(AF_PATH)\lib\afopencl.dll" "$(OutDir)Watermarking-BenchUI" /y /D
-xcopy "$(AF_PATH)\lib\FreeImage.dll" "$(OutDir)Watermarking-BenchUI" /y /D
-xcopy "$(AF_PATH)\lib\mkl_rt.2.dll" "$(OutDir)Watermarking-BenchUI" /y /D</Command>
+xcopy "$(SolutionDir)Watermarking-Impl\libs\libpng\bin\libpng16.dll" "$(OutDir)Watermarking-BenchUI" /y /D
+xcopy "$(SolutionDir)Watermarking-Impl\libs\zlib\bin\zlib1.dll" "$(OutDir)Watermarking-BenchUI" /y /D
+xcopy "$(SolutionDir)Watermarking-Impl\libs\libjpeg\bin\release\jpeg62.dll" "$(OutDir)Watermarking-BenchUI" /y /D
+xcopy "$(SolutionDir)Watermarking-Impl\libs\libtiff\bin\tiff.dll" "$(OutDir)Watermarking-BenchUI" /y /D</Command>
     </PostBuildEvent>
     <Link>
-      <AdditionalLibraryDirectories>$(AF_PATH)\lib;$(SolutionDir)Watermarking-Impl\libs\opencl\lib;$(SolutionDir)Watermarking-Impl\libs\ffmpeg\lib</AdditionalLibraryDirectories>
-      <AdditionalDependencies>$(CoreLibraryDependencies);afopencl.lib;OpenCL.lib;avutil.lib;avformat.lib;swscale.lib;avcodec.lib;avfilter.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(SolutionDir)Watermarking-Impl\libs\zlib\lib;$(SolutionDir)Watermarking-Impl\libs\libpng\lib;$(SolutionDir)Watermarking-Impl\libs\libjpeg\lib;$(SolutionDir)Watermarking-Impl\libs\libwebp\lib;$(SolutionDir)Watermarking-Impl\libs\libtiff\lib;$(SolutionDir)Watermarking-Impl\libs\opencl\lib;$(SolutionDir)Watermarking-Impl\libs\ffmpeg\lib</AdditionalLibraryDirectories>
+      <AdditionalDependencies>$(CoreLibraryDependencies);zlib.lib;libpng16.lib;jpeg.lib;libwebp.lib;tiff.lib;OpenCL.lib;avutil.lib;avformat.lib;swscale.lib;avcodec.lib;avfilter.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <IgnoreSpecificDefaultLibraries>LIBCMT</IgnoreSpecificDefaultLibraries>
+      <EntryPointSymbol>WinMainCRTStartup</EntryPointSymbol>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='OPENCL_Debug|x64'">
+    <ClCompile>
+      <LanguageStandard_C>stdc17</LanguageStandard_C>
+      <OpenMPSupport>true</OpenMPSupport>
+      <AdditionalIncludeDirectories>$(SolutionDir)Watermarking-Impl\include;$(SolutionDir)Watermarking-Util\include</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>WIN32;WIN64;NOMINMAX;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus </AdditionalOptions>
+    </ClCompile>
+    <PostBuildEvent>
+      <Command>xcopy "$(SolutionDir)Watermarking-Impl\libs\ffmpeg\bin\*.dll" "$(OutDir)Watermarking-BenchUI" /y /D
+xcopy "$(SolutionDir)Watermarking-Impl\libs\libpng\bin\libpng16d.dll" "$(OutDir)Watermarking-BenchUI" /y /D
+xcopy "$(SolutionDir)Watermarking-Impl\libs\zlib\bin\zlibd1.dll" "$(OutDir)Watermarking-BenchUI" /y /D
+xcopy "$(SolutionDir)Watermarking-Impl\libs\libjpeg\bin\debug\jpeg62.dll" "$(OutDir)Watermarking-BenchUI" /y /D
+xcopy "$(SolutionDir)Watermarking-Impl\libs\libtiff\bin\tiff.dll" "$(OutDir)Watermarking-BenchUI" /y /D</Command>
+    </PostBuildEvent>
+    <Link>
+      <AdditionalLibraryDirectories>$(SolutionDir)Watermarking-Impl\libs\zlib\lib;$(SolutionDir)Watermarking-Impl\libs\libpng\lib;$(SolutionDir)Watermarking-Impl\libs\libjpeg\lib;$(SolutionDir)Watermarking-Impl\libs\libwebp\lib;$(SolutionDir)Watermarking-Impl\libs\libtiff\lib;$(SolutionDir)Watermarking-Impl\libs\opencl\lib;$(SolutionDir)Watermarking-Impl\libs\ffmpeg\lib</AdditionalLibraryDirectories>
+      <AdditionalDependencies>$(CoreLibraryDependencies);zlibd.lib;libpng16d.lib;jpeg.lib;libwebp.lib;tiff.lib;OpenCL.lib;avutil.lib;avformat.lib;swscale.lib;avcodec.lib;avfilter.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <IgnoreSpecificDefaultLibraries>LIBCMT</IgnoreSpecificDefaultLibraries>
       <EntryPointSymbol>WinMainCRTStartup</EntryPointSymbol>
     </Link>
   </ItemDefinitionGroup>
@@ -378,6 +432,18 @@ xcopy "$(AF_PATH)\lib\mkl_rt.2.dll" "$(OutDir)Watermarking-BenchUI" /y /D</Comma
       <GenerateDebugInformation>false</GenerateDebugInformation>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='OPENCL_Debug|x64'" Label="Configuration">
+    <ClCompile>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <ConformanceMode>true</ConformanceMode>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='EIGEN_Release|x64'" Label="Configuration">
