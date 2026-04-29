@@ -8,7 +8,7 @@
  *  \author Dimitris Karatzas
  */
 template <typename T>
-class GpuArray {
+class CudaArray {
   private:
     T* ptr_ = nullptr;
     unsigned int rows = 0;
@@ -22,39 +22,39 @@ class GpuArray {
     }
 
   public:
-    GpuArray() = default;
+    CudaArray() = default;
 
-    explicit GpuArray(unsigned int count, cudaStream_t stream) : rows(count), cols(1), stream(stream) { alloc(); }
+    explicit CudaArray(unsigned int count, cudaStream_t stream) : rows(count), cols(1), stream(stream) { alloc(); }
 
-    GpuArray(unsigned int rows, unsigned int cols, cudaStream_t stream) : rows(rows), cols(cols), stream(stream) { alloc(); }
+    CudaArray(unsigned int rows, unsigned int cols, cudaStream_t stream) : rows(rows), cols(cols), stream(stream) { alloc(); }
 
-    GpuArray(unsigned int rows, unsigned int cols, unsigned int channels, cudaStream_t stream) : rows(rows), cols(cols), channels(channels), stream(stream) { alloc(); }
+    CudaArray(unsigned int rows, unsigned int cols, unsigned int channels, cudaStream_t stream) : rows(rows), cols(cols), channels(channels), stream(stream) { alloc(); }
 
-    GpuArray(unsigned int rows, unsigned int cols, const T* hostData, cudaStream_t stream) : rows(rows), cols(cols), stream(stream) {
+    CudaArray(unsigned int rows, unsigned int cols, const T* hostData, cudaStream_t stream) : rows(rows), cols(cols), stream(stream) {
         alloc();
         cudaMemcpyAsync(ptr_, hostData, bytes(), cudaMemcpyHostToDevice, stream);
     }
 
-    GpuArray(unsigned int rows, unsigned int cols, unsigned int channels, const T* hostData, cudaStream_t stream) : rows(rows), cols(cols), channels(channels), stream(stream) {
+    CudaArray(unsigned int rows, unsigned int cols, unsigned int channels, const T* hostData, cudaStream_t stream) : rows(rows), cols(cols), channels(channels), stream(stream) {
         alloc();
         cudaMemcpyAsync(ptr_, hostData, bytes(), cudaMemcpyHostToDevice, stream);
     }
 
-    ~GpuArray() {
+    ~CudaArray() {
         if (ptr_)
             cudaFreeAsync(ptr_, stream);
     }
 
-    GpuArray(const GpuArray&) = delete;
-    GpuArray& operator=(const GpuArray&) = delete;
+    CudaArray(const CudaArray&) = delete;
+    CudaArray& operator=(const CudaArray&) = delete;
 
-    GpuArray(GpuArray&& o) noexcept : ptr_(o.ptr_), rows(o.rows), cols(o.cols), channels(o.channels), stream(o.stream) {
+    CudaArray(CudaArray&& o) noexcept : ptr_(o.ptr_), rows(o.rows), cols(o.cols), channels(o.channels), stream(o.stream) {
         o.ptr_ = nullptr;
         o.rows = o.cols = 0;
         o.channels = 1;
     }
 
-    GpuArray& operator=(GpuArray&& o) noexcept {
+    CudaArray& operator=(CudaArray&& o) noexcept {
         if (this != &o) {
             if (ptr_)
                 cudaFreeAsync(ptr_, stream);
@@ -106,20 +106,20 @@ class GpuArray {
             cudaMemcpyAsync(dst, ptr_, bytes(), cudaMemcpyDeviceToHost, stream);
     }
 
-    static GpuArray zeros(unsigned int count, cudaStream_t stream) {
-        GpuArray arr(count, stream);
+    static CudaArray zeros(unsigned int count, cudaStream_t stream) {
+        CudaArray arr(count, stream);
         arr.fillZero();
         return arr;
     }
 
-    static GpuArray zeros(unsigned int rows, unsigned int cols, cudaStream_t stream) {
-        GpuArray arr(rows, cols, stream);
+    static CudaArray zeros(unsigned int rows, unsigned int cols, cudaStream_t stream) {
+        CudaArray arr(rows, cols, stream);
         arr.fillZero();
         return arr;
     }
 
-    GpuArray clone() const {
-        GpuArray copy(rows, cols, channels, stream);
+    CudaArray clone() const {
+        CudaArray copy(rows, cols, channels, stream);
         if (ptr_)
             cudaMemcpyAsync(copy.ptr_, ptr_, bytes(), cudaMemcpyDeviceToDevice, stream);
         return copy;

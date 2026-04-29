@@ -398,6 +398,12 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='CUDA_Debug|x64'">false</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='EIGEN_Debug|x64'">false</ExcludedFromBuild>
     </ClInclude>
+    <ClInclude Include="CudaArray.hpp">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='EIGEN_Debug|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='EIGEN_Release|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='OPENCL_Debug|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='OPENCL_Release|x64'">true</ExcludedFromBuild>
+    </ClInclude>
     <ClInclude Include="CudaStreamManager.hpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='EIGEN_Debug|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='EIGEN_Release|x64'">true</ExcludedFromBuild>

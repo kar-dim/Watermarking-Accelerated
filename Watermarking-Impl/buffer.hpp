@@ -2,14 +2,14 @@
 #include "cimg_init.h"
 #include <cstdint>
 #if defined(_USE_CUDA_)
-#include "GpuArray.hpp"
+#include "CudaArray.hpp"
 #include <cuda_runtime.h>
 using QueueHandle = cudaStream_t;
-using ImageBuffer = GpuArray<float>;
-using ImageOutputBuffer = GpuArray<uint8_t>;
-using Gray8Buffer = GpuArray<uint8_t>;
-using Gray16Buffer = GpuArray<uint16_t>;
-using FlagBuffer = GpuArray<int32_t>;
+using ImageBuffer = CudaArray<float>;
+using ImageOutputBuffer = CudaArray<uint8_t>;
+using Gray8Buffer = CudaArray<uint8_t>;
+using Gray16Buffer = CudaArray<uint16_t>;
+using FlagBuffer = CudaArray<int32_t>;
 using Gray8BufferIO = cimg_library::CImg<uint8_t>;
 using FloatBufferIO = cimg_library::CImg<float>;
 #elif defined(_USE_OPENCL_)

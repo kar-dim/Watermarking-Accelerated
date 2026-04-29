@@ -21,7 +21,7 @@
 
 #if defined(_USE_CUDA_)
 #include "CudaStreamManager.hpp"
-#include "GpuArray.hpp"
+#include "CudaArray.hpp"
 #include <algorithm>
 #include <cuda_runtime.h>
 #elif defined(_USE_OPENCL_)

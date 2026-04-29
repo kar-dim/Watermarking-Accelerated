@@ -10,8 +10,6 @@
     <ClInclude Include="CudaStreamManager.hpp">
       <Filter>Header Files\cuda</Filter>
     </ClInclude>
-    <CudaCompile Include="utils.cpp" />
-    <CudaCompile Include="video_utils.cpp" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Header Files">
@@ -61,6 +59,8 @@
     <ClCompile Include="WatermarkCore.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="utils.cpp" />
+    <ClCompile Include="video_utils.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="utils.hpp">
@@ -152,6 +152,9 @@
     </ClInclude>
     <ClInclude Include="cimg_init.h">
       <Filter>Header Files\util</Filter>
+    </ClInclude>
+    <ClInclude Include="CudaArray.hpp">
+      <Filter>Header Files\cuda</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

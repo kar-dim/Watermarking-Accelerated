@@ -1,7 +1,7 @@
 #pragma once
 #include "cuda_utils.hpp"
+#include "CudaArray.hpp"
 #include "CudaStreamManager.hpp"
-#include "GpuArray.hpp"
 #include "include/WatermarkTypes.hpp"
 #include "kernels/kernels.cuh"
 #include "WatermarkBase.hpp"
@@ -11,8 +11,8 @@
 #include <cub/cub.cuh>
 #include <cuda_runtime.h>
 #include <string>
-#include <vector>
 #include <thrust/iterator/transform_iterator.h>
+#include <vector>
 
 /*!
  *  \brief  Functions for watermark computation and detection, CUDA implementation.
@@ -44,7 +44,7 @@ class WatermarkCuda final : public WatermarkBase {
     void makeWatermark(const ImageBuffer& inputGrayImage, const ImageBuffer& inputImage, ImageOutputBuffer& output, const MaskMethod maskType) override {
         // reuse output buffer, only (re)allocate when dimensions or channel count change
         if (output.empty() || output.getRows() != this->baseRows || output.getCols() != this->baseCols || output.getChannels() != inputImage.getChannels())
-            output = GpuArray<uint8_t>(this->baseRows, this->baseCols, inputImage.getChannels(), stream);
+            output = CudaArray<uint8_t>(this->baseRows, this->baseCols, inputImage.getChannels(), stream);
 
         sumSq.fillZero();
 
@@ -124,20 +124,20 @@ class WatermarkCuda final : public WatermarkBase {
     dim3 meParams;
     unsigned int gridOptimalMe;
     unsigned int corrNumBlocks;
-    GpuArray<uint8_t> cubTempStorage;
+    CudaArray<uint8_t> cubTempStorage;
 
     // preallocated scratch buffers, shared across embed and detect paths
-    GpuArray<float> u;
-    GpuArray<uint64_t> sumSq;
-    GpuArray<uint64_t> Rx;
-    GpuArray<uint64_t> rx;
-    GpuArray<float> errorSeq;
-    GpuArray<float> errorSeqMax;
-    GpuArray<float> mask;
-    GpuArray<float> dotPartial;
-    GpuArray<float> uNormPartial;
-    GpuArray<float> zNormPartial;
-    GpuArray<float> corrResult;
+    CudaArray<float> u;
+    CudaArray<uint64_t> sumSq;
+    CudaArray<uint64_t> Rx;
+    CudaArray<uint64_t> rx;
+    CudaArray<float> errorSeq;
+    CudaArray<float> errorSeqMax;
+    CudaArray<float> mask;
+    CudaArray<float> dotPartial;
+    CudaArray<float> uNormPartial;
+    CudaArray<float> zNormPartial;
+    CudaArray<float> corrResult;
 
     static ImageBuffer initializeRandomMatrix(const std::vector<float>& watermarkVec, const unsigned int rows, const unsigned int cols) {
         return ImageBuffer(rows, cols, watermarkVec.data(), CudaStreamManager::getInstance().getComputeStream());
@@ -150,7 +150,7 @@ class WatermarkCuda final : public WatermarkBase {
         cub::DeviceReduce::Max(nullptr, tmpBytesTransform, iter, (float*)nullptr, this->totalPixels, 0);
         size_t tmpBytesRaw = 0;
         cub::DeviceReduce::Max(nullptr, tmpBytesRaw, (const float*)nullptr, (float*)nullptr, this->totalPixels, 0);
-        cubTempStorage = GpuArray<uint8_t>(static_cast<unsigned int>(std::max(tmpBytesTransform, tmpBytesRaw)), stream);
+        cubTempStorage = CudaArray<uint8_t>(static_cast<unsigned int>(std::max(tmpBytesTransform, tmpBytesRaw)), stream);
     }
 
     void initializePreallocatedBuffers() {
@@ -159,17 +159,17 @@ class WatermarkCuda final : public WatermarkBase {
         const dim3 corrGrid = cuda_utils::gridSizeCalculate(windowBlockSize, this->baseCols, this->baseRows);
         corrNumBlocks = corrGrid.x * corrGrid.y;
 
-        u = GpuArray<float>(this->baseRows, this->baseCols, stream);
-        sumSq = GpuArray<uint64_t>(1, stream);
-        Rx = GpuArray<uint64_t>(RxSize, stream);
-        rx = GpuArray<uint64_t>(rxSize, stream);
-        errorSeq = GpuArray<float>(this->baseRows, this->baseCols, stream);
-        errorSeqMax = GpuArray<float>(1, stream);
-        mask = GpuArray<float>(this->baseRows, this->baseCols, stream);
-        dotPartial = GpuArray<float>(corrNumBlocks, stream);
-        uNormPartial = GpuArray<float>(corrNumBlocks, stream);
-        zNormPartial = GpuArray<float>(corrNumBlocks, stream);
-        corrResult = GpuArray<float>(1, stream);
+        u = CudaArray<float>(this->baseRows, this->baseCols, stream);
+        sumSq = CudaArray<uint64_t>(1, stream);
+        Rx = CudaArray<uint64_t>(RxSize, stream);
+        rx = CudaArray<uint64_t>(rxSize, stream);
+        errorSeq = CudaArray<float>(this->baseRows, this->baseCols, stream);
+        errorSeqMax = CudaArray<float>(1, stream);
+        mask = CudaArray<float>(this->baseRows, this->baseCols, stream);
+        dotPartial = CudaArray<float>(corrNumBlocks, stream);
+        uNormPartial = CudaArray<float>(corrNumBlocks, stream);
+        zNormPartial = CudaArray<float>(corrNumBlocks, stream);
+        corrResult = CudaArray<float>(1, stream);
     }
 
     template <typename InputIteratorT>

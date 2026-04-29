@@ -3,7 +3,7 @@
 #include "opencl_init.h"
 
 /*!
- *  \brief  GPU buffer class for OpenCL, equivalent to CUDA GpuArray<T>
+ *  \brief  GPU buffer class for OpenCL, equivalent to CUDA CudaArray<T>
  *          Uses OclQueueManager's shared memory pool for buffer (re)use.
  *  \author Dimitris Karatzas
  */

@@ -20,7 +20,7 @@
 #include <vector>
 #elif defined(_USE_CUDA_)
 #include "CudaStreamManager.hpp"
-#include "GpuArray.hpp"
+#include "CudaArray.hpp"
 #include "WatermarkCuda.cuh"
 #include "cuda_utils.hpp"
 #include <algorithm>
@@ -73,8 +73,8 @@ namespace {
 ImageBuffer cimgGrayToGpu(const FloatBufferIO& img, cudaStream_t stream) {
     const int rows = img.height();
     const int cols = img.width();
-    GpuArray<float> rowMajor(rows, cols, img.data(), stream);
-    GpuArray<float> colMajor(rows, cols, stream);
+    CudaArray<float> rowMajor(rows, cols, img.data(), stream);
+    CudaArray<float> colMajor(rows, cols, stream);
     cuda_utils::launchRowMajorToColMajorFloatKernel(rowMajor.data(), colMajor.data(), cols, rows, 1, stream);
     return colMajor;
 }
@@ -82,8 +82,8 @@ ImageBuffer cimgGrayToGpu(const FloatBufferIO& img, cudaStream_t stream) {
 ImageBuffer cimgRgbToGpu(const FloatBufferIO& img, cudaStream_t stream) {
     const int rows = img.height();
     const int cols = img.width();
-    GpuArray<float> rowMajor(rows, cols, 3, img.data(), stream);
-    GpuArray<float> colMajor(rows, cols, 3, stream);
+    CudaArray<float> rowMajor(rows, cols, 3, img.data(), stream);
+    CudaArray<float> colMajor(rows, cols, 3, stream);
     cuda_utils::launchRowMajorToColMajorFloatKernel(rowMajor.data(), colMajor.data(), cols, rows, 3, stream);
     return colMajor;
 }
@@ -98,8 +98,8 @@ ImageBuffer cimgRgbToGpuGray(const FloatBufferIO& img, cudaStream_t stream) {
     const float* B = G + planeSize;
     for (int i = 0; i < planeSize; i++)
         gray[i] = R[i] * kRW + G[i] * kGW + B[i] * kBW;
-    GpuArray<float> rowMajorGray(rows, cols, gray.data(), stream);
-    GpuArray<float> colMajorGray(rows, cols, stream);
+    CudaArray<float> rowMajorGray(rows, cols, gray.data(), stream);
+    CudaArray<float> colMajorGray(rows, cols, stream);
     cuda_utils::launchRowMajorToColMajorFloatKernel(rowMajorGray.data(), colMajorGray.data(), cols, rows, 1, stream);
     return colMajorGray;
 }
@@ -335,7 +335,7 @@ ImageBuffer InternalUtils::rgb2gray(const ImageBuffer& rgbImage) {
     for (unsigned int i = 0; i < totalPixels; i++)
         gray[i] = hostRgb[i] * kRW + hostRgb[i + totalPixels] * kGW + hostRgb[i + 2 * totalPixels] * kBW;
 #if defined(_USE_CUDA_)
-    return GpuArray<float>(rgbImage.getRows(), rgbImage.getCols(), gray.data(), CudaStreamManager::getInstance().getComputeStream());
+    return CudaArray<float>(rgbImage.getRows(), rgbImage.getCols(), gray.data(), CudaStreamManager::getInstance().getComputeStream());
 #else
     return OclArray<float>(rgbImage.getRows(), rgbImage.getCols(), gray.data(), OclQueueManager::getInstance().getQueueRaw());
 #endif
@@ -359,7 +359,7 @@ ImageBuffer InternalUtils::castToFloatGray(const ImageOutputBuffer& buffer, cons
             hostF[i] = static_cast<float>(hostU8[i]);
     }
 #if defined(_USE_CUDA_)
-    return GpuArray<float>(buffer.getRows(), buffer.getCols(), hostF.data(), CudaStreamManager::getInstance().getComputeStream());
+    return CudaArray<float>(buffer.getRows(), buffer.getCols(), hostF.data(), CudaStreamManager::getInstance().getComputeStream());
 #else
     return OclArray<float>(buffer.getRows(), buffer.getCols(), hostF.data(), OclQueueManager::getInstance().getQueueRaw());
 #endif
