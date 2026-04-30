@@ -171,7 +171,7 @@ void InternalUtils::saveImage(const string& imagePath, const string& suffix, con
     const int channels = watermark.getChannels();
     const bool hasAlpha = alphaChannel.has_value();
     auto& mgr = OclQueueManager::getInstance();
-    OclArray<uint8_t> rowMajor(static_cast<unsigned int>(rows), static_cast<unsigned int>(cols), static_cast<unsigned int>(channels), mgr.getQueueRaw());
+    OclArray<uint8_t> rowMajor(rows, cols, channels, mgr.getQueueRaw());
     auto& q = mgr.getQueue();
     cl_utils::launchColMajorToRowMajorU8(watermark.clBuffer(), rowMajor.clBuffer(), cols, rows, channels, q);
     Gray8BufferIO output(cols, rows, 1, hasAlpha ? channels + 1 : channels);

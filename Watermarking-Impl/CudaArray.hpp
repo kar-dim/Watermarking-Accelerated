@@ -12,9 +12,9 @@ template <typename T>
 class CudaArray {
   private:
     T* ptr_ = nullptr;
-    unsigned int rows = 0;
-    unsigned int cols = 0;
-    unsigned int channels = 1;
+    int rows = 0;
+    int cols = 0;
+    int channels = 1;
     cudaStream_t stream = nullptr;
 
     void alloc() {
@@ -32,18 +32,18 @@ class CudaArray {
   public:
     CudaArray() = default;
 
-    explicit CudaArray(unsigned int count, cudaStream_t stream) : rows(count), cols(1), stream(stream) { alloc(); }
+    explicit CudaArray(const int count, cudaStream_t stream) : rows(count), cols(1), stream(stream) { alloc(); }
 
-    CudaArray(unsigned int rows, unsigned int cols, cudaStream_t stream) : rows(rows), cols(cols), stream(stream) { alloc(); }
+    CudaArray(const int rows, const int cols, cudaStream_t stream) : rows(rows), cols(cols), stream(stream) { alloc(); }
 
-    CudaArray(unsigned int rows, unsigned int cols, unsigned int channels, cudaStream_t stream) : rows(rows), cols(cols), channels(channels), stream(stream) { alloc(); }
+    CudaArray(const int rows, const int cols, int channels, cudaStream_t stream) : rows(rows), cols(cols), channels(channels), stream(stream) { alloc(); }
 
-    CudaArray(unsigned int rows, unsigned int cols, const T* hostData, cudaStream_t stream) : rows(rows), cols(cols), stream(stream) {
+    CudaArray(const int rows, const int cols, const T* hostData, cudaStream_t stream) : rows(rows), cols(cols), stream(stream) {
         alloc();
         cudaMemcpyAsync(ptr_, hostData, bytes(), cudaMemcpyHostToDevice, stream);
     }
 
-    CudaArray(unsigned int rows, unsigned int cols, unsigned int channels, const T* hostData, cudaStream_t stream) : rows(rows), cols(cols), channels(channels), stream(stream) {
+    CudaArray(const int rows, const int cols, const int channels, const T* hostData, cudaStream_t stream) : rows(rows), cols(cols), channels(channels), stream(stream) {
         alloc();
         cudaMemcpyAsync(ptr_, hostData, bytes(), cudaMemcpyHostToDevice, stream);
     }
@@ -76,10 +76,10 @@ class CudaArray {
 
     T* data() { return ptr_; }
     const T* data() const { return ptr_; }
-    unsigned int getRows() const { return rows; }
-    unsigned int getCols() const { return cols; }
-    unsigned int getChannels() const { return channels; }
-    unsigned int size() const { return rows * cols * channels; }
+    int getRows() const { return rows; }
+    int getCols() const { return cols; }
+    int getChannels() const { return channels; }
+    int size() const { return rows * cols * channels; }
     size_t bytes() const { return static_cast<size_t>(size()) * sizeof(T); }
     bool empty() const { return ptr_ == nullptr; }
     cudaStream_t getStream() const { return stream; }
@@ -110,13 +110,13 @@ class CudaArray {
             cudaMemcpyAsync(dst, ptr_, bytes(), cudaMemcpyDeviceToHost, stream);
     }
 
-    static CudaArray zeros(unsigned int count, cudaStream_t stream) {
+    static CudaArray zeros(const int count, cudaStream_t stream) {
         CudaArray arr(count, stream);
         arr.fillZero();
         return arr;
     }
 
-    static CudaArray zeros(unsigned int rows, unsigned int cols, cudaStream_t stream) {
+    static CudaArray zeros(const int rows, const int cols, cudaStream_t stream) {
         CudaArray arr(rows, cols, stream);
         arr.fillZero();
         return arr;

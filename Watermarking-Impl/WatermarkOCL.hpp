@@ -20,7 +20,7 @@
 template <int p>
 class WatermarkOCL final : public WatermarkBase {
   public:
-    WatermarkOCL<p>(const unsigned int rows, const unsigned int cols, const std::string& watermarkPassword, const float psnr)
+    WatermarkOCL<p>(const int rows, const int cols, const std::string& watermarkPassword, const float psnr)
         : WatermarkBase(rows, cols, watermarkPassword, psnr, initializeRandomMatrix), strengthNumerator(strengthFactor * std::sqrt(static_cast<float>(this->totalPixels))),
           coefficients(localSize, OclQueueManager::getInstance().getQueueRaw()), stopFlag(FlagBuffer::zeros(1, OclQueueManager::getInstance().getQueueRaw())),
           queue(OclQueueManager::getInstance().getQueue()), device(OclQueueManager::getInstance().getDevice()),
@@ -162,7 +162,7 @@ class WatermarkOCL final : public WatermarkBase {
     unsigned int corrFinalLocalSize;
     cl::Program programs;
 
-    static ImageBuffer initializeRandomMatrix(const std::vector<float>& watermarkVec, const unsigned int rows, const unsigned int cols) {
+    static ImageBuffer initializeRandomMatrix(const std::vector<float>& watermarkVec, const int rows, const int cols) {
         return ImageBuffer(rows, cols, watermarkVec.data(), OclQueueManager::getInstance().getQueueRaw());
     }
 

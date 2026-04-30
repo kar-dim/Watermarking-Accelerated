@@ -41,7 +41,7 @@ class WatermarkEigen final : public WatermarkBase {
     using Map = Eigen::Map<T>;
 
   public:
-    WatermarkEigen<p>(const unsigned int rows, const unsigned int cols, const std::string& watermarkPassword, const float psnr)
+    WatermarkEigen<p>(const int rows, const int cols, const std::string& watermarkPassword, const float psnr)
         : WatermarkBase(rows, cols, watermarkPassword, psnr, initializeRandomMatrix), errorSequence(rows, cols), filteredEstimation(rows, cols), u(rows, cols), uStrengthened(rows, cols),
           meMatrixData(omp_get_max_threads(), rows) {}
 
@@ -107,7 +107,7 @@ class WatermarkEigen final : public WatermarkBase {
     PredictionErrorMatrixData<p> meMatrixData;
 
     // initialize the watermark random matrix into an Eigen buffer
-    static ImageBuffer initializeRandomMatrix(const std::vector<float>& watermarkVec, const unsigned int rows, const unsigned int cols) {
+    static ImageBuffer initializeRandomMatrix(const std::vector<float>& watermarkVec, const int rows, const int cols) {
         return ImageBuffer(ArrayXXf(Map<const ArrayXXf>(watermarkVec.data(), rows, cols)));
     }
 

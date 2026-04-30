@@ -22,7 +22,7 @@
 template <int p>
 class WatermarkCuda final : public WatermarkBase {
   public:
-    WatermarkCuda<p>(const unsigned int rows, const unsigned int cols, const std::string& watermarkPassword, const float psnr)
+    WatermarkCuda<p>(const int rows, const int cols, const std::string& watermarkPassword, const float psnr)
         : WatermarkBase(rows, cols, watermarkPassword, psnr, initializeRandomMatrix), stream(CudaStreamManager::getInstance().getComputeStream()),
           strengthNumerator(strengthFactor * std::sqrt(static_cast<float>(this->totalPixels))), coefficients(localSize, stream), stopFlag(FlagBuffer::zeros(1, stream)) {
         if constexpr (p == 3)
@@ -33,9 +33,9 @@ class WatermarkCuda final : public WatermarkBase {
             gridOptimalMe = cuda_utils::gridSizeMeCalculate(me_p7, meBlockSize.x);
         else
             gridOptimalMe = cuda_utils::gridSizeMeCalculate(me_p9, meBlockSize.x);
-        constexpr unsigned int pixelsPerBlockY = (p == 3) ? (meBlockSize.x * 2) : meBlockSize.x;
-        const unsigned int meTotalBlocksY = WatermarkBase::alignUp<pixelsPerBlockY>(this->baseRows) / pixelsPerBlockY;
-        meParams = {meTotalBlocksY, meTotalBlocksY * this->baseCols};
+        constexpr int pixelsPerBlockY = (p == 3) ? (meBlockSize.x * 2) : meBlockSize.x;
+        const int meTotalBlocksY = WatermarkBase::alignUp<pixelsPerBlockY>(this->baseRows) / pixelsPerBlockY;
+        meParams = dim3(meTotalBlocksY, meTotalBlocksY * this->baseCols);
         const dim3 corrGrid = cuda_utils::gridSizeCalculate(windowBlockSize, this->baseCols, this->baseRows);
         corrNumBlocks = corrGrid.x * corrGrid.y;
         initializeCubStorage();
@@ -56,8 +56,8 @@ class WatermarkCuda final : public WatermarkBase {
             nvf_u_and_sumsq_fused<p><<<gridSize, windowBlockSize, 0, stream>>>(inputGrayImage.data(), this->randomMatrix.data(), u.data(), sumSq.data(), this->baseCols, this->baseRows);
         } else {
             // ME path: solve prediction error model, compute error sequence, normalize, fuse with watermark
-            constexpr unsigned int RxSize = static_cast<unsigned int>((localSize * (localSize + 1)) / 2);
-            constexpr unsigned int rxSize = static_cast<unsigned int>(localSize);
+            constexpr int RxSize = (localSize * (localSize + 1)) / 2;
+            constexpr int rxSize = localSize;
             CudaArray<uint64_t> Rx = CudaArray<uint64_t>::zeros(RxSize, stream);
             CudaArray<uint64_t> rx = CudaArray<uint64_t>::zeros(rxSize, stream);
             launchMeKernel(inputGrayImage.data(), Rx, rx);
@@ -137,11 +137,11 @@ class WatermarkCuda final : public WatermarkBase {
     FlagBuffer stopFlag;
 
     dim3 meParams;
-    unsigned int gridOptimalMe;
-    unsigned int corrNumBlocks;
+    int gridOptimalMe;
+    int corrNumBlocks;
     CudaArray<uint8_t> cubTempStorage;
 
-    static ImageBuffer initializeRandomMatrix(const std::vector<float>& watermarkVec, const unsigned int rows, const unsigned int cols) {
+    static ImageBuffer initializeRandomMatrix(const std::vector<float>& watermarkVec, const int rows, const int cols) {
         return ImageBuffer(rows, cols, watermarkVec.data(), CudaStreamManager::getInstance().getComputeStream());
     }
 
@@ -152,7 +152,7 @@ class WatermarkCuda final : public WatermarkBase {
         cub::DeviceReduce::Max(nullptr, tmpBytesTransform, iter, (float*)nullptr, this->totalPixels, 0);
         size_t tmpBytesRaw = 0;
         cub::DeviceReduce::Max(nullptr, tmpBytesRaw, (const float*)nullptr, (float*)nullptr, this->totalPixels, 0);
-        cubTempStorage = CudaArray<uint8_t>(static_cast<unsigned int>(std::max(tmpBytesTransform, tmpBytesRaw)), stream);
+        cubTempStorage = CudaArray<uint8_t>(static_cast<int>(std::max(tmpBytesTransform, tmpBytesRaw)), stream);
     }
 
     template <typename InputIteratorT>

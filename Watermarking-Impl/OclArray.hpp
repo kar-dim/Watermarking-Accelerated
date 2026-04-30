@@ -11,9 +11,9 @@ template <typename T>
 class OclArray {
   private:
     cl_mem mem = nullptr;
-    unsigned int rows = 0;
-    unsigned int cols = 0;
-    unsigned int channels = 1;
+    int rows = 0;
+    int cols = 0;
+    int channels = 1;
     cl_command_queue queue = nullptr;
 
     void alloc() {
@@ -33,20 +33,20 @@ class OclArray {
   public:
     OclArray() = default;
 
-    explicit OclArray(unsigned int count, cl_command_queue queue) : rows(count), cols(1), queue(queue) { alloc(); }
+    explicit OclArray(const int count, cl_command_queue queue) : rows(count), cols(1), queue(queue) { alloc(); }
 
-    OclArray(unsigned int rows, unsigned int cols, cl_command_queue queue) : rows(rows), cols(cols), queue(queue) { alloc(); }
+    OclArray(const int rows, const int cols, cl_command_queue queue) : rows(rows), cols(cols), queue(queue) { alloc(); }
 
-    OclArray(unsigned int rows, unsigned int cols, unsigned int channels, cl_command_queue queue) : rows(rows), cols(cols), channels(channels), queue(queue) { alloc(); }
+    OclArray(const int rows, const int cols, const int channels, cl_command_queue queue) : rows(rows), cols(cols), channels(channels), queue(queue) { alloc(); }
 
     // constructors that accept pointer data, pass CL_TRUE wait until copy is finished before returning
-    OclArray(unsigned int rows, unsigned int cols, const T* hostData, cl_command_queue queue) : rows(rows), cols(cols), queue(queue) {
+    OclArray(const int rows, const int cols, const T* hostData, cl_command_queue queue) : rows(rows), cols(cols), queue(queue) {
         alloc();
         if (mem)
             clEnqueueWriteBuffer(queue, mem, CL_TRUE, 0, bytes(), hostData, 0, nullptr, nullptr);
     }
 
-    OclArray(unsigned int rows, unsigned int cols, unsigned int channels, const T* hostData, cl_command_queue queue) : rows(rows), cols(cols), channels(channels), queue(queue) {
+    OclArray(const int rows, const int cols, const int channels, const T* hostData, cl_command_queue queue) : rows(rows), cols(cols), channels(channels), queue(queue) {
         alloc();
         if (mem)
             clEnqueueWriteBuffer(queue, mem, CL_TRUE, 0, bytes(), hostData, 0, nullptr, nullptr);
@@ -80,10 +80,10 @@ class OclArray {
 
     cl_mem data() { return mem; }
     cl_mem data() const { return mem; }
-    unsigned int getRows() const { return rows; }
-    unsigned int getCols() const { return cols; }
-    unsigned int getChannels() const { return channels; }
-    unsigned int size() const { return rows * cols * channels; }
+    int getRows() const { return rows; }
+    int getCols() const { return cols; }
+    int getChannels() const { return channels; }
+    int size() const { return rows * cols * channels; }
     size_t bytes() const { return static_cast<size_t>(size()) * sizeof(T); }
     bool empty() const { return mem == nullptr; }
     cl_command_queue getQueue() const { return queue; }
@@ -114,19 +114,19 @@ class OclArray {
             clEnqueueReadBuffer(queue, mem, CL_FALSE, 0, bytes(), dst, 0, nullptr, nullptr);
     }
 
-    static OclArray zeros(unsigned int count, cl_command_queue queue) {
+    static OclArray zeros(const int count, cl_command_queue queue) {
         OclArray arr(count, queue);
         arr.fillZero();
         return arr;
     }
 
-    static OclArray zeros(unsigned int rows, unsigned int cols, cl_command_queue queue) {
+    static OclArray zeros(const int rows, const int cols, cl_command_queue queue) {
         OclArray arr(rows, cols, queue);
         arr.fillZero();
         return arr;
     }
 
-    static OclArray zeros(unsigned int rows, unsigned int cols, unsigned int channels, cl_command_queue queue) {
+    static OclArray zeros(const int rows, const int cols, const int channels, cl_command_queue queue) {
         OclArray arr(rows, cols, channels, queue);
         arr.fillZero();
         return arr;

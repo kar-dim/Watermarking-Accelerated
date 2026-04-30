@@ -13,19 +13,19 @@
  */
 class WatermarkBase {
   protected:
-    using WatermarkLoader = std::function<ImageBuffer(const std::vector<float>&, const unsigned int, const unsigned int)>;
+    using WatermarkLoader = std::function<ImageBuffer(const std::vector<float>&, const int, const int)>;
 
-    template <unsigned int ALIGNMENT>
-    static constexpr unsigned int alignUp(const unsigned int x) {
+    template <int ALIGNMENT>
+    static constexpr int alignUp(const int x) {
         static_assert(ALIGNMENT > 0 && (ALIGNMENT & (ALIGNMENT - 1)) == 0, "ALIGNMENT must be a power of 2");
         return (x + (ALIGNMENT - 1)) & ~(ALIGNMENT - 1);
     }
-    unsigned int baseRows, baseCols, totalPixels;
+    int baseRows, baseCols, totalPixels;
     ImageBuffer randomMatrix;
     float strengthFactor;
 
   public:
-    WatermarkBase(const unsigned int rows, const unsigned int cols, const std::string& watermarkPassword, const float psnr, WatermarkLoader loader)
+    WatermarkBase(const int rows, const int cols, const std::string& watermarkPassword, const float psnr, WatermarkLoader loader)
         : baseRows(rows), baseCols(cols), totalPixels(baseRows * baseCols), randomMatrix(generateRandomMatrix(watermarkPassword, loader)), strengthFactor(computeStrengthFactor(psnr)) {}
 
     // delete copy and move operations we don't wannt them
