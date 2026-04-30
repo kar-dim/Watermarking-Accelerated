@@ -165,9 +165,9 @@ We bundle all necessary DLLs with the prebuilt binaries so the application runs 
 | Backend | Dependencies |
 |---------|--------------|
 | **All** |	`FFmpeg (all libav*.dll)`, `zlib1.dll`, `libpng16.dll`, `jpeg62.dll`, `tiff.dll`, `libwebp.lib` (static lib) |
-| **CUDA** |  `cudart_static.lib`, `cuda.lib` |
+| **CUDA** |  `cudart_static.lib`, `cuda.lib` (from CUDA toolkit) |
 | **OpenCL** | `OpenCL.lib` |
-| **Eigen** | No extra library dependency required |
+| **Eigen** | `libomp.dll` (clang's OpenMP) |
 
 **NOTES:**
 - OpenCL implementation: The [OpenCL Headers](https://github.com/KhronosGroup/OpenCL-Headers), [OpenCL C++ Bindings](https://github.com/KhronosGroup/OpenCL-CLHPP) and [OpenCL Library file](https://github.com/KhronosGroup/OpenCL-SDK) are already included and configured for this project.
