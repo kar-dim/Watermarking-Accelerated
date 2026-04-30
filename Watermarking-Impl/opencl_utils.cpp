@@ -2,6 +2,7 @@
 #include "kernels/utility_kernels.hpp"
 #include "OclQueueManager.hpp"
 #include "opencl_utils.hpp"
+#include <algorithm>
 #include <exception>
 #include <iostream>
 #include <stdexcept>
@@ -62,6 +63,14 @@ void launchRowMajorToColMajorFloat(const cl::Buffer& src, const cl::Buffer& dst,
     queue.enqueueNDRangeKernel(KernelBuilder(UtilityKernelCache::getProgram(), "row_major_to_col_major_float").args(src, dst, width, height).build(), cl::NullRange,
                                cl::NDRange(((width + (blockSize - 1)) / blockSize) * blockSize, ((height + (blockSize - 1)) / blockSize) * blockSize, channels), cl::NDRange(blockSize, blockSize, 1));
 }
+
+void launchU8ToFloatGray(const cl::Buffer& input, const cl::Buffer& output, const int planeSize, const int numChannels, cl::CommandQueue& queue) {
+    constexpr int localSize = 256;
+    const int globalSize = std::min((planeSize + localSize - 1) / localSize, 2560) * localSize;
+    queue.enqueueNDRangeKernel(KernelBuilder(UtilityKernelCache::getProgram(), "u8_to_float_gray").args(input, output, planeSize, numChannels).build(), cl::NullRange, cl::NDRange(globalSize),
+                               cl::NDRange(localSize));
+}
+
 void launchColMajorToRowMajorU8(const cl::Buffer& src, const cl::Buffer& dst, const int width, const int height, const int channels, cl::CommandQueue& queue) {
     constexpr int blockSize = 16;
     queue.enqueueNDRangeKernel(KernelBuilder(UtilityKernelCache::getProgram(), "col_major_to_row_major_u8").args(src, dst, width, height).build(), cl::NullRange,

@@ -676,6 +676,9 @@ __global__ void nV12ToYUV420p(const uint8_t* __restrict__ uvSrc, const int uvPit
 // used for converting uint8 pitched memory to non pitched float, used in HW accelerated video decoding
 __global__ void pitchedToFloat(const uint8_t* __restrict__ input, float* __restrict__ output, const int width, const int height, const int pitch);
 
+// uint8 col-major (1 or 3 channel) to float col-major grayscale, with optional RGB weighting
+__global__ void u8ToFloatGray(const uint8_t* __restrict__ input, float* __restrict__ output, const int planeSize, const int numChannels);
+
 // used for converting column-major uint8 GPU array back to row-major uint8, multichannel via z-dimension
 __global__ void colMajorToRowMajorU8(const uint8_t* __restrict__ src, uint8_t* __restrict__ dst, const int width, const int height);
 

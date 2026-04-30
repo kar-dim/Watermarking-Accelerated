@@ -319,16 +319,19 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile) {
         rgbImage = eigen_utils::cimgToEigenGray(cimgRgb);
         image = rgbImage;
         break;
-    case 3:
+    case 3: {
         rgbImage = eigen_utils::cimgToEigenRgb(cimgRgb);
-        image = rgb2gray(rgbImage);
+        const auto& rgb = rgbImage.getRGB();
+        image = ((rgb[0] * kRW) + (rgb[1] * kGW) + (rgb[2] * kBW)).eval();
         break;
+    }
     case 4: {
         alphaChannel.emplace(cimgRgb.get_shared_channel(3));
         auto rgbView = cimgRgb.get_shared_channels(0, 2);
         eigen_utils::cimgAlphaZero(rgbView, *alphaChannel);
         rgbImage = eigen_utils::cimgToEigenRgb(rgbView);
-        image = rgb2gray(rgbImage);
+        const auto& rgb = rgbImage.getRGB();
+        image = ((rgb[0] * kRW) + (rgb[1] * kGW) + (rgb[2] * kBW)).eval();
         break;
     }
     default: throw std::runtime_error("Invalid image dimensions");
@@ -340,43 +343,21 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile) {
     return buf;
 }
 
-ImageBuffer InternalUtils::rgb2gray(const ImageBuffer& rgbImage) {
-#if defined(_USE_GPU_)
-    const unsigned int totalPixels = rgbImage.getRows() * rgbImage.getCols();
-    std::vector<float> hostRgb(rgbImage.size());
-    rgbImage.toHost(hostRgb.data());
-    std::vector<float> gray(totalPixels);
-    for (unsigned int i = 0; i < totalPixels; i++)
-        gray[i] = hostRgb[i] * kRW + hostRgb[i + totalPixels] * kGW + hostRgb[i + 2 * totalPixels] * kBW;
-#if defined(_USE_CUDA_)
-    return CudaArray<float>(rgbImage.getRows(), rgbImage.getCols(), gray.data(), CudaStreamManager::getInstance().getComputeStream());
-#else
-    return OclArray<float>(rgbImage.getRows(), rgbImage.getCols(), gray.data(), OclQueueManager::getInstance().getQueueRaw());
-#endif
-#elif defined(_USE_EIGEN_)
-    const auto& rgb = rgbImage.getRGB();
-    return ((rgb[0] * kRW) + (rgb[1] * kGW) + (rgb[2] * kBW)).eval();
-#endif
-}
-
 ImageBuffer InternalUtils::castToFloatGray(const ImageOutputBuffer& buffer, const bool isRGB) {
-#if defined(_USE_GPU_)
-    const unsigned int totalPixels = buffer.getRows() * buffer.getCols();
-    std::vector<uint8_t> hostU8(buffer.size());
-    buffer.toHost(hostU8.data());
-    std::vector<float> hostF(totalPixels);
-    if (isRGB) {
-        for (unsigned int i = 0; i < totalPixels; i++)
-            hostF[i] = static_cast<float>(hostU8[i]) * kRW + static_cast<float>(hostU8[i + totalPixels]) * kGW + static_cast<float>(hostU8[i + 2 * totalPixels]) * kBW;
-    } else {
-        for (unsigned int i = 0; i < buffer.size(); i++)
-            hostF[i] = static_cast<float>(hostU8[i]);
-    }
 #if defined(_USE_CUDA_)
-    return CudaArray<float>(buffer.getRows(), buffer.getCols(), hostF.data(), CudaStreamManager::getInstance().getComputeStream());
-#else
-    return OclArray<float>(buffer.getRows(), buffer.getCols(), hostF.data(), OclQueueManager::getInstance().getQueueRaw());
-#endif
+    const int planeSize = buffer.getRows() * buffer.getCols();
+    const int channels = isRGB ? 3 : 1;
+    auto stream = CudaStreamManager::getInstance().getComputeStream();
+    CudaArray<float> gray(buffer.getRows(), buffer.getCols(), stream);
+    cuda_utils::launchU8ToFloatGrayKernel(buffer.data(), gray.data(), planeSize, channels, stream);
+    return gray;
+#elif defined(_USE_OPENCL_)
+    const int planeSize = buffer.getRows() * buffer.getCols();
+    const int channels = isRGB ? 3 : 1;
+    auto& queue = OclQueueManager::getInstance().getQueue();
+    OclArray<float> gray(buffer.getRows(), buffer.getCols(), OclQueueManager::getInstance().getQueueRaw());
+    cl_utils::launchU8ToFloatGray(buffer.clBuffer(), gray.clBuffer(), planeSize, channels, queue);
+    return gray;
 #else
     if (isRGB) {
         const auto& rgbU8 = buffer.getRGB();

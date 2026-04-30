@@ -595,6 +595,17 @@ __global__ void nV12ToYUV420p(const uint8_t* __restrict__ uvSrc, const int uvPit
     uvDst[uvWidth * uvHeight + idx] = src[1];
 }
 
+__global__ void u8ToFloatGray(const uint8_t* __restrict__ input, float* __restrict__ output, const int planeSize, const int numChannels) {
+    constexpr float kR = 0.299f, kG = 0.587f, kB = 0.114f;
+    const int stride = blockDim.x * gridDim.x;
+    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < planeSize; i += stride) {
+        if (numChannels == 3)
+            output[i] = static_cast<float>(input[i]) * kR + static_cast<float>(input[i + planeSize]) * kG + static_cast<float>(input[i + 2 * planeSize]) * kB;
+        else
+            output[i] = static_cast<float>(input[i]);
+    }
+}
+
 __global__ void colMajorToRowMajorU8(const uint8_t* __restrict__ src, uint8_t* __restrict__ dst, const int width, const int height) {
     __shared__ uint8_t tile[32][33];
     const int planeOffset = blockIdx.z * width * height;

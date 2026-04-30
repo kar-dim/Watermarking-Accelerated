@@ -19,6 +19,13 @@ void launchPitchedToFloatKernel(const uint8_t* ySrc, float* yDst, const int widt
     pitchedToFloat<<<gridSize, blockSize, 0, stream>>>(ySrc, yDst, width, height, pitch);
 }
 
+// uint8 col-major to float col-major grayscale
+void launchU8ToFloatGrayKernel(const uint8_t* input, float* output, const int planeSize, const int numChannels, const cudaStream_t stream) {
+    constexpr int blockSize = 768;
+    const int gridSize = gridSize1DStridedCalculate(planeSize, blockSize);
+    u8ToFloatGray<<<gridSize, blockSize, 0, stream>>>(input, output, planeSize, numChannels);
+}
+
 // transpose column-major uint8 to row-major uint8
 void launchColMajorToRowMajorU8Kernel(const uint8_t* src, uint8_t* dst, const int width, const int height, const int channels, const cudaStream_t stream) {
     constexpr dim3 blockSize(32, 8);

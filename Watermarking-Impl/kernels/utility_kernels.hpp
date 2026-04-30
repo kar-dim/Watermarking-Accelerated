@@ -62,4 +62,20 @@ __kernel void pitched_to_float(
         output[outCol * height + outRow] = tile[get_local_id(0)][get_local_id(1)];
 }
 
+// uint8 col-major (1 or 3 channel) to float col-major grayscale, with optional RGB weighting
+__kernel void u8_to_float_gray(
+    const __global uchar* restrict input,
+    __global float* restrict output,
+    const int planeSize,
+    const int numChannels)
+{
+    const int stride = get_global_size(0);
+    for (int i = get_global_id(0); i < planeSize; i += stride) {
+        if (numChannels == 3)
+            output[i] = (float)input[i] * 0.299f + (float)input[i + planeSize] * 0.587f + (float)input[i + 2 * planeSize] * 0.114f;
+        else
+            output[i] = (float)input[i];
+    }
+}
+
 )CLC";

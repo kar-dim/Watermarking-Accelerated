@@ -81,6 +81,9 @@ unsigned int maxPow2WorkGroupSize(const cl::Device& device);
 // coalesced tiled transpose: row-major float -> column-major float on GPU, supports multi-channel via 3D grid
 void launchRowMajorToColMajorFloat(const cl::Buffer& src, const cl::Buffer& dst, const int width, const int height, const int channels, cl::CommandQueue& queue);
 
+// uint8 col-major to float col-major grayscale on GPU, with optional RGB weighting
+void launchU8ToFloatGray(const cl::Buffer& input, const cl::Buffer& output, const int planeSize, const int numChannels, cl::CommandQueue& queue);
+
 // coalesced tiled transpose: column-major uchar -> row-major uchar on GPU, multichannel via z-dimension
 void launchColMajorToRowMajorU8(const cl::Buffer& src, const cl::Buffer& dst, const int width, const int height, const int channels, cl::CommandQueue& queue);
 
