@@ -74,7 +74,7 @@ class WatermarkOCL final : public WatermarkBase {
                 // scale u by strength factor and add to each channel of the input image
                 queue.enqueueNDRangeKernel(
                     KernelBuilder(programs, "apply_watermark_fused")
-                        .args(inputImage.clBuffer(), u.clBuffer(), sumSq.clBuffer(), output.clBuffer(), this->strengthNumerator, this->totalPixels, static_cast<int>(inputImage.getChannels()))
+                        .args(inputImage.clBuffer(), u.clBuffer(), sumSq.clBuffer(), output.clBuffer(), this->strengthNumerator, this->totalPixels, inputImage.getChannels())
                         .build(),
                     cl::NDRange(), cl::NDRange(maxGlobalSize), cl::NDRange(optimalLocalSize));
             },

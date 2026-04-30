@@ -354,9 +354,9 @@ ImageBuffer InternalUtils::castToFloatGray(const ImageOutputBuffer& buffer, cons
 #elif defined(_USE_OPENCL_)
     const int planeSize = buffer.getRows() * buffer.getCols();
     const int channels = isRGB ? 3 : 1;
-    auto& queue = OclQueueManager::getInstance().getQueue();
-    OclArray<float> gray(buffer.getRows(), buffer.getCols(), OclQueueManager::getInstance().getQueueRaw());
-    cl_utils::launchU8ToFloatGray(buffer.clBuffer(), gray.clBuffer(), planeSize, channels, queue);
+    auto& mgr = OclQueueManager::getInstance();
+    OclArray<float> gray(buffer.getRows(), buffer.getCols(), mgr.getQueueRaw());
+    cl_utils::launchU8ToFloatGray(buffer.clBuffer(), gray.clBuffer(), planeSize, channels, mgr.getQueue());
     return gray;
 #else
     if (isRGB) {

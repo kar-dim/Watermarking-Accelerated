@@ -119,9 +119,9 @@ string getCUDADeviceName(int deviceIndex = -1) {
 const uint8_t* extractPixelData(const ImageOutputBuffer& buffer, int& width, int& height, int& channels) {
     static std::vector<uint8_t> hostBuffer;
 #if defined(_USE_GPU_)
-    width = static_cast<int>(buffer.getCols());
-    height = static_cast<int>(buffer.getRows());
-    channels = static_cast<int>(buffer.getChannels());
+    width = buffer.getCols();
+    height = buffer.getRows();
+    channels = buffer.getChannels();
     hostBuffer.resize(static_cast<size_t>(width) * height * channels);
     buffer.toHost(hostBuffer.data());
     return hostBuffer.data();

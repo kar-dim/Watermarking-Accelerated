@@ -76,7 +76,7 @@ class WatermarkCuda final : public WatermarkBase {
         // scale u by strength factor and add to each channel of the input image
         const int blocksApply = cuda_utils::gridSize1DStridedCalculate(this->totalPixels, applyWatermarkBlockSize);
         apply_watermark_fused<<<blocksApply, applyWatermarkBlockSize, 0, stream>>>(inputImage.data(), u.data(), sumSq.data(), output.data(), this->strengthNumerator, this->totalPixels,
-                                                                                   static_cast<int>(inputImage.getChannels()));
+                                                                                   inputImage.getChannels());
     }
 
     // Detect: compute prediction error, detection mask, then correlate with watermark
