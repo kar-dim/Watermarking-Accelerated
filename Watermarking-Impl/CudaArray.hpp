@@ -36,7 +36,7 @@ class CudaArray {
 
     CudaArray(const int rows, const int cols, cudaStream_t stream) : rows(rows), cols(cols), stream(stream) { alloc(); }
 
-    CudaArray(const int rows, const int cols, int channels, cudaStream_t stream) : rows(rows), cols(cols), channels(channels), stream(stream) { alloc(); }
+    CudaArray(const int rows, const int cols, const int channels, cudaStream_t stream) : rows(rows), cols(cols), channels(channels), stream(stream) { alloc(); }
 
     CudaArray(const int rows, const int cols, const T* hostData, cudaStream_t stream) : rows(rows), cols(cols), stream(stream) {
         alloc();
