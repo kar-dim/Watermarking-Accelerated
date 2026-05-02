@@ -74,7 +74,7 @@ class PredictionErrorMatrixData {
         if (!Rx.allFinite() || !rx.allFinite())
             return false;
         // Cholesky reads upper triangle only
-        Eigen::LLT<LocalMatrix> llt(Rx.template selfadjointView<Eigen::Upper>());
+        Eigen::LLT<LocalMatrix, Eigen::Upper> llt(Rx);
         if (llt.info() != Eigen::Success)
             return false;
         coefficients = llt.solve(rx);
