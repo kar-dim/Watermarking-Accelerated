@@ -304,7 +304,7 @@ class WatermarkEigen final : public WatermarkBase {
                         const Map<const VectorXf> centerBatch(centerPtr, stripHeight);
                         for (int u = 0; u < localSize; u++)
                             neighborMatrix.col(u) = Map<const VectorXf>(centerPtr + offsets[u], stripHeight);
-                        // Rx += neighborMatrix^T * neighborMatrix  (SSYRK upper triangle only)
+                        // Rx += neighborMatrix^T * neighborMatrix (SSYRK upper triangle only)
                         RxLocal.template selfadjointView<Eigen::Upper>().rankUpdate(neighborMatrix.transpose());
                         // rx += neighborMatrix^T * center
                         rxLocal.noalias() += neighborMatrix.transpose() * centerBatch;
