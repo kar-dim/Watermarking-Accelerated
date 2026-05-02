@@ -1,6 +1,7 @@
 #pragma once
 #include "Eigen/Cholesky"
 #include "Eigen/Core"
+#include <algorithm>
 #include <vector>
 
 // Aligned matrix to 64 bytes boundary (cache-line friendly),
@@ -28,19 +29,24 @@ class PredictionErrorMatrixData {
     LocalMatrix Rx;
     std::vector<AlignedMatrix<LocalMatrix>> RxAll;
     std::vector<AlignedMatrix<LocalVector>> rxAll;
+    std::vector<AlignedMatrix<Eigen::MatrixXf>> neighborMatricesAll;
     std::vector<int> offsets;
 
   public:
     // initialize prediction error matrix data (allocate memory) for a given number of threads
     PredictionErrorMatrixData(const int numThreads, const int baseRows) : RxAll(numThreads), rxAll(numThreads) {
         offsets.reserve(localSize);
-        for (int dj = 0; dj < p; dj++)
+        for (int dj = 0; dj < p; dj++) {
             for (int di = 0; di < p; di++) {
                 if (di == center && dj == center)
                     continue;
                 // col-major offset
                 offsets.push_back((dj - center) * baseRows + (di - center));
             }
+        }
+        // initialize the neighbor matrices only for large local sizes (p>=5), for small local sizes the dot product approach is faster
+        if constexpr (p >= 5)
+            neighborMatricesAll.resize(numThreads, AlignedMatrix<Eigen::MatrixXf>{.mat = Eigen::MatrixXf(std::max(baseRows - 2 * center, 0), localSize)});
     }
 
     // sets all Rx, rx matrices and vectors to zero

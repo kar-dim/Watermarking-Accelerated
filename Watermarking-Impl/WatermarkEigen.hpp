@@ -279,8 +279,8 @@ class WatermarkEigen final : public WatermarkBase {
             auto& RxLocal = meMatrixData.RxAll[threadId].mat;
             auto& rxLocal = meMatrixData.rxAll[threadId].mat;
             if (hasCenterRegion) {
-                if constexpr (p <= 5) {
-                    // small localSize (8, 24): dot-product loops, upper-triangle accumulation
+                if constexpr (p == 3) {
+                    // small localSize (8): dot-product loops, upper-triangle accumulation
 #pragma omp for schedule(static) nowait
                     for (int j = startCol; j < endCol; j++) {
                         const int colOffset = j * baseRows;
@@ -294,20 +294,20 @@ class WatermarkEigen final : public WatermarkBase {
                         }
                     }
                 } else {
-                    // large localSize (48, 80), neighbor matrix N + SSYRK is faster
-                    // N allocated once (per thread) and reused across all columns assigned to this thread
-                    Eigen::MatrixXf N(stripHeight, localSize);
+                    // large localSize (24, 48 and 80): neighbor matrix + SSYRK is faster
+                    // pre-allocated at construction (per thread), reused across frames and columns
+                    auto& neighborMatrix = meMatrixData.neighborMatricesAll[threadId].mat;
 #pragma omp for schedule(static) nowait
                     for (int j = startCol; j < endCol; j++) {
                         const int colOffset = j * baseRows;
                         const float* centerPtr = imgData + colOffset + startRow;
                         const Map<const VectorXf> centerBatch(centerPtr, stripHeight);
                         for (int u = 0; u < localSize; u++)
-                            N.col(u) = Map<const VectorXf>(centerPtr + offsets[u], stripHeight);
-                        // Rx += N^T * N  (SSYRK upper triangle only)
-                        RxLocal.template selfadjointView<Eigen::Upper>().rankUpdate(N.transpose());
-                        // rx += N^T * center
-                        rxLocal.noalias() += N.transpose() * centerBatch;
+                            neighborMatrix.col(u) = Map<const VectorXf>(centerPtr + offsets[u], stripHeight);
+                        // Rx += neighborMatrix^T * neighborMatrix  (SSYRK upper triangle only)
+                        RxLocal.template selfadjointView<Eigen::Upper>().rankUpdate(neighborMatrix.transpose());
+                        // rx += neighborMatrix^T * center
+                        rxLocal.noalias() += neighborMatrix.transpose() * centerBatch;
                     }
                 }
             }
