@@ -234,26 +234,21 @@ void InternalUtils::rotate(FloatBufferIO& img, const uint16_t orientation) {
 ImageFileBuffer InternalUtils::loadImage(const string& imageFile) {
     ImageFileBuffer buf;
     auto& [rgbImage, image, alphaChannel, rows, cols, isRGB] = buf;
-
     std::ifstream fileStream(imageFile, std::ifstream::binary);
-    TinyEXIF::EXIFInfo exif(fileStream);
+    TinyEXIF::EXIFInfo exif(fileStream); // parse EXIF for orientation
+    auto cimgRgb = FloatBufferIO(imageFile.c_str());
+    InternalUtils::rotate(cimgRgb, exif.Orientation); // optional rotate (if required)
+    rows = cimgRgb.height();
+    cols = cimgRgb.width();
 
 #if defined(_USE_CUDA_)
-    auto cimgRgb = FloatBufferIO(imageFile.c_str());
-    InternalUtils::rotate(cimgRgb, exif.Orientation);
     auto stream = CudaStreamManager::getInstance().getComputeStream();
 
     switch (cimgRgb.spectrum()) {
-    case 1:
-        image = cimgGrayToGpu(cimgRgb, stream);
-        rows = cimgRgb.height();
-        cols = cimgRgb.width();
-        break;
+    case 1: image = cimgGrayToGpu(cimgRgb, stream); break;
     case 3:
         rgbImage = cimgRgbToGpu(cimgRgb, stream);
         image = cimgRgbToGpuGray(cimgRgb, stream);
-        rows = cimgRgb.height();
-        cols = cimgRgb.width();
         isRGB = true;
         break;
     case 4: {
@@ -266,8 +261,6 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile) {
                         rgbView(x, y, 0, ch) = 0.0f;
         rgbImage = cimgRgbToGpu(rgbView, stream);
         image = cimgRgbToGpuGray(rgbView, stream);
-        rows = cimgRgb.height();
-        cols = cimgRgb.width();
         isRGB = true;
         break;
     }
@@ -275,21 +268,13 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile) {
     }
     cudaStreamSynchronize(stream);
 #elif defined(_USE_OPENCL_)
-    auto cimgRgb = FloatBufferIO(imageFile.c_str());
-    InternalUtils::rotate(cimgRgb, exif.Orientation);
     auto queue = OclQueueManager::getInstance().getQueueRaw();
 
     switch (cimgRgb.spectrum()) {
-    case 1:
-        image = cimgGrayToGpu(cimgRgb, queue);
-        rows = cimgRgb.height();
-        cols = cimgRgb.width();
-        break;
+    case 1: image = cimgGrayToGpu(cimgRgb, queue); break;
     case 3:
         rgbImage = cimgRgbToGpu(cimgRgb, queue);
         image = cimgRgbToGpuGray(cimgRgb, queue);
-        rows = cimgRgb.height();
-        cols = cimgRgb.width();
         isRGB = true;
         break;
     case 4: {
@@ -302,8 +287,6 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile) {
                         rgbView(x, y, 0, ch) = 0.0f;
         rgbImage = cimgRgbToGpu(rgbView, queue);
         image = cimgRgbToGpuGray(rgbView, queue);
-        rows = cimgRgb.height();
-        cols = cimgRgb.width();
         isRGB = true;
         break;
     }
@@ -311,9 +294,6 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile) {
     }
     clFinish(queue);
 #elif defined(_USE_EIGEN_)
-    auto cimgRgb = FloatBufferIO(imageFile.c_str());
-    InternalUtils::rotate(cimgRgb, exif.Orientation);
-
     switch (cimgRgb.spectrum()) {
     case 1:
         rgbImage = eigen_utils::cimgToEigenGray(cimgRgb);
@@ -336,8 +316,6 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile) {
     }
     default: throw std::runtime_error("Invalid image dimensions");
     }
-    rows = image.getGray().rows();
-    cols = image.getGray().cols();
     isRGB = rgbImage.isRGB();
 #endif
     return buf;
