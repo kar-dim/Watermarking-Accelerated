@@ -5,6 +5,7 @@
 #include <Eigen/Core>
 #include <omp.h>
 #include <optional>
+#include <utility>
 #include <vector>
 #include <windows.h>
 
@@ -71,7 +72,7 @@ ImageBuffer cimgToEigenGray(const FloatBufferIO& grayImage) {
     for (int x = 0; x < cols; x++)
         for (int y = 0; y < rows; y++)
             output(y, x) = grayImage(x, y);
-    return ImageBuffer(output);
+    return ImageBuffer(std::move(output));
 }
 
 // sets the number of OpenMP (watermarking) threads based on physical cores
