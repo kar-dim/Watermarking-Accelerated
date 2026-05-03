@@ -27,7 +27,10 @@ The repository contains all required source code and dependencies needed to repr
 
 Implementations are optimized for maximum performance:
 - CPU implementation: Uses the ```Eigen``` library for linear algebra operations combined with efficient use of ```OpenMP``` multithreading (reductions, parallel loops). The application utilizes all available logical (or physical, specifically on video embedding) CPU cores for maximum performance. The project is configured to use ```clang``` compiler (clang-cl toolset) instead of MSVC, because it optimizes much better the heavily templated Eigen code.
-- GPU implementation: Provides both OpenCL and CUDA backends. Specifically for CUDA, we use warp shuffle techniques, CUB, Tensor Cores and Grid-Stride reduction loops to improve performance wherever applicable. All CUDA/OpenCL core kernels are 100% custom-built for maximum hardware utilization. In order to optimize VRAM usage, custom (but simple) memory pools are implemented for both backends.
+- GPU implementation: Provides both OpenCL and CUDA backends. All CUDA/OpenCL kernels are 100% custom-built for maximum hardware utilization.
+  - CUDA: Warp shuffle techniques, CUB, Tensor Cores and Grid-Stride reduction loops are used in order improve performance wherever applicable.
+  - OpenCL: A custom kernel caching mechanism is implemented (because OpenCL kernels are compiled at runtime), and need special care to reduce extra re-compilations. 
+  - All: In order to optimize VRAM usage, custom memory pools are implemented for both backends.
 
 <p align="center">
   <img src="https://github.com/user-attachments/assets/c1a3acea-3e4b-4584-9f96-500167f78368" width="33%" />
