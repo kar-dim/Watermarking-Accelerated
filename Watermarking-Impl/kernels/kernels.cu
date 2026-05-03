@@ -596,11 +596,10 @@ __global__ void nV12ToYUV420p(const uint8_t* __restrict__ uvSrc, const int uvPit
 }
 
 __global__ void u8ToFloatGray(const uint8_t* __restrict__ input, float* __restrict__ output, const int planeSize, const int numChannels) {
-    constexpr float kR = 0.299f, kG = 0.587f, kB = 0.114f;
     const int stride = blockDim.x * gridDim.x;
     for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < planeSize; i += stride) {
         if (numChannels == 3)
-            output[i] = static_cast<float>(input[i]) * kR + static_cast<float>(input[i + planeSize]) * kG + static_cast<float>(input[i + 2 * planeSize]) * kB;
+            output[i] = static_cast<float>(input[i]) * kLumaR + static_cast<float>(input[i + planeSize]) * kLumaG + static_cast<float>(input[i + 2 * planeSize]) * kLumaB;
         else
             output[i] = static_cast<float>(input[i]);
     }
@@ -671,5 +670,30 @@ __global__ void rowMajorToColMajorFloat(const float* __restrict__ src, float* __
     for (int i = 0; i < 32; i += 8) {
         if (outRow < height && (outCol + i) < width)
             dst[planeOffset + outRow + (outCol + i) * height] = tile[threadIdx.x][threadIdx.y + i];
+    }
+}
+
+// fused row-major 3-channel RGB to col-major grayscale: applies ITU-R 601 luma weights during the tiled transpose
+__global__ void rowMajorRGBToColMajorGray(const float* __restrict__ src, float* __restrict__ dst, const int width, const int height) {
+    __shared__ float tile[32][33];
+    const int planeSize = width * height;
+    const float* G = src + planeSize;
+    const float* B = src + 2 * planeSize;
+    const int col = blockIdx.x * 32 + threadIdx.x;
+    const int row = blockIdx.y * 32 + threadIdx.y;
+#pragma unroll
+    for (int i = 0; i < 32; i += 8) {
+        if (col < width && (row + i) < height) {
+            const int rmIdx = (row + i) * width + col;
+            tile[threadIdx.y + i][threadIdx.x] = src[rmIdx] * kLumaR + G[rmIdx] * kLumaG + B[rmIdx] * kLumaB;
+        }
+    }
+    __syncthreads();
+    const int outRow = blockIdx.y * 32 + threadIdx.x;
+    const int outCol = blockIdx.x * 32 + threadIdx.y;
+#pragma unroll
+    for (int i = 0; i < 32; i += 8) {
+        if (outRow < height && (outCol + i) < width)
+            dst[outRow + (outCol + i) * height] = tile[threadIdx.x][threadIdx.y + i];
     }
 }

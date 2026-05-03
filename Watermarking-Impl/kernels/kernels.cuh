@@ -5,6 +5,11 @@
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 
+// ITU-R 601 luma coefficients, shared across all kernels
+static constexpr float kLumaR = 0.299f;
+static constexpr float kLumaG = 0.587f;
+static constexpr float kLumaB = 0.114f;
+
 // convert FLOAT to UINT64 safely by multiplying with a very large power of 10 in order to not lose digits
 // for converting back to float, we multiply with the inverse
 __device__ inline uint64_t toScaledUint64(float value) { return static_cast<uint64_t>(value * 1000000000.0f); }
@@ -684,3 +689,6 @@ __global__ void colMajorToRowMajorU8(const uint8_t* __restrict__ src, uint8_t* _
 
 // used for converting row-major float (CImg) to column-major float (CudaArray), coalesced tiled transpose
 __global__ void rowMajorToColMajorFloat(const float* __restrict__ src, float* __restrict__ dst, const int width, const int height);
+
+// fused row-major 3-channel RGB to col-major grayscale with ITU-R 601 luma weights
+__global__ void rowMajorRGBToColMajorGray(const float* __restrict__ src, float* __restrict__ dst, const int width, const int height);

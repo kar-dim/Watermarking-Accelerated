@@ -64,6 +64,12 @@ void launchRowMajorToColMajorFloat(const cl::Buffer& src, const cl::Buffer& dst,
                                cl::NDRange(((width + (blockSize - 1)) / blockSize) * blockSize, ((height + (blockSize - 1)) / blockSize) * blockSize, channels), cl::NDRange(blockSize, blockSize, 1));
 }
 
+void launchRowMajorRGBToColMajorGray(const cl::Buffer& src, const cl::Buffer& dst, const int width, const int height, cl::CommandQueue& queue) {
+    constexpr int blockSize = 16;
+    queue.enqueueNDRangeKernel(KernelBuilder(UtilityKernelCache::getProgram(), "row_major_rgb_to_col_major_gray").args(src, dst, width, height).build(), cl::NullRange,
+                               cl::NDRange(((width + (blockSize - 1)) / blockSize) * blockSize, ((height + (blockSize - 1)) / blockSize) * blockSize), cl::NDRange(blockSize, blockSize));
+}
+
 void launchU8ToFloatGray(const cl::Buffer& input, const cl::Buffer& output, const int planeSize, const int numChannels, cl::CommandQueue& queue) {
     constexpr int localSize = 256;
     const int globalSize = std::min((planeSize + localSize - 1) / localSize, 2560) * localSize;

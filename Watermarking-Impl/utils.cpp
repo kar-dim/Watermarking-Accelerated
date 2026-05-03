@@ -17,7 +17,6 @@
 #include "WatermarkOCL.hpp"
 #include <algorithm>
 #include <cctype>
-#include <vector>
 #elif defined(_USE_CUDA_)
 #include "CudaStreamManager.hpp"
 #include "CudaArray.hpp"
@@ -25,7 +24,6 @@
 #include "cuda_utils.hpp"
 #include <algorithm>
 #include <cctype>
-#include <vector>
 #elif defined(_USE_EIGEN_)
 #include <algorithm>
 #include <cctype>
@@ -91,17 +89,10 @@ ImageBuffer cimgRgbToGpu(const FloatBufferIO& img, cudaStream_t stream) {
 ImageBuffer cimgRgbToGpuGray(const FloatBufferIO& img, cudaStream_t stream) {
     const int rows = img.height();
     const int cols = img.width();
-    const int planeSize = rows * cols;
-    std::vector<float> gray(planeSize);
-    const float* R = img.data();
-    const float* G = R + planeSize;
-    const float* B = G + planeSize;
-    for (int i = 0; i < planeSize; i++)
-        gray[i] = R[i] * kRW + G[i] * kGW + B[i] * kBW;
-    CudaArray<float> rowMajorGray(rows, cols, gray.data(), stream);
-    CudaArray<float> colMajorGray(rows, cols, stream);
-    cuda_utils::launchRowMajorToColMajorFloatKernel(rowMajorGray.data(), colMajorGray.data(), cols, rows, 1, stream);
-    return colMajorGray;
+    CudaArray<float> rowMajor(rows, cols, 3, img.data(), stream);
+    CudaArray<float> colMajor(rows, cols, stream);
+    cuda_utils::launchRowMajorRGBToColMajorGrayKernel(rowMajor.data(), colMajor.data(), cols, rows, stream);
+    return colMajor;
 }
 
 #elif defined(_USE_OPENCL_)
@@ -129,18 +120,11 @@ ImageBuffer cimgRgbToGpu(const FloatBufferIO& img, cl_command_queue queue) {
 ImageBuffer cimgRgbToGpuGray(const FloatBufferIO& img, cl_command_queue queue) {
     const int rows = img.height();
     const int cols = img.width();
-    const int planeSize = rows * cols;
-    std::vector<float> gray(planeSize);
-    const float* R = img.data();
-    const float* G = R + planeSize;
-    const float* B = G + planeSize;
-    for (int i = 0; i < planeSize; i++)
-        gray[i] = R[i] * kRW + G[i] * kGW + B[i] * kBW;
-    OclArray<float> rowMajorGray(rows, cols, gray.data(), queue);
-    OclArray<float> colMajorGray(rows, cols, queue);
+    OclArray<float> rowMajor(rows, cols, 3, img.data(), queue);
+    OclArray<float> colMajor(rows, cols, queue);
     auto& q = OclQueueManager::getInstance().getQueue();
-    cl_utils::launchRowMajorToColMajorFloat(rowMajorGray.clBuffer(), colMajorGray.clBuffer(), cols, rows, 1, q);
-    return colMajorGray;
+    cl_utils::launchRowMajorRGBToColMajorGray(rowMajor.clBuffer(), colMajor.clBuffer(), cols, rows, q);
+    return colMajor;
 }
 #endif
 

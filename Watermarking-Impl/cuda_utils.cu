@@ -38,4 +38,10 @@ void launchRowMajorToColMajorFloatKernel(const float* src, float* dst, const int
     const dim3 gridSize((width + 31) / 32, (height + 31) / 32, channels);
     rowMajorToColMajorFloat<<<gridSize, blockSize, 0, stream>>>(src, dst, width, height);
 }
+// fused row-major 3-channel RGB to col-major grayscale with luma weights
+void launchRowMajorRGBToColMajorGrayKernel(const float* src, float* dst, const int width, const int height, const cudaStream_t stream) {
+    constexpr dim3 blockSize(32, 8);
+    const dim3 gridSize((width + 31) / 32, (height + 31) / 32);
+    rowMajorRGBToColMajorGray<<<gridSize, blockSize, 0, stream>>>(src, dst, width, height);
+}
 } // namespace cuda_utils

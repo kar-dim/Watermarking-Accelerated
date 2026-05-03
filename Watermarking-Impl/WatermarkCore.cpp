@@ -170,6 +170,7 @@ bool initializeEnvironment(const int openclDevice) {
     cudaDeviceProp prop;
     cudaGetDeviceProperties(&prop, device);
     std::cout << "CUDA Device [" << device << "]: " << prop.name << " (Compute " << prop.major << "." << prop.minor << ")\n\n";
+    CudaStreamManager::getInstance(); // lazy initalization of the CUDA stream manager (create streams and pool)
 #endif
 #pragma omp parallel
     {}

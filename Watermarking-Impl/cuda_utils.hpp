@@ -13,6 +13,7 @@ void launchPitchedToFloatKernel(const uint8_t* ySrc, float* yDst, const int widt
 void launchU8ToFloatGrayKernel(const uint8_t* input, float* output, const int planeSize, const int numChannels, const cudaStream_t stream);
 void launchColMajorToRowMajorU8Kernel(const uint8_t* src, uint8_t* dst, const int width, const int height, const int channels, const cudaStream_t stream);
 void launchRowMajorToColMajorFloatKernel(const float* src, float* dst, const int width, const int height, const int channels, const cudaStream_t stream);
+void launchRowMajorRGBToColMajorGrayKernel(const float* src, float* dst, const int width, const int height, const cudaStream_t stream);
 // helper method to calculate kernel grid size from given 2D dimensions and blockSize
 inline dim3 gridSizeCalculate(const dim3 blockSize, const int rows, const int cols) { return dim3((cols + blockSize.x - 1) / blockSize.x, (rows + blockSize.y - 1) / blockSize.y); }
 // helper method to calculate a 1D grid size for a given number of elements and block size, with a maximum of 2560 blocks (used for grid-stride kernels only)
