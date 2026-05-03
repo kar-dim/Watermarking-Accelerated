@@ -18,10 +18,10 @@ Gray8BufferIO eigenRgbToCimg(const EigenArrayU8RGB& arrayRgb, const std::optiona
     const auto cols = arrayRgb[0].cols();
     const int channels = alphaChannel.has_value() ? 4 : 3;
     Gray8BufferIO output(static_cast<unsigned int>(cols), static_cast<unsigned int>(rows), 1, channels);
-#pragma omp parallel for
+#pragma omp parallel for schedule(static)
     for (int y = 0; y < rows; y++)
-        for (int x = 0; x < cols; x++)
-            for (int channel = 0; channel < 3; channel++)
+        for (int channel = 0; channel < 3; channel++)
+            for (int x = 0; x < cols; x++)
                 output(x, y, 0, channel) = arrayRgb[channel](y, x);
     if (channels == 4)
         std::memcpy(output.data() + (3 * cols * rows), alphaChannel->data(), cols * rows);
@@ -32,7 +32,7 @@ Gray8BufferIO eigenGrayToCimg(const Gray8Buffer& arrayGray) {
     const auto rows = arrayGray.rows();
     const auto cols = arrayGray.cols();
     Gray8BufferIO output(static_cast<unsigned int>(cols), static_cast<unsigned int>(rows));
-#pragma omp parallel for
+#pragma omp parallel for schedule(static)
     for (int y = 0; y < rows; y++)
         for (int x = 0; x < cols; x++)
             output(x, y) = arrayGray(y, x);
@@ -43,7 +43,7 @@ EigenArrayRGB cimgToEigenRgb(const FloatBufferIO& rgbImage) {
     const int rows = rgbImage.height();
     const int cols = rgbImage.width();
     EigenArrayRGB output = {ArrayXXf(rows, cols), ArrayXXf(rows, cols), ArrayXXf(rows, cols)};
-#pragma omp parallel for
+#pragma omp parallel for schedule(static)
     for (int x = 0; x < cols; x++)
         for (int y = 0; y < rows; y++)
             for (int channel = 0; channel < 3; channel++)
@@ -55,7 +55,7 @@ ImageBuffer cimgToEigenGray(const FloatBufferIO& grayImage) {
     const int rows = grayImage.height();
     const int cols = grayImage.width();
     ArrayXXf output(rows, cols);
-#pragma omp parallel for
+#pragma omp parallel for schedule(static)
     for (int x = 0; x < cols; x++)
         for (int y = 0; y < rows; y++)
             output(y, x) = grayImage(x, y);
