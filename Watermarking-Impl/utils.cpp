@@ -162,7 +162,7 @@ void InternalUtils::saveImage(const string& imagePath, const string& suffix, con
     OclArray<uint8_t> rowMajor(rows, cols, channels, mgr.getQueueRaw());
     cl_utils::launchColMajorToRowMajorU8(watermark.clBuffer(), rowMajor.clBuffer(), cols, rows, channels, mgr.getQueue());
 #endif
-    Gray8BufferIO output(cols, rows, 1, hasAlpha ? 4 : 3);
+    Gray8BufferIO output(cols, rows, 1, hasAlpha ? 4 : channels);
     rowMajor.toHost(output.data());
     if (hasAlpha)
         std::memcpy(output.data() + (3 * cols * rows), alphaChannel->data(), cols * rows);
