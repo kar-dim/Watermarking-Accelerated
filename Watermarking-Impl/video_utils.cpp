@@ -353,7 +353,7 @@ void detectWatermark(VideoSession* s, int& framesCount, const AVFrame* frame) {
     // if there is row padding (for alignment), we must copy the data to a contiguous block!
     if (frame->linesize[0] != width) {
         for (int y = 0; y < height; y++)
-            memcpy(s->hostFrame.get()->get() + y * width, frame->data[0] + y * frame->linesize[0], width);
+            std::memcpy(s->hostFrame.get()->get() + y * width, frame->data[0] + y * frame->linesize[0], width);
         srcY = s->hostFrame.get()->get();
     }
     loadInputFrame(s, srcY);
@@ -455,7 +455,7 @@ void processAndWriteYPlane(const bool embedWatermark, const AVFrame* frame, Vide
     // if there is row padding (for alignment), we must copy the data to a contiguous block!
     if (frame->linesize[0] != width) {
         for (int y = 0; y < height; y++)
-            memcpy(s->hostFrame.get()->get() + y * width, srcY + y * frame->linesize[0], width);
+            std::memcpy(s->hostFrame.get()->get() + y * width, srcY + y * frame->linesize[0], width);
         srcY = s->hostFrame.get()->get();
     }
     if (embedWatermark) {
@@ -478,7 +478,7 @@ void writeChromaPlanes(const AVFrame* frame, VideoSession* s, FILE* ffmpegPipe) 
         if (linesize != chromaWidth) {
             // de-stride into contiguous staging buffer, then one fwrite instead of chromaHeight fwrites
             for (int y = 0; y < chromaHeight; y++)
-                memcpy(chromaStaging + y * chromaWidth, src + y * linesize, chromaWidth);
+                std::memcpy(chromaStaging + y * chromaWidth, src + y * linesize, chromaWidth);
             fwrite(chromaStaging, 1, planeSize, ffmpegPipe);
         } else
             fwrite(src, 1, planeSize, ffmpegPipe);

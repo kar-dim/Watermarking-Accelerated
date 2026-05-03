@@ -2,6 +2,7 @@
 #include "eigen_rgb_array.hpp"
 #include "eigen_utils.hpp"
 #include <cstdint>
+#include <cstring>
 #include <Eigen/Core>
 #include <omp.h>
 #include <optional>
@@ -18,14 +19,12 @@ Gray8BufferIO eigenRgbToCimg(const EigenArrayU8RGB& arrayRgb, const std::optiona
     const int channels = alphaChannel.has_value() ? 4 : 3;
     Gray8BufferIO output(static_cast<unsigned int>(cols), static_cast<unsigned int>(rows), 1, channels);
 #pragma omp parallel for
-    for (int y = 0; y < rows; y++) {
-        for (int x = 0; x < cols; x++) {
+    for (int y = 0; y < rows; y++)
+        for (int x = 0; x < cols; x++)
             for (int channel = 0; channel < 3; channel++)
                 output(x, y, 0, channel) = arrayRgb[channel](y, x);
-            if (channels == 4)
-                output(x, y, 0, 3) = (*alphaChannel)(x, y);
-        }
-    }
+    if (channels == 4)
+        std::memcpy(output.data() + (3 * cols * rows), alphaChannel->data(), cols * rows);
     return output;
 }
 
@@ -38,18 +37,6 @@ Gray8BufferIO eigenGrayToCimg(const Gray8Buffer& arrayGray) {
         for (int x = 0; x < cols; x++)
             output(x, y) = arrayGray(y, x);
     return output;
-}
-
-void cimgAlphaZero(FloatBufferIO& rgbImage, const Gray8BufferIO& alphaChannel) {
-#pragma omp parallel for
-    for (int y = 0; y < rgbImage.height(); y++) {
-        for (int x = 0; x < rgbImage.width(); x++) {
-            if (alphaChannel(x, y) == 0.0f) {
-                for (int channel = 0; channel < 3; channel++)
-                    rgbImage(x, y, 0, channel) = 0.0f; // set RGB channels to zero where alpha is zero
-            }
-        }
-    }
 }
 
 EigenArrayRGB cimgToEigenRgb(const FloatBufferIO& rgbImage) {

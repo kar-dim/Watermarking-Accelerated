@@ -5,6 +5,7 @@
 #include "utils.hpp"
 #include "WatermarkBase.hpp"
 #include <cstdint>
+#include <cstring>
 #include <fstream>
 #include <memory>
 #include <optional>
@@ -28,7 +29,6 @@
 #include <algorithm>
 #include <cctype>
 #include "cimg_init.h"
-#include "eigen_rgb_array.hpp"
 #include "eigen_utils.hpp"
 #include "WatermarkEigen.hpp"
 #endif
@@ -38,6 +38,12 @@ using namespace CommonUtils;
 
 // save a CImg image selecting the correct encoder by file extension
 namespace {
+#if defined(_USE_EIGEN_)
+// standard ITU-R 601 Luma coefficients for RGB to Grayscale conversion
+constexpr float kRW = 0.299f;
+constexpr float kGW = 0.587f;
+constexpr float kBW = 0.114f;
+#endif
 void saveCimgByExtension(const Gray8BufferIO& cimgToSave, const string& path) {
     string extension = path.substr(path.find_last_of('.') + 1);
     std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
@@ -55,19 +61,28 @@ void saveCimgByExtension(const Gray8BufferIO& cimgToSave, const string& path) {
         throw std::runtime_error("Unsupported image format: " + extension);
 }
 
-// standard ITU-R 601 Luma coefficients for RGB to Grayscale conversion
-constexpr float kRW = 0.299f;
-constexpr float kGW = 0.587f;
-constexpr float kBW = 0.114f;
+// zero out RGB channels where alpha is 0, branchless, exploiting CImg's planar layout (RRRR...GGGG...BBBB...)
+void cimgAlphaZero(FloatBufferIO& rgb, const Gray8BufferIO& alpha) {
+    const int planeSize = rgb.width() * rgb.height();
+    float* R = rgb.data();
+    float* G = R + planeSize;
+    float* B = G + planeSize;
+    const uint8_t* A = alpha.data();
+#pragma omp parallel for schedule(static)
+    for (int i = 0; i < planeSize; i++) {
+        const float mask = A[i] ? 1.0f : 0.0f;
+        R[i] *= mask;
+        G[i] *= mask;
+        B[i] *= mask;
+    }
+}
 } // namespace
 
 // GPU helpers for CImg (row-major) <-> GPU array (column-major) conversion
 #if defined(_USE_GPU_)
 namespace {
-
 #if defined(_USE_CUDA_)
-// For CUDA: upload the raw row-major CImg data to a temp GPU buffer, then transpose in-place on GPU.
-// This avoids CPU-side std::vector allocation and uses a coalesced tiled transpose kernel.
+// For CUDA: upload the raw row-major CImg data to a temp GPU buffer, then transpose on GPU
 ImageBuffer cimgGrayToGpu(const FloatBufferIO& img, cudaStream_t stream) {
     const int rows = img.height();
     const int cols = img.width();
@@ -96,7 +111,7 @@ ImageBuffer cimgRgbToGpuGray(const FloatBufferIO& img, cudaStream_t stream) {
 }
 
 #elif defined(_USE_OPENCL_)
-// For OCL: upload raw row-major CImg data to GPU, then transpose with a coalesced tiled kernel (mirrors CUDA path).
+// For OpenCL: upload the raw row-major CImg data to a temp GPU buffer, then transpose on GPU (mirrors CUDA)
 ImageBuffer cimgGrayToGpu(const FloatBufferIO& img, cl_command_queue queue) {
     const int rows = img.height();
     const int cols = img.width();
@@ -147,12 +162,10 @@ void InternalUtils::saveImage(const string& imagePath, const string& suffix, con
     OclArray<uint8_t> rowMajor(rows, cols, channels, mgr.getQueueRaw());
     cl_utils::launchColMajorToRowMajorU8(watermark.clBuffer(), rowMajor.clBuffer(), cols, rows, channels, mgr.getQueue());
 #endif
-    Gray8BufferIO output(cols, rows, 1, hasAlpha ? channels + 1 : channels);
+    Gray8BufferIO output(cols, rows, 1, hasAlpha ? 4 : 3);
     rowMajor.toHost(output.data());
     if (hasAlpha)
-        for (int c = 0; c < cols; c++)
-            for (int r = 0; r < rows; r++)
-                output(c, r, 0, channels) = (*alphaChannel)(c, r);
+        std::memcpy(output.data() + (3 * cols * rows), alphaChannel->data(), cols * rows);
     saveCimgByExtension(output, watermarkedFile);
 #elif defined(_USE_EIGEN_)
     const auto cimgToSave = watermark.isRGB() ? eigen_utils::eigenRgbToCimg(watermark.getRGB(), alphaChannel) : eigen_utils::eigenGrayToCimg(watermark.getGray());
@@ -226,11 +239,7 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile) {
     case 4: {
         alphaChannel.emplace(cimgRgb.get_shared_channel(3));
         auto rgbView = cimgRgb.get_shared_channels(0, 2);
-        for (int y = 0; y < cimgRgb.height(); y++)
-            for (int x = 0; x < cimgRgb.width(); x++)
-                if ((*alphaChannel)(x, y) == 0)
-                    for (int ch = 0; ch < 3; ch++)
-                        rgbView(x, y, 0, ch) = 0.0f;
+        cimgAlphaZero(rgbView, *alphaChannel);
         rgbImage = cimgRgbToGpu(rgbView, stream);
         image = cimgRgbToGpuGray(rgbView, stream);
         isRGB = true;
@@ -252,11 +261,7 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile) {
     case 4: {
         alphaChannel.emplace(cimgRgb.get_shared_channel(3));
         auto rgbView = cimgRgb.get_shared_channels(0, 2);
-        for (int y = 0; y < cimgRgb.height(); y++)
-            for (int x = 0; x < cimgRgb.width(); x++)
-                if ((*alphaChannel)(x, y) == 0)
-                    for (int ch = 0; ch < 3; ch++)
-                        rgbView(x, y, 0, ch) = 0.0f;
+        cimgAlphaZero(rgbView, *alphaChannel);
         rgbImage = cimgRgbToGpu(rgbView, queue);
         image = cimgRgbToGpuGray(rgbView, queue);
         isRGB = true;
@@ -280,7 +285,7 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile) {
     case 4: {
         alphaChannel.emplace(cimgRgb.get_shared_channel(3));
         auto rgbView = cimgRgb.get_shared_channels(0, 2);
-        eigen_utils::cimgAlphaZero(rgbView, *alphaChannel);
+        cimgAlphaZero(rgbView, *alphaChannel);
         rgbImage = eigen_utils::cimgToEigenRgb(rgbView);
         const auto& rgb = rgbImage.getRGB();
         image = ((rgb[0] * kRW) + (rgb[1] * kGW) + (rgb[2] * kBW)).eval();
