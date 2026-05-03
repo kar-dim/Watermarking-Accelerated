@@ -2,6 +2,7 @@
 #include "Eigen/Core"
 #include "eigen_rgb_array.hpp"
 #include <cstdint>
+#include <utility>
 #include <variant>
 
 /*!
@@ -18,6 +19,8 @@ class ImageEigenOutputBuffer {
     ImageEigenOutputBuffer() = default;
     ImageEigenOutputBuffer(const Gray8Buffer& gray) : data(gray) {}
     ImageEigenOutputBuffer(const EigenArrayU8RGB& rgb) : data(rgb) {}
+    ImageEigenOutputBuffer(Gray8Buffer&& gray) noexcept : data(std::move(gray)) {}
+    ImageEigenOutputBuffer(EigenArrayU8RGB&& rgb) noexcept : data(std::move(rgb)) {}
 
     bool isRGB() const { return std::holds_alternative<EigenArrayU8RGB>(data); }
     const Gray8Buffer& getGray() const { return std::get<Gray8Buffer>(data); }
