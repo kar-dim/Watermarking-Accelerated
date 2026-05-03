@@ -96,6 +96,9 @@ void launchPitchedToFloat(const cl::Buffer& src, const cl::Buffer& dst, const in
 // helper method to calculate the number of local groups needed for a specific number of elements and local size, with a maximum of 2560 blocks (used for grid-stride kernels only)
 inline int calculateLocalGroupsNumber(const int N, const int localSize) { return std::min((N + localSize - 1) / localSize, 2560); }
 
+// rounds n up to the nearest multiple of blockSize (used to compute global NDRange sizes for 2D tiled kernels)
+inline int roundUp(const int n, const int blockSize) { return ((n + blockSize - 1) / blockSize) * blockSize; }
+
 // helper method to execute an OpenCL kernel and throw detailed error on failure
 template <typename Func>
 auto executeKernel(const Func& kernelFunc, const std::string& context) {
