@@ -226,9 +226,12 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile) {
     rows = cimgRgb.height();
     cols = cimgRgb.width();
 
+#if defined(_USE_GPU_)
 #if defined(_USE_CUDA_)
     auto stream = CudaStreamManager::getInstance().getComputeStream();
-
+#elif defined(_USE_OPENCL_)
+    auto stream = OclQueueManager::getInstance().getQueueRaw();
+#endif
     switch (cimgRgb.spectrum()) {
     case 1: image = cimgGrayToGpu(cimgRgb, stream); break;
     case 3:
@@ -247,29 +250,11 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile) {
     }
     default: throw std::runtime_error("Invalid image dimensions");
     }
+#if defined(_USE_CUDA_)
     cudaStreamSynchronize(stream);
 #elif defined(_USE_OPENCL_)
-    auto queue = OclQueueManager::getInstance().getQueueRaw();
-
-    switch (cimgRgb.spectrum()) {
-    case 1: image = cimgGrayToGpu(cimgRgb, queue); break;
-    case 3:
-        rgbImage = cimgRgbToGpu(cimgRgb, queue);
-        image = cimgRgbToGpuGray(cimgRgb, queue);
-        isRGB = true;
-        break;
-    case 4: {
-        alphaChannel.emplace(cimgRgb.get_shared_channel(3));
-        auto rgbView = cimgRgb.get_shared_channels(0, 2);
-        cimgAlphaZero(rgbView, *alphaChannel);
-        rgbImage = cimgRgbToGpu(rgbView, queue);
-        image = cimgRgbToGpuGray(rgbView, queue);
-        isRGB = true;
-        break;
-    }
-    default: throw std::runtime_error("Invalid image dimensions");
-    }
-    clFinish(queue);
+    clFinish(stream);
+#endif
 #elif defined(_USE_EIGEN_)
     switch (cimgRgb.spectrum()) {
     case 1:
