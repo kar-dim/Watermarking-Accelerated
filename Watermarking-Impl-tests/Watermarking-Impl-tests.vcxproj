@@ -79,7 +79,7 @@
     <PostBuildEvent>
       <Command>xcopy "$(SolutionDir)Watermarking-Impl\libs\libpng\bin\libpng16.dll" "$(OutDir)" /y /D
 xcopy "$(SolutionDir)Watermarking-Impl\libs\zlib\bin\zlib1.dll" "$(OutDir)" /y /D
-xcopy "$(SolutionDir)Watermarking-Impl\libs\libjpeg\bin\release\jpeg62.dll" "$(OutDir)" /y /D
+xcopy "$(SolutionDir)Watermarking-Impl\libs\libjpeg\bin\jpeg62.dll" "$(OutDir)" /y /D
 xcopy "$(SolutionDir)Watermarking-Impl\libs\libtiff\bin\tiff.dll" "$(OutDir)" /y /D</Command>
     </PostBuildEvent>
     <CudaCompile>
@@ -115,7 +115,7 @@ xcopy "$(SolutionDir)Watermarking-Impl\libs\libtiff\bin\tiff.dll" "$(OutDir)" /y
       <Command>xcopy "$(LLVMInstallDir)\bin\libomp.dll" "$(SolutionDir)x64\EIGEN_Release\" /y /D
 xcopy "$(SolutionDir)Watermarking-Impl\libs\libpng\bin\libpng16.dll" "$(SolutionDir)x64\EIGEN_Release\" /y /D
 xcopy "$(SolutionDir)Watermarking-Impl\libs\zlib\bin\zlib1.dll" "$(SolutionDir)x64\EIGEN_Release\" /y /D
-xcopy "$(SolutionDir)Watermarking-Impl\libs\libjpeg\bin\release\jpeg62.dll" "$(SolutionDir)x64\EIGEN_Release\" /y /D
+xcopy "$(SolutionDir)Watermarking-Impl\libs\libjpeg\bin\jpeg62.dll" "$(SolutionDir)x64\EIGEN_Release\" /y /D
 xcopy "$(SolutionDir)Watermarking-Impl\libs\libtiff\bin\tiff.dll" "$(SolutionDir)x64\EIGEN_Release\" /y /D</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
@@ -145,7 +145,7 @@ xcopy "$(SolutionDir)Watermarking-Impl\libs\libtiff\bin\tiff.dll" "$(SolutionDir
     <PostBuildEvent>
       <Command>xcopy "$(SolutionDir)Watermarking-Impl\libs\libpng\bin\libpng16.dll" "$(OutDir)" /y /D
 xcopy "$(SolutionDir)Watermarking-Impl\libs\zlib\bin\zlib1.dll" "$(OutDir)" /y /D
-xcopy "$(SolutionDir)Watermarking-Impl\libs\libjpeg\bin\release\jpeg62.dll" "$(OutDir)" /y /D
+xcopy "$(SolutionDir)Watermarking-Impl\libs\libjpeg\bin\jpeg62.dll" "$(OutDir)" /y /D
 xcopy "$(SolutionDir)Watermarking-Impl\libs\libtiff\bin\tiff.dll" "$(OutDir)" /y /D
 </Command>
     </PostBuildEvent>
