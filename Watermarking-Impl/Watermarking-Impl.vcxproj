@@ -107,6 +107,7 @@
       <AdditionalIncludeDirectories>$(ProjectDir)libs\CImg;$(ProjectDir)libs\zlib\include;$(ProjectDir)libs\libpng\include;$(ProjectDir)libs\libjpeg\include;$(ProjectDir)libs\libwebp\include;$(ProjectDir)libs\libtiff\include;$(AF_PATH)\include;$(ProjectDir)libs\ffmpeg\include;$(SolutionDir)Watermarking-Util\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <OpenMPSupport>true</OpenMPSupport>
+      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
@@ -119,7 +120,7 @@
     <CudaCompile>
       <TargetMachinePlatform>64</TargetMachinePlatform>
       <CodeGeneration>compute_89,sm_89</CodeGeneration>
-      <AdditionalCompilerOptions>/wd4275 /Zc:__cplusplus /Zc:preprocessor</AdditionalCompilerOptions>
+      <AdditionalCompilerOptions>/wd4275 /arch:AVX2 /Zc:__cplusplus /Zc:preprocessor</AdditionalCompilerOptions>
       <AdditionalOptions>-diag-suppress 1388 -diag-suppress 221 --std c++20 %(AdditionalOptions)</AdditionalOptions>
     </CudaCompile>
     <PostBuildEvent>
@@ -139,6 +140,7 @@
       <AdditionalIncludeDirectories>$(ProjectDir)libs\CImg;$(ProjectDir)libs\zlib\include;$(ProjectDir)libs\libpng\include;$(ProjectDir)libs\libjpeg\include;$(ProjectDir)libs\libwebp\include;$(ProjectDir)libs\libtiff\include;$(CUDA_PATH)\include;$(ProjectDir)libs\ffmpeg\include;$(SolutionDir)Watermarking-Util\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <OpenMPSupport>true</OpenMPSupport>
+      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
@@ -152,7 +154,7 @@
     <CudaCompile>
       <TargetMachinePlatform>64</TargetMachinePlatform>
       <CodeGeneration>compute_89,sm_89</CodeGeneration>
-      <AdditionalCompilerOptions>/wd4275 /Zc:__cplusplus /Zc:preprocessor</AdditionalCompilerOptions>
+      <AdditionalCompilerOptions>/wd4275 /arch:AVX2 /Zc:__cplusplus /Zc:preprocessor</AdditionalCompilerOptions>
       <AdditionalOptions>-diag-suppress 1388 -diag-suppress 221 --std c++20 %(AdditionalOptions)</AdditionalOptions>
     </CudaCompile>
     <PostBuildEvent>
@@ -172,6 +174,7 @@
       <AdditionalIncludeDirectories>$(ProjectDir)libs\CImg;$(ProjectDir)libs\zlib\include;$(ProjectDir)libs\libpng\include;$(ProjectDir)libs\libjpeg\include;$(ProjectDir)libs\libwebp\include;$(ProjectDir)libs\libtiff\include;$(CUDA_PATH)\include;$(ProjectDir)libs\ffmpeg\include;$(SolutionDir)Watermarking-Util\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <OpenMPSupport>true</OpenMPSupport>
+      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
@@ -185,7 +188,7 @@
     <CudaCompile>
       <TargetMachinePlatform>64</TargetMachinePlatform>
       <CodeGeneration>compute_75,sm_75;compute_86,sm_86;compute_89,sm_89;compute_120,sm_120;compute_120,compute_120</CodeGeneration>
-      <AdditionalCompilerOptions>/wd4275 /Zc:__cplusplus /Zc:preprocessor</AdditionalCompilerOptions>
+      <AdditionalCompilerOptions>/wd4275 /arch:AVX2 /Zc:__cplusplus /Zc:preprocessor</AdditionalCompilerOptions>
       <AdditionalOptions>-diag-suppress 1388 -diag-suppress 221 --std c++20 %(AdditionalOptions)</AdditionalOptions>
     </CudaCompile>
     <PostBuildEvent>
@@ -225,6 +228,7 @@
       <ConformanceMode>true</ConformanceMode>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <OpenMPSupport>true</OpenMPSupport>
+      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
     </ClCompile>
     <CudaCompile>
       <CodeGeneration />
@@ -254,6 +258,7 @@
       <ConformanceMode>true</ConformanceMode>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <OpenMPSupport>true</OpenMPSupport>
+      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
     </ClCompile>
     <CudaCompile>
       <CodeGeneration>

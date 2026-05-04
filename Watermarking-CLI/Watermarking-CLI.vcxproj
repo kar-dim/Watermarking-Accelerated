@@ -128,6 +128,7 @@
       <AdditionalIncludeDirectories>$(SolutionDir)Watermarking-Impl\include;$(SolutionDir)Watermarking-Util\include;$(ProjectDir)libs\inih;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <OpenMPSupport>true</OpenMPSupport>
+      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -187,6 +188,7 @@ xcopy /y /d /i /e "$(SolutionDir)samples\*.*" "$(OutDir)samples"</Command>
       <AdditionalIncludeDirectories>$(SolutionDir)Watermarking-Impl\include;$(SolutionDir)Watermarking-Util\include;$(ProjectDir)libs\inih;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <OpenMPSupport>true</OpenMPSupport>
+      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -215,6 +217,7 @@ xcopy /y /d /i /e "$(SolutionDir)samples\*.*" "$(OutDir)samples"</Command>
       <AdditionalIncludeDirectories>$(SolutionDir)Watermarking-Impl\include;$(SolutionDir)Watermarking-Util\include;$(ProjectDir)libs\inih;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <OpenMPSupport>true</OpenMPSupport>
+      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -277,6 +280,7 @@ xcopy /y /d /i /e "$(SolutionDir)samples\*.*" "$(OutDir)samples"</Command>
       <AdditionalIncludeDirectories>$(SolutionDir)Watermarking-Impl\include;$(SolutionDir)Watermarking-Util\include;$(ProjectDir)libs\inih;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <OpenMPSupport>true</OpenMPSupport>
+      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -308,6 +312,7 @@ xcopy /y /d /i /e "$(SolutionDir)samples\*.*" "$(OutDir)samples"</Command>
       <AdditionalIncludeDirectories>$(SolutionDir)Watermarking-Impl\include;$(SolutionDir)Watermarking-Util\include;$(ProjectDir)libs\inih;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <OpenMPSupport>true</OpenMPSupport>
+      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>

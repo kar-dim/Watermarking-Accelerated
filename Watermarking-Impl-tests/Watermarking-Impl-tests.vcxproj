@@ -66,6 +66,7 @@
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
+      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
@@ -84,7 +85,7 @@ xcopy "$(SolutionDir)Watermarking-Impl\libs\libtiff\bin\tiff.dll" "$(OutDir)" /y
     </PostBuildEvent>
     <CudaCompile>
       <AdditionalOptions>-diag-suppress 1388 --std c++20 %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalCompilerOptions>/wd4275 /Zc:__cplusplus</AdditionalCompilerOptions>
+      <AdditionalCompilerOptions>/wd4275 /arch:AVX2 /Zc:__cplusplus</AdditionalCompilerOptions>
       <CodeGeneration>compute_86,sm_86</CodeGeneration>
     </CudaCompile>
   </ItemDefinitionGroup>
@@ -132,6 +133,7 @@ xcopy "$(SolutionDir)Watermarking-Impl\libs\libtiff\bin\tiff.dll" "$(SolutionDir
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <LanguageStandard>stdcpp20</LanguageStandard>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
+      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
