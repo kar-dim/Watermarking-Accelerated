@@ -60,7 +60,11 @@ $$\text{Score} = C \cdot \sqrt{\text{FPS}_{\text{embed}} \cdot \text{FPS}_{\text
 
 **NOTE**:
 1. For video and image batched operations only the proposed mask is used, which is more optimal. The NVF based watermarked image is only saved for single images (explained below) and not in batched mode.
-2. CPU implementation is built with AVX2 support: ```-mavx2 -mfma```. To enable AVX-512 replace the previous with: <br/>```-march=native```. The performance gains are negligible, and for much broader compatibility we use AVX2 by default.
+2. All implementations are built with ```AVX2``` support:
+     - clang (CPU builds): ```-mavx2 -mfma```
+     - MSVC (GPU builds): ```/arch:AVX2```
+
+To enable ```AVX-512``` replace the previous with: ```-march=native``` (clang) or ```/arch:AVX512``` (MSVC). The performance gains are minimal, and for much broader compatibility we use AVX2 by default.
 
 The CLI application should be parameterized from the corresponding ```settings.ini``` file. Here is a detailed explanation for each parameter:
 
