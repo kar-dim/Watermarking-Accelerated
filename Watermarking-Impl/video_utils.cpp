@@ -20,8 +20,10 @@
 #include <utility>
 
 #if defined(_USE_CUDA_)
+#include "CudaArray.hpp"
 #include "CudaStreamManager.hpp"
 #include "cuda_utils.hpp"
+#include <cuda.h>
 extern "C" {
 #include "libavutil/buffer.h"
 #include "libavutil/hwcontext_cuda.h"
@@ -75,10 +77,27 @@ AVCodecContextPtr openDecoderHWAccel(const AVCodecParameters* inputCodecParams, 
         return openSoftwareDecoder(inputCodecParams);
     if (avcodec_parameters_to_context(ctx.get(), inputCodecParams) < 0)
         return openSoftwareDecoder(inputCodecParams);
-    AVBufferRef* raw_hw_device_ctx = nullptr;
-    if (av_hwdevice_ctx_create(&raw_hw_device_ctx, AV_HWDEVICE_TYPE_CUDA, NULL, NULL, AV_CUDA_USE_PRIMARY_CONTEXT) < 0)
+    // manually create the hw device context to share our existing primary CUDA context
+    AVBufferRef* raw_hw_device_ctx = av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_CUDA);
+    if (!raw_hw_device_ctx)
         return openSoftwareDecoder(inputCodecParams);
     AVBufferRefPtr hw_device_ctx(raw_hw_device_ctx);
+    auto* hwCtx = reinterpret_cast<AVHWDeviceContext*>(hw_device_ctx->data);
+    auto* cudaCtx = reinterpret_cast<AVCUDADeviceContext*>(hwCtx->hwctx);
+    int runtimeDevice = 0;
+    cudaGetDevice(&runtimeDevice);
+    CUdevice cuDev = 0;
+    if (cuDeviceGet(&cuDev, runtimeDevice) != CUDA_SUCCESS)
+        return openSoftwareDecoder(inputCodecParams);
+    CUcontext primaryCtx = nullptr;
+    if (cuDevicePrimaryCtxRetain(&primaryCtx, cuDev) != CUDA_SUCCESS)
+        return openSoftwareDecoder(inputCodecParams);
+    cudaCtx->cuda_ctx = primaryCtx;
+    hwCtx->user_opaque = reinterpret_cast<void*>(static_cast<intptr_t>(cuDev));
+    hwCtx->free = [](AVHWDeviceContext* c) {
+        const CUdevice d = static_cast<CUdevice>(reinterpret_cast<intptr_t>(c->user_opaque));
+        cuDevicePrimaryCtxRelease(d);
+    };
     if (av_hwdevice_ctx_init(hw_device_ctx.get()) < 0)
         return openSoftwareDecoder(inputCodecParams);
     ctx->hw_device_ctx = av_buffer_ref(hw_device_ctx.get());
