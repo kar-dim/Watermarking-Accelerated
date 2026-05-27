@@ -426,6 +426,10 @@ void embedWatermark(VideoSession* s, int& framesCount, const AVFrame* frame, Enc
         // passthrough: take a refcounted reference to the decoded frame (zero data copy)
         AVFramePtr ref(av_frame_alloc());
         checkError(av_frame_ref(ref.get(), frame) < 0, "Failed to ref passthrough frame");
+        // if FULL range we normalize to YUV420P (YUVJ420p is deprecated)
+        // encoder context already carries color_range=AVCOL_RANGE_JPEG, so players can understand it's full range
+        if (ref->format == AV_PIX_FMT_YUVJ420P)
+            ref->format = AV_PIX_FMT_YUV420P;
         queue.push(std::move(ref));
     }
     framesCount++;

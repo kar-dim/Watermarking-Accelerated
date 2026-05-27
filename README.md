@@ -85,51 +85,48 @@ The CLI application should be parameterized from the corresponding ```settings.i
 
 | Parameter                         | Description                                                                                                                 |
 |-----------------------------------|-----------------------------------------------------------------------------------------------------------------------------                |
-| mode                              | ```[embed/detect]```: Sets the video mode. Both options read the ```[video]/path``` as input video and either embed the watermark encode via ffmpeg) or try to detect the watermark.
+| mode                              | ```[embed/detect]```: Sets the video mode. Both options read the ```[video]/path``` as input video and either embed the watermark (re-encoding the output via libav) or try to detect the watermark.
 | \[video\]/path                    | Path to the video file, if we want to embed or detect the watermark for a video. This will set the sample application to ```video mode``` and will read the video-only settings that are described in this section plus the common settings (```watermark_seed```, ```display_fps```, ```p```, ```psnr``` and ```opencl_device_id```) |
 | watermark_interval                | ```[Number]```: Embed or try to detect the watermark every ```watermark_interval``` frames. If set to 1 when embedding, the watermark will be embedded for all frames, which degrades video quality. If the current frame is not divisible by this parameter, then for embedding the frame is passed to the encoder as-is (no watermark), and for detection the frame is decoded and skipped. |
 | cuda_hw_decoder                   | ```[CUDA only]```: Offload decoding to the GPU using **NVDEC**. This is **much** more effective on ```HEVC``` or ```AV1``` videos (especially 4K and above) and tasks like watermark detection, as software decoders are generally fast for lower resolutions and less complex algorithms such as ```H264```. Valid options are ```hevc_cuvid``` , ```h264_cuvid``` and ```av1_cuvid```. Other decoders may be available like ```vp9_cuvid```, ```vc1_cuvid``` or ```mjpeg_cuvid```. If HW decoders aren't available, the application will automatically fall back to CPU decoding.|
 | cuda_hw_encoder                   | ```[true/false]```: Offload encoding to the GPU using **NVENC**. This makes more sense when combined with **NVDEC** but it is not necessary. If set, then the encoder options of ```encode_codec_options``` settings are ignored, and valid nvenc codec options must be provided in the ```hw_encode_options``` section. This works even for Eigen/OpenCL builds, assuming a compatible NVIDIA GPU exists, but incurs transparent Host/Device transfers reducing slightly its effectiveness (in CUDA build it is zero copy if used alongside **NVDEC**). |
 | encode_output_path                | Set this value to a file path, in order to embed watermark on the video from ```[video]/path``` parameter and save the watermarked file to disk. This will set the sample application to ```video embedding mode```. If you want to detect the watermark from the ```video``` parameter then comment this line, effectively setting the sample application to ```video detect mode```. |
-| encode_codec_options              | These are FFmpeg options for encoding only. It configures the coded library and its options. Example: ```-c:v libx265 -preset fast -crf 23```  will pass these encoding options to FFmpeg.|
+| encode_codec_options              | Encoder options passed directly to the libav encoder. Configures the codec and its quality settings. Example: ```-c:v libx265 -preset fast -crf 23```.|
 | hw_encode_options                 | These are FFmpeg options for encoding with NVENC. Only used when `cuda_hw_encoder` is `true` and overwrites the ```encode_codec_options``` option. Example: ```-c:v hevc_nvenc -preset p6 -tune hq -cq 26 -b:v 0``` is the NVENC equivalent to the sample used for CPU encoder. NOTE: Encoding and decoding as separate, we can decode with CPU and encode with NVENC (and vice versa), and of course we can do both!
 
-# FFmpeg Command Used for Video Encoding
+# Video Encoding Pipeline
 
-The following FFmpeg command is used to encode a new video while preserving the original input's metadata, subtitles, and audio tracks. It decodes the input video, embeds the watermark, and passes the resulting frames into standard input (stdin) for encoding, while copying audio/subtitles from the original input file as is. You can customize **video codec** encoding settings (codec, CRF, presets, etc) via the ```encode_codec_options``` option as described above.
+The application uses the **FFmpeg libraries (libav\*)** directly, no `ffmpeg.exe` is required or invoked. The pipeline decodes the input with libavcodec, watermarks each selected luma frame, re-encodes the watermarked video with the chosen codec, and remuxes all audio and subtitle streams directly from the source container without re-encoding them. PTS timestamps are passed through unchanged, so both **CFR and VFR** inputs are handled correctly.
+
+You can customize the video codec and its quality settings via the ```encode_codec_options``` / ```hw_encode_options``` parameters described above.
+
+### Equivalent FFmpeg CLI command (for reference)
+
+The pipeline is functionally equivalent to the following FFmpeg CLI invocation. This is provided purely for documentation purposes, the application does **not** call `ffmpeg.exe`.
+
 ```
 ffmpeg -y -f rawvideo
-  -pix_fmt <fmt>
+  -pix_fmt yuv420p
   -s <width>x<height>
-  -r <frame_rate>
   -i -
   -i <input_video_file>
   <encoder_options>
   -c:s copy -c:a copy
   -map 1:s? -map 0:v -map 1:a?
   -max_interleave_delta 0
-  -vf "<rotation>" (OPTIONAL)
-  -color_range:v:0 <range>
   <output_file>
 ```
 
-### Explanation:
-- `-f rawvideo -pix_fmt <fmt>`: Specifies raw pixel format, either ```yuv420p``` or ```yuvj420p``` (limited or full range, extracted from the input).
-- `-s <width>x<height>`: Specifies frame size (extracted from the input).
-- `-r <frame_rate>`: Frame rate of the video (extracted from the input).
-- `-i -`: Accepts raw video from stdin.
-- `-i <input_video_file>`: **USER SUPPLIED**: Original input file.
-- `<encoder_options>`: **USER SUPPLIED**: Encoder options such as codec, preset, and quality options. If CUDA NVENC is requested then it reads the ```hw_encode_options``` parameter from the settings file, else it reads ```encode_codec_options```.
-- `-c:s copy -c:a copy`: Copies subtitle and audio streams without re-encoding.
-- `-map 1:s? -map 0:v -map 1:a?`: Maps subtitles/audio from the original input, and video from stdin.
-- `-max_interleave_delta 0`: Reduces potential interleaving delay issues.
-- `-vf "<rotation>"`: Filter to be applied for rotating the output video (optional, may not be set, extracted from the input).
-- `-color_range:v:0 <range>`: Sets the output color range metadata to help video players (value of "tv" or "pc" is supplied, extracted from the input).
-- `<output_file>`: **USER SUPPLIED**: Output file path for the final video.
+- `-f rawvideo -pix_fmt yuv420p`: Raw 8-bit planar YUV input from stdin (watermarked frames).
+- `-i -`: Watermarked video frames piped from the application.
+- `-i <input_video_file>`: **USER SUPPLIED** original source file (audio/subtitles remuxed from here).
+- `<encoder_options>`: **USER SUPPLIED** codec, preset, and quality flags from ```encode_codec_options``` (or ```hw_encode_options``` when NVENC is enabled).
+- `-c:s copy -c:a copy`: Audio and subtitle streams copied without re-encoding.
+- `-map 1:s? -map 0:v -map 1:a?`: Video from the watermarked stream, audio/subtitles from the original input.
+- `-max_interleave_delta 0`: Avoids interleaving delay issues in the output container.
+- `<output_file>`: **USER SUPPLIED** — destination path set via ```encode_output_path```.
 
-**NOTES:** 
-- Only Constant Frame Rate (CFR) works as expected for an input video. If the input video is Variable Frame Rate (VFR) there may be issues with audio/subtitles sync on the output file.
-- 10-bit video support is experimental: 10-bit non HDR is fully supported. HDR 10-bit is tonemapped (mobius) to SDR by CPU, Hardware accelerated tonemapping is not yet supported by FFMPEG. Encoding is always 8-bit. 
+**NOTE:** 10-bit video is supported: 10-bit SDR is converted to 8-bit losslessly before watermarking. HDR 10-bit is tonemapped (Mobius) to SDR by the CPU filter graph before watermarking. Hardware-accelerated tonemapping is not yet supported by FFmpeg. Encoding output is always 8-bit.
 
 # How to Build
 
