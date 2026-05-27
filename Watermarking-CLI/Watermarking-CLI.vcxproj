@@ -139,7 +139,6 @@
     </Link>
     <PostBuildEvent>
       <Command>xcopy "$(SolutionDir)Watermarking-Impl\libs\ffmpeg\bin\*.dll" "$(OutDir)" /y /D
-xcopy "$(SolutionDir)Watermarking-Impl\libs\ffmpeg\bin\ffmpeg.exe" "$(OutDir)" /y /D
 xcopy "$(SolutionDir)Watermarking-Impl\libs\libpng\bin\libpng16d.dll" "$(OutDir)" /y /D
 xcopy "$(SolutionDir)Watermarking-Impl\libs\zlib\bin\zlib1.dll" "$(OutDir)" /y /D
 xcopy "$(SolutionDir)Watermarking-Impl\libs\libjpeg\bin\jpeg62.dll" "$(OutDir)" /y /D
@@ -171,7 +170,6 @@ xcopy "$(SolutionDir)Watermarking-Impl\libs\zlib\bin\zlib1.dll" "$(OutDir)" /y /
 xcopy "$(SolutionDir)Watermarking-Impl\libs\libjpeg\bin\jpeg62.dll" "$(OutDir)" /y /D
 xcopy "$(SolutionDir)Watermarking-Impl\libs\libtiff\bin\tiff.dll" "$(OutDir)" /y /D
 xcopy "$(SolutionDir)Watermarking-Impl\libs\ffmpeg\bin\*.dll" "$(OutDir)" /y /D
-xcopy "$(SolutionDir)Watermarking-Impl\libs\ffmpeg\bin\ffmpeg.exe" "$(OutDir)" /y /D
 xcopy /y /d /i /e "$(SolutionDir)samples\*.*" "$(OutDir)samples"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
@@ -263,7 +261,6 @@ xcopy "$(SolutionDir)Watermarking-Impl\libs\zlib\bin\zlib1.dll" "$(OutDir)" /y /
 xcopy "$(SolutionDir)Watermarking-Impl\libs\libjpeg\bin\jpeg62.dll" "$(OutDir)" /y /D
 xcopy "$(SolutionDir)Watermarking-Impl\libs\libtiff\bin\tiff.dll" "$(OutDir)" /y /D
 xcopy "$(SolutionDir)Watermarking-Impl\libs\ffmpeg\bin\*.dll" "$(OutDir)" /y /D
-xcopy "$(SolutionDir)Watermarking-Impl\libs\ffmpeg\bin\ffmpeg.exe" "$(OutDir)" /y /D
 xcopy /y /d /i /e "$(SolutionDir)samples\*.*" "$(OutDir)samples"</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
@@ -291,7 +288,6 @@ xcopy /y /d /i /e "$(SolutionDir)samples\*.*" "$(OutDir)samples"</Command>
     </Link>
     <PostBuildEvent>
       <Command>xcopy "$(SolutionDir)Watermarking-Impl\libs\ffmpeg\bin\*.dll" "$(OutDir)" /y /D
-xcopy "$(SolutionDir)Watermarking-Impl\libs\ffmpeg\bin\ffmpeg.exe" "$(OutDir)" /y /D
 xcopy "$(SolutionDir)Watermarking-Impl\libs\libpng\bin\libpng16.dll" "$(OutDir)" /y /D
 xcopy "$(SolutionDir)Watermarking-Impl\libs\zlib\bin\zlib1.dll" "$(OutDir)" /y /D
 xcopy "$(SolutionDir)Watermarking-Impl\libs\libjpeg\bin\jpeg62.dll" "$(OutDir)" /y /D
@@ -323,7 +319,6 @@ xcopy /y /d /i /e "$(SolutionDir)samples\*.*" "$(OutDir)samples"</Command>
     </Link>
     <PostBuildEvent>
       <Command>xcopy "$(SolutionDir)Watermarking-Impl\libs\ffmpeg\bin\*.dll" "$(OutDir)" /y /D
-xcopy "$(SolutionDir)Watermarking-Impl\libs\ffmpeg\bin\ffmpeg.exe" "$(OutDir)" /y /D
 xcopy "$(SolutionDir)Watermarking-Impl\libs\libpng\bin\libpng16.dll" "$(OutDir)" /y /D
 xcopy "$(SolutionDir)Watermarking-Impl\libs\zlib\bin\zlib1.dll" "$(OutDir)" /y /D
 xcopy "$(SolutionDir)Watermarking-Impl\libs\libjpeg\bin\jpeg62.dll" "$(OutDir)" /y /D

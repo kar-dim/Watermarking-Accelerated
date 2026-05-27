@@ -217,7 +217,6 @@
     </ClCompile>
     <PostBuildEvent>
       <Command>xcopy "$(SolutionDir)Watermarking-Impl\libs\ffmpeg\bin\*.dll" "$(OutDir)Watermarking-BenchUI" /y /D
-xcopy "$(SolutionDir)Watermarking-Impl\libs\ffmpeg\bin\ffmpeg.exe" "$(OutDir)Watermarking-BenchUI" /y /D
 xcopy "$(SolutionDir)Watermarking-Impl\libs\libpng\bin\libpng16.dll" "$(OutDir)Watermarking-BenchUI" /y /D
 xcopy "$(SolutionDir)Watermarking-Impl\libs\zlib\bin\zlib1.dll" "$(OutDir)Watermarking-BenchUI" /y /D
 xcopy "$(SolutionDir)Watermarking-Impl\libs\libjpeg\bin\jpeg62.dll" "$(OutDir)Watermarking-BenchUI" /y /D
@@ -246,7 +245,6 @@ xcopy "$(SolutionDir)Watermarking-Impl\libs\libtiff\bin\tiff.dll" "$(OutDir)Wate
     </ClCompile>
     <PostBuildEvent>
       <Command>xcopy "$(SolutionDir)Watermarking-Impl\libs\ffmpeg\bin\*.dll" "$(OutDir)Watermarking-BenchUI" /y /D
-xcopy "$(SolutionDir)Watermarking-Impl\libs\ffmpeg\bin\ffmpeg.exe" "$(OutDir)Watermarking-BenchUI" /y /D
 xcopy "$(SolutionDir)Watermarking-Impl\libs\libpng\bin\libpng16.dll" "$(OutDir)Watermarking-BenchUI" /y /D
 xcopy "$(SolutionDir)Watermarking-Impl\libs\zlib\bin\zlib1.dll" "$(OutDir)Watermarking-BenchUI" /y /D
 xcopy "$(SolutionDir)Watermarking-Impl\libs\libjpeg\bin\jpeg62.dll" "$(OutDir)Watermarking-BenchUI" /y /D
@@ -275,7 +273,6 @@ xcopy "$(SolutionDir)Watermarking-Impl\libs\libtiff\bin\tiff.dll" "$(OutDir)Wate
     </ClCompile>
     <PostBuildEvent>
       <Command>xcopy "$(SolutionDir)Watermarking-Impl\libs\ffmpeg\bin\*.dll" "$(OutDir)Watermarking-BenchUI" /y /D
-xcopy "$(SolutionDir)Watermarking-Impl\libs\ffmpeg\bin\ffmpeg.exe" "$(OutDir)Watermarking-BenchUI" /y /D
 xcopy "$(SolutionDir)Watermarking-Impl\libs\libpng\bin\libpng16.dll" "$(OutDir)Watermarking-BenchUI" /y /D
 xcopy "$(SolutionDir)Watermarking-Impl\libs\zlib\bin\zlib1.dll" "$(OutDir)Watermarking-BenchUI" /y /D
 xcopy "$(SolutionDir)Watermarking-Impl\libs\libjpeg\bin\jpeg62.dll" "$(OutDir)Watermarking-BenchUI" /y /D
@@ -308,7 +305,7 @@ xcopy "$(SolutionDir)Watermarking-Impl\libs\zlib\bin\zlib1.dll" "$(OutDir)Waterm
 xcopy "$(SolutionDir)Watermarking-Impl\libs\libjpeg\bin\jpeg62.dll" "$(OutDir)Watermarking-BenchUI" /y /D
 xcopy "$(SolutionDir)Watermarking-Impl\libs\libtiff\bin\tiff.dll" "$(OutDir)Watermarking-BenchUI" /y /D
 xcopy "$(SolutionDir)Watermarking-Impl\libs\ffmpeg\bin\*.dll" "$(OutDir)Watermarking-BenchUI" /y /D
-xcopy "$(SolutionDir)Watermarking-Impl\libs\ffmpeg\bin\ffmpeg.exe" "$(OutDir)Watermarking-BenchUI\" /y /D</Command>
+</Command>
     </PostBuildEvent>
     <Link>
       <AdditionalLibraryDirectories>$(SolutionDir)Watermarking-Impl\libs\zlib\lib;$(LLVMInstallDir)\lib;$(SolutionDir)Watermarking-Impl\libs\libpng\lib;$(SolutionDir)Watermarking-Impl\libs\libjpeg\lib;$(SolutionDir)Watermarking-Impl\libs\libwebp\lib;$(SolutionDir)Watermarking-Impl\libs\libtiff\lib;$(SolutionDir)Watermarking-Impl\libs\ffmpeg\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
@@ -335,7 +332,7 @@ xcopy "$(SolutionDir)Watermarking-Impl\libs\zlib\bin\zlib1.dll" "$(OutDir)Waterm
 xcopy "$(SolutionDir)Watermarking-Impl\libs\libjpeg\bin\jpeg62.dll" "$(OutDir)Watermarking-BenchUI" /y /D
 xcopy "$(SolutionDir)Watermarking-Impl\libs\libtiff\bin\tiff.dll" "$(OutDir)Watermarking-BenchUI" /y /D
 xcopy "$(SolutionDir)Watermarking-Impl\libs\ffmpeg\bin\*.dll" "$(OutDir)Watermarking-BenchUI" /y /D
-xcopy "$(SolutionDir)Watermarking-Impl\libs\ffmpeg\bin\ffmpeg.exe" "$(OutDir)Watermarking-BenchUI" /y /D</Command>
+</Command>
     </PostBuildEvent>
     <Link>
       <AdditionalLibraryDirectories>$(SolutionDir)Watermarking-Impl\libs\zlib\lib;$(LLVMInstallDir)\lib;$(SolutionDir)Watermarking-Impl\libs\libpng\lib;$(SolutionDir)Watermarking-Impl\libs\libjpeg\lib;$(SolutionDir)Watermarking-Impl\libs\libwebp\lib;$(SolutionDir)Watermarking-Impl\libs\libtiff\lib;$(SolutionDir)Watermarking-Impl\libs\ffmpeg\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
