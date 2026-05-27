@@ -39,7 +39,7 @@ struct VideoSession {
     ImageBuffer inputFrame;
     ImageOutputBuffer watermarkedFrame;
     Gray8Buffer grayFrame;
-    // output encoding (embed mode only — initialized in embedVideo, null for detect)
+    // output encoding (embed mode only, initialized in embedVideo, null for detect)
     video_utils::AVOutputFormatContextPtr outputFormatCtx;
     video_utils::AVCodecContextPtr outputEncoderCtx;
     std::vector<int> inputToOutputStreamMap; // input stream index → output stream index (-1 = skip)
