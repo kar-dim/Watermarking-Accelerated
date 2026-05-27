@@ -203,7 +203,7 @@ static int testForVideo(const INIReader& inir, const string& videoFile, const in
     settings.hwDecoder = inir.Get("compute", "cuda_hw_decoder", "");
     settings.useHwEncoder = inir.GetBoolean("compute", "cuda_hw_encoder", false);
     settings.encodeOptions = settings.useHwEncoder ? inir.Get("video", "hw_encode_options", "-c:v hevc_nvenc -preset p6 -tune hq -cq 26 -b:v 0")
-                                                   : inir.Get("video", "cpu_encode_options", "-c:v libx265 -preset fast -crf 23");
+                                                   : inir.Get("video", "encode_codec_options", "-c:v libx265 -preset fast -crf 23");
     settings.encodeOutputPath = inir.Get("video", "encode_output_path", "");
 
     // open video session

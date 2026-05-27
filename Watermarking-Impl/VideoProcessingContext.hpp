@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <memory>
 #include <utility>
+#include <vector>
 
 extern "C" {
 #include "libavformat/avformat.h"
@@ -38,6 +39,11 @@ struct VideoSession {
     ImageBuffer inputFrame;
     ImageOutputBuffer watermarkedFrame;
     Gray8Buffer grayFrame;
+    // output encoding (embed mode only — initialized in embedVideo, null for detect)
+    video_utils::AVOutputFormatContextPtr outputFormatCtx;
+    video_utils::AVCodecContextPtr outputEncoderCtx;
+    std::vector<int> inputToOutputStreamMap; // input stream index → output stream index (-1 = skip)
+    int outputVideoStreamIndex = -1;
     // convenient getter for video properties
     inline std::pair<int, int> videoDims() const { return {videoStream->codecpar->height, videoStream->codecpar->width}; }
 };

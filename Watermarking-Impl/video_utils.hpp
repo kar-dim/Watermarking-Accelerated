@@ -4,9 +4,7 @@
 #include "include/WatermarkTypes.hpp"
 #include "video_defines.hpp"
 #include "VideoProcessingContext.hpp"
-#include <cerrno>
 #include <cstdint>
-#include <cstdio>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -19,7 +17,6 @@ extern "C" {
 #include "libavutil/pixfmt.h"
 #include "libavutil/error.h"
 #include "libavutil/frame.h"
-#include "libavutil/rational.h"
 }
 
 /*!
@@ -37,7 +34,7 @@ inline bool isHDR(const AVCodecContext* codecCtx) { return codecCtx->color_trc =
 
 #if defined(_USE_CUDA_)
 AVCodecContextPtr openDecoderHWAccel(const AVCodecParameters* inputCodecParams, const std::string& userHwDecoder, bool& useHwDecoder);
-void embedWatermarkHWAccel(WatermarkCore::VideoSession* s, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe);
+void embedWatermarkHWAccel(WatermarkCore::VideoSession* s, int& framesCount, const AVFrame* frame);
 void detectWatermarkHWAccel(WatermarkCore::VideoSession* s, int& framesCount, const AVFrame* frame);
 #endif
 std::string getFilterGraphString(const WatermarkCore::VideoSession* s);
@@ -46,24 +43,25 @@ bool initFilterGraph(WatermarkCore::VideoSession* s);
 AVCodecContextPtr openDecoder(const AVCodecParameters* inputCodecParams, const std::string& userHwDecoder, bool& useHwDecoder);
 AVCodecContextPtr openSoftwareDecoder(const AVCodecParameters* inputCodecParams);
 bool checkPixelFormatSupport(const std::span<const AVPixelFormat> supportedFormats, const AVPixelFormat format);
-std::string getFrameRate(const AVStream* st);
-AVRational getTimeBase(const AVStream* st);
-inline std::string getPixFmt(const AVStream* st) { return st->codecpar->color_range == AVCOL_RANGE_JPEG ? "-pix_fmt yuvj420p " : "-pix_fmt yuv420p "; }
-inline std::string getColorRange(const AVStream* st) { return st->codecpar->color_range == AVCOL_RANGE_JPEG ? "-color_range:v:0 pc " : "-color_range:v:0 tv "; }
-std::string getStreamRotation(const AVStream* st);
 int findVideoStream(const AVFormatContext* inputFormatCtx);
-void embedWatermark(WatermarkCore::VideoSession* s, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe);
+void embedWatermark(WatermarkCore::VideoSession* s, int& framesCount, const AVFrame* frame);
 void detectWatermark(WatermarkCore::VideoSession* s, int& framesCount, const AVFrame* frame);
-void embedAndWriteFrame(WatermarkCore::VideoSession* s, const ImageBuffer& buffer, const int elements, FILE* ffmpegPipe);
-void processAndWriteYPlane(const bool embedWatermark, const AVFrame* frame, WatermarkCore::VideoSession* s, FILE* ffmpegPipe);
-void writeChromaPlanes(const AVFrame* frame, WatermarkCore::VideoSession* s, FILE* ffmpegPipe);
-int videoDispatcher(WatermarkCore::VideoSession* s, VideoMode op, const bool needsFiltert = false, FILE* ffmpegPipe = nullptr);
+void embedAndFillYPlane(WatermarkCore::VideoSession* s, const ImageBuffer& buffer);
+void fillYPlane(const bool doEmbed, const AVFrame* frame, WatermarkCore::VideoSession* s);
+void fillChromaPlanes(const AVFrame* frame, WatermarkCore::VideoSession* s);
+int videoDispatcher(WatermarkCore::VideoSession* s, VideoMode op, const bool needsFilter = false);
 void filterFrame(AVFramePtr& frame, AVFramePtr& filteredFrame, const WatermarkCore::VideoSession* s);
 void loadInputFrame(WatermarkCore::VideoSession* s, const uint8_t* hostPtr);
+// output encoder lifecycle
+void initOutputEncoder(WatermarkCore::VideoSession* s);
+void encodeFrame(WatermarkCore::VideoSession* s, int64_t pts);
+void flushAndFinalize(WatermarkCore::VideoSession* s);
 
-// main frames loop logic for video watermark embedding and detection
+// main frames loop logic for video watermark embedding and detection.
+// when s->outputFormatCtx is set (embed mode), non-video packets (audio, subtitles)
+// are remuxed directly to the output, otherwise they are discarded (detect mode)
 template <bool needsFilter, typename Func>
-int processFrames(const WatermarkCore::VideoSession* s, Func&& processFrame) {
+int processFrames(WatermarkCore::VideoSession* s, Func&& processFrame) {
     const AVPacketPtr packet(av_packet_alloc());
     AVFramePtr frame(av_frame_alloc());
     AVFramePtr filteredFrame(nullptr);
@@ -71,26 +69,38 @@ int processFrames(const WatermarkCore::VideoSession* s, Func&& processFrame) {
         filteredFrame.reset(av_frame_alloc());
     int framesCount = 0;
 
-    // read video frames loop
     while (av_read_frame(s->inputFormatCtx.get(), packet.get()) >= 0) {
-        if (packet->stream_index != s->videoStreamIndex || avcodec_send_packet(s->inputDecoderCtx.get(), packet.get()) < 0) {
-            av_packet_unref(packet.get());
-            continue;
-        }
-        while (true) {
-            const int ret = avcodec_receive_frame(s->inputDecoderCtx.get(), frame.get());
-            if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
-                break;
-            if (ret < 0) {
-                char errbuf[256];
-                av_strerror(ret, errbuf, sizeof(errbuf));
-                av_packet_unref(packet.get());
-                throw std::runtime_error(std::string("FFmpeg decoding error: ") + errbuf);
+        if (packet->stream_index == s->videoStreamIndex) {
+            if (avcodec_send_packet(s->inputDecoderCtx.get(), packet.get()) >= 0) {
+                while (true) {
+                    const int ret = avcodec_receive_frame(s->inputDecoderCtx.get(), frame.get());
+                    if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
+                        break;
+                    if (ret < 0) {
+                        char errbuf[256];
+                        av_strerror(ret, errbuf, sizeof(errbuf));
+                        av_packet_unref(packet.get());
+                        throw std::runtime_error(std::string("FFmpeg decoding error: ") + errbuf);
+                    }
+                    // optionally filter frame (10-bit to 8-bit conversion, HDR to SDR tonemapping)
+                    if constexpr (needsFilter)
+                        filterFrame(frame, filteredFrame, s);
+                    std::forward<Func>(processFrame)(frame.get(), framesCount);
+                }
             }
-            // optionally filter frame (10-bit to 8-bit conversion, HDR to SDR tonemapping)
-            if constexpr (needsFilter)
-                filterFrame(frame, filteredFrame, s);
-            std::forward<Func>(processFrame)(frame.get(), framesCount);
+        } else if (s->outputFormatCtx) {
+            // remux non video streams (audio, subtitles) directly to output
+            const int inIdx = packet->stream_index;
+            if (inIdx < static_cast<int>(s->inputToOutputStreamMap.size())) {
+                const int outIdx = s->inputToOutputStreamMap[inIdx];
+                if (outIdx >= 0) {
+                    av_packet_rescale_ts(packet.get(),
+                        s->inputFormatCtx->streams[inIdx]->time_base,
+                        s->outputFormatCtx->streams[outIdx]->time_base);
+                    packet->stream_index = outIdx;
+                    av_interleaved_write_frame(s->outputFormatCtx.get(), packet.get());
+                }
+            }
         }
         av_packet_unref(packet.get());
     }

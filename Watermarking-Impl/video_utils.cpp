@@ -7,17 +7,16 @@
 #include "VideoProcessingContext.hpp"
 #include "WatermarkBase.hpp"
 #include <algorithm>
-#include <cerrno>
-#include <cmath>
 #include <cstdint>
-#include <cstdio>
 #include <cstring>
 #include <format>
 #include <iostream>
 #include <span>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <vector>
 
 #if defined(_USE_CUDA_)
 #include "CudaArray.hpp"
@@ -43,8 +42,9 @@ extern "C" {
 #include "libavfilter/buffersink.h"
 #include "libavfilter/buffersrc.h"
 #include "libavformat/avformat.h"
+#include "libavformat/avio.h"
 #include "libavutil/avutil.h"
-#include "libavutil/display.h"
+#include "libavutil/dict.h"
 #include "libavutil/error.h"
 #include "libavutil/frame.h"
 #include "libavutil/mem.h"
@@ -62,6 +62,13 @@ using namespace CommonUtils;
 using namespace WatermarkCore;
 using std::cout;
 using std::string;
+
+namespace {
+constexpr AVPixelFormat supportedFormats[] = {AV_PIX_FMT_YUV420P, AV_PIX_FMT_YUVJ420P, AV_PIX_FMT_YUV420P10LE, AV_PIX_FMT_CUDA};
+#if defined(_USE_CUDA_)
+constexpr AVPixelFormat supportedHwFormats[] = {AV_PIX_FMT_NV12, AV_PIX_FMT_P010LE, AV_PIX_FMT_P016LE};
+#endif
+} // namespace
 
 namespace video_utils {
 #if defined(_USE_CUDA_)
@@ -110,24 +117,27 @@ AVCodecContextPtr openDecoderHWAccel(const AVCodecParameters* inputCodecParams, 
 }
 
 // embed watermark in a video frame by using CUDA hardware acceleration
-void embedWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe) {
+void embedWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* frame) {
     const auto stream = CudaStreamManager::getInstance().getComputeStream();
     const auto [height, width] = s->videoDims();
     CudaArray<uint8_t> chromaBuffer(width * height / 2, stream);
-    // launch NV12 to YUV420 kernel (for UV planes) and copy chroma to host
+    // convert NV12 chroma -> YUV420P planar and download async to hostFrame[W*H..]
     cuda_utils::launchNV12ToYUV420pKernel(frame->data[1], frame->linesize[1], chromaBuffer.data(), width / 2, height / 2, stream);
-    chromaBuffer.toHostAsync(s->hostFrame.get()->get() + width * height);
+    chromaBuffer.toHostAsync(s->hostFrame->get() + width * height);
 
     if (framesCount % s->settings.watermarkInterval == 0) {
+        cout << std::format(" [Embedding frame {}]\n", framesCount + 1);
         CudaArray<float> lumaBuffer(height, width, stream);
         cuda_utils::launchPitchedToFloatKernel(frame->data[0], lumaBuffer.data(), width, height, frame->linesize[0], stream);
-        cudaStreamSynchronize(stream);
-        embedAndWriteFrame(s, lumaBuffer, width * height * 3 / 2, ffmpegPipe);
+        cudaStreamSynchronize(stream);     // UV async download + luma float conversion complete
+        embedAndFillYPlane(s, lumaBuffer); // watermark, download Y to hostFrame[0..W*H-1]
     } else {
-        cudaMemcpy2DAsync(s->hostFrame.get()->get(), width, frame->data[0], frame->linesize[0], width, height, cudaMemcpyDeviceToHost, stream);
+        // no watermark, copy luma directly to hostFrame[0..W*H-1]
+        cudaMemcpy2DAsync(s->hostFrame->get(), width, frame->data[0], frame->linesize[0], width, height, cudaMemcpyDeviceToHost, stream);
         cudaStreamSynchronize(stream);
-        fwrite(s->hostFrame.get()->get(), 1, width * height * 3 / 2, ffmpegPipe);
     }
+    // hostFrame now contains complete YUV420P, send to encoder (NVENC async, returns fast)
+    encodeFrame(s, frame->pts);
     framesCount++;
 }
 
@@ -213,8 +223,8 @@ bool initFilterGraph(VideoSession* s) {
     if (filterDesc.empty())
         return false; // no need for filtering
 
-    // parse the filter graph description in order to initialize the filter graph later
-    const AVRational timeBase = getTimeBase(s->videoStream);
+    // timeBase is CRITICAL for VFR, pass as is
+    const AVRational timeBase = s->videoStream->time_base;
     const char* pixFmtName = av_get_pix_fmt_name((AVPixelFormat)s->inputDecoderCtx->pix_fmt);
     string args = std::format("video_size={}x{}:pix_fmt={}:time_base={}/{}:pixel_aspect={}/{}", s->inputDecoderCtx->width, s->inputDecoderCtx->height, pixFmtName, timeBase.num, timeBase.den,
                               s->inputDecoderCtx->sample_aspect_ratio.num, s->inputDecoderCtx->sample_aspect_ratio.den);
@@ -301,61 +311,65 @@ bool initFilterGraph(VideoSession* s) {
     return true;
 }
 
-// helper method to embed the watermark in the video frame and write it to the ffmpeg pipe
-void embedAndWriteFrame(VideoSession* s, const ImageBuffer& buffer, const int elements, FILE* ffmpegPipe) {
+// watermark the frame and fill hostFrame[0..W*H-1] with the processed Y plane
+void embedAndFillYPlane(VideoSession* s, const ImageBuffer& buffer) {
     s->watermarkObj->makeWatermark(buffer, buffer, s->watermarkedFrame, MaskMethod::ME);
 #if defined(_USE_CUDA_)
     {
         const auto stream = CudaStreamManager::getInstance().getComputeStream();
         CudaArray<uint8_t> rowMajorOut(s->watermarkedFrame.getRows(), s->watermarkedFrame.getCols(), stream);
-        cuda_utils::launchColMajorToRowMajorU8Kernel(s->watermarkedFrame.data(), rowMajorOut.data(), static_cast<int>(s->watermarkedFrame.getCols()), static_cast<int>(s->watermarkedFrame.getRows()), 1, stream);
-        rowMajorOut.toHost(s->hostFrame.get()->get());
+        cuda_utils::launchColMajorToRowMajorU8Kernel(s->watermarkedFrame.data(), rowMajorOut.data(), static_cast<int>(s->watermarkedFrame.getCols()), static_cast<int>(s->watermarkedFrame.getRows()),
+                                                     1, stream);
+        rowMajorOut.toHost(s->hostFrame->get()); // fills hostFrame[0..W*H-1]
     }
-    fwrite(s->hostFrame.get()->get(), 1, elements, ffmpegPipe);
 #elif defined(_USE_OPENCL_)
     {
         const auto [height, width] = s->videoDims();
         auto& mgr = OclQueueManager::getInstance();
         OclArray<uint8_t> rowMajorOut(height, width, mgr.getQueueRaw());
-        auto& q = mgr.getQueue();
-        cl_utils::launchColMajorToRowMajorU8(s->watermarkedFrame.clBuffer(), rowMajorOut.clBuffer(), width, height, 1, q);
-        rowMajorOut.toHost(s->hostFrame.get()->get());
+        cl_utils::launchColMajorToRowMajorU8(s->watermarkedFrame.clBuffer(), rowMajorOut.clBuffer(), width, height, 1, mgr.getQueue());
+        rowMajorOut.toHost(s->hostFrame->get()); // fills hostFrame[0..W*H-1]
     }
-    fwrite(s->hostFrame.get()->get(), 1, elements, ffmpegPipe);
 #elif defined(_USE_EIGEN_)
-    s->grayFrame = s->watermarkedFrame.getGray().transpose();
-    fwrite(s->grayFrame.data(), 1, elements, ffmpegPipe);
+    {
+        const auto [height, width] = s->videoDims();
+        s->grayFrame = s->watermarkedFrame.getGray().transpose();
+        std::memcpy(s->hostFrame->get(), s->grayFrame.data(), static_cast<size_t>(width) * height);
+    }
 #endif
 }
 
-// helper method to dispatch the correct watermarking or detection method
+// dispatch the correct watermarking or detection method for each frame
 // clang-format off
-int videoDispatcher(VideoSession* s, VideoMode op, const bool needsFilter, FILE* ffmpegPipe) {
+int videoDispatcher(VideoSession* s, VideoMode op, const bool needsFilter) {
 #if defined(_USE_CUDA_)
     if (s->useHwDecoder)
-        return needsFilter ? 
-            processFrames<true>(s,[&](const AVFrame* frame, int& framesCount) {
-                op == VideoMode::EMBED ? embedWatermarkHWAccel(s, framesCount, frame, ffmpegPipe) : detectWatermarkHWAccel(s, framesCount, frame);
-            }) : 
+        return needsFilter ?
+            processFrames<true>(s, [&](const AVFrame* frame, int& framesCount) {
+                op == VideoMode::EMBED ? embedWatermarkHWAccel(s, framesCount, frame) : detectWatermarkHWAccel(s, framesCount, frame);
+            }) :
             processFrames<false>(s, [&](const AVFrame* frame, int& framesCount) {
-                op == VideoMode::EMBED ? embedWatermarkHWAccel(s, framesCount, frame, ffmpegPipe) : detectWatermarkHWAccel(s, framesCount, frame);
+                op == VideoMode::EMBED ? embedWatermarkHWAccel(s, framesCount, frame) : detectWatermarkHWAccel(s, framesCount, frame);
             });
 #endif
-    return needsFilter ? 
-        processFrames<true>(s, [&](const AVFrame* frame,int& framesCount) { 
-            op == VideoMode::EMBED ? embedWatermark(s, framesCount, frame, ffmpegPipe) : detectWatermark(s, framesCount, frame);
-        }) : 
+    return needsFilter ?
+        processFrames<true>(s, [&](const AVFrame* frame, int& framesCount) {
+            op == VideoMode::EMBED ? embedWatermark(s, framesCount, frame) : detectWatermark(s, framesCount, frame);
+        }) :
         processFrames<false>(s, [&](const AVFrame* frame, int& framesCount) {
-            op == VideoMode::EMBED ? embedWatermark(s, framesCount, frame, ffmpegPipe) : detectWatermark(s, framesCount, frame);
+            op == VideoMode::EMBED ? embedWatermark(s, framesCount, frame) : detectWatermark(s, framesCount, frame);
         });
 }
 // clang-format on
 
-// embed watermark in a video frame
-void embedWatermark(VideoSession* s, int& framesCount, const AVFrame* frame, FILE* ffmpegPipe) {
-    const bool embedWatermark = framesCount % s->settings.watermarkInterval == 0;
-    processAndWriteYPlane(embedWatermark, frame, s, ffmpegPipe);
-    writeChromaPlanes(frame, s, ffmpegPipe);
+// embed watermark in a video frame (software decode path)
+void embedWatermark(VideoSession* s, int& framesCount, const AVFrame* frame) {
+    const bool doEmbed = framesCount % s->settings.watermarkInterval == 0;
+    if (doEmbed)
+        cout << std::format(" [Embedding frame {}]\n", framesCount + 1);
+    fillYPlane(doEmbed, frame, s);
+    fillChromaPlanes(frame, s);
+    encodeFrame(s, frame->pts);
     framesCount++;
 }
 
@@ -389,28 +403,7 @@ int findVideoStream(const AVFormatContext* inputFormatCtx) {
     return -1;
 }
 
-// get the rotation angle of the video stream (if any) to apply as a filter in the encoder
-string getStreamRotation(const AVStream* st) {
-    if (!st || !st->codecpar)
-        return "";
-    for (int i = 0; i < st->codecpar->nb_coded_side_data; i++) {
-        const AVPacketSideData& sd = st->codecpar->coded_side_data[i];
-        if (sd.type == AV_PKT_DATA_DISPLAYMATRIX && sd.data && sd.size >= 9 * sizeof(int32_t)) {
-            const double rotation = -av_display_rotation_get(reinterpret_cast<const int32_t*>(sd.data));
-            const int angle = (static_cast<int>(std::lrint(rotation)) + 360) % 360; // normalize to [0, 360)
-            switch (angle) {
-            case 90: return "-vf \"transpose=1\" ";
-            case 180: return "-vf \"hflip,vflip\" ";
-            case 270: return "-vf \"transpose=2\" ";
-            default: return "";
-            }
-        }
-    }
-    return "";
-}
-
-// if CUDA, try to open hw decoder (if requested), else fallback to open software decoder context for video
-// otherwise, just open software decoder
+// if CUDA, try to open hw decoder (if requested), else fallback to open software decoder context for video, else just open software decoder
 AVCodecContextPtr openDecoder(const AVCodecParameters* inputCodecParams, const string& userHwDecoder, bool& useHwDecoder) {
 #if defined(_USE_CUDA_)
     return openDecoderHWAccel(inputCodecParams, userHwDecoder, useHwDecoder);
@@ -450,61 +443,229 @@ bool checkPixelFormatSupport(const std::span<const AVPixelFormat> formats, const
     return isValidFormat;
 }
 
-// get the input video FPS (average)
-string getFrameRate(const AVStream* st) {
-    const AVRational frameRate = st->avg_frame_rate;
-    return std::format("{:.3f}", static_cast<float>(frameRate.num) / frameRate.den);
-}
-
-// get the input video time base (should be 1/average(fps))
-AVRational getTimeBase(const AVStream* st) {
-    const AVRational fps = st->avg_frame_rate;
-    if (fps.num > 0 && fps.den > 0)
-        return av_inv_q(fps);
-    // fallback if avg_frame_rate is garbage
-    if (st->time_base.num > 0 && st->time_base.den > 0)
-        return st->time_base;
-    return AVRational{1, 30};
-}
-
-// runs the watermark creation for a video frame and writes the watermarked frame to the ffmpeg pipe
-void processAndWriteYPlane(const bool embedWatermark, const AVFrame* frame, VideoSession* s, FILE* ffmpegPipe) {
+// fill hostFrame[0..W*H-1] with the Y plane (watermarked or passthrough)
+void fillYPlane(const bool doEmbed, const AVFrame* frame, VideoSession* s) {
     const auto [height, width] = s->videoDims();
-    uint8_t* srcY = frame->data[0];
-    // if there is row padding (for alignment), we must copy the data to a contiguous block!
+    uint8_t* hostY = s->hostFrame->get();
+    const uint8_t* srcY = frame->data[0];
+    // destride into hostFrame if the decoder added alignment padding
     if (frame->linesize[0] != width) {
         for (int y = 0; y < height; y++)
-            std::memcpy(s->hostFrame.get()->get() + y * width, srcY + y * frame->linesize[0], width);
-        srcY = s->hostFrame.get()->get();
+            std::memcpy(hostY + y * width, srcY + y * frame->linesize[0], width);
+        srcY = hostY;
     }
-    if (embedWatermark) {
+    if (doEmbed) {
         loadInputFrame(s, srcY);
-        embedAndWriteFrame(s, s->inputFrame, width * height, ffmpegPipe);
-    } else
-        fwrite(srcY, 1, width * height, ffmpegPipe);
+        embedAndFillYPlane(s, s->inputFrame);
+    } else if (srcY != hostY) {
+        // no watermark, frame was not destrided: copy Y directly into hostFrame
+        std::memcpy(hostY, srcY, static_cast<size_t>(width) * height);
+    }
 }
 
-// writes the chroma planes (U and V) to the ffmpeg pipe, either assuming aligned pointers or not
-void writeChromaPlanes(const AVFrame* frame, VideoSession* s, FILE* ffmpegPipe) {
+// fill hostFrame[W*H..W*H*3/2-1] with U and V planes (de-stride if needed)
+void fillChromaPlanes(const AVFrame* frame, VideoSession* s) {
     const auto [height, width] = s->videoDims();
-    const int planeSize = width * height / 4;
     const int chromaHeight = height / 2;
     const int chromaWidth = width / 2;
-    // hostFrame tail (past the Y plane) used as a contiguous staging area for de-strided chroma
-    uint8_t* const chromaStaging = s->hostFrame.get()->get() + width * height;
-    // lambda to write a single chroma plane
-    auto writePlane = [&](const uint8_t* src, const int linesize) {
+    uint8_t* uDst = s->hostFrame->get() + width * height; // U starts right after Y
+    uint8_t* vDst = uDst + chromaWidth * chromaHeight;    // V follows U
+    // lambda: copy one chroma plane, de-striding if the decoder added alignment padding
+    auto copyPlane = [&](const uint8_t* src, const int linesize, uint8_t* dst) {
         if (linesize != chromaWidth) {
-            // de-stride into contiguous staging buffer, then one fwrite instead of chromaHeight fwrites
             for (int y = 0; y < chromaHeight; y++)
-                std::memcpy(chromaStaging + y * chromaWidth, src + y * linesize, chromaWidth);
-            fwrite(chromaStaging, 1, planeSize, ffmpegPipe);
-        } else
-            fwrite(src, 1, planeSize, ffmpegPipe);
+                std::memcpy(dst + y * chromaWidth, src + y * linesize, chromaWidth);
+        } else {
+            std::memcpy(dst, src, static_cast<size_t>(chromaWidth) * chromaHeight);
+        }
     };
-    // write U
-    writePlane(frame->data[1], frame->linesize[1]);
-    // write V
-    writePlane(frame->data[2], frame->linesize[2]);
+    copyPlane(frame->data[1], frame->linesize[1], uDst);
+    copyPlane(frame->data[2], frame->linesize[2], vDst);
 }
+
+// parse "-c:v codec -key val ..." into {codecName, AVDictionary*}
+// strips stream specifiers (:v, :a, :s) so AVOptions names match libav
+static std::pair<std::string, AVDictionary*> parseEncodeOptions(const std::string& optStr) {
+    std::string codecName;
+    AVDictionary* opts = nullptr;
+
+    auto stripStreamSpec = [](std::string key) {
+        const auto pos = key.rfind(':');
+        if (pos != std::string::npos && pos + 1 < key.size()) {
+            const char spec = key[pos + 1];
+            if (spec == 'v' || spec == 'a' || spec == 's' || spec == 'd' || spec == 't')
+                key.erase(pos);
+        }
+        return key;
+    };
+
+    std::istringstream ss(optStr);
+    std::vector<std::string> tokens;
+    for (std::string tok; ss >> tok;)
+        tokens.push_back(std::move(tok));
+
+    for (size_t i = 0; i < tokens.size();) {
+        if (tokens[i].size() > 1 && tokens[i][0] == '-') {
+            const std::string key = stripStreamSpec(tokens[i].substr(1));
+            if (i + 1 < tokens.size() && (tokens[i + 1].empty() || tokens[i + 1][0] != '-')) {
+                const std::string& val = tokens[i + 1];
+                if (key == "c" || key == "codec")
+                    codecName = val;
+                else
+                    av_dict_set(&opts, key.c_str(), val.c_str(), 0);
+                i += 2;
+                continue;
+            }
+        }
+        ++i;
+    }
+    return {codecName, opts};
+}
+
+// pull ready packets from the encoder and write them to the output file
+static void drainEncoderPackets(VideoSession* s) {
+    const AVPacketPtr pkt(av_packet_alloc());
+    const AVStream* outVideoStream = s->outputFormatCtx->streams[s->outputVideoStreamIndex];
+    while (avcodec_receive_packet(s->outputEncoderCtx.get(), pkt.get()) == 0) {
+        av_packet_rescale_ts(pkt.get(), s->outputEncoderCtx->time_base, outVideoStream->time_base);
+        pkt->stream_index = s->outputVideoStreamIndex;
+        checkError(av_interleaved_write_frame(s->outputFormatCtx.get(), pkt.get()) < 0, "Failed to write encoded video packet");
+        av_packet_unref(pkt.get());
+    }
+    // AVERROR(EAGAIN) = encoder needs more frames before producing output, (we ignore it, keep going)
+}
+
+// initialize the output encoder (AVCodecContext) and muxer (AVFormatContext)
+// parses encodeOptions like "-c:v hevc_nvenc -preset p6 -cq 26" or "-c:v libx265 -preset fast -crf 23"
+// audio and subtitle streams are remuxed (copied) from the input, rotation metadata is preserved as display matrix side data
+void initOutputEncoder(VideoSession* s) {
+    checkError(s->settings.encodeOutputPath.empty(), "No output path specified for video encode");
+
+    auto [codecName, rawOpts] = parseEncodeOptions(s->settings.encodeOptions);
+    AVDictionary* opts = rawOpts; // avcodec_open2 will consume recognized entries
+    const AVCodec* encoder = avcodec_find_encoder_by_name(codecName.c_str());
+    if (!encoder) {
+        av_dict_free(&opts);
+        throw std::runtime_error("Encoder not found: " + codecName + " (check encode_codec_options / hw_encode_options in settings.ini)");
+    }
+    // create the output muxer (format context)
+    AVFormatContext* rawOutFmt = nullptr;
+    checkError(avformat_alloc_output_context2(&rawOutFmt, nullptr, nullptr, s->settings.encodeOutputPath.c_str()) < 0, "Failed to create output format context for: " + s->settings.encodeOutputPath);
+    s->outputFormatCtx.reset(rawOutFmt);
+
+    // build the encoder context
+    AVCodecContextPtr encCtx(avcodec_alloc_context3(encoder));
+    checkError(!encCtx, "Failed to allocate encoder context");
+
+    const int height = s->videoStream->codecpar->height;
+    const int width = s->videoStream->codecpar->width;
+    encCtx->width = width;
+    encCtx->height = height;
+    encCtx->pix_fmt = AV_PIX_FMT_YUV420P;          // hostFrame is always YUV420P planar
+    encCtx->time_base = s->videoStream->time_base; // preserves original PTS for VFR
+    encCtx->framerate = s->videoStream->avg_frame_rate;
+    encCtx->sample_aspect_ratio = s->videoStream->codecpar->sample_aspect_ratio;
+    // if we tonemapped HDR->SDR the pixels are now BT.709, so we MUST write SDR metadata instead of the original HDR flags
+    // isHDR checks color_trc for PQ (SMPTE 2084) or HLG, those are only set on true HDR input
+    const bool inputIsHDR = isHDR(s->inputDecoderCtx.get());
+    encCtx->color_range = s->videoStream->codecpar->color_range;
+    encCtx->color_primaries = inputIsHDR ? AVCOL_PRI_BT709 : s->inputDecoderCtx->color_primaries;
+    encCtx->color_trc = inputIsHDR ? AVCOL_TRC_BT709 : s->inputDecoderCtx->color_trc;
+    encCtx->colorspace = inputIsHDR ? AVCOL_SPC_BT709 : s->inputDecoderCtx->colorspace;
+    // MP4/MOV containers require the extradata to be embedded in a global header
+    if (s->outputFormatCtx->oformat->flags & AVFMT_GLOBALHEADER)
+        encCtx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+
+    // open encoder, avcodec_open2 consumes recognised entries from opts
+    const int openRet = avcodec_open2(encCtx.get(), encoder, &opts);
+    av_dict_free(&opts);
+    checkError(openRet < 0, "Failed to open encoder: " + codecName);
+    // add streams to the output container
+    s->inputToOutputStreamMap.assign(s->inputFormatCtx->nb_streams, -1);
+    // video stream (encoded)
+    AVStream* outVideoStream = avformat_new_stream(s->outputFormatCtx.get(), nullptr);
+    checkError(!outVideoStream, "Failed to create output video stream");
+    checkError(avcodec_parameters_from_context(outVideoStream->codecpar, encCtx.get()) < 0, "Failed to copy encoder parameters to output video stream");
+    outVideoStream->time_base = encCtx->time_base;
+    // copy side data (display matrix / rotation, etc) from the input stream
+    // when we tonemapped HDR->SDR, skip HDR entries, the pixel data is already SDR
+    // leaving those in causes video players to tonemap again!
+    for (int i = 0; i < s->videoStream->codecpar->nb_coded_side_data; i++) {
+        const AVPacketSideData& sd = s->videoStream->codecpar->coded_side_data[i];
+        if (inputIsHDR && (sd.type == AV_PKT_DATA_MASTERING_DISPLAY_METADATA || sd.type == AV_PKT_DATA_CONTENT_LIGHT_LEVEL))
+            continue;
+        AVPacketSideData* dst = av_packet_side_data_new(&outVideoStream->codecpar->coded_side_data, &outVideoStream->codecpar->nb_coded_side_data, sd.type, sd.size, 0);
+        if (dst)
+            std::memcpy(dst->data, sd.data, sd.size);
+    }
+    s->inputToOutputStreamMap[s->videoStreamIndex] = outVideoStream->index;
+    s->outputVideoStreamIndex = outVideoStream->index;
+
+    // audio + subtitle streams are REMUXED as is (similar to map in ffmpeg cli)
+    for (unsigned i = 0; i < s->inputFormatCtx->nb_streams; i++) {
+        const AVStream* inSt = s->inputFormatCtx->streams[i];
+        const AVMediaType type = inSt->codecpar->codec_type;
+        if (type != AVMEDIA_TYPE_AUDIO && type != AVMEDIA_TYPE_SUBTITLE)
+            continue;
+        AVStream* outSt = avformat_new_stream(s->outputFormatCtx.get(), nullptr);
+        if (!outSt)
+            continue; // non-fatal: skip this stream
+        if (avcodec_parameters_copy(outSt->codecpar, inSt->codecpar) < 0)
+            continue;
+        outSt->time_base = inSt->time_base;
+        s->inputToOutputStreamMap[i] = outSt->index;
+    }
+
+    // open the output file and write the container header
+    if (!(s->outputFormatCtx->oformat->flags & AVFMT_NOFILE)) {
+        checkError(avio_open(&s->outputFormatCtx->pb, s->settings.encodeOutputPath.c_str(), AVIO_FLAG_WRITE) < 0, "Failed to open output file: " + s->settings.encodeOutputPath);
+    }
+    s->outputFormatCtx->max_interleave_delta = 0; // same as -max_interleave_delta 0 in the ffmpeg cli
+    AVDictionary* hdrOpts = nullptr;
+    checkError(avformat_write_header(s->outputFormatCtx.get(), &hdrOpts) < 0, "Failed to write output container header");
+    av_dict_free(&hdrOpts);
+
+    s->outputEncoderCtx = std::move(encCtx);
+    cout << info("Encoder: " + codecName + ": \"" + s->settings.encodeOutputPath + "\"\n\n");
+}
+
+// wrap the current hostFrame (YUV420P planar, W*H*3/2 bytes) in an AVFrame and submit it
+// to the encoder, for NVENC this returns almost immediately (async),
+// for software encoders the internal frame-thread pool handles parallelism
+// non-blocking drain -> we pull whatever packets the encoder has already finished.
+void encodeFrame(VideoSession* s, const int64_t pts) {
+    const auto [height, width] = s->videoDims();
+    const uint8_t* src = s->hostFrame->get();
+
+    AVFramePtr encFrame(av_frame_alloc());
+    checkError(!encFrame, "Failed to allocate encoder AVFrame");
+    encFrame->format = AV_PIX_FMT_YUV420P;
+    encFrame->width = width;
+    encFrame->height = height;
+    encFrame->pts = pts; // pass original decoded PTS -> VFR preserved end-to-end, important!
+    checkError(av_frame_get_buffer(encFrame.get(), 0) < 0, "Failed to allocate encoder frame buffer");
+
+    // copy YUV planes
+    for (int y = 0; y < height; y++)
+        std::memcpy(encFrame->data[0] + y * encFrame->linesize[0], src + y * width, width);
+    for (int y = 0; y < height / 2; y++) {
+        std::memcpy(encFrame->data[1] + y * encFrame->linesize[1], src + width * height + y * (width / 2), width / 2);
+        std::memcpy(encFrame->data[2] + y * encFrame->linesize[2], src + width * height * 5 / 4 + y * (width / 2), width / 2);
+    }
+
+    const int ret = avcodec_send_frame(s->outputEncoderCtx.get(), encFrame.get());
+    checkError(ret < 0 && ret != AVERROR(EAGAIN), "Encoder send_frame failed");
+    drainEncoderPackets(s);
+}
+
+// flush the encoder pipeline and finalise the output container, called once after all input frames have been processed
+void flushAndFinalize(VideoSession* s) {
+    if (!s->outputEncoderCtx || !s->outputFormatCtx)
+        return;
+    // send flush signal, encoder will drain its internal lookahead/B-frame buffers
+    avcodec_send_frame(s->outputEncoderCtx.get(), nullptr);
+    drainEncoderPackets(s);                     // drain all remaining encoded packets
+    av_write_trailer(s->outputFormatCtx.get()); // write container trailer (MOOV atom for MP4, etc etc)
+}
+
 } // namespace video_utils

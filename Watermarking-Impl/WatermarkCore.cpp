@@ -9,12 +9,10 @@
 #include "VideoProcessingContext.hpp"
 #include "WatermarkBase.hpp"
 #include <cstdint>
-#include <cstdio>
 #include <iostream>
 #include <memory>
 #include <omp.h>
 #include <optional>
-#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -45,7 +43,6 @@ using namespace CommonUtils;
 using namespace InternalUtils;
 
 using std::string;
-using FILEPtr = std::unique_ptr<FILE, decltype(&_pclose)>;
 
 namespace WatermarkCore {
 
@@ -357,26 +354,25 @@ VideoHandle initVideo(const VideoSettings& settings) {
     const int width = session->videoStream->codecpar->width;
     session->watermarkObj = createWatermarkObject(height, width, settings.watermarkPassword, settings.p, settings.psnr);
     session->hostFrame = std::make_unique<HostMemory<uint8_t>>(width * height * 3 / 2);
+#if defined(_USE_EIGEN_)
+    // video is always grayscale, initialize the output buffer to the gray variant (bad_variant_access fix)
+    session->watermarkedFrame = ImageOutputBuffer(Gray8Buffer(height, width));
+#endif
     return VideoHandle(session);
 }
 
-// main function to embed the watermark into the video, it first initializes the filter graph if needed (for 10-bit to 8-bit conversion and HDR to SDR tonemapping),
-// then constructs the FFmpeg command for encoding the output video with the watermark
+// embed the watermark into the video using libav encoding
+// initializes the filter graph if needed (10-bit / HDR), opens the encoder and muxer,
+// processes all frames (video watermarked, audio/subtitles remuxed), then finalises the container
 int embedVideo(VideoSession* s) {
     const bool needsFilter = initFilterGraph(s);
-
-    std::ostringstream ffmpegCmd;
-    ffmpegCmd << "ffmpeg -y -f rawvideo " << getPixFmt(s->videoStream) << "-s " << s->videoStream->codecpar->width << "x" << s->videoStream->codecpar->height << " -r " << getFrameRate(s->videoStream)
-              << " -i - -i \"" << s->settings.videoFile << "\" " << s->settings.encodeOptions << " -c:s copy -c:a copy -map 1:s? -map 0:v -map 1:a? -max_interleave_delta 0 "
-              << getStreamRotation(s->videoStream) << getColorRange(s->videoStream) << "\"" << s->settings.encodeOutputPath << "\"";
-    std::cout << info("\nFFmpeg encode command: " + ffmpegCmd.str() + "\n\n");
-
-    FILEPtr ffmpegPipe(_popen(ffmpegCmd.str().c_str(), "wb"), _pclose);
-    checkError(!ffmpegPipe.get(), "Error: Could not open FFmpeg pipe");
-    return videoDispatcher(s, VideoMode::EMBED, needsFilter, ffmpegPipe.get());
+    video_utils::initOutputEncoder(s);
+    const int framesProcessed = videoDispatcher(s, VideoMode::EMBED, needsFilter);
+    video_utils::flushAndFinalize(s);
+    return framesProcessed;
 }
 
 // main function to detect the watermark from the video
-int detectVideo(VideoSession* s) { return videoDispatcher(s, VideoMode::DETECT, false, nullptr); }
+int detectVideo(VideoSession* s) { return videoDispatcher(s, VideoMode::DETECT, false); }
 
 } // namespace WatermarkCore

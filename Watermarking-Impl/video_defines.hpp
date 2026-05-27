@@ -9,9 +9,10 @@ extern "C" {
 #include "libavfilter/buffersrc.h"
 #include "libavformat/avformat.h"
 #include "libavutil/mem.h"
-#include "libavutil/pixfmt.h"
 #include "libavutil/frame.h"
 #include "libavutil/buffer.h"
+#include "libavutil/dict.h"
+#include "libavformat/avio.h"
 }
 
 namespace video_utils::detail {
@@ -29,6 +30,21 @@ struct AVGenericDeleter {
             av_free(p);
     }
 };
+
+struct AVOutputFormatContextDeleter {
+    void operator()(AVFormatContext* p) const noexcept {
+        if (!p)
+            return;
+        if (p->pb && p->oformat && !(p->oformat->flags & AVFMT_NOFILE))
+            avio_closep(&p->pb);
+        avformat_free_context(p);
+    }
+};
+
+struct AVDictDeleter {
+    void operator()(AVDictionary* d) const noexcept { av_dict_free(&d); }
+};
+
 } // namespace video_utils::detail
 
 /*!
@@ -44,9 +60,7 @@ using AVCodecContextPtr = std::unique_ptr<AVCodecContext, detail::AVDeleter<avco
 using AVFilterInOutPtr = std::unique_ptr<AVFilterInOut, detail::AVDeleter<avfilter_inout_free>>;
 using AVFilterGraphPtr = std::unique_ptr<AVFilterGraph, detail::AVDeleter<avfilter_graph_free>>;
 using AVBufferSrcParametersPtr = std::unique_ptr<AVBufferSrcParameters, detail::AVGenericDeleter>;
+using AVOutputFormatContextPtr = std::unique_ptr<AVFormatContext, detail::AVOutputFormatContextDeleter>;
+using AVDictionaryPtr = std::unique_ptr<AVDictionary, detail::AVDictDeleter>;
 
-static constexpr AVPixelFormat supportedFormats[] = {AV_PIX_FMT_YUV420P, AV_PIX_FMT_YUVJ420P, AV_PIX_FMT_YUV420P10LE, AV_PIX_FMT_CUDA};
-#if defined(_USE_CUDA_)
-static constexpr AVPixelFormat supportedHwFormats[] = {AV_PIX_FMT_NV12, AV_PIX_FMT_P010LE, AV_PIX_FMT_P016LE};
-#endif
 } // namespace video_utils
