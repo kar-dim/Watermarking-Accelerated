@@ -13,6 +13,7 @@
 #include <cstring>
 #include <exception>
 #include <format>
+#include <functional>
 #include <iostream>
 #include <mutex>
 #include <queue>
@@ -520,12 +521,12 @@ void detectWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* fr
 
 // main frames loop: decodes packets, calls processFrame for each video frame,
 // remuxes audio/subtitle packets directly when outputFormatCtx is set (embed mode)
-template <bool needsFilter, typename Func>
-int processFrames(VideoSession* s, Func&& processFrame) {
+template <typename Func>
+int processFrames(VideoSession* s, const bool needsFilter, Func&& processFrame) {
     const AVPacketPtr packet(av_packet_alloc());
     AVFramePtr frame(av_frame_alloc());
     AVFramePtr filteredFrame(nullptr);
-    if constexpr (needsFilter)
+    if (needsFilter)
         filteredFrame.reset(av_frame_alloc());
     int framesCount = 0;
 
@@ -542,7 +543,7 @@ int processFrames(VideoSession* s, Func&& processFrame) {
                         av_packet_unref(packet.get());
                         throw std::runtime_error(std::string("FFmpeg decoding error: ") + errbuf);
                     }
-                    if constexpr (needsFilter)
+                    if (needsFilter)
                         filterFrame(frame, filteredFrame, s);
                     std::forward<Func>(processFrame)(frame.get(), framesCount);
                 }
@@ -562,7 +563,7 @@ int processFrames(VideoSession* s, Func&& processFrame) {
     }
     avcodec_send_packet(s->inputDecoderCtx.get(), nullptr);
     while (avcodec_receive_frame(s->inputDecoderCtx.get(), frame.get()) == 0) {
-        if constexpr (needsFilter)
+        if (needsFilter)
             filterFrame(frame, filteredFrame, s);
         std::forward<Func>(processFrame)(frame.get(), framesCount);
     }
@@ -669,23 +670,17 @@ bool initFilterGraph(VideoSession* s) {
     return true;
 }
 
-// clang-format off
 int videoDispatcher(VideoSession* s, VideoMode op, const bool needsFilter) {
 #if defined(_USE_CUDA_)
-    if (s->useHwDecoder)
-        return needsFilter ?
-            processFrames<true>(s, [&](const AVFrame* frame, int& framesCount) {
-                op == VideoMode::EMBED ? embedWatermarkHWAccel(s, framesCount, frame) : detectWatermarkHWAccel(s, framesCount, frame);
-            }) :
-            processFrames<false>(s, [&](const AVFrame* frame, int& framesCount) {
-                op == VideoMode::EMBED ? embedWatermarkHWAccel(s, framesCount, frame) : detectWatermarkHWAccel(s, framesCount, frame);
-            });
+    if (s->useHwDecoder) {
+        if (op == VideoMode::EMBED)
+            return processFrames(s, needsFilter, [&](const AVFrame* frame, int& framesCount) { embedWatermarkHWAccel(s, framesCount, frame); });
+        return processFrames(s, needsFilter, [&](const AVFrame* frame, int& framesCount) { detectWatermarkHWAccel(s, framesCount, frame); });
+    }
 #endif
     // SW detect
     if (op == VideoMode::DETECT)
-        return needsFilter ?
-            processFrames<true>(s, [&](const AVFrame* frame, int& framesCount) { detectWatermark(s, framesCount, frame); }) :
-            processFrames<false>(s, [&](const AVFrame* frame, int& framesCount) { detectWatermark(s, framesCount, frame); });
+        return processFrames(s, needsFilter, [&](const AVFrame* frame, int& framesCount) { detectWatermark(s, framesCount, frame); });
 
     // SW embed: start a dedicated encode thread so decode+watermark (main) and
     // avcodec_send_frame+write (background) run concurrently
@@ -694,9 +689,7 @@ int videoDispatcher(VideoSession* s, VideoMode op, const bool needsFilter) {
     std::thread encThread(encodeWorker, s, std::ref(queue), std::ref(encErr));
     int result = 0;
     try {
-        result = needsFilter ?
-            processFrames<true>(s, [&](const AVFrame* frame, int& framesCount) { embedWatermark(s, framesCount, frame, queue); }) :
-            processFrames<false>(s, [&](const AVFrame* frame, int& framesCount) { embedWatermark(s, framesCount, frame, queue); });
+        result = processFrames(s, needsFilter, [&](const AVFrame* frame, int& framesCount) { embedWatermark(s, framesCount, frame, queue); });
         queue.push(nullptr); // END: tell the encode thread to flush and exit
     } catch (...) {
         queue.abort(); // unblock encode thread if it is waiting
@@ -708,7 +701,6 @@ int videoDispatcher(VideoSession* s, VideoMode op, const bool needsFilter) {
         std::rethrow_exception(encErr);
     return result;
 }
-// clang-format on
 
 void initOutputEncoder(VideoSession* s) {
     checkError(s->settings.encodeOutputPath.empty(), "No output path specified for video encode");
