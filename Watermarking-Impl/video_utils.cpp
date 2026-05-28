@@ -16,6 +16,7 @@
 #include <functional>
 #include <iostream>
 #include <mutex>
+#include <optional>
 #include <queue>
 #include <span>
 #include <sstream>
@@ -23,6 +24,7 @@
 #include <string>
 #include <thread>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #if defined(_USE_CUDA_)
@@ -89,32 +91,43 @@ bool checkPixelFormatSupport(const std::span<const AVPixelFormat> formats, const
 }
 
 // Queue that decouples the decode/watermark main thread from the encode background thread
+// Holds either a frame to encode or an already prepared packet to remux directly, the
+// encode thread is the only writer to outputFormatCtx, eliminating muxer race conditions
 struct EncodeQueue {
+    using Item = std::variant<AVFramePtr, AVPacketPtr>;
     static constexpr int MAX_DEPTH = 8;
-    std::queue<AVFramePtr> q;
+    std::queue<Item> q;
     std::mutex mtx;
     std::condition_variable cv;
+    bool closed = false;
     bool aborted = false;
 
-    // push frame (or nullptr for end), blocks when the queue is full
-    void push(AVFramePtr f) {
+    // push item (frame or packet), blocks when the queue is full
+    void push(Item item) {
         std::unique_lock lk(mtx);
         cv.wait(lk, [&] { return static_cast<int>(q.size()) < MAX_DEPTH || aborted; });
         if (!aborted)
-            q.push(std::move(f));
+            q.push(std::move(item));
         cv.notify_all();
     }
 
-    // returns nullptr on end, or abort
-    AVFramePtr pop() {
+    // signal EOS (end of stream), no more pushes will follow
+    void close() {
         std::unique_lock lk(mtx);
-        cv.wait(lk, [&] { return !q.empty() || aborted; });
+        closed = true;
+        cv.notify_all();
+    }
+
+    // returns nullopt on end (closed and drained) or abort
+    std::optional<Item> pop() {
+        std::unique_lock lk(mtx);
+        cv.wait(lk, [&] { return !q.empty() || closed || aborted; });
         if (q.empty())
-            return nullptr;
-        AVFramePtr f = std::move(q.front());
+            return std::nullopt;
+        Item item = std::move(q.front());
         q.pop();
         cv.notify_all();
-        return f;
+        return item;
     }
 
     // unblock any waiting caller immediately (error path)
@@ -335,17 +348,23 @@ void drainEncoderPackets(VideoSession* s) {
     // AVERROR(EAGAIN) -> encoder needs more frames before producing output (we ignore it, keep going)
 }
 
-// encode thread: pops frames, sends to encoder, drains output packets (nullptr frame signals END)
-// runs on a background thread and errors are marshalled back via encErr
+// encode thread: pops items, encodes frames OR writes passthrough packets, it is the
+// only writer to outputFormatCtx so audio/subtitle remux and video encode never have race conditions
 // does NOT flush the encoder on exit — flushAndFinalize handles that after join()
 void encodeWorker(VideoSession* s, EncodeQueue& queue, std::exception_ptr& encErr) noexcept {
     try {
-        while (AVFramePtr frame = queue.pop()) {
-            const int ret = avcodec_send_frame(s->outputEncoderCtx.get(), frame.get());
-            checkError(ret < 0 && ret != AVERROR(EAGAIN), "Encode thread: avcodec_send_frame failed");
-            drainEncoderPackets(s);
+        while (auto item = queue.pop()) {
+            if (std::holds_alternative<AVFramePtr>(*item)) {
+                AVFramePtr frame = std::move(std::get<AVFramePtr>(*item));
+                const int ret = avcodec_send_frame(s->outputEncoderCtx.get(), frame.get());
+                checkError(ret < 0 && ret != AVERROR(EAGAIN), "Encode thread: avcodec_send_frame failed");
+                drainEncoderPackets(s);
+            } else {
+                AVPacketPtr pkt = std::move(std::get<AVPacketPtr>(*item));
+                checkError(av_interleaved_write_frame(s->outputFormatCtx.get(), pkt.get()) < 0, "Encode thread: passthrough packet write failed");
+            }
         }
-        // nullptr popped -> all frames sent and flushAndFinalize will send the null frame + final drain
+        // queue closed -> all items processed, flushAndFinalize will send the null frame + final drain
     } catch (...) {
         encErr = std::current_exception();
         queue.abort(); // unblock main thread if it is waiting on a full queue
@@ -353,8 +372,8 @@ void encodeWorker(VideoSession* s, EncodeQueue& queue, std::exception_ptr& encEr
 }
 
 #if defined(_USE_CUDA_)
-// NVDEC+NVENC zero-copy: wrap CUDA Y+UV buffers in a hw AVFrame and send directly to NVENC
-void encodeFrameGPU(VideoSession* s, const CudaArray<uint8_t>& yRowMajor, const AVFrame* srcFrame, const int64_t pts) {
+// NVDEC+NVENC zero-copy: wrap CUDA Y+UV buffers in a hw AVFrame and give it to the encode thread
+void encodeFrameGPU(VideoSession* s, const CudaArray<uint8_t>& yRowMajor, const AVFrame* srcFrame, const int64_t pts, EncodeQueue& queue) {
     const auto [height, width] = s->videoDims();
     const auto stream = CudaStreamManager::getInstance().getComputeStream();
     AVFramePtr encFrame(av_frame_alloc());
@@ -369,9 +388,7 @@ void encodeFrameGPU(VideoSession* s, const CudaArray<uint8_t>& yRowMajor, const 
     // D2D: original NV12 UV stays interleaved —> NVENC expects NV12, no conversion needed
     cudaMemcpy2DAsync(encFrame->data[1], encFrame->linesize[1], srcFrame->data[1], srcFrame->linesize[1], width, height / 2, cudaMemcpyDeviceToDevice, stream);
     cudaStreamSynchronize(stream);
-    const int ret = avcodec_send_frame(s->outputEncoderCtx.get(), encFrame.get());
-    checkError(ret < 0 && ret != AVERROR(EAGAIN), "NVENC send_frame failed");
-    drainEncoderPackets(s);
+    queue.push(std::move(encFrame));
 }
 #endif
 
@@ -455,18 +472,10 @@ void detectWatermark(VideoSession* s, int& framesCount, const AVFrame* frame) {
 }
 
 #if defined(_USE_CUDA_)
-// synchronous encode: used by the NVDEC+SW-encoder path (chroma already in hostFrame)
-void encodeFrame(VideoSession* s, const int64_t pts) {
-    AVFramePtr encFrame = buildEncFrame(s, pts);
-    const int ret = avcodec_send_frame(s->outputEncoderCtx.get(), encFrame.get());
-    checkError(ret < 0 && ret != AVERROR(EAGAIN), "Encoder send_frame failed");
-    drainEncoderPackets(s);
-}
-
 // embed watermark in a NVDEC frame, two paths depending on the encoder:
 // NVDEC + NVENC: full zero-copy, Y and UV stay in VRAM
 // NVDEC + SW encoder: download Y+UV to hostFrame, CPU encodes
-void embedWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* frame) {
+void embedWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* frame, EncodeQueue& queue) {
     const auto stream = CudaStreamManager::getInstance().getComputeStream();
     const auto [height, width] = s->videoDims();
     const bool doEmbed = framesCount % s->settings.watermarkInterval == 0;
@@ -484,7 +493,7 @@ void embedWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* fra
         } else {
             cudaMemcpy2DAsync(yRowMajor.data(), width, frame->data[0], frame->linesize[0], width, height, cudaMemcpyDeviceToDevice, stream);
         }
-        encodeFrameGPU(s, yRowMajor, frame, frame->pts);
+        encodeFrameGPU(s, yRowMajor, frame, frame->pts, queue);
     } else {
         // NVDEC + SW encoder
         CudaArray<uint8_t> chromaBuffer(width * height / 2, stream);
@@ -499,7 +508,8 @@ void embedWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* fra
             cudaMemcpy2DAsync(s->hostFrame->get(), width, frame->data[0], frame->linesize[0], width, height, cudaMemcpyDeviceToHost, stream);
             cudaStreamSynchronize(stream);
         }
-        encodeFrame(s, frame->pts);
+        // chroma is already in hostFrame -> buildEncFrame reads Y+UV from there
+        queue.push(buildEncFrame(s, frame->pts));
     }
     framesCount++;
 }
@@ -522,7 +532,7 @@ void detectWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* fr
 // main frames loop: decodes packets, calls processFrame for each video frame,
 // remuxes audio/subtitle packets directly when outputFormatCtx is set (embed mode)
 template <typename Func>
-int processFrames(VideoSession* s, const bool needsFilter, Func&& processFrame) {
+int processFrames(VideoSession* s, const bool needsFilter, EncodeQueue* remuxQueue, Func&& processFrame) {
     const AVPacketPtr packet(av_packet_alloc());
     AVFramePtr frame(av_frame_alloc());
     AVFramePtr filteredFrame(nullptr);
@@ -549,13 +559,16 @@ int processFrames(VideoSession* s, const bool needsFilter, Func&& processFrame) 
                 }
             }
         } else if (s->outputFormatCtx) {
+            // embed mode (any path): hand the audio/subtitle packet to the encode thread
             const int inIdx = packet->stream_index;
             if (inIdx < static_cast<int>(s->inputToOutputStreamMap.size())) {
                 const int outIdx = s->inputToOutputStreamMap[inIdx];
                 if (outIdx >= 0) {
                     av_packet_rescale_ts(packet.get(), s->inputFormatCtx->streams[inIdx]->time_base, s->outputFormatCtx->streams[outIdx]->time_base);
                     packet->stream_index = outIdx;
-                    av_interleaved_write_frame(s->outputFormatCtx.get(), packet.get());
+                    AVPacketPtr owned(av_packet_alloc());
+                    av_packet_move_ref(owned.get(), packet.get());
+                    remuxQueue->push(std::move(owned));
                 }
             }
         }
@@ -671,26 +684,29 @@ bool initFilterGraph(VideoSession* s) {
 }
 
 int videoDispatcher(VideoSession* s, VideoMode op, const bool needsFilter) {
+    // detect paths: no encoder, no thread, no queue
+    if (op == VideoMode::DETECT) {
 #if defined(_USE_CUDA_)
-    if (s->useHwDecoder) {
-        if (op == VideoMode::EMBED)
-            return processFrames(s, needsFilter, [&](const AVFrame* frame, int& framesCount) { embedWatermarkHWAccel(s, framesCount, frame); });
-        return processFrames(s, needsFilter, [&](const AVFrame* frame, int& framesCount) { detectWatermarkHWAccel(s, framesCount, frame); });
-    }
+        if (s->useHwDecoder)
+            return processFrames(s, needsFilter, nullptr, [&](const AVFrame* frame, int& framesCount) { detectWatermarkHWAccel(s, framesCount, frame); });
 #endif
-    // SW detect
-    if (op == VideoMode::DETECT)
-        return processFrames(s, needsFilter, [&](const AVFrame* frame, int& framesCount) { detectWatermark(s, framesCount, frame); });
+        return processFrames(s, needsFilter, nullptr, [&](const AVFrame* frame, int& framesCount) { detectWatermark(s, framesCount, frame); });
+    }
 
-    // SW embed: start a dedicated encode thread so decode+watermark (main) and
-    // avcodec_send_frame+write (background) run concurrently
+    // embed paths: start a dedicated encode thread so decode+watermark (main) and
+    // avcodec_send_frame+write (background) run concurrently, video frames and audio/subtitle packets all go in the queue
     EncodeQueue queue;
     std::exception_ptr encErr;
     std::thread encThread(encodeWorker, s, std::ref(queue), std::ref(encErr));
     int result = 0;
     try {
-        result = processFrames(s, needsFilter, [&](const AVFrame* frame, int& framesCount) { embedWatermark(s, framesCount, frame, queue); });
-        queue.push(nullptr); // END: tell the encode thread to flush and exit
+#if defined(_USE_CUDA_)
+        if (s->useHwDecoder)
+            result = processFrames(s, needsFilter, &queue, [&](const AVFrame* frame, int& framesCount) { embedWatermarkHWAccel(s, framesCount, frame, queue); });
+        else
+#endif
+            result = processFrames(s, needsFilter, &queue, [&](const AVFrame* frame, int& framesCount) { embedWatermark(s, framesCount, frame, queue); });
+        queue.close(); // END: tell the encode thread to drain and exit
     } catch (...) {
         queue.abort(); // unblock encode thread if it is waiting
         encThread.join();
