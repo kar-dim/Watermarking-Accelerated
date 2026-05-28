@@ -126,7 +126,7 @@ ffmpeg -y -f rawvideo
 - `-max_interleave_delta 0`: Avoids interleaving delay issues in the output container.
 - `<output_file>`: **USER SUPPLIED** — destination path set via ```encode_output_path```.
 
-**NOTE:** 10-bit video is supported: 10-bit SDR is converted to 8-bit losslessly before watermarking. HDR 10-bit is tonemapped (Mobius) to SDR by the CPU filter graph before watermarking. Hardware-accelerated tonemapping is not yet supported by FFmpeg. Encoding output is always 8-bit.
+**NOTE:** 10-bit video is supported: 10-bit SDR is converted to 8-bit losslessly before watermarking. HDR 10-bit is tonemapped with the Mobius algorithm to SDR. If CPU decoder is used, then we use the FFmpeg's `tonemap=mobius` filter. For Hardware-accelerated decoder (NVDEC) a custom Mobius kernel pipeline is implemented, because currently it is impossible to do the tonemapping by FFmpeg provided filters. Encoding output is always 8-bit SDR.
 
 # How to Build
 
