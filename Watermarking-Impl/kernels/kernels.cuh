@@ -692,3 +692,49 @@ __global__ void rowMajorToColMajorFloat(const float* __restrict__ src, float* __
 
 // fused row-major 3-channel RGB to col-major grayscale with ITU-R 601 luma weights
 __global__ void rowMajorRGBToColMajorGray(const float* __restrict__ src, float* __restrict__ dst, const int width, const int height);
+
+// HDR (P010LE, BT.2020 PQ) to SDR (BT.709) helpers
+
+// PQ EOTF (ST.2084): normalized PQ [0,1] -> linear [0,1] where 1.0 = 10000 nits
+__device__ __forceinline__ float pqEotf(const float N) {
+    constexpr float invM1 = 1.0f / 0.1593017578125f;
+    constexpr float invM2 = 1.0f / 78.84375f;
+    constexpr float c1 = 0.8359375f;
+    constexpr float c2 = 18.8515625f;
+    constexpr float c3 = 18.6875f;
+    const float Np = __powf(N, invM2);
+    return __powf(fmaxf(Np - c1, 0.0f) / (c2 - c3 * Np), invM1);
+}
+
+// Mobius tonemapping: Mobius transform where f(j)=j, f'(j)=1, f(peak)=1.0
+// Input MUST be in npl=100 units (1.0 = 100 nits, so SDR white == 1.0)
+__device__ __forceinline__ float mobiusTonemap(const float x, const float hdrPeak) {
+    constexpr float j = 0.3f; // transition point in npl=100 units (30 nits)
+    if (x <= j)
+        return x;
+    const float C = (2.0f - hdrPeak) / (hdrPeak * (2.0f * j - 1.0f) - j * j);
+    const float A = 2.0f * C * j + 1.0f;
+    const float B = -C * j * j;
+    return (A * x + B) / (C * x + 1.0f);
+}
+
+// BT.1886 gamma (gamma 2.4): linear [0,1] -> display [0,1]
+__device__ __forceinline__ float bt1886(const float x) { return __powf(fmaxf(x, 0.0f), 1.0f / 2.4f); }
+
+// Full HDR luma: P010LE limited range Y to SDR float [0,255]
+// hdrPeak: HDR peak in npl=100 units
+__device__ __forceinline__ float p010YToSdrFloat(const uint16_t raw, const float hdrPeak) {
+    const float norm = clamp((static_cast<float>(raw >> 6) - 64.0f) / 876.0f, 0.0f, 1.0f);
+    const float linear_100 = pqEotf(norm) * 100.0f; // npl=100, so 100 nits -> 1.0
+    return bt1886(clamp(mobiusTonemap(linear_100, hdrPeak), 0.0f, 1.0f)) * 255.0f;
+}
+
+// HDR Y: P010LE pitched -> col-major float [0,255] (equivalent to pitchedToFloat for HDR frames)
+__global__ void p010HdrYToSdrFloat(const uint16_t* __restrict__ input, float* __restrict__ output, const int width, const int height, const int pitchBytes, const float hdrPeak);
+
+// HDR UV: P010LE interleaved UV + Y -> uint8_t interleaved NV12 UV with full BT.2020->BT.709 conversion
+__global__ void p010HdrUVToSdrNV12(const uint16_t* __restrict__ ySrc, const int yPitchBytes, const uint16_t* __restrict__ uvSrc, const int uvPitchBytes, uint8_t* __restrict__ uvDst, const int width,
+                                   const int height, const float hdrPeak);
+
+// HDR Y: P010LE pitched -> uint8_t row-major [0,255] (for passthrough encoding without watermarking)
+__global__ void p010HdrYToSdrU8(const uint16_t* __restrict__ input, uint8_t* __restrict__ output, const int width, const int height, const int pitchBytes, const float hdrPeak);

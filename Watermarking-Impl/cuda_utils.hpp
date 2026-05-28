@@ -14,6 +14,10 @@ void launchU8ToFloatGrayKernel(const uint8_t* input, float* output, const int pl
 void launchColMajorToRowMajorU8Kernel(const uint8_t* src, uint8_t* dst, const int width, const int height, const int channels, const cudaStream_t stream);
 void launchRowMajorToColMajorFloatKernel(const float* src, float* dst, const int width, const int height, const int channels, const cudaStream_t stream);
 void launchRowMajorRGBToColMajorGrayKernel(const float* src, float* dst, const int width, const int height, const cudaStream_t stream);
+// HDR (P010LE BT.2020 PQ) -> SDR (BT.709) conversion kernels
+void launchP010HdrYToSdrFloatKernel(const uint16_t* ySrc, float* yDst, const int width, const int height, const int pitchBytes, const float hdrPeak, const cudaStream_t stream);
+void launchP010HdrUVToSdrNV12Kernel(const uint16_t* ySrc, const int yPitchBytes, const uint16_t* uvSrc, const int uvPitchBytes, uint8_t* uvDst, const int width, const int height, const float hdrPeak, const cudaStream_t stream);
+void launchP010HdrYToSdrU8Kernel(const uint16_t* ySrc, uint8_t* yDst, const int width, const int height, const int pitchBytes, const float hdrPeak, const cudaStream_t stream);
 // helper method to calculate kernel grid size from given 2D dimensions and blockSize
 inline dim3 gridSizeCalculate(const dim3 blockSize, const int rows, const int cols) { return dim3((cols + blockSize.x - 1) / blockSize.x, (rows + blockSize.y - 1) / blockSize.y); }
 // helper method to calculate a 1D grid size for a given number of elements and block size, with a maximum of 2560 blocks (used for grid-stride kernels only)

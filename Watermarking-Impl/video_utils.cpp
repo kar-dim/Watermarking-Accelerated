@@ -57,6 +57,7 @@ extern "C" {
 #include "libavutil/dict.h"
 #include "libavutil/error.h"
 #include "libavutil/frame.h"
+#include "libavutil/mastering_display_metadata.h"
 #include "libavutil/mem.h"
 #include "libavutil/pixdesc.h"
 #include "libavutil/pixfmt.h"
@@ -214,9 +215,10 @@ string getFilterGraphString(const VideoSession* s) {
         return ""; // 8-bit SDR, no filtering (save processing time)
     if (!isHDR(s->inputDecoderCtx.get()))
         return s->useHwDecoder ? "scale_cuda=format=nv12" : "format=yuv420p"; // 10-bit SDR, fast downscale to 8-bit
-    // HDR10 / 10-bit HDR GPU case -> unfortunately no way to tonemap in GPU with cuda filters yet! Should use CPU decoder instead
-    checkError(s->useHwDecoder, "Cannot tonemap HDR input to SDR with Hardware Accelerated Decoder yet. Use CPU decoder instead.");
-    // HDR10 / 10-bit HDR CPU case -> scaler needs more input info
+    // NVDEC + HDR: conversion is done by CUDA kernels, no filter graph needed
+    if (s->useHwDecoder)
+        return "";
+    // SW decoder + HDR: zscale needs explicit input primaries/matrix
     const char* primaries = av_color_primaries_name(s->inputDecoderCtx.get()->color_primaries);
     const char* matrix = av_color_space_name(s->inputDecoderCtx.get()->colorspace);
     // fallback to safe HDR10 defaults if any field is unspecified
@@ -373,7 +375,8 @@ void encodeWorker(VideoSession* s, EncodeQueue& queue, std::exception_ptr& encEr
 
 #if defined(_USE_CUDA_)
 // NVDEC+NVENC zero-copy: wrap CUDA Y+UV buffers in a hw AVFrame and give it to the encode thread
-void encodeFrameGPU(VideoSession* s, const CudaArray<uint8_t>& yRowMajor, const AVFrame* srcFrame, const int64_t pts, EncodeQueue& queue) {
+// uvOverride: when not null, use this preconverted uint8_t NV12 UV (HDR path) instead of srcFrame->data[1]
+void encodeFrameGPU(VideoSession* s, const CudaArray<uint8_t>& yRowMajor, const AVFrame* srcFrame, const int64_t pts, EncodeQueue& queue, const uint8_t* uvOverride = nullptr) {
     const auto [height, width] = s->videoDims();
     const auto stream = CudaStreamManager::getInstance().getComputeStream();
     AVFramePtr encFrame(av_frame_alloc());
@@ -383,10 +386,11 @@ void encodeFrameGPU(VideoSession* s, const CudaArray<uint8_t>& yRowMajor, const 
     encFrame->height = height;
     encFrame->pts = pts;
     checkError(av_hwframe_get_buffer(s->outputEncoderCtx->hw_frames_ctx, encFrame.get(), 0) < 0, "Failed to get NVENC hw frame buffer");
-    // D2D: watermarked Y (row-major, stride=width) -> NVENC Y plane (NVENC-aligned stride)
     cudaMemcpy2DAsync(encFrame->data[0], encFrame->linesize[0], yRowMajor.data(), width, width, height, cudaMemcpyDeviceToDevice, stream);
-    // D2D: original NV12 UV stays interleaved —> NVENC expects NV12, no conversion needed
-    cudaMemcpy2DAsync(encFrame->data[1], encFrame->linesize[1], srcFrame->data[1], srcFrame->linesize[1], width, height / 2, cudaMemcpyDeviceToDevice, stream);
+    // HDR path passes preconverted uint8_t NV12 UV (stride=width) -> SDR path copies directly from decoded frame
+    const uint8_t* uvSrc = uvOverride ? uvOverride : static_cast<const uint8_t*>(srcFrame->data[1]);
+    const int uvPitch = uvOverride ? width : srcFrame->linesize[1];
+    cudaMemcpy2DAsync(encFrame->data[1], encFrame->linesize[1], uvSrc, uvPitch, width, height / 2, cudaMemcpyDeviceToDevice, stream);
     cudaStreamSynchronize(stream);
     queue.push(std::move(encFrame));
 }
@@ -472,43 +476,100 @@ void detectWatermark(VideoSession* s, int& framesCount, const AVFrame* frame) {
 }
 
 #if defined(_USE_CUDA_)
-// embed watermark in a NVDEC frame, two paths depending on the encoder:
-// NVDEC + NVENC: full zero-copy, Y and UV stay in VRAM
-// NVDEC + SW encoder: download Y+UV to hostFrame, CPU encodes
+// read HDR peak luminance from stream MaxCLL side data, normalized to 100 units (nits / 100)
+// falls back to 10.0 (1000 nits) which is the most common
+static float getHdrPeak(const VideoSession* s) {
+    for (int i = 0; i < s->videoStream->codecpar->nb_coded_side_data; i++) {
+        const AVPacketSideData& sd = s->videoStream->codecpar->coded_side_data[i];
+        if (sd.type == AV_PKT_DATA_CONTENT_LIGHT_LEVEL) {
+            const auto* cll = reinterpret_cast<const AVContentLightMetadata*>(sd.data);
+            if (cll->MaxCLL > 0)
+                return static_cast<float>(cll->MaxCLL) / 100.0f;
+        }
+    }
+    return 10.0f; // 1000 nits default
+}
+
+// HDR helpers: convert P010LE CUDA planes to SDR format (HDR peak is read once per session)
+static void loadHdrLuma(VideoSession* s, const AVFrame* frame, CudaArray<float>& dst, const float hdrPeak, const cudaStream_t stream) {
+    const auto [height, width] = s->videoDims();
+    cuda_utils::launchP010HdrYToSdrFloatKernel(reinterpret_cast<const uint16_t*>(frame->data[0]), dst.data(), width, height, frame->linesize[0], hdrPeak, stream);
+}
+
+static CudaArray<uint8_t> convertHdrUV(VideoSession* s, const AVFrame* frame, const float hdrPeak, const cudaStream_t stream) {
+    const auto [height, width] = s->videoDims();
+    CudaArray<uint8_t> uvNV12(width * height / 2, stream);
+    cuda_utils::launchP010HdrUVToSdrNV12Kernel(reinterpret_cast<const uint16_t*>(frame->data[0]), frame->linesize[0], reinterpret_cast<const uint16_t*>(frame->data[1]), frame->linesize[1],
+                                               uvNV12.data(), width, height, hdrPeak, stream);
+    return uvNV12;
+}
+
+// embed watermark in a NVDEC frame: Two encoder paths (NVENC, SW) and two content paths (SDR, HDR).
+// HDR frames (P010LE PQ) are tonemapped to BT.709 SDR entirely in custom CUDA kernels
 void embedWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* frame, EncodeQueue& queue) {
     const auto stream = CudaStreamManager::getInstance().getComputeStream();
     const auto [height, width] = s->videoDims();
     const bool doEmbed = framesCount % s->settings.watermarkInterval == 0;
+    const bool isHdr = isHDR(s->inputDecoderCtx.get());
+    const float hdrPeak = isHdr ? getHdrPeak(s) : 0.0f; // read MaxCLL once per frame
 
     if (doEmbed)
         cout << std::format(" [Embedding frame {}]\n", framesCount + 1);
+
     if (s->outputEncoderCtx->hw_frames_ctx) {
-        // NVDEC + NVENC zero-copy
+        // NVDEC + NVENC
         CudaArray<uint8_t> yRowMajor(height, width, stream);
         if (doEmbed) {
             CudaArray<float> lumaFloat(height, width, stream);
-            cuda_utils::launchPitchedToFloatKernel(frame->data[0], lumaFloat.data(), width, height, frame->linesize[0], stream);
+            if (isHdr)
+                loadHdrLuma(s, frame, lumaFloat, hdrPeak, stream);
+            else
+                cuda_utils::launchPitchedToFloatKernel(frame->data[0], lumaFloat.data(), width, height, frame->linesize[0], stream);
             s->watermarkObj->makeWatermark(lumaFloat, lumaFloat, s->watermarkedFrame, MaskMethod::ME);
             cuda_utils::launchColMajorToRowMajorU8Kernel(s->watermarkedFrame.data(), yRowMajor.data(), width, height, 1, stream);
         } else {
-            cudaMemcpy2DAsync(yRowMajor.data(), width, frame->data[0], frame->linesize[0], width, height, cudaMemcpyDeviceToDevice, stream);
+            if (isHdr)
+                cuda_utils::launchP010HdrYToSdrU8Kernel(reinterpret_cast<const uint16_t*>(frame->data[0]), yRowMajor.data(), width, height, frame->linesize[0], hdrPeak, stream);
+            else
+                cudaMemcpy2DAsync(yRowMajor.data(), width, frame->data[0], frame->linesize[0], width, height, cudaMemcpyDeviceToDevice, stream);
         }
-        encodeFrameGPU(s, yRowMajor, frame, frame->pts, queue);
+        if (isHdr) {
+            CudaArray<uint8_t> uvNV12 = convertHdrUV(s, frame, hdrPeak, stream);
+            encodeFrameGPU(s, yRowMajor, frame, frame->pts, queue, uvNV12.data());
+        } else {
+            encodeFrameGPU(s, yRowMajor, frame, frame->pts, queue);
+        }
     } else {
         // NVDEC + SW encoder
-        CudaArray<uint8_t> chromaBuffer(width * height / 2, stream);
-        cuda_utils::launchNV12ToYUV420pKernel(frame->data[1], frame->linesize[1], chromaBuffer.data(), width / 2, height / 2, stream);
-        chromaBuffer.toHostAsync(s->hostFrame->get() + width * height);
-        if (doEmbed) {
-            CudaArray<float> lumaBuffer(height, width, stream);
-            cuda_utils::launchPitchedToFloatKernel(frame->data[0], lumaBuffer.data(), width, height, frame->linesize[0], stream);
-            cudaStreamSynchronize(stream);
-            embedAndFillYPlane(s, lumaBuffer);
+        if (isHdr) {
+            // convert HDR UV: P010LE -> NV12 uint8_t -> planar YUV420P in hostFrame
+            CudaArray<uint8_t> uvNV12 = convertHdrUV(s, frame, hdrPeak, stream);
+            CudaArray<uint8_t> chromaBuffer(width * height / 2, stream);
+            cuda_utils::launchNV12ToYUV420pKernel(uvNV12.data(), width, chromaBuffer.data(), width / 2, height / 2, stream);
+            chromaBuffer.toHostAsync(s->hostFrame->get() + width * height);
+            if (doEmbed) {
+                CudaArray<float> lumaFloat(height, width, stream);
+                loadHdrLuma(s, frame, lumaFloat, hdrPeak, stream);
+                cudaStreamSynchronize(stream);
+                embedAndFillYPlane(s, lumaFloat);
+            } else {
+                cuda_utils::launchP010HdrYToSdrU8Kernel(reinterpret_cast<const uint16_t*>(frame->data[0]), s->hostFrame->get(), width, height, frame->linesize[0], hdrPeak, stream);
+                cudaStreamSynchronize(stream);
+            }
         } else {
-            cudaMemcpy2DAsync(s->hostFrame->get(), width, frame->data[0], frame->linesize[0], width, height, cudaMemcpyDeviceToHost, stream);
-            cudaStreamSynchronize(stream);
+            CudaArray<uint8_t> chromaBuffer(width * height / 2, stream);
+            cuda_utils::launchNV12ToYUV420pKernel(frame->data[1], frame->linesize[1], chromaBuffer.data(), width / 2, height / 2, stream);
+            chromaBuffer.toHostAsync(s->hostFrame->get() + width * height);
+            if (doEmbed) {
+                CudaArray<float> lumaBuffer(height, width, stream);
+                cuda_utils::launchPitchedToFloatKernel(frame->data[0], lumaBuffer.data(), width, height, frame->linesize[0], stream);
+                cudaStreamSynchronize(stream);
+                embedAndFillYPlane(s, lumaBuffer);
+            } else {
+                cudaMemcpy2DAsync(s->hostFrame->get(), width, frame->data[0], frame->linesize[0], width, height, cudaMemcpyDeviceToHost, stream);
+                cudaStreamSynchronize(stream);
+            }
         }
-        // chroma is already in hostFrame -> buildEncFrame reads Y+UV from there
         queue.push(buildEncFrame(s, frame->pts));
     }
     framesCount++;
@@ -522,7 +583,12 @@ void detectWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* fr
     const auto [height, width] = s->videoDims();
     const auto stream = CudaStreamManager::getInstance().getComputeStream();
     CudaArray<float> lumaBuffer(height, width, stream);
-    cuda_utils::launchPitchedToFloatKernel(frame->data[0], lumaBuffer.data(), width, height, frame->linesize[0], stream);
+    if (isHDR(s->inputDecoderCtx.get())) {
+        const float hdrPeak = getHdrPeak(s);
+        loadHdrLuma(s, frame, lumaBuffer, hdrPeak, stream);
+    } else {
+        cuda_utils::launchPitchedToFloatKernel(frame->data[0], lumaBuffer.data(), width, height, frame->linesize[0], stream);
+    }
     const float correlation = s->watermarkObj->detectWatermark(lumaBuffer, MaskMethod::ME);
     cout << "Correlation for frame: " << (framesCount + 1) << ": " << correlation << "\n";
     framesCount++;

@@ -674,6 +674,90 @@ __global__ void rowMajorToColMajorFloat(const float* __restrict__ src, float* __
 }
 
 // fused row-major 3-channel RGB to col-major grayscale: applies ITU-R 601 luma weights during the tiled transpose
+// HDR Y: same 32x8 / 32x32 tile-transpose pattern as pitchedToFloat, input is uint16_t P010LE
+__global__ void p010HdrYToSdrFloat(const uint16_t* __restrict__ input, float* __restrict__ output, const int width, const int height, const int pitchBytes, const float hdrPeak) {
+    __shared__ float tile[32][33];
+    const int pitchU16 = pitchBytes / 2;
+    const int x = blockIdx.x * 32 + threadIdx.x;
+    const int y = blockIdx.y * 32 + threadIdx.y;
+#pragma unroll
+    for (int i = 0; i < 32; i += 8) {
+        float val = 0.0f;
+        if (x < width && (y + i) < height)
+            val = p010YToSdrFloat(input[(y + i) * pitchU16 + x], hdrPeak);
+        tile[threadIdx.y + i][threadIdx.x] = val;
+    }
+    __syncthreads();
+    const int dstX = blockIdx.y * 32 + threadIdx.x;
+    const int dstY = blockIdx.x * 32 + threadIdx.y;
+#pragma unroll
+    for (int i = 0; i < 32; i += 8) {
+        if (dstX < height && (dstY + i) < width)
+            output[(dstY + i) * height + dstX] = tile[threadIdx.x][threadIdx.y + i];
+    }
+}
+
+// HDR UV: one thread per UV sample, full BT.2020 YCbCr -> linear RGB -> tonemap -> BT.709 YCbCr -> NV12 uint8_t
+// Memory access: pack ALL loads/stores into wider types so consecutive threads for full 32-byte sector utilization
+// Y load: uint32_t[uvX] on row 2*uvY, reads Y[2*uvX] (lo16) in one coalesced transaction
+// UV load: uint32_t[uvX] on row uvY, reads U[uvX](lo16) + V[uvX](hi16) in one transaction
+// UV store: uint16_t[uvX] on row uvY, writes Cb(lo8) + Cr(hi8) in one transaction
+__global__ void p010HdrUVToSdrNV12(const uint16_t* __restrict__ ySrc, const int yPitchBytes, const uint16_t* __restrict__ uvSrc, const int uvPitchBytes, uint8_t* __restrict__ uvDst, const int width,
+                                   const int height, const float hdrPeak) {
+    const int uvX = blockIdx.x * blockDim.x + threadIdx.x;
+    const int uvY = blockIdx.y * blockDim.y + threadIdx.y;
+    if (uvX >= width / 2 || uvY >= height / 2)
+        return;
+
+    // Y: packed uint32_t read
+    const uint32_t yPair = reinterpret_cast<const uint32_t*>(reinterpret_cast<const uint8_t*>(ySrc) + 2 * uvY * yPitchBytes)[uvX];
+    const float Y = clamp((static_cast<float>((yPair & 0xFFFF) >> 6) - 64.0f) / 876.0f, 0.0f, 1.0f);
+
+    // UV: packed uint32_t read
+    const uint32_t uvRaw = reinterpret_cast<const uint32_t*>(reinterpret_cast<const uint8_t*>(uvSrc) + uvY * uvPitchBytes)[uvX];
+    const float Cb = (static_cast<float>(((uvRaw) & 0xFFFF) >> 6) - 512.0f) / 896.0f;
+    const float Cr = (static_cast<float>(((uvRaw >> 16) & 0xFFFF) >> 6) - 512.0f) / 896.0f;
+
+    // YCbCr (BT.2020) -> PQ-encoded RGB in [0,1] (ITU-R BT.2020, Kr=0.2627, Kb=0.0593)
+    const float Rl = clamp(Y + 1.47460f * Cr, 0.0f, 1.0f);
+    const float Gl = clamp(Y - 0.16455f * Cb - 0.57135f * Cr, 0.0f, 1.0f);
+    const float Bl = clamp(Y + 1.88140f * Cb, 0.0f, 1.0f);
+
+    // PQ EOTF per channel -> linear light, then npl=100 normalization (1.0 -> 100 nits)
+    const float Re = pqEotf(Rl) * 100.0f;
+    const float Ge = pqEotf(Gl) * 100.0f;
+    const float Be = pqEotf(Bl) * 100.0f;
+
+    // BT.2020 -> BT.709 gamut matrix (linear RGB in, linear RGB out)
+    const float R7 = clamp(1.6605f * Re - 0.5876f * Ge - 0.0728f * Be, 0.0f, hdrPeak);
+    const float G7 = clamp(-0.1246f * Re + 1.1329f * Ge - 0.0083f * Be, 0.0f, hdrPeak);
+    const float B7 = clamp(-0.0182f * Re - 0.1006f * Ge + 1.1187f * Be, 0.0f, hdrPeak);
+
+    // Mobius tonemap (npl=100 input) + BT.1886 gamma per channel
+    const float Rg = bt1886(clamp(mobiusTonemap(R7, hdrPeak), 0.0f, 1.0f));
+    const float Gg = bt1886(clamp(mobiusTonemap(G7, hdrPeak), 0.0f, 1.0f));
+    const float Bg = bt1886(clamp(mobiusTonemap(B7, hdrPeak), 0.0f, 1.0f));
+
+    // RGB -> YCbCr (BT.709, Kr=0.2126, Kg=0.7152, Kb=0.0722)
+    const float Y7 = 0.2126f * Rg + 0.7152f * Gg + 0.0722f * Bg;
+    const float Cb7 = (Bg - Y7) / 1.8556f;
+    const float Cr7 = (Rg - Y7) / 1.5748f;
+
+    // packed uint16_t store — Cb in lo8, Cr in hi8 — stride-1 across warp, full sector utilization
+    const uint8_t cb8 = static_cast<uint8_t>(clamp(Cb7 * 224.0f + 128.0f, 16.0f, 240.0f));
+    const uint8_t cr8 = static_cast<uint8_t>(clamp(Cr7 * 224.0f + 128.0f, 16.0f, 240.0f));
+    reinterpret_cast<uint16_t*>(uvDst)[uvY * (width / 2) + uvX] = static_cast<uint16_t>(cb8) | (static_cast<uint16_t>(cr8) << 8);
+}
+
+// HDR Y passthrough: P010LE -> uint8_t row-major, luma-only pipeline (no transpose needed)
+__global__ void p010HdrYToSdrU8(const uint16_t* __restrict__ input, uint8_t* __restrict__ output, const int width, const int height, const int pitchBytes, const float hdrPeak) {
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+    if (x >= width || y >= height)
+        return;
+    output[y * width + x] = static_cast<uint8_t>(clamp(p010YToSdrFloat(input[y * (pitchBytes / 2) + x], hdrPeak), 0.0f, 255.0f));
+}
+
 __global__ void rowMajorRGBToColMajorGray(const float* __restrict__ src, float* __restrict__ dst, const int width, const int height) {
     __shared__ float tile[32][33];
     const int planeSize = width * height;
