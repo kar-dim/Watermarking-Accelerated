@@ -1,6 +1,7 @@
 #pragma once
 
 #include "buffer.hpp"
+#include "HdrTonemap.hpp"
 #include "HostMemory.hpp"
 #include "include/WatermarkCore.hpp"
 #include "video_defines.hpp"
@@ -30,7 +31,7 @@ struct VideoSession {
     bool useHwDecoder = false;
     // HDR metadata cached from the decoder
     bool isHdr = false;
-    float hdrPeak = 10.0f; // in npl=100 units (10.0 -> 1000 nits) used by HDR CUDA kernels
+    video_utils::MobiusParams mobius = video_utils::MobiusParams::fromHdrPeak(10.0f); // default 1000 nits (used by HDR CUDA kernels)
     // watermarking related buffers and objects
     std::unique_ptr<WatermarkBase> watermarkObj;
     std::unique_ptr<HostMemory<uint8_t>> hostFrame;

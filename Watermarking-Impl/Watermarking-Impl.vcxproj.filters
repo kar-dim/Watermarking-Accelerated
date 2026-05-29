@@ -166,5 +166,8 @@
     <ClInclude Include="CudaMemPool.hpp">
       <Filter>Header Files\cuda</Filter>
     </ClInclude>
+    <ClInclude Include="HdrTonemap.hpp">
+      <Filter>Header Files\util</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

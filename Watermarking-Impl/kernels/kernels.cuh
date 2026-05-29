@@ -902,7 +902,7 @@ __device__ __forceinline__ float lutLerp1024(const float* __restrict__ lut, cons
 }
 
 // Mobius tonemapping: exact FFmpeg vf_tonemap.c formula: K * (x+a)/(x+b)
-// a, b, K depend ONLY on hdrPeak so they are precomputed on the host
+// a, b, K depend ONLY on the per-video hdrPeak so they are precomputed once on the host
 __device__ __forceinline__ float mobiusTonemap(const float x, const float mobA, const float mobB, const float mobK) {
     constexpr float j = 0.3f; // transition point in npl=100 units (30 nits)
     if (x <= j)

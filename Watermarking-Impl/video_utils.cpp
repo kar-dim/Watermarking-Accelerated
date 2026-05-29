@@ -493,17 +493,18 @@ static float getHdrPeak(const VideoSession* s) {
     return 10.0f; // 1000 nits default
 }
 
-// HDR helpers: convert P010LE CUDA planes to SDR format (HDR peak is read once per session)
-static void loadHdrLuma(VideoSession* s, const AVFrame* frame, CudaArray<float>& dst, const float hdrPeak, const cudaStream_t stream) {
+// HDR helpers: convert P010LE CUDA planes to SDR format
+static void loadHdrLuma(VideoSession* s, const AVFrame* frame, CudaArray<float>& dst, const MobiusParams& mobius, const cudaStream_t stream) {
     const auto [height, width] = s->videoDims();
-    cuda_utils::launchP010HdrYToSdrFloatKernel(reinterpret_cast<const uint16_t*>(frame->data[0]), frame->linesize[0], reinterpret_cast<const uint16_t*>(frame->data[1]), frame->linesize[1], dst.data(), width, height, hdrPeak, stream);
+    cuda_utils::launchP010HdrYToSdrFloatKernel(reinterpret_cast<const uint16_t*>(frame->data[0]), frame->linesize[0], reinterpret_cast<const uint16_t*>(frame->data[1]), frame->linesize[1], dst.data(),
+                                               width, height, mobius, stream);
 }
 
-static CudaArray<uint8_t> convertHdrUV(VideoSession* s, const AVFrame* frame, const float hdrPeak, const cudaStream_t stream) {
+static CudaArray<uint8_t> convertHdrUV(VideoSession* s, const AVFrame* frame, const MobiusParams& mobius, const cudaStream_t stream) {
     const auto [height, width] = s->videoDims();
     CudaArray<uint8_t> uvNV12(width * height / 2, stream);
     cuda_utils::launchP010HdrUVToSdrNV12Kernel(reinterpret_cast<const uint16_t*>(frame->data[0]), frame->linesize[0], reinterpret_cast<const uint16_t*>(frame->data[1]), frame->linesize[1],
-                                               uvNV12.data(), width, height, hdrPeak, stream);
+                                               uvNV12.data(), width, height, mobius, stream);
     return uvNV12;
 }
 
@@ -514,7 +515,7 @@ void embedWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* fra
     const auto [height, width] = s->videoDims();
     const bool doEmbed = framesCount % s->settings.watermarkInterval == 0;
     const bool isHdr = s->isHdr;
-    const float hdrPeak = s->hdrPeak;
+    const MobiusParams& mobius = s->mobius;
 
     if (doEmbed)
         cout << std::format(" [Embedding frame {}]\n", framesCount + 1);
@@ -525,19 +526,20 @@ void embedWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* fra
         if (doEmbed) {
             CudaArray<float> lumaFloat(height, width, stream);
             if (isHdr)
-                loadHdrLuma(s, frame, lumaFloat, hdrPeak, stream);
+                loadHdrLuma(s, frame, lumaFloat, mobius, stream);
             else
                 cuda_utils::launchPitchedToFloatKernel(frame->data[0], lumaFloat.data(), width, height, frame->linesize[0], stream);
             s->watermarkObj->makeWatermark(lumaFloat, lumaFloat, s->watermarkedFrame, MaskMethod::ME);
             cuda_utils::launchColMajorToRowMajorU8Kernel(s->watermarkedFrame.data(), yRowMajor.data(), width, height, 1, stream);
         } else {
             if (isHdr)
-                cuda_utils::launchP010HdrYToSdrU8Kernel(reinterpret_cast<const uint16_t*>(frame->data[0]), frame->linesize[0], reinterpret_cast<const uint16_t*>(frame->data[1]), frame->linesize[1], yRowMajor.data(), width, height, hdrPeak, stream);
+                cuda_utils::launchP010HdrYToSdrU8Kernel(reinterpret_cast<const uint16_t*>(frame->data[0]), frame->linesize[0], reinterpret_cast<const uint16_t*>(frame->data[1]), frame->linesize[1],
+                                                        yRowMajor.data(), width, height, mobius, stream);
             else
                 cudaMemcpy2DAsync(yRowMajor.data(), width, frame->data[0], frame->linesize[0], width, height, cudaMemcpyDeviceToDevice, stream);
         }
         if (isHdr) {
-            CudaArray<uint8_t> uvNV12 = convertHdrUV(s, frame, hdrPeak, stream);
+            CudaArray<uint8_t> uvNV12 = convertHdrUV(s, frame, mobius, stream);
             encodeFrameGPU(s, yRowMajor, frame, frame->pts, queue, uvNV12.data());
         } else {
             encodeFrameGPU(s, yRowMajor, frame, frame->pts, queue);
@@ -546,17 +548,18 @@ void embedWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* fra
         // NVDEC + SW encoder
         if (isHdr) {
             // convert HDR UV: P010LE -> NV12 uint8_t -> planar YUV420P in hostFrame
-            CudaArray<uint8_t> uvNV12 = convertHdrUV(s, frame, hdrPeak, stream);
+            CudaArray<uint8_t> uvNV12 = convertHdrUV(s, frame, mobius, stream);
             CudaArray<uint8_t> chromaBuffer(width * height / 2, stream);
             cuda_utils::launchNV12ToYUV420pKernel(uvNV12.data(), width, chromaBuffer.data(), width / 2, height / 2, stream);
             chromaBuffer.toHostAsync(s->hostFrame->get() + width * height);
             if (doEmbed) {
                 CudaArray<float> lumaFloat(height, width, stream);
-                loadHdrLuma(s, frame, lumaFloat, hdrPeak, stream);
+                loadHdrLuma(s, frame, lumaFloat, mobius, stream);
                 cudaStreamSynchronize(stream);
                 embedAndFillYPlane(s, lumaFloat);
             } else {
-                cuda_utils::launchP010HdrYToSdrU8Kernel(reinterpret_cast<const uint16_t*>(frame->data[0]), frame->linesize[0], reinterpret_cast<const uint16_t*>(frame->data[1]), frame->linesize[1], s->hostFrame->get(), width, height, hdrPeak, stream);
+                cuda_utils::launchP010HdrYToSdrU8Kernel(reinterpret_cast<const uint16_t*>(frame->data[0]), frame->linesize[0], reinterpret_cast<const uint16_t*>(frame->data[1]), frame->linesize[1],
+                                                        s->hostFrame->get(), width, height, mobius, stream);
                 cudaStreamSynchronize(stream);
             }
         } else {
@@ -587,7 +590,7 @@ void detectWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* fr
     const auto stream = CudaStreamManager::getInstance().getComputeStream();
     CudaArray<float> lumaBuffer(height, width, stream);
     if (s->isHdr) {
-        loadHdrLuma(s, frame, lumaBuffer, s->hdrPeak, stream);
+        loadHdrLuma(s, frame, lumaBuffer, s->mobius, stream);
     } else {
         cuda_utils::launchPitchedToFloatKernel(frame->data[0], lumaBuffer.data(), width, height, frame->linesize[0], stream);
     }
@@ -753,10 +756,10 @@ bool initFilterGraph(VideoSession* s) {
 
 int videoDispatcher(VideoSession* s, VideoMode op, const bool needsFilter) {
 #if defined(_USE_CUDA_)
-    // cache HDR info
+    // cache HDR info: read the video peak once and precompute the Mobius coefficients from it
     s->isHdr = isHDR(s->inputDecoderCtx.get());
     if (s->isHdr)
-        s->hdrPeak = getHdrPeak(s);
+        s->mobius = MobiusParams::fromHdrPeak(getHdrPeak(s));
 #endif
     // detect paths: no encoder, no thread, no queue
     if (op == VideoMode::DETECT) {
