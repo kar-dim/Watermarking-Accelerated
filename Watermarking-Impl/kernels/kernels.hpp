@@ -435,37 +435,49 @@ __kernel void me(__global const float* restrict input,
     }
 }
 #elif WINDOW_SIZE >= 5
+// REGISTER TILED ME: each workitem computes a TILE x TILE block of the matrix Rx, we load TILE neighbor row vectors + TILE col vectors 
+// per pixel into registers and reusing them across the whole block, increasing math intensity from 2 FMA/load to 8 FMA/load at TILE=4
+// WMMA for the poor... in order to stay compute bound instead of bandwidth bound. TILE worked best with value of 4 after tests
+#define TILE 4
+#define N_TILES_DIM ((NEIGHB_SIZE + TILE - 1) / TILE)
+
+// neighbor index -> (row, shift) into the local strip (the predicted center pixel CENTER_IDX is skipped)
+inline int2 neighborLoc(const int n) {
+    const int cacheN = (n >= CENTER_IDX) ? n + 1 : n;
+    return (int2)(cacheN / N_ROWS, cacheN % N_ROWS);
+}
+
 __kernel void me(
     __global const float* restrict input,
     volatile __global ulong* restrict Rx,
     volatile __global ulong* restrict rx,
     const int width,
-    const int height) 
+    const int height)
 {
     const int gx = get_group_id(0);
     const int gy = get_group_id(1);
     const int localId = get_local_id(0);
     const float halfScaleFactor = 0.00392156862f;
 
-    __local half blockValues[N_ROWS][BUFFER_COLS]; 
+    __local half blockValues[N_ROWS][BUFFER_COLS];
 
     // load data
-    const int loadLimit = N_ROWS * BUFFER_COLS; 
+    const int loadLimit = N_ROWS * BUFFER_COLS;
     const int radius = N_ROWS / 2;
-    const int baseGlobalCol = (gx * 256) - radius; 
+    const int baseGlobalCol = (gx * 256) - radius;
     const int baseGlobalRow = gy - radius;
-    
+
     int r = localId % N_ROWS;
     int c = localId / N_ROWS;
     int idx = localId;
-    
-    while (idx < loadLimit) { 
+
+    while (idx < loadLimit) {
         const int gCol = clamp(baseGlobalCol + c, 0, width - 1);
         const int gRow = clamp(baseGlobalRow + r, 0, height - 1);
         blockValues[r][c] = input[gCol * height + gRow] * halfScaleFactor;
         idx += 256;
         c += COL_STEP;
-        r += ROW_STEP; 
+        r += ROW_STEP;
         if (r >= N_ROWS) {
             r -= N_ROWS;
             c += 1;
@@ -473,46 +485,74 @@ __kernel void me(
     }
     barrier(CLK_LOCAL_MEM_FENCE);
 
-    // vectorized compute of Rx and rx
-    for (int k = localId; k < TOTAL_TASKS; k += 256) {
-        float coeffSum = 0.0f;
+    // Rx: tiled lower-triangular matrix (compute every (r,c) with r >= c exactly once)
+    const int numTiles = N_TILES_DIM * N_TILES_DIM;
+    for (int t = localId; t < numTiles; t += 256) {
+        const int r0 = (t / N_TILES_DIM) * TILE;
+        const int c0 = (t % N_TILES_DIM) * TILE;
+        // skip tiles entirely in the strict upper triangle (no r >= c element to write)
+        if (r0 + (TILE - 1) < c0)
+            continue;
 
-        if (k < BOUNDARY) { 
-            // Rx
-            const int2 coords = getPackedCoords(k);
-            const int r_idx = coords.x; 
-            const int c_idx = coords.y; 
-            const int cacheRow = (r_idx >= CENTER_IDX) ? r_idx + 1 : r_idx;
-            const int cacheCol = (c_idx >= CENTER_IDX) ? c_idx + 1 : c_idx;
-            const int rowA = cacheRow / N_ROWS;
-            const int shiftA = cacheRow % N_ROWS;
-            const int rowB = cacheCol / N_ROWS;
-            const int shiftB = cacheCol % N_ROWS;
+        // strip locations for the TILE row and col vectors (clamped)
+        int2 locR[TILE], locC[TILE];
+#pragma unroll
+        for (int i = 0; i < TILE; i++) {
+            locR[i] = neighborLoc(min(r0 + i, NEIGHB_SIZE - 1));
+            locC[i] = neighborLoc(min(c0 + i, NEIGHB_SIZE - 1));
+        }
+
+        float acc[TILE][TILE];
+#pragma unroll
+        for (int i = 0; i < TILE; i++)
+#pragma unroll
+            for (int j = 0; j < TILE; j++)
+                acc[i][j] = 0.0f;
+
+        // load TILE+TILE vectors per step, compute TILE*TILE products (register-blocked)
+        for (int p = 0; p < 256; p += 4) {
+            float4 fa[TILE], fb[TILE];
+#pragma unroll
+            for (int i = 0; i < TILE; i++) {
+                fa[i] = vload_half4(0, (__local half*)&blockValues[locR[i].x][p + locR[i].y]);
+                fb[i] = vload_half4(0, (__local half*)&blockValues[locC[i].x][p + locC[i].y]);
+            }
+#pragma unroll
+            for (int i = 0; i < TILE; i++)
+#pragma unroll
+                for (int j = 0; j < TILE; j++)
+                    acc[i][j] += dot(fa[i], fb[j]);
+        }
 
 #pragma unroll
-            for (int p = 0; p < 256; p += 4) {
-                const float4 fa = vload_half4(0, (__local half*)&blockValues[rowA][p + shiftA]);
-                const float4 fb = vload_half4(0, (__local half*)&blockValues[rowB][p + shiftB]);
-                coeffSum += dot(fa, fb);
-            }
-            atom_add(&Rx[SOLVER_IDX(r_idx, c_idx)], toScaledUlong(coeffSum));
-            
-        } else {
-            // rx
-            const int nIdx = k - BOUNDARY;
-            const int cacheIdx = (nIdx >= CENTER_IDX) ? nIdx + 1 : nIdx;
-            const int rowN = cacheIdx / N_ROWS;
-            const int shiftN = cacheIdx % N_ROWS;
+        for (int i = 0; i < TILE; i++) {
+            const int rr = r0 + i;
+            if (rr >= NEIGHB_SIZE)
+                continue;
 #pragma unroll
-            for (int p = 0; p < 256; p += 4) {
-                const float4 fn = vload_half4(0, (__local half*)&blockValues[rowN][p + shiftN]);
-                const float4 fc = vload_half4(0, (__local half*)&blockValues[ROW_CENTER][p + SHIFT_CENTER]);
-                coeffSum += dot(fn, fc);
+            for (int j = 0; j < TILE; j++) {
+                const int cc = c0 + j;
+                if (cc <= rr) // cc <= rr < NEIGHB_SIZE, so cc is always in range
+                    atom_add(&Rx[SOLVER_IDX(rr, cc)], toScaledUlong(acc[i][j]));
             }
-            atom_add(&rx[nIdx], toScaledUlong(coeffSum));
         }
     }
+
+    // rx: reuse the center vector in the loop
+    for (int n = localId; n < NEIGHB_SIZE; n += 256) {
+        const int2 locN = neighborLoc(n);
+        float coeffSum = 0.0f;
+#pragma unroll
+        for (int p = 0; p < 256; p += 4) {
+            const float4 fn = vload_half4(0, (__local half*)&blockValues[locN.x][p + locN.y]);
+            const float4 fc = vload_half4(0, (__local half*)&blockValues[ROW_CENTER][p + SHIFT_CENTER]);
+            coeffSum += dot(fn, fc);
+        }
+        atom_add(&rx[n], toScaledUlong(coeffSum));
+    }
 }
+#undef TILE
+#undef N_TILES_DIM
 #undef N_ROWS
 #undef MAT_SIZE
 #undef COL_STEP

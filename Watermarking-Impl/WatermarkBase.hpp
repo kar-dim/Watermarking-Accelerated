@@ -3,7 +3,6 @@
 #include "buffer.hpp"
 #include "include/WatermarkTypes.hpp"
 #include <cmath>
-#include <functional>
 #include <string>
 #include <vector>
 
@@ -13,7 +12,7 @@
  */
 class WatermarkBase {
   protected:
-    using WatermarkLoader = std::function<ImageBuffer(const std::vector<float>&, const int, const int)>;
+    using WatermarkLoader = ImageBuffer (*)(const std::vector<float>&, const int, const int);
 
     template <int ALIGNMENT>
     static constexpr int alignUp(const int x) {
