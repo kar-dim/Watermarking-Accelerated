@@ -28,6 +28,9 @@ struct VideoSession {
     const AVStream* videoStream = nullptr;
     int videoStreamIndex = -1;
     bool useHwDecoder = false;
+    // HDR metadata cached from the decoder
+    bool isHdr = false;
+    float hdrPeak = 10.0f; // in npl=100 units (10.0 -> 1000 nits) used by HDR CUDA kernels
     // watermarking related buffers and objects
     std::unique_ptr<WatermarkBase> watermarkObj;
     std::unique_ptr<HostMemory<uint8_t>> hostFrame;

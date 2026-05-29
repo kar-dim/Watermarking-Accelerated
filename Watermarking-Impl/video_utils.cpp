@@ -207,9 +207,12 @@ AVCodecContextPtr openDecoderHWAccel(const AVCodecParameters* inputCodecParams, 
 }
 #endif
 
-// get HDR info from the codec context in order to pass it to the filter graph for correct SDR tonemapping
-// if 10-bit HDR video -> tonemap to SDR with ffmpeg CPU filters and convert to 8-bit
-// if 10-bit SDR video -> convert to 8-bit fast
+// Decide the filter graph based on input depth, HDR status, and decoder type:
+// 8-bit SDR (any decoder) -> "" (no filter needed)
+// 10-bit SDR + NVDEC -> scale_cuda=format=nv12 (GPU 10->8-bit downscale)
+// 10-bit SDR + SW decoder -> format=yuv420p (CPU 10->8-bit)
+// HDR + NVDEC -> "" (tonemapped by custom CUDA kernels in embedWatermarkHWAccel)
+// HDR + SW decoder -> zscale+tonemap (CPU tonemap)
 string getFilterGraphString(const VideoSession* s) {
     if (!is10bit(s->inputDecoderCtx.get(), s->videoStream))
         return ""; // 8-bit SDR, no filtering (save processing time)
@@ -493,7 +496,7 @@ static float getHdrPeak(const VideoSession* s) {
 // HDR helpers: convert P010LE CUDA planes to SDR format (HDR peak is read once per session)
 static void loadHdrLuma(VideoSession* s, const AVFrame* frame, CudaArray<float>& dst, const float hdrPeak, const cudaStream_t stream) {
     const auto [height, width] = s->videoDims();
-    cuda_utils::launchP010HdrYToSdrFloatKernel(reinterpret_cast<const uint16_t*>(frame->data[0]), dst.data(), width, height, frame->linesize[0], hdrPeak, stream);
+    cuda_utils::launchP010HdrYToSdrFloatKernel(reinterpret_cast<const uint16_t*>(frame->data[0]), frame->linesize[0], reinterpret_cast<const uint16_t*>(frame->data[1]), frame->linesize[1], dst.data(), width, height, hdrPeak, stream);
 }
 
 static CudaArray<uint8_t> convertHdrUV(VideoSession* s, const AVFrame* frame, const float hdrPeak, const cudaStream_t stream) {
@@ -510,8 +513,8 @@ void embedWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* fra
     const auto stream = CudaStreamManager::getInstance().getComputeStream();
     const auto [height, width] = s->videoDims();
     const bool doEmbed = framesCount % s->settings.watermarkInterval == 0;
-    const bool isHdr = isHDR(s->inputDecoderCtx.get());
-    const float hdrPeak = isHdr ? getHdrPeak(s) : 0.0f; // read MaxCLL once per frame
+    const bool isHdr = s->isHdr;
+    const float hdrPeak = s->hdrPeak;
 
     if (doEmbed)
         cout << std::format(" [Embedding frame {}]\n", framesCount + 1);
@@ -529,7 +532,7 @@ void embedWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* fra
             cuda_utils::launchColMajorToRowMajorU8Kernel(s->watermarkedFrame.data(), yRowMajor.data(), width, height, 1, stream);
         } else {
             if (isHdr)
-                cuda_utils::launchP010HdrYToSdrU8Kernel(reinterpret_cast<const uint16_t*>(frame->data[0]), yRowMajor.data(), width, height, frame->linesize[0], hdrPeak, stream);
+                cuda_utils::launchP010HdrYToSdrU8Kernel(reinterpret_cast<const uint16_t*>(frame->data[0]), frame->linesize[0], reinterpret_cast<const uint16_t*>(frame->data[1]), frame->linesize[1], yRowMajor.data(), width, height, hdrPeak, stream);
             else
                 cudaMemcpy2DAsync(yRowMajor.data(), width, frame->data[0], frame->linesize[0], width, height, cudaMemcpyDeviceToDevice, stream);
         }
@@ -553,7 +556,7 @@ void embedWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* fra
                 cudaStreamSynchronize(stream);
                 embedAndFillYPlane(s, lumaFloat);
             } else {
-                cuda_utils::launchP010HdrYToSdrU8Kernel(reinterpret_cast<const uint16_t*>(frame->data[0]), s->hostFrame->get(), width, height, frame->linesize[0], hdrPeak, stream);
+                cuda_utils::launchP010HdrYToSdrU8Kernel(reinterpret_cast<const uint16_t*>(frame->data[0]), frame->linesize[0], reinterpret_cast<const uint16_t*>(frame->data[1]), frame->linesize[1], s->hostFrame->get(), width, height, hdrPeak, stream);
                 cudaStreamSynchronize(stream);
             }
         } else {
@@ -583,9 +586,8 @@ void detectWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* fr
     const auto [height, width] = s->videoDims();
     const auto stream = CudaStreamManager::getInstance().getComputeStream();
     CudaArray<float> lumaBuffer(height, width, stream);
-    if (isHDR(s->inputDecoderCtx.get())) {
-        const float hdrPeak = getHdrPeak(s);
-        loadHdrLuma(s, frame, lumaBuffer, hdrPeak, stream);
+    if (s->isHdr) {
+        loadHdrLuma(s, frame, lumaBuffer, s->hdrPeak, stream);
     } else {
         cuda_utils::launchPitchedToFloatKernel(frame->data[0], lumaBuffer.data(), width, height, frame->linesize[0], stream);
     }
@@ -750,6 +752,12 @@ bool initFilterGraph(VideoSession* s) {
 }
 
 int videoDispatcher(VideoSession* s, VideoMode op, const bool needsFilter) {
+#if defined(_USE_CUDA_)
+    // cache HDR info
+    s->isHdr = isHDR(s->inputDecoderCtx.get());
+    if (s->isHdr)
+        s->hdrPeak = getHdrPeak(s);
+#endif
     // detect paths: no encoder, no thread, no queue
     if (op == VideoMode::DETECT) {
 #if defined(_USE_CUDA_)
@@ -818,6 +826,7 @@ void initOutputEncoder(VideoSession* s) {
     encCtx->framerate = s->videoStream->avg_frame_rate;
     encCtx->sample_aspect_ratio = s->videoStream->codecpar->sample_aspect_ratio;
     // if we tonemapped HDR->SDR write SDR metadata, not the original HDR flags
+    // (called once before videoDispatcher caches s->isHdr, so read directly here)
     const bool inputIsHDR = isHDR(s->inputDecoderCtx.get());
     encCtx->color_range = s->videoStream->codecpar->color_range;
     encCtx->color_primaries = inputIsHDR ? AVCOL_PRI_BT709 : s->inputDecoderCtx->color_primaries;
@@ -836,7 +845,7 @@ void initOutputEncoder(VideoSession* s) {
         fc->sw_format = AV_PIX_FMT_NV12;
         fc->width = width;
         fc->height = height;
-        fc->initial_pool_size = 4;
+        fc->initial_pool_size = 8; // match EncodeQueue::MAX_DEPTH
         checkError(av_hwframe_ctx_init(framesRef) < 0, "Failed to init hw_frames_ctx for NVENC");
         encCtx->hw_frames_ctx = framesRef;
     }
@@ -895,9 +904,11 @@ void initOutputEncoder(VideoSession* s) {
 void flushAndFinalize(VideoSession* s) {
     if (!s->outputEncoderCtx || !s->outputFormatCtx)
         return;
-    avcodec_send_frame(s->outputEncoderCtx.get(), nullptr);
+    // send EOS to the encoder, AVERROR_EOF here means it was already flushed (ignore)
+    const int sendRet = avcodec_send_frame(s->outputEncoderCtx.get(), nullptr);
+    checkError(sendRet < 0 && sendRet != AVERROR_EOF, "Failed to flush encoder");
     drainEncoderPackets(s);
-    av_write_trailer(s->outputFormatCtx.get());
+    checkError(av_write_trailer(s->outputFormatCtx.get()) < 0, "Failed to write container trailer (output file may be truncated)");
 }
 
 } // namespace video_utils
