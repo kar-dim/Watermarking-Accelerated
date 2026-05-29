@@ -3,6 +3,7 @@
 #include "eigen_rgb_array.hpp"
 #include "ImageEigenOutputBuffer.hpp"
 #include <cstdint>
+#include <utility>
 #include <variant>
 
 /*!
