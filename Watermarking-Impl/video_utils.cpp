@@ -63,6 +63,7 @@ extern "C" {
 #include "libavutil/pixfmt.h"
 #include "libavutil/rational.h"
 #include "libavutil/hwcontext.h"
+#include "libavcodec/defs.h"
 }
 
 #if defined(_USE_EIGEN_)
@@ -810,6 +811,14 @@ void initOutputEncoder(VideoSession* s) {
     checkError(avformat_alloc_output_context2(&rawOutFmt, nullptr, nullptr, s->settings.encodeOutputPath.c_str()) < 0, "Failed to create output format context for: " + s->settings.encodeOutputPath);
     s->outputFormatCtx.reset(rawOutFmt);
 
+    // fail fast on incompatible container/codec combos (like HEVC into AVI), which would mux into a broken file,
+    // we check the codec id so it covers both sw and cuda hw encoders
+    if (avformat_query_codec(s->outputFormatCtx->oformat, encoder->id, FF_COMPLIANCE_NORMAL) == 0) {
+        av_dict_free(&opts);
+        throw std::runtime_error("Codec '" + codecName + "' cannot be stored in the '" + std::string(s->outputFormatCtx->oformat->name) + "' container (" + s->settings.encodeOutputPath +
+                                 "). Pick a container-compatible codec (prefer same container).");
+    }
+
     // build the encoder context
     AVCodecContextPtr encCtx(avcodec_alloc_context3(encoder));
     checkError(!encCtx, "Failed to allocate encoder context");
@@ -889,6 +898,9 @@ void initOutputEncoder(VideoSession* s) {
             continue;
         if (avcodec_parameters_copy(outSt->codecpar, inSt->codecpar) < 0)
             continue;
+        // drop the input container's FourCC tag so the output muxer assigns a tag valid for its own container.
+        // without this, remuxing between different input/output containers (like mp4 -> mkv) fails at write_header
+        outSt->codecpar->codec_tag = 0;
         outSt->time_base = inSt->time_base;
         s->inputToOutputStreamMap[i] = outSt->index;
     }
