@@ -348,7 +348,7 @@ VideoHandle initVideo(const VideoSettings& settings) {
     checkError(session->videoStreamIndex == -1, "No video stream found");
     session->videoStream = session->inputFormatCtx->streams[session->videoStreamIndex];
     session->useHwDecoder = false;
-    session->inputDecoderCtx = openDecoder(session->videoStream->codecpar, settings.hwDecoder, session->useHwDecoder);
+    session->inputDecoderCtx = openDecoder(session->videoStream->codecpar, settings.hwDecoder, session->useHwDecoder, session->videoStream->time_base);
     checkError(!session->inputDecoderCtx.get(), "Could not open video decoder");
     const int height = session->videoStream->codecpar->height;
     const int width = session->videoStream->codecpar->width;

@@ -140,7 +140,7 @@ struct EncodeQueue {
     }
 };
 
-AVCodecContextPtr openSoftwareDecoder(const AVCodecParameters* inputCodecParams) {
+AVCodecContextPtr openSoftwareDecoder(const AVCodecParameters* inputCodecParams, AVRational pktTimebase) {
     const AVCodec* inputDecoder = avcodec_find_decoder(inputCodecParams->codec_id);
     if (!inputDecoder)
         return nullptr;
@@ -156,6 +156,7 @@ AVCodecContextPtr openSoftwareDecoder(const AVCodecParameters* inputCodecParams)
         ctx->thread_type = FF_THREAD_SLICE;
     else
         ctx->thread_count = 1;
+    ctx->pkt_timebase = pktTimebase; // give the decoder the stream timebase (silences "Invalid pkt_timebase", correct VFR timestamps)
     if (avcodec_open2(ctx.get(), inputDecoder, nullptr) < 0)
         return nullptr;
     checkPixelFormatSupport(supportedFormats, ctx->pix_fmt);
@@ -164,21 +165,21 @@ AVCodecContextPtr openSoftwareDecoder(const AVCodecParameters* inputCodecParams)
 
 #if defined(_USE_CUDA_)
 // try to open a CUDA hardware accelerated decoder, falls back to software on any failure
-AVCodecContextPtr openDecoderHWAccel(const AVCodecParameters* inputCodecParams, const string& userHwDecoder, bool& useHwDecoder) {
+AVCodecContextPtr openDecoderHWAccel(const AVCodecParameters* inputCodecParams, const string& userHwDecoder, bool& useHwDecoder, AVRational pktTimebase) {
     if (userHwDecoder.empty())
-        return openSoftwareDecoder(inputCodecParams);
+        return openSoftwareDecoder(inputCodecParams, pktTimebase);
     const AVCodec* inputDecoder = avcodec_find_decoder_by_name(userHwDecoder.c_str());
     if (!inputDecoder)
-        return openSoftwareDecoder(inputCodecParams);
+        return openSoftwareDecoder(inputCodecParams, pktTimebase);
     AVCodecContextPtr ctx(avcodec_alloc_context3(inputDecoder));
     if (!ctx)
-        return openSoftwareDecoder(inputCodecParams);
+        return openSoftwareDecoder(inputCodecParams, pktTimebase);
     if (avcodec_parameters_to_context(ctx.get(), inputCodecParams) < 0)
-        return openSoftwareDecoder(inputCodecParams);
+        return openSoftwareDecoder(inputCodecParams, pktTimebase);
     // share our existing primary CUDA context with the decoder
     AVBufferRef* raw_hw_device_ctx = av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_CUDA);
     if (!raw_hw_device_ctx)
-        return openSoftwareDecoder(inputCodecParams);
+        return openSoftwareDecoder(inputCodecParams, pktTimebase);
     AVBufferRefPtr hw_device_ctx(raw_hw_device_ctx);
     auto* hwCtx = reinterpret_cast<AVHWDeviceContext*>(hw_device_ctx->data);
     auto* cudaCtx = reinterpret_cast<AVCUDADeviceContext*>(hwCtx->hwctx);
@@ -186,10 +187,10 @@ AVCodecContextPtr openDecoderHWAccel(const AVCodecParameters* inputCodecParams, 
     cudaGetDevice(&runtimeDevice);
     CUdevice cuDev = 0;
     if (cuDeviceGet(&cuDev, runtimeDevice) != CUDA_SUCCESS)
-        return openSoftwareDecoder(inputCodecParams);
+        return openSoftwareDecoder(inputCodecParams, pktTimebase);
     CUcontext primaryCtx = nullptr;
     if (cuDevicePrimaryCtxRetain(&primaryCtx, cuDev) != CUDA_SUCCESS)
-        return openSoftwareDecoder(inputCodecParams);
+        return openSoftwareDecoder(inputCodecParams, pktTimebase);
     cudaCtx->cuda_ctx = primaryCtx;
     hwCtx->user_opaque = reinterpret_cast<void*>(static_cast<intptr_t>(cuDev));
     hwCtx->free = [](AVHWDeviceContext* c) {
@@ -197,11 +198,12 @@ AVCodecContextPtr openDecoderHWAccel(const AVCodecParameters* inputCodecParams, 
         cuDevicePrimaryCtxRelease(d);
     };
     if (av_hwdevice_ctx_init(hw_device_ctx.get()) < 0)
-        return openSoftwareDecoder(inputCodecParams);
+        return openSoftwareDecoder(inputCodecParams, pktTimebase);
     ctx->hw_device_ctx = av_buffer_ref(hw_device_ctx.get());
     ctx->get_format = [](AVCodecContext*, const enum AVPixelFormat*) { return AV_PIX_FMT_CUDA; };
+    ctx->pkt_timebase = pktTimebase; // give cuvid the stream timebase (silences "Invalid pkt_timebase", correct VFR timestamps)
     if (avcodec_open2(ctx.get(), inputDecoder, nullptr) < 0)
-        return openSoftwareDecoder(inputCodecParams);
+        return openSoftwareDecoder(inputCodecParams, pktTimebase);
     useHwDecoder = true;
     checkPixelFormatSupport(supportedHwFormats, ctx->sw_pix_fmt);
     return ctx;
@@ -666,11 +668,11 @@ int findVideoStream(const AVFormatContext* inputFormatCtx) {
     return -1;
 }
 
-AVCodecContextPtr openDecoder(const AVCodecParameters* inputCodecParams, const string& userHwDecoder, bool& useHwDecoder) {
+AVCodecContextPtr openDecoder(const AVCodecParameters* inputCodecParams, const string& userHwDecoder, bool& useHwDecoder, AVRational pktTimebase) {
 #if defined(_USE_CUDA_)
-    return openDecoderHWAccel(inputCodecParams, userHwDecoder, useHwDecoder);
+    return openDecoderHWAccel(inputCodecParams, userHwDecoder, useHwDecoder, pktTimebase);
 #else
-    return openSoftwareDecoder(inputCodecParams);
+    return openSoftwareDecoder(inputCodecParams, pktTimebase);
 #endif
 }
 

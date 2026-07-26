@@ -26,7 +26,7 @@ inline bool is10bit(const AVCodecContext* codecCtx, const AVStream* st) {
 inline bool isHDR(const AVCodecContext* codecCtx) { return codecCtx->color_trc == AVCOL_TRC_SMPTE2084 || codecCtx->color_trc == AVCOL_TRC_ARIB_STD_B67; }
 
 // public API
-AVCodecContextPtr openDecoder(const AVCodecParameters* inputCodecParams, const std::string& userHwDecoder, bool& useHwDecoder);
+AVCodecContextPtr openDecoder(const AVCodecParameters* inputCodecParams, const std::string& userHwDecoder, bool& useHwDecoder, AVRational pktTimebase);
 int findVideoStream(const AVFormatContext* inputFormatCtx);
 bool initFilterGraph(WatermarkCore::VideoSession* s);
 int videoDispatcher(WatermarkCore::VideoSession* s, VideoMode op, bool needsFilter = false);
