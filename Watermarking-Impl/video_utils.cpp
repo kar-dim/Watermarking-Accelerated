@@ -307,17 +307,22 @@ void fillYPlane(const AVFrame* frame, VideoSession* s) {
     embedAndFillYPlane(s, s->inputFrame);
 }
 
-// parse "-c:v codec -key val ..." into {codecName, AVDictionary*}
-// strips stream specifiers (:v, :a, :s) so AVOptions names match libav
+// parse "-c:v codec -key val ..." into {codecName, AVDictionary*}. only true encoder options reach the codec,
+// audio/subtitle/-map directives and pix_fmt are skipped: we remux those streams and set
+// the pixel format ourselves, passing them here would destroy the codec name or desync the encode buffers
 std::pair<std::string, AVDictionary*> parseEncodeOptions(const std::string& optStr) {
     std::string codecName;
     AVDictionary* opts = nullptr;
-    auto stripStreamSpec = [](std::string key) {
+    // split "c:v" -> base "c", spec 'v'. spec 0 = unspecified, treated as video
+    auto splitSpec = [](const std::string& key, char& spec) {
+        spec = 0;
         const auto pos = key.rfind(':');
-        if (pos != std::string::npos && pos + 1 < key.size()) {
-            const char spec = key[pos + 1];
-            if (spec == 'v' || spec == 'a' || spec == 's' || spec == 'd' || spec == 't')
-                key.erase(pos);
+        if (pos != std::string::npos && pos + 2 == key.size()) {
+            const char c = key[pos + 1];
+            if (c == 'v' || c == 'a' || c == 's' || c == 'd' || c == 't') {
+                spec = c;
+                return key.substr(0, pos);
+            }
         }
         return key;
     };
@@ -327,20 +332,54 @@ std::pair<std::string, AVDictionary*> parseEncodeOptions(const std::string& optS
         tokens.push_back(std::move(tok));
     for (size_t i = 0; i < tokens.size();) {
         if (tokens[i].size() > 1 && tokens[i][0] == '-') {
-            const std::string key = stripStreamSpec(tokens[i].substr(1));
-            if (i + 1 < tokens.size() && (tokens[i + 1].empty() || tokens[i + 1][0] != '-')) {
-                const std::string& val = tokens[i + 1];
-                if (key == "c" || key == "codec")
-                    codecName = val;
-                else
-                    av_dict_set(&opts, key.c_str(), val.c_str(), 0);
-                i += 2;
+            char spec = 0;
+            const std::string base = splitSpec(tokens[i].substr(1), spec);
+            const bool hasVal = (i + 1 < tokens.size()) && (tokens[i + 1].empty() || tokens[i + 1][0] != '-');
+            const size_t step = hasVal ? 2 : 1;
+            // a/s/d stream or -map (we remux those), pixel_format (we set it ourselves): skip, never reach the codec
+            if (base == "map" || (spec != 0 && spec != 'v') || base == "pix_fmt" || base == "pixel_format") {
+                i += step;
                 continue;
             }
+            if (hasVal) {
+                const std::string& val = tokens[i + 1];
+                if (base == "c" || base == "codec")
+                    codecName = val;
+                else
+                    av_dict_set(&opts, base.c_str(), val.c_str(), 0);
+            }
+            i += step;
+            continue;
         }
         ++i;
     }
     return {codecName, opts};
+}
+
+// Copy input chapters (title + timing) to the output. Chapters hang off AVFormatContext, not any stream, so the
+// per-stream metadata copy never reaches them. time_base is wall-clock, so it survives any pts rescale
+void copyChapters(const VideoSession* s) {
+    const AVFormatContext* in = s->inputFormatCtx.get();
+    AVFormatContext* out = s->outputFormatCtx.get();
+    if (in->nb_chapters == 0)
+        return;
+    auto* list = static_cast<AVChapter**>(av_realloc_array(nullptr, in->nb_chapters, sizeof(AVChapter*)));
+    checkError(!list, "Failed to allocate chapter array");
+    unsigned n = 0;
+    for (unsigned i = 0; i < in->nb_chapters; i++) {
+        const AVChapter* src = in->chapters[i];
+        auto* dst = static_cast<AVChapter*>(av_mallocz(sizeof(AVChapter)));
+        if (!dst)
+            continue;
+        dst->id = src->id;
+        dst->time_base = src->time_base;
+        dst->start = src->start;
+        dst->end = src->end;
+        av_dict_copy(&dst->metadata, src->metadata, 0);
+        list[n++] = dst;
+    }
+    out->chapters = list; // ownership -> out, avformat_free_context frees these
+    out->nb_chapters = n;
 }
 
 // pull all ready packets from the encoder and write them to the output container (non-blocking)
@@ -808,6 +847,17 @@ void initOutputEncoder(VideoSession* s) {
         av_dict_free(&opts);
         throw std::runtime_error("Encoder not found: " + codecName + " (check encode_codec_options / hw_encode_options in settings.ini)");
     }
+    // backend and codec must agree: hw_encode_options must name a hardware encoder, encode_codec_options a software one
+    const bool encIsHw = (encoder->capabilities & AV_CODEC_CAP_HARDWARE) != 0;
+    if (s->settings.useHwEncoder && !encIsHw) {
+        av_dict_free(&opts);
+        throw std::runtime_error("cuda_hw_encoder is ON but '" + codecName +
+                                 "' is a CPU (software) encoder. Use a hardware encoder like hevc_nvenc in hw_encode_options, or turn cuda_hw_encoder off.");
+    }
+    if (!s->settings.useHwEncoder && encIsHw) {
+        av_dict_free(&opts);
+        throw std::runtime_error("cuda_hw_encoder is OFF but '" + codecName + "' is a hardware encoder. Use a software encoder like libx265 in encode_codec_options, or turn cuda_hw_encoder on.");
+    }
     // create the output muxer (format context)
     AVFormatContext* rawOutFmt = nullptr;
     checkError(avformat_alloc_output_context2(&rawOutFmt, nullptr, nullptr, s->settings.encodeOutputPath.c_str()) < 0, "Failed to create output format context for: " + s->settings.encodeOutputPath);
@@ -886,6 +936,10 @@ void initOutputEncoder(VideoSession* s) {
         if (dst)
             std::memcpy(dst->data, sd.data, sd.size);
     }
+    // carry the video stream's tags and disposition, rotate is dropped
+    av_dict_copy(&outVideoStream->metadata, s->videoStream->metadata, 0);
+    av_dict_set(&outVideoStream->metadata, "rotate", nullptr, 0);
+    outVideoStream->disposition = s->videoStream->disposition;
     s->inputToOutputStreamMap[s->videoStreamIndex] = outVideoStream->index;
     s->outputVideoStreamIndex = outVideoStream->index;
 
@@ -903,9 +957,14 @@ void initOutputEncoder(VideoSession* s) {
         // drop the input container's FourCC tag so the output muxer assigns a tag valid for its own container.
         // without this, remuxing between different input/output containers (like mp4 -> mkv) fails at write_header
         outSt->codecpar->codec_tag = 0;
+        av_dict_copy(&outSt->metadata, inSt->metadata, 0);
+        outSt->disposition = inSt->disposition; // default/forced flags, else the player re-guesses
         outSt->time_base = inSt->time_base;
         s->inputToOutputStreamMap[i] = outSt->index;
     }
+    av_dict_copy(&s->outputFormatCtx->metadata, s->inputFormatCtx->metadata, 0); // container tags like file title
+    copyChapters(s);
+
     // open the output file and write the container header
     if (!(s->outputFormatCtx->oformat->flags & AVFMT_NOFILE))
         checkError(avio_open(&s->outputFormatCtx->pb, s->settings.encodeOutputPath.c_str(), AVIO_FLAG_WRITE) < 0, "Failed to open output file: " + s->settings.encodeOutputPath);
