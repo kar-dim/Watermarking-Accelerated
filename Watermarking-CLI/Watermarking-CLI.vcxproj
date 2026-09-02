@@ -187,10 +187,11 @@ xcopy /y /d /i /e "$(SolutionDir)samples\*.*" "$(OutDir)samples"</Command>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <OpenMPSupport>true</OpenMPSupport>
       <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
+      <DebugInformationFormat>None</DebugInformationFormat>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
-      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
       <AdditionalLibraryDirectories>$(SolutionDir)Watermarking-Impl\libs\opencl\lib;$(SolutionDir)Watermarking-Impl\libs\zlib\lib;$(SolutionDir)Watermarking-Impl\libs\libpng\lib;$(SolutionDir)Watermarking-Impl\libs\libjpeg\lib;$(SolutionDir)Watermarking-Impl\libs\libwebp\lib;$(SolutionDir)Watermarking-Impl\libs\libtiff\lib;$(SolutionDir)Watermarking-Impl\libs\ffmpeg\lib</AdditionalLibraryDirectories>
       <AdditionalDependencies>zlib.lib;libpng16.lib;jpeg.lib;libwebp.lib;tiff.lib;OpenCL.lib;avutil.lib;avformat.lib;swscale.lib;avcodec.lib;avfilter.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <IgnoreSpecificDefaultLibraries>LIBCMT</IgnoreSpecificDefaultLibraries>
@@ -245,10 +246,11 @@ xcopy /y /d /i /e "$(SolutionDir)samples\*.*" "$(OutDir)samples"</Command>
       <LanguageStandard_C>stdc17</LanguageStandard_C>
       <AdditionalIncludeDirectories>$(SolutionDir)Watermarking-Impl\include;$(SolutionDir)Watermarking-Util\include;$(ProjectDir)libs\inih;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>-openmp -mavx2 -mfma /clang:-O3 /Zc:__cplusplus -flto=thin %(AdditionalOptions)</AdditionalOptions>
+      <DebugInformationFormat>None</DebugInformationFormat>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
-      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
       <AdditionalLibraryDirectories>$(SolutionDir)Watermarking-Impl\libs\zlib\lib;$(LLVMInstallDir)\lib;$(SolutionDir)Watermarking-Impl\libs\libpng\lib;$(SolutionDir)Watermarking-Impl\libs\libjpeg\lib;$(SolutionDir)Watermarking-Impl\libs\libwebp\lib;$(SolutionDir)Watermarking-Impl\libs\libtiff\lib;$(SolutionDir)Watermarking-Impl\libs\ffmpeg\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>zlib.lib;libomp.lib;libpng16.lib;jpeg.lib;libwebp.lib;tiff.lib;avutil.lib;avformat.lib;swscale.lib;avcodec.lib;avfilter.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <OptimizeReferences>true</OptimizeReferences>
@@ -278,10 +280,11 @@ xcopy /y /d /i /e "$(SolutionDir)samples\*.*" "$(OutDir)samples"</Command>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <OpenMPSupport>true</OpenMPSupport>
       <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
+      <DebugInformationFormat>None</DebugInformationFormat>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
-      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
       <IgnoreSpecificDefaultLibraries>LIBCMT</IgnoreSpecificDefaultLibraries>
       <AdditionalDependencies>cudart_static.lib;cuda.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;zlib.lib;libpng16.lib;jpeg.lib;libwebp.lib;tiff.lib;avutil.lib;avformat.lib;swscale.lib;avcodec.lib;avfilter.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(SolutionDir)Watermarking-Impl\libs\zlib\lib;$(SolutionDir)Watermarking-Impl\libs\libpng\lib;$(SolutionDir)Watermarking-Impl\libs\libjpeg\lib;$(SolutionDir)Watermarking-Impl\libs\libwebp\lib;$(SolutionDir)Watermarking-Impl\libs\libtiff\lib;$(SolutionDir)Watermarking-Impl\libs\ffmpeg\lib;$(CUDA_PATH)\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
@@ -309,10 +312,11 @@ xcopy /y /d /i /e "$(SolutionDir)samples\*.*" "$(OutDir)samples"</Command>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <OpenMPSupport>true</OpenMPSupport>
       <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
+      <DebugInformationFormat>None</DebugInformationFormat>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
-      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
       <IgnoreSpecificDefaultLibraries>LIBCMT</IgnoreSpecificDefaultLibraries>
       <AdditionalDependencies>cudart_static.lib;cuda.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;zlib.lib;libpng16.lib;jpeg.lib;libwebp.lib;tiff.lib;avutil.lib;avformat.lib;swscale.lib;avcodec.lib;avfilter.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(SolutionDir)Watermarking-Impl\libs\zlib\lib;$(SolutionDir)Watermarking-Impl\libs\libpng\lib;$(SolutionDir)Watermarking-Impl\libs\libjpeg\lib;$(SolutionDir)Watermarking-Impl\libs\libwebp\lib;$(SolutionDir)Watermarking-Impl\libs\libtiff\lib;$(SolutionDir)Watermarking-Impl\libs\ffmpeg\lib;$(CUDA_PATH)\lib\x64;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
