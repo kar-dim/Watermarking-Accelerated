@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AuxiliaryMux.hpp"
 #include "buffer.hpp"
 #include "HdrTonemap.hpp"
 #include "HostMemory.hpp"
@@ -46,7 +47,7 @@ struct VideoSession {
     // output encoding (embed mode only, initialized in embedVideo, null for detect)
     video_utils::AVOutputFormatContextPtr outputFormatCtx;
     video_utils::AVCodecContextPtr outputEncoderCtx;
-    std::vector<int> inputToOutputStreamMap; // input stream index → output stream index (-1 = skip)
+    video_utils::AuxiliaryMux auxMux; // handles audio remux and subtitle transcoding
     int outputVideoStreamIndex = -1;
     // convenient getter for video properties
     inline std::pair<int, int> videoDims() const { return {videoStream->codecpar->height, videoStream->codecpar->width}; }

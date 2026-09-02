@@ -60,7 +60,7 @@ struct VideoSettings {
     int p;
     float psnr;
     int watermarkInterval;
-    std::string hwDecoder;
+    bool useHwDecoder;
     bool useHwEncoder;
     std::string encodeOptions;
     std::string encodeOutputPath;

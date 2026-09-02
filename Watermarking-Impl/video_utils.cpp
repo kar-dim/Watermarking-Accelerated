@@ -1,5 +1,8 @@
+#include "AuxiliaryMux.hpp"
+#include "AvUtil.hpp"
 #include "buffer.hpp"
 #include "common_utils.hpp"
+#include "EncodeOptions.hpp"
 #include "include/WatermarkCore.hpp"
 #include "include/WatermarkTypes.hpp"
 #include "video_defines.hpp"
@@ -12,6 +15,7 @@
 #include <cstdint>
 #include <cstring>
 #include <exception>
+#include <filesystem>
 #include <format>
 #include <functional>
 #include <iostream>
@@ -19,13 +23,11 @@
 #include <optional>
 #include <queue>
 #include <span>
-#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <thread>
 #include <utility>
 #include <variant>
-#include <vector>
 
 #if defined(_USE_CUDA_)
 #include "CudaArray.hpp"
@@ -34,6 +36,7 @@
 #include <cuda_runtime.h>
 #include <cuda.h>
 extern "C" {
+#include "libavcodec/codec_id.h"
 #include "libavutil/buffer.h"
 #include "libavutil/hwcontext_cuda.h"
 }
@@ -86,10 +89,8 @@ namespace video_utils {
 namespace {
 // internal implementations
 
-bool checkPixelFormatSupport(const std::span<const AVPixelFormat> formats, const AVPixelFormat format) {
-    const bool isValidFormat = std::ranges::any_of(formats, [&](auto f) { return f == format; });
-    checkError(!isValidFormat, "Error: Video frame format not supported, aborting");
-    return isValidFormat;
+bool isPixelFormatSupported(const std::span<const AVPixelFormat> formats, const AVPixelFormat format) {
+    return std::ranges::any_of(formats, [&](auto f) { return f == format; });
 }
 
 // Queue that decouples the decode/watermark main thread from the encode background thread
@@ -159,16 +160,45 @@ AVCodecContextPtr openSoftwareDecoder(const AVCodecParameters* inputCodecParams,
     ctx->pkt_timebase = pktTimebase; // give the decoder the stream timebase (silences "Invalid pkt_timebase", correct VFR timestamps)
     if (avcodec_open2(ctx.get(), inputDecoder, nullptr) < 0)
         return nullptr;
-    checkPixelFormatSupport(supportedFormats, ctx->pix_fmt);
+    checkError(!isPixelFormatSupported(supportedFormats, ctx->pix_fmt), "Error: Video frame format not supported, aborting");
     return ctx;
 }
 
 #if defined(_USE_CUDA_)
+// H264 NVDEC extra checks: It opens these profiles but decodes them wrong (unsupported by NVDEC hardware)
+bool nvdecMisdecodesProfile(const AVCodecParameters* codecParams) {
+    return codecParams->codec_id == AV_CODEC_ID_H264 && (codecParams->profile == AV_PROFILE_H264_HIGH_444_PREDICTIVE || codecParams->profile == AV_PROFILE_H264_CAVLC_444);
+}
+
+const char* cuvidNameFor(const AVCodecID codecId) {
+    switch (codecId) {
+    case AV_CODEC_ID_H264: return "h264_cuvid";
+    case AV_CODEC_ID_HEVC: return "hevc_cuvid";
+    case AV_CODEC_ID_AV1: return "av1_cuvid";
+    case AV_CODEC_ID_VP9: return "vp9_cuvid";
+    case AV_CODEC_ID_VP8: return "vp8_cuvid";
+    case AV_CODEC_ID_MPEG1VIDEO: return "mpeg1_cuvid";
+    case AV_CODEC_ID_MPEG2VIDEO: return "mpeg2_cuvid";
+    case AV_CODEC_ID_MPEG4: return "mpeg4_cuvid";
+    case AV_CODEC_ID_VC1: return "vc1_cuvid";
+    default: return nullptr;
+    }
+}
+
 // try to open a CUDA hardware accelerated decoder, falls back to software on any failure
-AVCodecContextPtr openDecoderHWAccel(const AVCodecParameters* inputCodecParams, const string& userHwDecoder, bool& useHwDecoder, AVRational pktTimebase) {
-    if (userHwDecoder.empty())
+AVCodecContextPtr openDecoderHWAccel(const AVCodecParameters* inputCodecParams, bool& useHwDecoder, AVRational pktTimebase) {
+    useHwDecoder = false;
+    const char* decoderName = cuvidNameFor(inputCodecParams->codec_id);
+    if (!decoderName) {
+        cout << info(std::format("NVDEC cannot decode codec '{}', falling back to software decoder (CPU).\n", avcodec_get_name(inputCodecParams->codec_id)));
         return openSoftwareDecoder(inputCodecParams, pktTimebase);
-    const AVCodec* inputDecoder = avcodec_find_decoder_by_name(userHwDecoder.c_str());
+    }
+    if (nvdecMisdecodesProfile(inputCodecParams)) {
+        const char* profileName = avcodec_profile_name(inputCodecParams->codec_id, inputCodecParams->profile);
+        cout << info(std::format("NVDEC decodes H.264 profile '{}' incorrectly, falling back to software decoder (CPU).\n", profileName ? profileName : "?"));
+        return openSoftwareDecoder(inputCodecParams, pktTimebase);
+    }
+    const AVCodec* inputDecoder = avcodec_find_decoder_by_name(decoderName);
     if (!inputDecoder)
         return openSoftwareDecoder(inputCodecParams, pktTimebase);
     AVCodecContextPtr ctx(avcodec_alloc_context3(inputDecoder));
@@ -176,6 +206,7 @@ AVCodecContextPtr openDecoderHWAccel(const AVCodecParameters* inputCodecParams, 
         return openSoftwareDecoder(inputCodecParams, pktTimebase);
     if (avcodec_parameters_to_context(ctx.get(), inputCodecParams) < 0)
         return openSoftwareDecoder(inputCodecParams, pktTimebase);
+
     // share our existing primary CUDA context with the decoder
     AVBufferRef* raw_hw_device_ctx = av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_CUDA);
     if (!raw_hw_device_ctx)
@@ -192,6 +223,7 @@ AVCodecContextPtr openDecoderHWAccel(const AVCodecParameters* inputCodecParams, 
     if (cuDevicePrimaryCtxRetain(&primaryCtx, cuDev) != CUDA_SUCCESS)
         return openSoftwareDecoder(inputCodecParams, pktTimebase);
     cudaCtx->cuda_ctx = primaryCtx;
+    cudaCtx->stream = CudaStreamManager::getInstance().getComputeStream();
     hwCtx->user_opaque = reinterpret_cast<void*>(static_cast<intptr_t>(cuDev));
     hwCtx->free = [](AVHWDeviceContext* c) {
         const CUdevice d = static_cast<CUdevice>(reinterpret_cast<intptr_t>(c->user_opaque));
@@ -199,13 +231,31 @@ AVCodecContextPtr openDecoderHWAccel(const AVCodecParameters* inputCodecParams, 
     };
     if (av_hwdevice_ctx_init(hw_device_ctx.get()) < 0)
         return openSoftwareDecoder(inputCodecParams, pktTimebase);
+    if (cuCtxSetCurrent(primaryCtx) != CUDA_SUCCESS)
+        return openSoftwareDecoder(inputCodecParams, pktTimebase);
     ctx->hw_device_ctx = av_buffer_ref(hw_device_ctx.get());
     ctx->get_format = [](AVCodecContext*, const enum AVPixelFormat*) { return AV_PIX_FMT_CUDA; };
     ctx->pkt_timebase = pktTimebase; // give cuvid the stream timebase (silences "Invalid pkt_timebase", correct VFR timestamps)
-    if (avcodec_open2(ctx.get(), inputDecoder, nullptr) < 0)
+
+    // adaptive deinterlace for cuvid (does not regress or cost for progressive)
+    AVDictionary* decOpts = nullptr;
+    av_dict_set(&decOpts, "deint", "adaptive", 0);
+    av_dict_set(&decOpts, "drop_second_field", "1", 0);
+    int openStatus = avcodec_open2(ctx.get(), inputDecoder, &decOpts);
+    av_dict_free(&decOpts);
+    if (openStatus < 0) {
+        openStatus = avcodec_open2(ctx.get(), inputDecoder, nullptr);
+    }
+    if (openStatus < 0) {
+        cout << info(std::format("NVDEC decoder '{}' could not open input, falling back to software decoder (CPU).\n", decoderName));
         return openSoftwareDecoder(inputCodecParams, pktTimebase);
+    }
+    if (!isPixelFormatSupported(supportedHwFormats, ctx->sw_pix_fmt)) {
+        cout << info(std::format("NVDEC output format '{}' unsupported, falling back to software decoder (CPU).\n",
+            av_get_pix_fmt_name(ctx->sw_pix_fmt) ? av_get_pix_fmt_name(ctx->sw_pix_fmt) : "?"));
+        return openSoftwareDecoder(inputCodecParams, pktTimebase);
+    }
     useHwDecoder = true;
-    checkPixelFormatSupport(supportedHwFormats, ctx->sw_pix_fmt);
     return ctx;
 }
 #endif
@@ -307,81 +357,6 @@ void fillYPlane(const AVFrame* frame, VideoSession* s) {
     embedAndFillYPlane(s, s->inputFrame);
 }
 
-// parse "-c:v codec -key val ..." into {codecName, AVDictionary*}. only true encoder options reach the codec,
-// audio/subtitle/-map directives and pix_fmt are skipped: we remux those streams and set
-// the pixel format ourselves, passing them here would destroy the codec name or desync the encode buffers
-std::pair<std::string, AVDictionary*> parseEncodeOptions(const std::string& optStr) {
-    std::string codecName;
-    AVDictionary* opts = nullptr;
-    // split "c:v" -> base "c", spec 'v'. spec 0 = unspecified, treated as video
-    auto splitSpec = [](const std::string& key, char& spec) {
-        spec = 0;
-        const auto pos = key.rfind(':');
-        if (pos != std::string::npos && pos + 2 == key.size()) {
-            const char c = key[pos + 1];
-            if (c == 'v' || c == 'a' || c == 's' || c == 'd' || c == 't') {
-                spec = c;
-                return key.substr(0, pos);
-            }
-        }
-        return key;
-    };
-    std::istringstream ss(optStr);
-    std::vector<std::string> tokens;
-    for (std::string tok; ss >> tok;)
-        tokens.push_back(std::move(tok));
-    for (size_t i = 0; i < tokens.size();) {
-        if (tokens[i].size() > 1 && tokens[i][0] == '-') {
-            char spec = 0;
-            const std::string base = splitSpec(tokens[i].substr(1), spec);
-            const bool hasVal = (i + 1 < tokens.size()) && (tokens[i + 1].empty() || tokens[i + 1][0] != '-');
-            const size_t step = hasVal ? 2 : 1;
-            // a/s/d stream or -map (we remux those), pixel_format (we set it ourselves): skip, never reach the codec
-            if (base == "map" || (spec != 0 && spec != 'v') || base == "pix_fmt" || base == "pixel_format") {
-                i += step;
-                continue;
-            }
-            if (hasVal) {
-                const std::string& val = tokens[i + 1];
-                if (base == "c" || base == "codec")
-                    codecName = val;
-                else
-                    av_dict_set(&opts, base.c_str(), val.c_str(), 0);
-            }
-            i += step;
-            continue;
-        }
-        ++i;
-    }
-    return {codecName, opts};
-}
-
-// Copy input chapters (title + timing) to the output. Chapters hang off AVFormatContext, not any stream, so the
-// per-stream metadata copy never reaches them. time_base is wall-clock, so it survives any pts rescale
-void copyChapters(const VideoSession* s) {
-    const AVFormatContext* in = s->inputFormatCtx.get();
-    AVFormatContext* out = s->outputFormatCtx.get();
-    if (in->nb_chapters == 0)
-        return;
-    auto* list = static_cast<AVChapter**>(av_realloc_array(nullptr, in->nb_chapters, sizeof(AVChapter*)));
-    checkError(!list, "Failed to allocate chapter array");
-    unsigned n = 0;
-    for (unsigned i = 0; i < in->nb_chapters; i++) {
-        const AVChapter* src = in->chapters[i];
-        auto* dst = static_cast<AVChapter*>(av_mallocz(sizeof(AVChapter)));
-        if (!dst)
-            continue;
-        dst->id = src->id;
-        dst->time_base = src->time_base;
-        dst->start = src->start;
-        dst->end = src->end;
-        av_dict_copy(&dst->metadata, src->metadata, 0);
-        list[n++] = dst;
-    }
-    out->chapters = list; // ownership -> out, avformat_free_context frees these
-    out->nb_chapters = n;
-}
-
 // pull all ready packets from the encoder and write them to the output container (non-blocking)
 void drainEncoderPackets(VideoSession* s) {
     const AVPacketPtr pkt(av_packet_alloc());
@@ -389,10 +364,9 @@ void drainEncoderPackets(VideoSession* s) {
     while (avcodec_receive_packet(s->outputEncoderCtx.get(), pkt.get()) == 0) {
         av_packet_rescale_ts(pkt.get(), s->outputEncoderCtx->time_base, outVideoStream->time_base);
         pkt->stream_index = s->outputVideoStreamIndex;
-        checkError(av_interleaved_write_frame(s->outputFormatCtx.get(), pkt.get()) < 0, "Failed to write encoded video packet");
+        checkAv(av_interleaved_write_frame(s->outputFormatCtx.get(), pkt.get()), "Failed to write encoded video packet");
         av_packet_unref(pkt.get());
     }
-    // AVERROR(EAGAIN) -> encoder needs more frames before producing output (we ignore it, keep going)
 }
 
 // encode thread: pops items, encodes frames OR writes passthrough packets, it is the
@@ -403,15 +377,18 @@ void encodeWorker(VideoSession* s, EncodeQueue& queue, std::exception_ptr& encEr
         while (auto item = queue.pop()) {
             if (std::holds_alternative<AVFramePtr>(*item)) {
                 AVFramePtr frame = std::move(std::get<AVFramePtr>(*item));
-                const int ret = avcodec_send_frame(s->outputEncoderCtx.get(), frame.get());
-                checkError(ret < 0 && ret != AVERROR(EAGAIN), "Encode thread: avcodec_send_frame failed");
+                int ret = avcodec_send_frame(s->outputEncoderCtx.get(), frame.get());
+                while (ret == AVERROR(EAGAIN)) {
+                    drainEncoderPackets(s);
+                    ret = avcodec_send_frame(s->outputEncoderCtx.get(), frame.get());
+                }
+                checkAv(ret, "Encode thread: avcodec_send_frame failed");
                 drainEncoderPackets(s);
             } else {
                 AVPacketPtr pkt = std::move(std::get<AVPacketPtr>(*item));
-                checkError(av_interleaved_write_frame(s->outputFormatCtx.get(), pkt.get()) < 0, "Encode thread: passthrough packet write failed");
+                checkAv(av_interleaved_write_frame(s->outputFormatCtx.get(), pkt.get()), "Encode thread: passthrough packet write failed");
             }
         }
-        // queue closed -> all items processed, flushAndFinalize will send the null frame + final drain
     } catch (...) {
         encErr = std::current_exception();
         queue.abort(); // unblock main thread if it is waiting on a full queue
@@ -488,7 +465,7 @@ void embedWatermark(VideoSession* s, int& framesCount, const AVFrame* frame, Enc
         cout << std::format(" [Embedding frame {}]\n", framesCount + 1);
         fillYPlane(frame, s);
         // chroma goes decoded frame → encFrame directly inside buildEncFrame (no hostFrame hop)
-        queue.push(buildEncFrame(s, frame->pts, frame));
+        queue.push(buildEncFrame(s, framePts(frame), frame));
     } else {
         // passthrough: take a refcounted reference to the decoded frame (zero data copy)
         AVFramePtr ref(av_frame_alloc());
@@ -497,6 +474,7 @@ void embedWatermark(VideoSession* s, int& framesCount, const AVFrame* frame, Enc
         // encoder context already carries color_range=AVCOL_RANGE_JPEG, so players can understand it's full range
         if (ref->format == AV_PIX_FMT_YUVJ420P)
             ref->format = AV_PIX_FMT_YUV420P;
+        ref->pts = framePts(frame);
         queue.push(std::move(ref));
     }
     framesCount++;
@@ -582,9 +560,9 @@ void embedWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* fra
         }
         if (isHdr) {
             CudaArray<uint8_t> uvNV12 = convertHdrUV(s, frame, mobius, stream);
-            encodeFrameGPU(s, yRowMajor, frame, frame->pts, queue, uvNV12.data());
+            encodeFrameGPU(s, yRowMajor, frame, framePts(frame), queue, uvNV12.data());
         } else {
-            encodeFrameGPU(s, yRowMajor, frame, frame->pts, queue);
+            encodeFrameGPU(s, yRowMajor, frame, framePts(frame), queue);
         }
     } else {
         // NVDEC + SW encoder
@@ -618,7 +596,7 @@ void embedWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* fra
                 cudaStreamSynchronize(stream);
             }
         }
-        queue.push(buildEncFrame(s, frame->pts));
+        queue.push(buildEncFrame(s, framePts(frame)));
     }
     framesCount++;
 }
@@ -645,54 +623,64 @@ void detectWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* fr
 // main frames loop: decodes packets, calls processFrame for each video frame,
 // remuxes audio/subtitle packets directly when outputFormatCtx is set (embed mode)
 template <typename Func>
-int processFrames(VideoSession* s, const bool needsFilter, EncodeQueue* remuxQueue, Func&& processFrame) {
+int processFrames(VideoSession* s, const bool needsFilter, Func&& processFrame) {
     const AVPacketPtr packet(av_packet_alloc());
     AVFramePtr frame(av_frame_alloc());
     AVFramePtr filteredFrame(nullptr);
     if (needsFilter)
         filteredFrame.reset(av_frame_alloc());
     int framesCount = 0;
+    long long droppedPackets = 0;
 
-    while (av_read_frame(s->inputFormatCtx.get(), packet.get()) >= 0) {
+    auto drainDecodedFrames = [&] {
+        while (true) {
+            const int ret = avcodec_receive_frame(s->inputDecoderCtx.get(), frame.get());
+            if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
+                break;
+            checkAv(ret, "FFmpeg decoding error");
+            if (needsFilter)
+                filterFrame(frame, filteredFrame, s);
+            std::forward<Func>(processFrame)(frame.get(), framesCount);
+        }
+    };
+
+    while (true) {
+        const int readRet = av_read_frame(s->inputFormatCtx.get(), packet.get());
+        if (readRet < 0) {
+            checkError(readRet != AVERROR_EOF, std::format("Reading input video failed after {} frames: {}", framesCount, avErrorText(readRet)));
+            break;
+        }
         if (packet->stream_index == s->videoStreamIndex) {
-            if (avcodec_send_packet(s->inputDecoderCtx.get(), packet.get()) >= 0) {
-                while (true) {
-                    const int ret = avcodec_receive_frame(s->inputDecoderCtx.get(), frame.get());
-                    if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
-                        break;
-                    if (ret < 0) {
-                        char errbuf[256];
-                        av_strerror(ret, errbuf, sizeof(errbuf));
-                        av_packet_unref(packet.get());
-                        throw std::runtime_error(std::string("FFmpeg decoding error: ") + errbuf);
-                    }
-                    if (needsFilter)
-                        filterFrame(frame, filteredFrame, s);
-                    std::forward<Func>(processFrame)(frame.get(), framesCount);
-                }
+            int sendRet = avcodec_send_packet(s->inputDecoderCtx.get(), packet.get());
+            while (sendRet == AVERROR(EAGAIN)) {
+                drainDecodedFrames();
+                sendRet = avcodec_send_packet(s->inputDecoderCtx.get(), packet.get());
+            }
+            if (sendRet < 0 && sendRet != AVERROR(EAGAIN)) {
+                if (droppedPackets++ == 0)
+                    cout << info(std::format("Corrupt video packet skipped at frame {} ({})\n", framesCount, avErrorText(sendRet)));
+            } else if (sendRet >= 0) {
+                drainDecodedFrames();
             }
         } else if (s->outputFormatCtx) {
-            // embed mode (any path): hand the audio/subtitle packet to the encode thread
-            const int inIdx = packet->stream_index;
-            if (inIdx < static_cast<int>(s->inputToOutputStreamMap.size())) {
-                const int outIdx = s->inputToOutputStreamMap[inIdx];
-                if (outIdx >= 0) {
-                    av_packet_rescale_ts(packet.get(), s->inputFormatCtx->streams[inIdx]->time_base, s->outputFormatCtx->streams[outIdx]->time_base);
-                    packet->stream_index = outIdx;
-                    AVPacketPtr owned(av_packet_alloc());
-                    av_packet_move_ref(owned.get(), packet.get());
-                    remuxQueue->push(std::move(owned));
-                }
-            }
+            std::string auxErr;
+            checkError(!s->auxMux.routePacket(packet.get(), auxErr), auxErr);
         }
         av_packet_unref(packet.get());
     }
-    avcodec_send_packet(s->inputDecoderCtx.get(), nullptr);
-    while (avcodec_receive_frame(s->inputDecoderCtx.get(), frame.get()) == 0) {
-        if (needsFilter)
-            filterFrame(frame, filteredFrame, s);
-        std::forward<Func>(processFrame)(frame.get(), framesCount);
+
+    if (droppedPackets > 0)
+        cout << info(std::format("{} corrupt video packets skipped in total\n", droppedPackets));
+
+    int flushRet = avcodec_send_packet(s->inputDecoderCtx.get(), nullptr);
+    while (flushRet == AVERROR(EAGAIN)) {
+        drainDecodedFrames();
+        flushRet = avcodec_send_packet(s->inputDecoderCtx.get(), nullptr);
     }
+    checkError(flushRet < 0 && flushRet != AVERROR_EOF, "Flushing decoder failed: " + avErrorText(flushRet));
+    drainDecodedFrames();
+
+    checkError(framesCount == 0, "Decoded 0 frames: the input video stream could not be decoded. No valid output was written.");
     return framesCount;
 }
 
@@ -700,19 +688,15 @@ int processFrames(VideoSession* s, const bool needsFilter, EncodeQueue* remuxQue
 
 // public API
 
-int findVideoStream(const AVFormatContext* inputFormatCtx) {
-    for (unsigned int i = 0; i < inputFormatCtx->nb_streams; i++)
-        if (inputFormatCtx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO)
-            return i;
-    return -1;
-}
+int findVideoStream(const AVFormatContext* inputFormatCtx) { return av_find_best_stream(const_cast<AVFormatContext*>(inputFormatCtx), AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0); }
 
-AVCodecContextPtr openDecoder(const AVCodecParameters* inputCodecParams, const string& userHwDecoder, bool& useHwDecoder, AVRational pktTimebase) {
+AVCodecContextPtr openDecoder(const AVCodecParameters* inputCodecParams, const bool useHwDecoderRequested, bool& useHwDecoder, AVRational pktTimebase) {
 #if defined(_USE_CUDA_)
-    return openDecoderHWAccel(inputCodecParams, userHwDecoder, useHwDecoder, pktTimebase);
-#else
-    return openSoftwareDecoder(inputCodecParams, pktTimebase);
+    if (useHwDecoderRequested)
+        return openDecoderHWAccel(inputCodecParams, useHwDecoder, pktTimebase);
 #endif
+    useHwDecoder = false;
+    return openSoftwareDecoder(inputCodecParams, pktTimebase);
 }
 
 bool initFilterGraph(VideoSession* s) {
@@ -807,9 +791,9 @@ int videoDispatcher(VideoSession* s, VideoMode op, const bool needsFilter) {
     if (op == VideoMode::DETECT) {
 #if defined(_USE_CUDA_)
         if (s->useHwDecoder)
-            return processFrames(s, needsFilter, nullptr, [&](const AVFrame* frame, int& framesCount) { detectWatermarkHWAccel(s, framesCount, frame); });
+            return processFrames(s, needsFilter, [&](const AVFrame* frame, int& framesCount) { detectWatermarkHWAccel(s, framesCount, frame); });
 #endif
-        return processFrames(s, needsFilter, nullptr, [&](const AVFrame* frame, int& framesCount) { detectWatermark(s, framesCount, frame); });
+        return processFrames(s, needsFilter, [&](const AVFrame* frame, int& framesCount) { detectWatermark(s, framesCount, frame); });
     }
 
     // embed paths: start a dedicated encode thread so decode+watermark (main) and
@@ -819,12 +803,20 @@ int videoDispatcher(VideoSession* s, VideoMode op, const bool needsFilter) {
     std::thread encThread(encodeWorker, s, std::ref(queue), std::ref(encErr));
     int result = 0;
     try {
+        s->auxMux.setSink([&queue](AVPacket* packet) {
+            AVPacketPtr owned(av_packet_alloc());
+            if (!owned || av_packet_ref(owned.get(), packet) < 0)
+                return false;
+            queue.push(std::move(owned));
+            return true;
+        });
+
 #if defined(_USE_CUDA_)
         if (s->useHwDecoder)
-            result = processFrames(s, needsFilter, &queue, [&](const AVFrame* frame, int& framesCount) { embedWatermarkHWAccel(s, framesCount, frame, queue); });
+            result = processFrames(s, needsFilter, [&](const AVFrame* frame, int& framesCount) { embedWatermarkHWAccel(s, framesCount, frame, queue); });
         else
 #endif
-            result = processFrames(s, needsFilter, &queue, [&](const AVFrame* frame, int& framesCount) { embedWatermark(s, framesCount, frame, queue); });
+            result = processFrames(s, needsFilter, [&](const AVFrame* frame, int& framesCount) { embedWatermark(s, framesCount, frame, queue); });
         queue.close(); // END: tell the encode thread to drain and exit
     } catch (...) {
         queue.abort(); // unblock encode thread if it is waiting
@@ -839,58 +831,64 @@ int videoDispatcher(VideoSession* s, VideoMode op, const bool needsFilter) {
 
 void initOutputEncoder(VideoSession* s) {
     checkError(s->settings.encodeOutputPath.empty(), "No output path specified for video encode");
+    checkError(sameFileOnDisk(s->settings.videoFile, s->settings.encodeOutputPath),
+               "Output path points to the same physical file as the input file (" + s->settings.encodeOutputPath + "). Overwriting the input video is forbidden.");
 
-    auto [codecName, rawOpts] = parseEncodeOptions(s->settings.encodeOptions);
-    AVDictionary* opts = rawOpts;
+    ParsedEncodeOptions parsed = parseEncodeOptions(s->settings.encodeOptions);
+    const std::string& codecName = parsed.codecName;
+    OptionDict opts(parsed.dictionary);
+    const MediaLog log = [](const std::string& msg) { cout << info(msg + "\n"); };
+    reportParsedOptions(parsed, log);
+
+    if (codecName.empty())
+        throw std::runtime_error("No video encoder in the options string, needs '-c:v <encoder>' (e.g. -c:v hevc_nvenc)");
+
     const AVCodec* encoder = avcodec_find_encoder_by_name(codecName.c_str());
-    if (!encoder) {
-        av_dict_free(&opts);
-        throw std::runtime_error("Encoder not found: " + codecName + " (check encode_codec_options / hw_encode_options in settings.ini)");
-    }
+    if (!encoder)
+        throw std::runtime_error("Encoder not found: '" + codecName + "' (check encode_codec_options / hw_encode_options in settings.ini)");
+
     // backend and codec must agree: hw_encode_options must name a hardware encoder, encode_codec_options a software one
     const bool encIsHw = (encoder->capabilities & AV_CODEC_CAP_HARDWARE) != 0;
-    if (s->settings.useHwEncoder && !encIsHw) {
-        av_dict_free(&opts);
+    if (s->settings.useHwEncoder && !encIsHw)
         throw std::runtime_error("cuda_hw_encoder is ON but '" + codecName +
                                  "' is a CPU (software) encoder. Use a hardware encoder like hevc_nvenc in hw_encode_options, or turn cuda_hw_encoder off.");
-    }
-    if (!s->settings.useHwEncoder && encIsHw) {
-        av_dict_free(&opts);
+    if (!s->settings.useHwEncoder && encIsHw)
         throw std::runtime_error("cuda_hw_encoder is OFF but '" + codecName + "' is a hardware encoder. Use a software encoder like libx265 in encode_codec_options, or turn cuda_hw_encoder on.");
-    }
+
     // create the output muxer (format context)
     AVFormatContext* rawOutFmt = nullptr;
-    checkError(avformat_alloc_output_context2(&rawOutFmt, nullptr, nullptr, s->settings.encodeOutputPath.c_str()) < 0, "Failed to create output format context for: " + s->settings.encodeOutputPath);
+    checkAv(avformat_alloc_output_context2(&rawOutFmt, nullptr, nullptr, s->settings.encodeOutputPath.c_str()), "Failed to create output format context for: " + s->settings.encodeOutputPath);
     s->outputFormatCtx.reset(rawOutFmt);
 
-    // fail fast on incompatible container/codec combos (like HEVC into AVI), which would mux into a broken file,
-    // we check the codec id so it covers both sw and cuda hw encoders
-    if (avformat_query_codec(s->outputFormatCtx->oformat, encoder->id, FF_COMPLIANCE_NORMAL) == 0) {
-        av_dict_free(&opts);
+    // fail fast on incompatible container/codec combos (like HEVC into AVI), which would mux into a broken file
+    if (avformat_query_codec(s->outputFormatCtx->oformat, encoder->id, FF_COMPLIANCE_NORMAL) == 0)
         throw std::runtime_error("Codec '" + codecName + "' cannot be stored in the '" + std::string(s->outputFormatCtx->oformat->name) + "' container (" + s->settings.encodeOutputPath +
                                  "). Pick a container-compatible codec (prefer same container).");
+
+    const int height = s->videoStream->codecpar->height;
+    const int width = s->videoStream->codecpar->width;
+
+    if (s->settings.useHwEncoder) {
+        const int maxNvencRes = (codecName == "h264_nvenc") ? 4096 : 8192;
+        checkError(width > maxNvencRes || height > maxNvencRes,
+                   std::format("Output resolution ({}x{}) exceeds the NVENC hardware encoder limit of {}x{}.", width, height, maxNvencRes, maxNvencRes));
     }
 
     // build the encoder context
     AVCodecContextPtr encCtx(avcodec_alloc_context3(encoder));
     checkError(!encCtx, "Failed to allocate encoder context");
 
-    // important to set 0 for maximum performance
     encCtx->thread_count = 0;
-
-    const int height = s->videoStream->codecpar->height;
-    const int width = s->videoStream->codecpar->width;
     encCtx->width = width;
     encCtx->height = height;
-    // NVDEC+NVENC zero-copy: encoder receives CUDA NV12 frames directly from VRAM
-    // all other paths: encoder receives YUV420P frames from hostFrame (CPU RAM)
+
     const bool useGpuPipeline = s->useHwDecoder && s->settings.useHwEncoder;
     encCtx->pix_fmt = useGpuPipeline ? AV_PIX_FMT_CUDA : AV_PIX_FMT_YUV420P;
     encCtx->time_base = s->videoStream->time_base;
     encCtx->framerate = s->videoStream->avg_frame_rate;
     encCtx->sample_aspect_ratio = s->videoStream->codecpar->sample_aspect_ratio;
+
     // if we tonemapped HDR->SDR write SDR metadata, not the original HDR flags
-    // (called once before videoDispatcher caches s->isHdr, so read directly here)
     const bool inputIsHDR = isHDR(s->inputDecoderCtx.get());
     encCtx->color_range = s->videoStream->codecpar->color_range;
     encCtx->color_primaries = inputIsHDR ? AVCOL_PRI_BT709 : s->inputDecoderCtx->color_primaries;
@@ -910,24 +908,31 @@ void initOutputEncoder(VideoSession* s) {
         fc->width = width;
         fc->height = height;
         fc->initial_pool_size = 8; // match EncodeQueue::MAX_DEPTH
-        checkError(av_hwframe_ctx_init(framesRef) < 0, "Failed to init hw_frames_ctx for NVENC");
+        if (av_hwframe_ctx_init(framesRef) < 0) {
+            av_buffer_unref(&framesRef);
+            throw std::runtime_error("Failed to init hw_frames_ctx for NVENC");
+        }
         encCtx->hw_frames_ctx = framesRef;
     }
 #endif
 
-    const int openRet = avcodec_open2(encCtx.get(), encoder, &opts);
-    av_dict_free(&opts);
-    checkError(openRet < 0, "Failed to open encoder: " + codecName);
+    const AVPixelFormat wantFmt = useGpuPipeline ? AV_PIX_FMT_CUDA : AV_PIX_FMT_YUV420P;
+    if (!encoderSupportsPixFmt(encoder, wantFmt))
+        throw std::runtime_error(std::format("Encoder '{}' cannot encode {} ({} output). Pick another codec or change options.", codecName,
+                                             av_get_pix_fmt_name(wantFmt) ? av_get_pix_fmt_name(wantFmt) : "?", useGpuPipeline ? "NVENC CUDA" : "YUV420P"));
 
-    s->inputToOutputStreamMap.assign(s->inputFormatCtx->nb_streams, -1);
+    checkAv(avcodec_open2(encCtx.get(), encoder, opts.ptr()), "Failed to open encoder: " + codecName);
+
     AVStream* outVideoStream = avformat_new_stream(s->outputFormatCtx.get(), nullptr);
     checkError(!outVideoStream, "Failed to create output video stream");
-    checkError(avcodec_parameters_from_context(outVideoStream->codecpar, encCtx.get()) < 0, "Failed to copy encoder parameters to output video stream");
+    checkAv(avcodec_parameters_from_context(outVideoStream->codecpar, encCtx.get()), "Failed to copy encoder parameters to output video stream");
     outVideoStream->time_base = encCtx->time_base;
-    // fix codecpar->format when CUDA input was used
     if (useGpuPipeline)
         outVideoStream->codecpar->format = AV_PIX_FMT_YUV420P;
-    // copy side data (rotation, etc) -> skip HDR metadata when we tonemapped to SDR
+    if (!parsed.codecTag.empty())
+        outVideoStream->codecpar->codec_tag = codecTagFromString(parsed.codecTag);
+
+    // copy side data (rotation, display matrix) -> skip HDR metadata when tonemapped to SDR
     for (int i = 0; i < s->videoStream->codecpar->nb_coded_side_data; i++) {
         const AVPacketSideData& sd = s->videoStream->codecpar->coded_side_data[i];
         if (inputIsHDR && (sd.type == AV_PKT_DATA_MASTERING_DISPLAY_METADATA || sd.type == AV_PKT_DATA_CONTENT_LIGHT_LEVEL))
@@ -940,38 +945,31 @@ void initOutputEncoder(VideoSession* s) {
     av_dict_copy(&outVideoStream->metadata, s->videoStream->metadata, 0);
     av_dict_set(&outVideoStream->metadata, "rotate", nullptr, 0);
     outVideoStream->disposition = s->videoStream->disposition;
-    s->inputToOutputStreamMap[s->videoStreamIndex] = outVideoStream->index;
     s->outputVideoStreamIndex = outVideoStream->index;
 
-    // remux audio + subtitle streams as-is
-    for (unsigned i = 0; i < s->inputFormatCtx->nb_streams; i++) {
-        const AVStream* inSt = s->inputFormatCtx->streams[i];
-        const AVMediaType type = inSt->codecpar->codec_type;
-        if (type != AVMEDIA_TYPE_AUDIO && type != AVMEDIA_TYPE_SUBTITLE)
-            continue;
-        AVStream* outSt = avformat_new_stream(s->outputFormatCtx.get(), nullptr);
-        if (!outSt)
-            continue;
-        if (avcodec_parameters_copy(outSt->codecpar, inSt->codecpar) < 0)
-            continue;
-        // drop the input container's FourCC tag so the output muxer assigns a tag valid for its own container.
-        // without this, remuxing between different input/output containers (like mp4 -> mkv) fails at write_header
-        outSt->codecpar->codec_tag = 0;
-        av_dict_copy(&outSt->metadata, inSt->metadata, 0);
-        outSt->disposition = inSt->disposition; // default/forced flags, else the player re-guesses
-        outSt->time_base = inSt->time_base;
-        s->inputToOutputStreamMap[i] = outSt->index;
-    }
-    av_dict_copy(&s->outputFormatCtx->metadata, s->inputFormatCtx->metadata, 0); // container tags like file title
-    copyChapters(s);
+    // remux audio tracks and transcode subtitles via AuxiliaryMux
+    AuxiliaryMuxSetup auxSetup;
+    auxSetup.input = s->inputFormatCtx.get();
+    auxSetup.output = s->outputFormatCtx.get();
+    auxSetup.outputPath = s->settings.encodeOutputPath;
+    auxSetup.videoWidth = width;
+    auxSetup.videoHeight = height;
+    auxSetup.log = log;
+
+    std::string auxError;
+    const bool auxConfigured = s->auxMux.configure(auxSetup, auxError);
+    checkError(!auxConfigured, auxError);
 
     // open the output file and write the container header
     if (!(s->outputFormatCtx->oformat->flags & AVFMT_NOFILE))
-        checkError(avio_open(&s->outputFormatCtx->pb, s->settings.encodeOutputPath.c_str(), AVIO_FLAG_WRITE) < 0, "Failed to open output file: " + s->settings.encodeOutputPath);
-    s->outputFormatCtx->max_interleave_delta = 0; // same as -max_interleave_delta 0 in the ffmpeg cli
-    AVDictionary* hdrOpts = nullptr;
-    checkError(avformat_write_header(s->outputFormatCtx.get(), &hdrOpts) < 0, "Failed to write output container header");
-    av_dict_free(&hdrOpts);
+        checkAv(avio_open(&s->outputFormatCtx->pb, s->settings.encodeOutputPath.c_str(), AVIO_FLAG_WRITE), "Failed to open output file: " + s->settings.encodeOutputPath);
+    s->outputFormatCtx->max_interleave_delta = 0;
+
+    // leftover unconsumed options (like -movflags +faststart) go to the container muxer
+    const int headerRet = avformat_write_header(s->outputFormatCtx.get(), opts.ptr());
+    if (headerRet >= 0)
+        reportUnusedOptions(opts.get(), codecName, s->outputFormatCtx->oformat->name, log);
+    checkAv(headerRet, "Failed to write output container header");
 
     s->outputEncoderCtx = std::move(encCtx);
     cout << info("Encoder: " + codecName + ": \"" + s->settings.encodeOutputPath + "\"\n\n");
@@ -980,11 +978,15 @@ void initOutputEncoder(VideoSession* s) {
 void flushAndFinalize(VideoSession* s) {
     if (!s->outputEncoderCtx || !s->outputFormatCtx)
         return;
-    // send EOS to the encoder, AVERROR_EOF here means it was already flushed (ignore)
-    const int sendRet = avcodec_send_frame(s->outputEncoderCtx.get(), nullptr);
-    checkError(sendRet < 0 && sendRet != AVERROR_EOF, "Failed to flush encoder");
+    // send EOS to the encoder, retry on EAGAIN
+    int sendRet = avcodec_send_frame(s->outputEncoderCtx.get(), nullptr);
+    while (sendRet == AVERROR(EAGAIN)) {
+        drainEncoderPackets(s);
+        sendRet = avcodec_send_frame(s->outputEncoderCtx.get(), nullptr);
+    }
+    checkError(sendRet < 0 && sendRet != AVERROR_EOF, "Failed to flush encoder: " + avErrorText(sendRet));
     drainEncoderPackets(s);
-    checkError(av_write_trailer(s->outputFormatCtx.get()) < 0, "Failed to write container trailer (output file may be truncated)");
+    checkAv(av_write_trailer(s->outputFormatCtx.get()), "Failed to write container trailer (output file may be truncated)");
 }
 
 } // namespace video_utils

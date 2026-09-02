@@ -355,6 +355,8 @@
     </CudaCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="AuxiliaryMux.cpp" />
+    <ClCompile Include="EncodeOptions.cpp" />
     <ClCompile Include="WatermarkBase.cpp" />
     <ClCompile Include="WatermarkCore.cpp" />
     <CudaCompile Include="cuda_utils.cu">
@@ -527,6 +529,9 @@
     <ClInclude Include="utils.hpp" />
     <ClInclude Include="VideoProcessingContext.hpp" />
     <ClInclude Include="video_defines.hpp" />
+    <ClInclude Include="AuxiliaryMux.hpp" />
+    <ClInclude Include="AvUtil.hpp" />
+    <ClInclude Include="EncodeOptions.hpp" />
     <ClInclude Include="video_utils.hpp" />
     <ClInclude Include="WatermarkCrypto.hpp" />
     <ClInclude Include="WatermarkCuda.cuh">
