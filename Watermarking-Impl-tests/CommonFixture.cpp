@@ -1,15 +1,24 @@
+#include "../Watermarking-Impl/EncodeOptions.hpp"
 #include "../Watermarking-Impl/WatermarkCrypto.hpp"
 #include "WatermarkCore.hpp"
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
 #include <filesystem>
 #include <gtest/gtest.h>
 #include <iomanip>
+#include <regex>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <system_error>
+#include <vector>
 #include <WatermarkTypes.hpp>
+
+extern "C" {
+#include "libavutil/dict.h"
+}
 
 using namespace WatermarkCore;
 namespace fs = std::filesystem;
@@ -20,6 +29,9 @@ constexpr float defaultPsnr = 40.0f;
 constexpr const char* defaultPassword = "random_watermark_password";
 const fs::path colorImage = "samples/images/512.png";
 const fs::path grayImage = "samples/images/512_gray.jpg";
+const fs::path alphaImage = "samples/images/4k_argb.png";
+// small (1.9 MB / 693 frame) clip, it also tests the 10-bit to 8-bit filter graph
+const fs::path shortVideo = "samples/videos/sample_1080p_10bit.mkv";
 
 std::string hexDigest(const std::array<uint8_t, 32>& digest) {
     std::ostringstream result;
@@ -33,6 +45,37 @@ SessionPixelData embedAndRead(ImageSession* session, const MaskMethod method) {
     embedImage(session, method);
     finish();
     return getSessionPixelData(session);
+}
+
+// look up one key in a parsed option dictionary, empty when absent
+std::string dictValue(const video_utils::ParsedEncodeOptions& parsed, const char* key) {
+    const AVDictionaryEntry* entry = av_dict_get(parsed.dictionary.get(), key, nullptr, 0);
+    return entry != nullptr ? entry->value : "";
+}
+
+// baseline settings for the video tests
+VideoSettings makeVideoSettings(const std::string& input) {
+    VideoSettings settings{};
+    settings.videoFile = input;
+    settings.watermarkPassword = defaultPassword;
+    settings.p = defaultP;
+    settings.psnr = 30.0f; // lower on purpose, to preserve watermark a bit more when re-encoding
+    settings.watermarkInterval = 1;
+    settings.useHwDecoder = false;
+    settings.useHwEncoder = false;
+    settings.encodeOptions = "-c:v libx265 -preset ultrafast -crf 20";
+    return settings;
+}
+
+std::vector<float> capturedCorrelations(VideoSession* session, int& framesProcessed) {
+    testing::internal::CaptureStdout();
+    framesProcessed = detectVideo(session);
+    const std::string output = testing::internal::GetCapturedStdout();
+    std::vector<float> correlations;
+    const std::regex pattern(R"(Correlation for frame: \d+: ([-+0-9.eE]+))");
+    for (auto it = std::sregex_iterator(output.begin(), output.end(), pattern); it != std::sregex_iterator(); ++it)
+        correlations.push_back(std::stof((*it)[1].str()));
+    return correlations;
 }
 } // namespace
 
@@ -137,19 +180,163 @@ TEST_F(WatermarkTest, SupportsEveryDocumentedPredictionOrder) {
         loadImage(pSession.get(), colorImage.string());
         const SessionPixelData output = embedAndRead(pSession.get(), MaskMethod::ME);
         EXPECT_EQ(output.pixels.size(), static_cast<size_t>(output.width) * output.height * output.channels) << "p=" << predictionOrder;
+        prepareDetectionImage(pSession.get(), MaskMethod::ME);
+        const float correlation = detectEmbeddedBuffer(pSession.get(), MaskMethod::ME);
+        EXPECT_TRUE(std::isfinite(correlation)) << "p=" << predictionOrder;
+        EXPECT_GT(correlation, 0.5f) << "p=" << predictionOrder;
     }
 }
 
+TEST_F(WatermarkTest, RejectsUndocumentedPredictionOrder) {
+    ImageHandle badSession = createImageSession(defaultPassword, 4, defaultPsnr);
+    EXPECT_THROW(loadImage(badSession.get(), colorImage.string()), std::invalid_argument);
+}
+
+TEST_F(WatermarkTest, PreservesTheAlphaChannelWhenSaving) {
+    ASSERT_TRUE(fs::exists(alphaImage)) << alphaImage;
+    ImageHandle alphaSession = createImageSession(defaultPassword, defaultP, defaultPsnr);
+    loadImage(alphaSession.get(), alphaImage.string());
+    embedImage(alphaSession.get(), MaskMethod::ME);
+    finish();
+
+    const fs::path requested = tempDir / "alpha.png";
+    const fs::path saved = tempDir / "alphaW_ME.png";
+    saveImage(alphaSession.get(), requested.string(), MaskMethod::ME);
+    ASSERT_TRUE(fs::exists(saved));
+
+    // reloading 4 channel PNG must still detect, and the alpha channel must not bleed into the colour planes
+    ImageHandle reloaded = createImageSession(defaultPassword, defaultP, defaultPsnr);
+    loadImage(reloaded.get(), saved.string());
+    const float correlation = detectLoadedImage(reloaded.get(), MaskMethod::ME);
+    EXPECT_TRUE(std::isfinite(correlation));
+    EXPECT_GT(correlation, 0.5f);
+}
+
 TEST_F(WatermarkTest, RejectsHighBitDepthVideoDetection) {
-    VideoSettings settings{};
-    settings.videoFile = "samples/videos/sample_1080p_10bit.mkv";
-    settings.watermarkPassword = defaultPassword;
-    settings.p = defaultP;
+    VideoSettings settings = makeVideoSettings(shortVideo.string());
     settings.psnr = defaultPsnr;
-    settings.watermarkInterval = 1;
-    settings.useHwDecoder = false;
-    settings.useHwEncoder = false;
+    settings.encodeOptions.clear();
 
     VideoHandle video = initVideo(settings);
     EXPECT_THROW(detectVideo(video.get()), std::runtime_error);
+}
+
+// video embedding: covers the encoder/muxer setup, the filter graph, the encode
+// thread and the frame conversion kernels
+TEST_F(WatermarkTest, EmbedsIntoVideoAndDetectsFromTheEncodedFile) {
+    const fs::path output = tempDir / "watermarked.mkv";
+    VideoSettings embedSettings = makeVideoSettings(shortVideo.string());
+    embedSettings.encodeOutputPath = output.string();
+
+    VideoHandle embedSession = initVideo(embedSettings);
+    const int embeddedFrames = embedVideo(embedSession.get());
+    embedSession.reset(); // close the muxer so the file is complete before we read it back
+    ASSERT_GT(embeddedFrames, 0);
+    ASSERT_TRUE(fs::exists(output));
+    ASSERT_GT(fs::file_size(output), 0U);
+
+    VideoSettings detectSettings = makeVideoSettings(output.string());
+    VideoHandle detectSession = initVideo(detectSettings);
+    int detectedFrames = 0;
+    const std::vector<float> correlations = capturedCorrelations(detectSession.get(), detectedFrames);
+
+    EXPECT_EQ(detectedFrames, embeddedFrames) << "the encoder must not add or drop frames";
+    ASSERT_EQ(correlations.size(), static_cast<size_t>(detectedFrames));
+    // flat/fade frames carry no watermark, check the clip by its median frame (hopefully not flat too)
+    std::vector<float> sorted = correlations;
+    std::sort(sorted.begin(), sorted.end());
+    EXPECT_GT(sorted[sorted.size() / 2], 0.5f);
+}
+
+TEST_F(WatermarkTest, EmbedsOnlyOnTheRequestedVideoInterval) {
+    const fs::path output = tempDir / "interval.mkv";
+    VideoSettings embedSettings = makeVideoSettings(shortVideo.string());
+    embedSettings.watermarkInterval = 50;
+    embedSettings.encodeOutputPath = output.string();
+
+    VideoHandle embedSession = initVideo(embedSettings);
+    const int embeddedFrames = embedVideo(embedSession.get());
+    embedSession.reset();
+    ASSERT_GT(embeddedFrames, 0);
+
+    VideoSettings detectSettings = makeVideoSettings(output.string());
+    detectSettings.watermarkInterval = 50;
+    VideoHandle detectSession = initVideo(detectSettings);
+    int detectedFrames = 0;
+    const std::vector<float> correlations = capturedCorrelations(detectSession.get(), detectedFrames);
+
+    // detection checks exactly the frames that were watermarked
+    EXPECT_EQ(correlations.size(), static_cast<size_t>((detectedFrames + 49) / 50));
+    std::vector<float> sorted = correlations;
+    std::sort(sorted.begin(), sorted.end());
+    EXPECT_GT(sorted[sorted.size() / 2], 0.5f);
+}
+
+TEST_F(WatermarkTest, RefusesToOverwriteTheInputVideo) {
+    VideoSettings settings = makeVideoSettings(shortVideo.string());
+    settings.encodeOutputPath = shortVideo.string();
+    VideoHandle session = initVideo(settings);
+    EXPECT_THROW(embedVideo(session.get()), std::runtime_error);
+}
+
+TEST_F(WatermarkTest, RejectsAnEncoderThatDisagreesWithTheSelectedBackend) {
+    VideoSettings settings = makeVideoSettings(shortVideo.string());
+    settings.useHwEncoder = false;
+    settings.encodeOptions = "-c:v hevc_nvenc"; // hardware encoder while the pipeline is set to software
+    settings.encodeOutputPath = (tempDir / "mismatch.mkv").string();
+    VideoHandle session = initVideo(settings);
+    EXPECT_THROW(embedVideo(session.get()), std::runtime_error);
+}
+
+TEST_F(WatermarkTest, RejectsAnEncodeOptionsStringWithoutAnEncoder) {
+    VideoSettings settings = makeVideoSettings(shortVideo.string());
+    settings.encodeOptions = "-preset ultrafast -crf 20";
+    settings.encodeOutputPath = (tempDir / "nocodec.mkv").string();
+    VideoHandle session = initVideo(settings);
+    EXPECT_THROW(embedVideo(session.get()), std::runtime_error);
+}
+
+// encode option parsing
+TEST(EncodeOptionsTest, ExtractsTheEncoderAndForwardsTheRest) {
+    const video_utils::ParsedEncodeOptions parsed = video_utils::parseEncodeOptions("-c:v libx265 -preset fast -crf 23");
+    EXPECT_EQ(parsed.codecName, "libx265");
+    EXPECT_EQ(dictValue(parsed, "preset"), "fast");
+    EXPECT_EQ(dictValue(parsed, "crf"), "23");
+}
+
+TEST(EncodeOptionsTest, KeepsNegativeAndFractionalValuesAsValues) {
+    const video_utils::ParsedEncodeOptions parsed = video_utils::parseEncodeOptions("-c:v libx265 -b:v 0 -qcomp -0.5 -rc-lookahead -1");
+    EXPECT_EQ(parsed.codecName, "libx265");
+    EXPECT_EQ(dictValue(parsed, "qcomp"), "-0.5");
+    EXPECT_EQ(dictValue(parsed, "rc-lookahead"), "-1");
+}
+
+TEST(EncodeOptionsTest, IgnoresOptionsThePipelineOwns) {
+    const video_utils::ParsedEncodeOptions parsed = video_utils::parseEncodeOptions("-c:v libx265 -map 0 -pix_fmt yuv444p -c:a aac");
+    EXPECT_EQ(parsed.codecName, "libx265");
+    EXPECT_EQ(dictValue(parsed, "pix_fmt"), "") << "pixel format is chosen by the pipeline, not the user";
+    EXPECT_EQ(dictValue(parsed, "map"), "");
+    EXPECT_FALSE(parsed.ignored.empty());
+}
+
+TEST(EncodeOptionsTest, FlagsColourOptionsThatClashWithTheSourceMetadata) {
+    const video_utils::ParsedEncodeOptions parsed = video_utils::parseEncodeOptions("-c:v libx265 -color_range pc");
+    EXPECT_EQ(parsed.overrides.size(), 1U);
+}
+
+TEST(EncodeOptionsTest, DropsTrailingFlagsThatHaveNoValue) {
+    const video_utils::ParsedEncodeOptions parsed = video_utils::parseEncodeOptions("-c:v libx265 -preset");
+    EXPECT_EQ(parsed.codecName, "libx265");
+    EXPECT_EQ(parsed.valueless.size(), 1U);
+}
+
+TEST(EncodeOptionsTest, RespectsQuotedValues) {
+    const video_utils::ParsedEncodeOptions parsed = video_utils::parseEncodeOptions("-c:v libx265 -x265-params \"keyint=50:min-keyint=50\"");
+    EXPECT_EQ(dictValue(parsed, "x265-params"), "keyint=50:min-keyint=50");
+}
+
+TEST(EncodeOptionsTest, ParsesBothNumericAndFourCcCodecTags) {
+    EXPECT_EQ(video_utils::parseEncodeOptions("-c:v libx265 -tag:v hvc1").codecTag, "hvc1");
+    EXPECT_EQ(video_utils::codecTagFromString("hvc1"), 0x31637668U); // little endian 'h','v','c','1'
+    EXPECT_EQ(video_utils::codecTagFromString("0x31637668"), 0x31637668U);
 }

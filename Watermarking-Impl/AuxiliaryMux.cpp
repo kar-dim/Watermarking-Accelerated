@@ -20,6 +20,7 @@ extern "C" {
 #include "libavcodec/packet.h"
 #include "libavformat/avformat.h"
 #include "libavutil/avutil.h"
+#include "libavutil/dict.h"
 #include "libavutil/mathematics.h"
 #include "libavutil/mem.h"
 }
@@ -74,6 +75,9 @@ bool copyChapters(const AVFormatContext* input, AVFormatContext* output) {
     if (input->nb_chapters == 0) {
         return true;
     }
+    if (output->chapters != nullptr || output->nb_chapters != 0) {
+        return false;
+    }
     auto** chapters = static_cast<AVChapter**>(av_calloc(input->nb_chapters, sizeof(AVChapter*)));
     if (chapters == nullptr) {
         return false;
@@ -82,8 +86,14 @@ bool copyChapters(const AVFormatContext* input, AVFormatContext* output) {
     for (unsigned index = 0; index < input->nb_chapters; ++index) {
         const AVChapter* source = input->chapters[index];
         auto* destination = static_cast<AVChapter*>(av_mallocz(sizeof(AVChapter)));
+        // partial chapter tables silently lose markers, fail instead so the caller can report it
         if (destination == nullptr) {
-            continue;
+            for (unsigned done = 0; done < copied; ++done) {
+                av_dict_free(&chapters[done]->metadata);
+                av_freep(&chapters[done]);
+            }
+            av_freep(&chapters);
+            return false;
         }
         destination->id = source->id;
         destination->time_base = source->time_base;
@@ -283,20 +293,22 @@ bool AuxiliaryMux::transcodeSubtitle(SubtitleTranscode& transcode, AVPacket* pac
         subtitle.pts += av_rescale_q(subtitle.start_display_time, AVRational{1, 1000}, AV_TIME_BASE_Q);
         subtitle.end_display_time -= subtitle.start_display_time;
         subtitle.start_display_time = 0;
-        constexpr int kSubtitlePacketCapacity = 1 << 20;
+        constexpr size_t kSubtitleScratchCapacity = 1 << 20;
+        if (transcode.encodeScratch.empty()) {
+            transcode.encodeScratch.resize(kSubtitleScratchCapacity);
+        }
+        // encode into the reused scratch first, then allocate a packet of exactly the produced size
+        const int bytes = avcodec_encode_subtitle(transcode.encoder.get(), transcode.encodeScratch.data(), static_cast<int>(transcode.encodeScratch.size()), &subtitle);
         AVPacketPtr outputPacket(av_packet_alloc());
-        if (outputPacket && av_new_packet(outputPacket.get(), kSubtitlePacketCapacity) == 0) {
-            const int bytes = avcodec_encode_subtitle(transcode.encoder.get(), outputPacket->data, outputPacket->size, &subtitle);
-            if (bytes > 0) {
-                av_shrink_packet(outputPacket.get(), bytes);
-                const AVRational outputTimeBase = output_->streams[transcode.outputStreamIndex]->time_base;
-                outputPacket->stream_index = transcode.outputStreamIndex;
-                outputPacket->pts = av_rescale_q(subtitle.pts, AV_TIME_BASE_Q, outputTimeBase);
-                outputPacket->dts = outputPacket->pts;
-                outputPacket->duration = av_rescale_q(subtitle.end_display_time, AVRational{1, 1000}, outputTimeBase);
-                outputPacket->pos = -1;
-                success = emit(outputPacket.get(), error);
-            }
+        if (bytes > 0 && outputPacket && av_new_packet(outputPacket.get(), bytes) == 0) {
+            std::memcpy(outputPacket->data, transcode.encodeScratch.data(), static_cast<size_t>(bytes));
+            const AVRational outputTimeBase = output_->streams[transcode.outputStreamIndex]->time_base;
+            outputPacket->stream_index = transcode.outputStreamIndex;
+            outputPacket->pts = av_rescale_q(subtitle.pts, AV_TIME_BASE_Q, outputTimeBase);
+            outputPacket->dts = outputPacket->pts;
+            outputPacket->duration = av_rescale_q(subtitle.end_display_time, AVRational{1, 1000}, outputTimeBase);
+            outputPacket->pos = -1;
+            success = emit(outputPacket.get(), error);
         }
     }
     avsubtitle_free(&subtitle);

@@ -15,7 +15,6 @@ class CudaStreamManager {
     }
 
     cudaStream_t getComputeStream() const { return computeStream; }
-    cudaStream_t getTransferStream() const { return transferStream; }
     CudaMemPool& getPool() { return pool; }
 
     CudaStreamManager(const CudaStreamManager&) = delete;
@@ -25,20 +24,16 @@ class CudaStreamManager {
 
   private:
     cudaStream_t computeStream = nullptr;
-    cudaStream_t transferStream = nullptr;
     CudaMemPool pool;
 
     CudaStreamManager() {
         try {
             CUDA_CHECK(cudaStreamCreate(&computeStream));
-            CUDA_CHECK(cudaStreamCreate(&transferStream));
             size_t freeMem = 0;
             size_t totalMem = 0;
             CUDA_CHECK(cudaMemGetInfo(&freeMem, &totalMem));
             pool.setCapacity(totalMem);
         } catch (...) {
-            if (transferStream)
-                cudaStreamDestroy(transferStream);
             if (computeStream)
                 cudaStreamDestroy(computeStream);
             throw;
@@ -49,7 +44,5 @@ class CudaStreamManager {
         pool.reset(computeStream);
         if (computeStream)
             cudaStreamDestroy(computeStream);
-        if (transferStream)
-            cudaStreamDestroy(transferStream);
     }
 };

@@ -135,7 +135,7 @@ This project is built using **Visual Studio** and consists of a **solution with 
 - Watermarking-CLI: The sample command line application that interacts with the Core project to embed and detect watermark in images and video.
 - Watermarking-BenchUI: The benchmarking project. It interacts with the Core project and benchmarks the performance of image watermarking. It uses Qt for UI.
 - Watermarking-Util: Common utility methods without dependencies, that may be used by any project. It is built as a **static library**.
-- Watermarking-Tests: Basic tests for the Core project.
+- Watermarking-Impl-tests: GoogleTest suite for the Core project. Runs from the build output folder (the samples are copied there at build time).
 
 ### Solution Configurations
 

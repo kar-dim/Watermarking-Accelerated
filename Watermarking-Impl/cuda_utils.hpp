@@ -30,8 +30,10 @@ inline int gridSize1DStridedCalculate(const int N, const int blockSize) { return
 // helper method to calculate prediction error kernel 1D grid size based on the number of SMs of the GPU
 template <typename KernelFunc>
 inline unsigned int gridSizeMeCalculate(KernelFunc kernel, const int blockSize) {
+    int device = 0;
+    CUDA_CHECK(cudaGetDevice(&device));
     int numSMs;
-    CUDA_CHECK(cudaDeviceGetAttribute(&numSMs, cudaDevAttrMultiProcessorCount, 0));
+    CUDA_CHECK(cudaDeviceGetAttribute(&numSMs, cudaDevAttrMultiProcessorCount, device));
     int maxBlocksPerSM;
     CUDA_CHECK(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&maxBlocksPerSM, kernel, blockSize, 0));
     // SM * Max blocks per SM for perfect persistent threads strategy

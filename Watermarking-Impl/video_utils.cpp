@@ -107,12 +107,14 @@ struct EncodeQueue {
     bool aborted = false;
 
     // push item (frame or packet), blocks when the queue is full
-    void push(Item item) {
+    [[nodiscard]] bool push(Item item) {
         std::unique_lock lk(mtx);
         cv.wait(lk, [&] { return static_cast<int>(q.size()) < MAX_DEPTH || aborted; });
-        if (!aborted)
-            q.push(std::move(item));
+        if (aborted)
+            return false;
+        q.push(std::move(item));
         cv.notify_all();
+        return true;
     }
 
     // signal EOS (end of stream), no more pushes will follow
@@ -141,6 +143,11 @@ struct EncodeQueue {
         cv.notify_all();
     }
 };
+
+// give an item to the encode thread, abandoning the decode loop if that thread has already failed
+void pushToEncoder(EncodeQueue& queue, EncodeQueue::Item item) {
+    checkError(!queue.push(std::move(item)), "Encode thread stopped, aborting the decode loop");
+}
 
 AVCodecContextPtr openSoftwareDecoder(const AVCodecParameters* inputCodecParams, AVRational pktTimebase) {
     const AVCodec* inputDecoder = avcodec_find_decoder(inputCodecParams->codec_id);
@@ -421,7 +428,7 @@ void encodeFrameGPU(VideoSession* s, const CudaArray<uint8_t>& yRowMajor, const 
     const int uvPitch = uvOverride ? width : srcFrame->linesize[1];
     CUDA_CHECK(cudaMemcpy2DAsync(encFrame->data[1], encFrame->linesize[1], uvSrc, uvPitch, width, height / 2, cudaMemcpyDeviceToDevice, stream));
     CUDA_CHECK(cudaStreamSynchronize(stream));
-    queue.push(std::move(encFrame));
+    pushToEncoder(queue, std::move(encFrame));
 }
 #endif
 
@@ -472,7 +479,7 @@ void embedWatermark(VideoSession* s, int& framesCount, const AVFrame* frame, Enc
         cout << std::format(" [Embedding frame {}]\n", framesCount + 1);
         fillYPlane(frame, s);
         // chroma goes decoded frame → encFrame directly inside buildEncFrame (no hostFrame hop)
-        queue.push(buildEncFrame(s, framePts(frame), frame));
+        pushToEncoder(queue, buildEncFrame(s, framePts(frame), frame));
     } else {
         // passthrough: take a refcounted reference to the decoded frame (zero data copy)
         AVFramePtr ref(av_frame_alloc());
@@ -482,7 +489,7 @@ void embedWatermark(VideoSession* s, int& framesCount, const AVFrame* frame, Enc
         if (ref->format == AV_PIX_FMT_YUVJ420P)
             ref->format = AV_PIX_FMT_YUV420P;
         ref->pts = framePts(frame);
-        queue.push(std::move(ref));
+        pushToEncoder(queue, std::move(ref));
     }
     framesCount++;
 }
@@ -582,7 +589,6 @@ void embedWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* fra
             if (doEmbed) {
                 CudaArray<float> lumaFloat(height, width, stream);
                 loadHdrLuma(s, frame, lumaFloat, mobius, stream);
-                CUDA_CHECK(cudaStreamSynchronize(stream));
                 embedAndFillYPlane(s, lumaFloat);
             } else {
                 cuda_utils::launchP010HdrYToSdrU8Kernel(reinterpret_cast<const uint16_t*>(frame->data[0]), frame->linesize[0], reinterpret_cast<const uint16_t*>(frame->data[1]), frame->linesize[1],
@@ -596,14 +602,13 @@ void embedWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* fra
             if (doEmbed) {
                 CudaArray<float> lumaBuffer(height, width, stream);
                 cuda_utils::launchPitchedToFloatKernel(frame->data[0], lumaBuffer.data(), width, height, frame->linesize[0], stream);
-                CUDA_CHECK(cudaStreamSynchronize(stream));
                 embedAndFillYPlane(s, lumaBuffer);
             } else {
                 CUDA_CHECK(cudaMemcpy2DAsync(s->hostFrame->get(), width, frame->data[0], frame->linesize[0], width, height, cudaMemcpyDeviceToHost, stream));
                 CUDA_CHECK(cudaStreamSynchronize(stream));
             }
         }
-        queue.push(buildEncFrame(s, framePts(frame)));
+        pushToEncoder(queue, buildEncFrame(s, framePts(frame)));
     }
     framesCount++;
 }
@@ -630,7 +635,9 @@ void detectWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* fr
 // main frames loop: decodes packets, calls processFrame for each video frame,
 // remuxes audio/subtitle packets directly when outputFormatCtx is set (embed mode)
 template <typename Func>
-int processFrames(VideoSession* s, const bool needsFilter, Func&& processFrame) {
+int processFrames(VideoSession* s, const bool needsFilter, Func&& processFrameArg) {
+    // bind to an lvalue: the callback is invoked once per frame, it must never be forwarded as an rvalue
+    Func& processFrame = processFrameArg;
     const AVPacketPtr packet(av_packet_alloc());
     AVFramePtr frame(av_frame_alloc());
     AVFramePtr filteredFrame(nullptr);
@@ -647,7 +654,7 @@ int processFrames(VideoSession* s, const bool needsFilter, Func&& processFrame) 
             checkAv(ret, "FFmpeg decoding error");
             if (needsFilter)
                 filterFrame(frame, filteredFrame, s);
-            std::forward<Func>(processFrame)(frame.get(), framesCount);
+            processFrame(frame.get(), framesCount);
         }
     };
 
@@ -814,8 +821,7 @@ int videoDispatcher(VideoSession* s, VideoMode op, const bool needsFilter) {
             AVPacketPtr owned(av_packet_alloc());
             if (!owned || av_packet_ref(owned.get(), packet) < 0)
                 return false;
-            queue.push(std::move(owned));
-            return true;
+            return queue.push(std::move(owned));
         });
 
 #if defined(_USE_CUDA_)
@@ -828,6 +834,8 @@ int videoDispatcher(VideoSession* s, VideoMode op, const bool needsFilter) {
     } catch (...) {
         queue.abort(); // unblock encode thread if it is waiting
         encThread.join();
+        if (encErr)
+            std::rethrow_exception(encErr);
         throw;
     }
     encThread.join();
@@ -843,7 +851,7 @@ void initOutputEncoder(VideoSession* s) {
 
     ParsedEncodeOptions parsed = parseEncodeOptions(s->settings.encodeOptions);
     const std::string& codecName = parsed.codecName;
-    OptionDict opts(parsed.dictionary);
+    OptionDict& opts = parsed.dictionary; // owned by `parsed`, consumed by the encoder then the muxer
     const MediaLog log = [](const std::string& msg) { cout << info(msg + "\n"); };
     reportParsedOptions(parsed, log);
 

@@ -22,7 +22,7 @@ class HostMemory {
 #elif defined(_USE_OPENCL_)
         queue = OclQueueManager::getInstance().getQueue();
         pinnedBuffer = cl::Buffer(OclQueueManager::getInstance().getContext(), CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR, size * sizeof(T));
-        ptr = static_cast<T*>(queue.enqueueMapBuffer(pinnedBuffer, CL_TRUE, CL_MAP_WRITE, 0, size * sizeof(T)));
+        ptr = static_cast<T*>(queue.enqueueMapBuffer(pinnedBuffer, CL_TRUE, CL_MAP_READ | CL_MAP_WRITE, 0, size * sizeof(T)));
 #elif defined(_USE_EIGEN_)
         pinnedBuffer = std::make_unique<T[]>(size);
         ptr = pinnedBuffer.get();

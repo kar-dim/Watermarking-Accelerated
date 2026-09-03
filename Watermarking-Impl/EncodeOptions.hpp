@@ -18,7 +18,7 @@ namespace video_utils {
 struct ParsedEncodeOptions {
     std::string codecName;
     std::string codecTag;
-    AVDictionary* dictionary = nullptr;
+    OptionDict dictionary;
     std::vector<std::string> ignored;
     std::vector<std::string> valueless;
     std::vector<std::string> overrides;

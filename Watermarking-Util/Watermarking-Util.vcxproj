@@ -112,7 +112,7 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup>
-    <OutDir>$(SolutionDir)$(Platform)\$(Configuration)\lib\</OutDir>
+    <OutDir>$(WatermarkingLibraryOutputDirectory)</OutDir>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='EIGEN_Debug|x64'">
     <ClCompile>

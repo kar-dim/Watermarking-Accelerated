@@ -49,6 +49,10 @@
   <ImportGroup Label="Shared" />
   <ImportGroup Label="PropertySheets" />
   <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <LocalDebuggerWorkingDirectory>$(OutDir)</LocalDebuggerWorkingDirectory>
+    <DebuggerFlavor>WindowsLocalDebugger</DebuggerFlavor>
+  </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='EIGEN_Release|x64'">
     <LinkIncremental>false</LinkIncremental>
   </PropertyGroup>
@@ -61,7 +65,7 @@
       <PreprocessorDefinitions>X64;NDEBUG;NOMINMAX;_CONSOLE;_USE_CUDA_;_USE_GPU_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <DebugInformationFormat>None</DebugInformationFormat>
-      <AdditionalIncludeDirectories>$(WatermarkingImplDir)include;$(WatermarkingImplDir)libs\inih;$(ProjectDir)libs\googletest-1.17.0\include;$(CUDA_PATH)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(WatermarkingImplDir)include;$(WatermarkingImplDir)libs\inih;$(ProjectDir)libs\googletest-1.17.0\include;$(WatermarkingMediaIncludeDirectory);$(CUDA_PATH)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
     </ClCompile>
@@ -70,7 +74,7 @@
       <SubSystem>Console</SubSystem>
       <OptimizeReferences>true</OptimizeReferences>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
-      <AdditionalLibraryDirectories>$(WatermarkingRoot)x64\CUDA_Release;$(WatermarkingRoot)x64\CUDA_Release\lib;$(WatermarkingImplDir)libs\zlib\lib;$(WatermarkingImplDir)libs\libpng\lib;$(WatermarkingImplDir)libs\libjpeg\lib;$(WatermarkingImplDir)libs\libwebp\lib;$(WatermarkingImplDir)libs\libtiff\lib;$(ProjectDir)libs\googletest-1.17.0\lib;$(WatermarkingImplDir)libs\ffmpeg\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(WatermarkingLibraryOutputDirectory);$(WatermarkingImplDir)libs\zlib\lib;$(WatermarkingImplDir)libs\libpng\lib;$(WatermarkingImplDir)libs\libjpeg\lib;$(WatermarkingImplDir)libs\libwebp\lib;$(WatermarkingImplDir)libs\libtiff\lib;$(ProjectDir)libs\googletest-1.17.0\lib;$(WatermarkingImplDir)libs\ffmpeg\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>cudart_static.lib;cuda.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;zlib.lib;libpng16.lib;jpeg.lib;libwebp.lib;tiff.lib;Watermarking-Impl.lib;gtest.lib;gtest_main.lib;avutil.lib;avformat.lib;swscale.lib;avcodec.lib;avfilter.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <IgnoreSpecificDefaultLibraries>LIBCMT</IgnoreSpecificDefaultLibraries>
     </Link>
@@ -91,7 +95,7 @@
       <PreprocessorDefinitions>X64;NDEBUG;NOMINMAX;_CONSOLE;_CRT_SECURE_NO_WARNINGS;_USE_EIGEN_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <DebugInformationFormat>None</DebugInformationFormat>
-      <AdditionalIncludeDirectories>$(WatermarkingImplDir)include;$(WatermarkingImplDir)libs\Eigen;$(WatermarkingImplDir)libs\CImg;$(WatermarkingImplDir)libs\zlib\include;$(WatermarkingImplDir)libs\inih;$(WatermarkingImplDir)libs\libpng\include;$(WatermarkingImplDir)libs\libjpeg\include;$(WatermarkingImplDir)libs\libwebp\include;$(WatermarkingImplDir)libs\libtiff\include;$(LLVMInstallDir)\lib\clang\17\include;$(ProjectDir)libs\googletest-1.17.0\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(WatermarkingImplDir)include;$(WatermarkingImplDir)libs\Eigen;$(WatermarkingImplDir)libs\CImg;$(WatermarkingImplDir)libs\zlib\include;$(WatermarkingImplDir)libs\inih;$(WatermarkingImplDir)libs\libpng\include;$(WatermarkingImplDir)libs\libjpeg\include;$(WatermarkingImplDir)libs\libwebp\include;$(WatermarkingImplDir)libs\libtiff\include;$(ProjectDir)libs\googletest-1.17.0\include;$(WatermarkingMediaIncludeDirectory);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>-openmp -mavx2 -mfma /clang:-O3 /Zc:__cplusplus -flto=thin %(AdditionalOptions)</AdditionalOptions>
       <FunctionLevelLinking>true</FunctionLevelLinking>
     </ClCompile>
@@ -100,7 +104,7 @@
       <SubSystem>Console</SubSystem>
       <OptimizeReferences>true</OptimizeReferences>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
-      <AdditionalLibraryDirectories>$(WatermarkingRoot)x64\EIGEN_Release;$(WatermarkingRoot)x64\EIGEN_Release\lib;$(WatermarkingImplDir)libs\libpng\lib;$(LLVMInstallDir)\lib;$(WatermarkingImplDir)libs\zlib\lib;$(WatermarkingImplDir)libs\libjpeg\lib;$(WatermarkingImplDir)libs\libwebp\lib;$(WatermarkingImplDir)libs\libtiff\lib;$(ProjectDir)libs\googletest-1.17.0\lib;$(WatermarkingImplDir)libs\ffmpeg\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(WatermarkingLibraryOutputDirectory);$(WatermarkingImplDir)libs\libpng\lib;$(LLVMInstallDir)\x64\lib;$(LLVMInstallDir)\lib;$(WatermarkingImplDir)libs\zlib\lib;$(WatermarkingImplDir)libs\libjpeg\lib;$(WatermarkingImplDir)libs\libwebp\lib;$(WatermarkingImplDir)libs\libtiff\lib;$(ProjectDir)libs\googletest-1.17.0\lib;$(WatermarkingImplDir)libs\ffmpeg\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>zlib.lib;libomp.lib;libpng16.lib;jpeg.lib;tiff.lib;libwebp.lib;Watermarking-Impl.lib;gtest.lib;gtest_main.lib;avutil.lib;avformat.lib;swscale.lib;avcodec.lib;avfilter.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
@@ -112,7 +116,7 @@
       <PreprocessorDefinitions>X64;NDEBUG;NOMINMAX;_CONSOLE;_USE_OPENCL_;_USE_GPU_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <DebugInformationFormat>None</DebugInformationFormat>
-      <AdditionalIncludeDirectories>$(WatermarkingImplDir)include;$(WatermarkingImplDir)libs\opencl\include;$(WatermarkingImplDir)libs\inih;$(ProjectDir)libs\googletest-1.17.0\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(WatermarkingImplDir)include;$(WatermarkingImplDir)libs\opencl\include;$(WatermarkingImplDir)libs\inih;$(ProjectDir)libs\googletest-1.17.0\include;$(WatermarkingMediaIncludeDirectory);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
     </ClCompile>
@@ -121,7 +125,7 @@
       <SubSystem>Console</SubSystem>
       <OptimizeReferences>true</OptimizeReferences>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
-      <AdditionalLibraryDirectories>$(WatermarkingImplDir)libs\zlib\lib;$(WatermarkingImplDir)libs\libpng\lib;$(WatermarkingImplDir)libs\libjpeg\lib;$(WatermarkingImplDir)libs\libwebp\lib;$(WatermarkingImplDir)libs\libtiff\lib;$(WatermarkingRoot)x64\OPENCL_Release;$(WatermarkingRoot)x64\OPENCL_Release\lib;$(WatermarkingImplDir)libs\opencl\lib;$(ProjectDir)libs\googletest-1.17.0\lib;$(WatermarkingImplDir)libs\ffmpeg\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(WatermarkingImplDir)libs\zlib\lib;$(WatermarkingImplDir)libs\libpng\lib;$(WatermarkingImplDir)libs\libjpeg\lib;$(WatermarkingImplDir)libs\libwebp\lib;$(WatermarkingImplDir)libs\libtiff\lib;$(WatermarkingLibraryOutputDirectory);$(WatermarkingImplDir)libs\opencl\lib;$(ProjectDir)libs\googletest-1.17.0\lib;$(WatermarkingImplDir)libs\ffmpeg\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>zlib.lib;libpng16.lib;jpeg.lib;libwebp.lib;tiff.lib;OpenCL.lib;Watermarking-Impl.lib;gtest.lib;gtest_main.lib;avutil.lib;avformat.lib;swscale.lib;avcodec.lib;avfilter.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <IgnoreSpecificDefaultLibraries>LIBCMT</IgnoreSpecificDefaultLibraries>
     </Link>

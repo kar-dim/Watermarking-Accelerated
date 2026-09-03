@@ -13,8 +13,9 @@
     <WatermarkingRuntimeFile Include="$(WatermarkingImplDir)libs\libtiff\bin\tiff.dll" />
     <WatermarkingRuntimeFile Include="$(WatermarkingImplDir)libs\libpng\bin\libpng16d.dll" Condition="$(Configuration.Contains('_Debug'))" />
     <WatermarkingRuntimeFile Include="$(WatermarkingImplDir)libs\libpng\bin\libpng16.dll" Condition="!$(Configuration.Contains('_Debug'))" />
-    <WatermarkingRuntimeFile Include="$(LLVMInstallDir)\bin\libomp.dll" Condition="$(Configuration.StartsWith('EIGEN_')) and Exists('$(LLVMInstallDir)\bin\libomp.dll')" />
-    <WatermarkingSampleFile Include="$(WatermarkingRoot)samples\**\*" Condition="'$(MSBuildProjectName)' == 'Watermarking-CLI'" />
+    <WatermarkingRuntimeFile Include="$(LLVMInstallDir)\x64\bin\libomp.dll" Condition="$(Configuration.StartsWith('EIGEN_')) and Exists('$(LLVMInstallDir)\x64\bin\libomp.dll')" />
+    <WatermarkingRuntimeFile Include="$(LLVMInstallDir)\bin\libomp.dll" Condition="$(Configuration.StartsWith('EIGEN_')) and !Exists('$(LLVMInstallDir)\x64\bin\libomp.dll') and Exists('$(LLVMInstallDir)\bin\libomp.dll')" />
+    <WatermarkingSampleFile Include="$(WatermarkingRoot)samples\**\*" Condition="'$(MSBuildProjectName)' == 'Watermarking-CLI' or '$(MSBuildProjectName)' == 'Watermarking-Impl-tests'" />
   </ItemGroup>
 
   <Target Name="CopyWatermarkingRuntimeFiles" AfterTargets="Build" Condition="'$(ConfigurationType)' == 'Application'">

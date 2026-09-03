@@ -106,7 +106,7 @@ ParsedEncodeOptions parseEncodeOptions(const std::string& text) {
         } else {
             if (clashesWithPipeline(key))
                 result.overrides.push_back(tokens[index]);
-            av_dict_set(&result.dictionary, key.c_str(), value.c_str(), 0);
+            av_dict_set(result.dictionary.ptr(), key.c_str(), value.c_str(), 0);
         }
         index += step;
     }

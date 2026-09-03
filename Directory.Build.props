@@ -3,6 +3,9 @@
   <!-- Automatically imported by every project below this directory. -->
   <PropertyGroup Label="Watermarking shared paths">
     <WatermarkingRoot>$(MSBuildThisFileDirectory)</WatermarkingRoot>
+    <!-- Static libs are build intermediates absorbed by the exes, so they are collected here instead of
+         inside the deployable output. Static library projects set OutDir to this, consumers search it. -->
+    <WatermarkingLibraryOutputDirectory>$(WatermarkingRoot)$(Platform)\lib\$(Configuration)\</WatermarkingLibraryOutputDirectory>
     <WatermarkingImplDir>$(WatermarkingRoot)Watermarking-Impl\</WatermarkingImplDir>
     <WatermarkingUtilDir>$(WatermarkingRoot)Watermarking-Util\</WatermarkingUtilDir>
     <WatermarkingPublicIncludeDirectories>$(WatermarkingImplDir)include;$(WatermarkingUtilDir)include</WatermarkingPublicIncludeDirectories>

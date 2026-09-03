@@ -7,6 +7,7 @@
 
 #include "AvUtil.hpp"
 #include "video_defines.hpp"
+#include <cstdint>
 #include <functional>
 #include <string>
 #include <vector>
@@ -52,6 +53,7 @@ class AuxiliaryMux {
         int outputStreamIndex = -1;
         AVCodecContextPtr decoder;
         AVCodecContextPtr encoder;
+        std::vector<std::uint8_t> encodeScratch;
     };
 
     bool copyStream(const AVStream* inputStream, unsigned inputIndex, std::string& error);

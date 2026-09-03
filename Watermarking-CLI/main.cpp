@@ -75,9 +75,7 @@ static int testForImageBatch(const INIReader& inir, const int p, const float psn
             pending.future.get();
             cout << success(std::format(" [OK] {}\n", pending.inputFile.filename().string()));
             ++successCount;
-        } catch (const std::exception& e) {
-            cout << err(std::format(" [FAILED] {} - Save error: {}\n", pending.inputFile.filename().string(), cleanError(e.what())));
-        }
+        } catch (const std::exception& e) { cout << err(std::format(" [FAILED] {} - Save error: {}\n", pending.inputFile.filename().string(), cleanError(e.what()))); }
     };
 
     // start the batch process (begin timer)
@@ -275,6 +273,8 @@ int main() {
         cout << err(string("Fatal error: ") + ex.what() + "\n");
         exitCode = EXIT_FAILURE;
     }
+    // flush first
+    cout.flush();
     system("pause");
     return exitCode;
 }

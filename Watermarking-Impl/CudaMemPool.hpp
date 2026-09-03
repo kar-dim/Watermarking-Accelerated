@@ -34,10 +34,7 @@ class CudaMemPool {
 
   public:
     CudaMemPool() = default;
-    ~CudaMemPool() {
-        for (auto& [sz, ptr] : memList)
-            cudaFree(ptr);
-    }
+    ~CudaMemPool() { reset(nullptr); }
 
     CudaMemPool(const CudaMemPool&) = delete;
     CudaMemPool& operator=(const CudaMemPool&) = delete;
