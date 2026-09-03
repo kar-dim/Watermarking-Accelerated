@@ -9,6 +9,7 @@ extern "C" {
 #include "libavcodec/avcodec.h"
 #include "libavcodec/codec_par.h"
 #include "libavformat/avformat.h"
+#include "libavutil/pixdesc.h"
 #include "libavutil/pixfmt.h"
 }
 
@@ -17,10 +18,15 @@ extern "C" {
  *  \author Dimitris Karatzas
  */
 namespace video_utils {
-// 10-bit and HDR helpers
+// High-bit-depth and HDR helpers. Rejects every known format whose components exceed 8 bits
 inline bool is10bit(const AVCodecContext* codecCtx, const AVStream* st) {
-    const bool is10bitCtx = codecCtx->pix_fmt == AV_PIX_FMT_YUV420P10LE || codecCtx->pix_fmt == AV_PIX_FMT_YUV420P16LE;
-    return is10bitCtx || (st->codecpar->format == AV_PIX_FMT_YUV420P10LE || st->codecpar->format == AV_PIX_FMT_YUV420P16LE || st->codecpar->bits_per_raw_sample == 10);
+    const auto exceeds8Bits = [](const AVPixelFormat format) {
+        if (format == AV_PIX_FMT_NONE)
+            return false;
+        const AVPixFmtDescriptor* descriptor = av_pix_fmt_desc_get(format);
+        return descriptor && descriptor->nb_components > 0 && descriptor->comp[0].depth > 8;
+    };
+    return exceeds8Bits(codecCtx->pix_fmt) || exceeds8Bits(codecCtx->sw_pix_fmt) || exceeds8Bits(static_cast<AVPixelFormat>(st->codecpar->format)) || st->codecpar->bits_per_raw_sample > 8;
 }
 // PQ HDR10 or HLG HDR
 inline bool isHDR(const AVCodecContext* codecCtx) { return codecCtx->color_trc == AVCOL_TRC_SMPTE2084 || codecCtx->color_trc == AVCOL_TRC_ARIB_STD_B67; }

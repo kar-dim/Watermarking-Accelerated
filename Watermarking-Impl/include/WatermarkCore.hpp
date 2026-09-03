@@ -17,6 +17,12 @@ struct ImageSession;
 struct VideoSession;
 struct PreloadedImage;
 struct ExportedImage;
+struct SessionPixelData {
+    std::vector<uint8_t> pixels;
+    int width = 0;
+    int height = 0;
+    int channels = 0;
+};
 // clang-format off
 struct VideoSessionDeleter { void operator()(VideoSession* s) const; };
 struct ImageSessionDeleter { void operator()(ImageSession* s) const; };
@@ -51,7 +57,8 @@ void saveImage(const ImageSession* session, const std::string& outPath, MaskMeth
 ExportHandle createReusableExportBuffer();
 void exportForSave(const ImageSession* session, ExportedImage* reusableBuffer, MaskMethod method);
 void flushToDiskAsync(ExportedImage* handle, const std::string& outPath, MaskMethod method);
-const uint8_t* getSessionPixelData(const ImageSession* session, int& width, int& height, int& channels);
+SessionPixelData getSessionPixelData(const ImageSession* session);
+void optimizeThreadsForVideoEmbedding();
 
 // video processing functions
 struct VideoSettings {

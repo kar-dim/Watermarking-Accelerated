@@ -25,6 +25,7 @@ namespace fs = std::filesystem;
 BenchmarkWorker::BenchmarkWorker(const int openclDevice, QObject* parent) : QThread(parent), deviceIndex(openclDevice) {}
 
 void BenchmarkWorker::run() {
+    try {
     // read the image files (which are embedded in the executable) and write them to temporary folder
     if (tempDir.isValid()) {
         const QDir resourceDir(":/samples");
@@ -144,7 +145,7 @@ void BenchmarkWorker::run() {
                 for (float psnr : psnrValues) {
                     if (QThread::currentThread()->isInterruptionRequested())
                         return;
-                    // update p and psnr in the session, this will trigger all necessary internal recalculations in the engine (e.g. random noise generation)
+                    // p change rebuilds the backend, PSNR change updates only the cached embedding strength
                     updateSessionParams(session.get(), p, psnr);
                     // EMBED BENCHMARK
                     auto [avgEmbedMs, embedFps, dummy] = measurePerformance([&]() {
@@ -184,13 +185,19 @@ void BenchmarkWorker::run() {
     const double finalDetectFps = (cellCount > 0) ? std::exp(sumLogDetectFps / cellCount) : 0.0;
     const int finalScore = static_cast<int>(std::round(std::sqrt(finalEmbedFps * finalDetectFps) * 10.0));
     emit benchmarkFinished(finalEmbedFps, finalDetectFps, finalScore);
+    } catch (...) {
+        emit benchmarkFinished(0.0, 0.0, 0);
+    }
 }
 
 // simple format conversion from the raw pixel data of the watermark session (column-major, planar) to a QImage (row-major, interleaved) for display in the GUI
 // optimized with OpenMP and cache locality in mind, but the timer does not count this, it is only used for display purposes
 QImage BenchmarkWorker::convertToQtFormat(ImageSession* session) const {
-    int rows = 0, cols = 0, channels = 0;
-    const uint8_t* rawData = getSessionPixelData(session, cols, rows, channels);
+    const SessionPixelData pixelData = getSessionPixelData(session);
+    const int rows = pixelData.height;
+    const int cols = pixelData.width;
+    const int channels = pixelData.channels;
+    const uint8_t* rawData = pixelData.pixels.data();
     QImage displayImage(cols, rows, channels == 3 ? QImage::Format_RGB888 : QImage::Format_Grayscale8);
     // rgb
     if (channels == 3) {

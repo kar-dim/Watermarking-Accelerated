@@ -1,4 +1,5 @@
 #pragma once
+#include "../CudaCheck.hpp"
 #include "CudaMemPool.hpp"
 #include <cuda_runtime.h>
 
@@ -23,16 +24,25 @@ class CudaStreamManager {
     CudaStreamManager& operator=(CudaStreamManager&&) = delete;
 
   private:
-    cudaStream_t computeStream;
-    cudaStream_t transferStream;
+    cudaStream_t computeStream = nullptr;
+    cudaStream_t transferStream = nullptr;
     CudaMemPool pool;
 
     CudaStreamManager() {
-        cudaStreamCreate(&computeStream);
-        cudaStreamCreate(&transferStream);
-        size_t free = 0, total = 0;
-        cudaMemGetInfo(&free, &total);
-        pool.setCapacity(total);
+        try {
+            CUDA_CHECK(cudaStreamCreate(&computeStream));
+            CUDA_CHECK(cudaStreamCreate(&transferStream));
+            size_t freeMem = 0;
+            size_t totalMem = 0;
+            CUDA_CHECK(cudaMemGetInfo(&freeMem, &totalMem));
+            pool.setCapacity(totalMem);
+        } catch (...) {
+            if (transferStream)
+                cudaStreamDestroy(transferStream);
+            if (computeStream)
+                cudaStreamDestroy(computeStream);
+            throw;
+        }
     }
 
     ~CudaStreamManager() {

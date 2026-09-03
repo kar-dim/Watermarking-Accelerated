@@ -1,5 +1,6 @@
 #pragma once
 #if defined(_USE_CUDA_)
+#include "../CudaCheck.hpp"
 #include <cuda_runtime.h>
 #elif defined(_USE_OPENCL_)
 #include "opencl_init.h"
@@ -17,7 +18,7 @@ class HostMemory {
   public:
     HostMemory(const size_t size) {
 #if defined(_USE_CUDA_)
-        cudaHostAlloc(&ptr, size * sizeof(T), cudaHostAllocDefault);
+        CUDA_CHECK(cudaHostAlloc(&ptr, size * sizeof(T), cudaHostAllocDefault));
 #elif defined(_USE_OPENCL_)
         queue = OclQueueManager::getInstance().getQueue();
         pinnedBuffer = cl::Buffer(OclQueueManager::getInstance().getContext(), CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR, size * sizeof(T));

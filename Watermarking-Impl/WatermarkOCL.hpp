@@ -21,8 +21,8 @@ template <int p>
 class WatermarkOCL final : public WatermarkBase {
   public:
     WatermarkOCL<p>(const int rows, const int cols, const std::string& watermarkPassword, const float psnr)
-        : WatermarkBase(rows, cols, watermarkPassword, psnr, initializeRandomMatrix), strengthNumerator(strengthFactor * std::sqrt(static_cast<float>(this->totalPixels))),
-          coefficients(localSize, OclQueueManager::getInstance().getQueueRaw()), stopFlag(FlagBuffer::zeros(1, OclQueueManager::getInstance().getQueueRaw())),
+        : WatermarkBase(rows, cols, watermarkPassword, psnr, initializeRandomMatrix), coefficients(localSize, OclQueueManager::getInstance().getQueueRaw()),
+          stopFlag(FlagBuffer::zeros(1, OclQueueManager::getInstance().getQueueRaw())),
           queue(OclQueueManager::getInstance().getQueue()), device(OclQueueManager::getInstance().getDevice()),
           texKernelDims{alignUp<windowLocalSize.first>(rows), alignUp<windowLocalSize.second>(cols)}, meKernelDims{rows, alignUp<optimalLocalSize>(cols)},
           corrFinalLocalSize(cl_utils::maxPow2WorkGroupSize(device)), programs(cl_utils::OpenCLKernelCache<p>::getProgram()) {}
@@ -152,7 +152,6 @@ class WatermarkOCL final : public WatermarkBase {
     static constexpr int RxSize = (localSize * (localSize + 1)) / 2;
     static constexpr int rxSize = localSize;
 
-    float strengthNumerator;
     ImageBuffer coefficients;
     FlagBuffer stopFlag;
 

@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!-- Shared runtime deployment for the CLI, tests, and Qt application. -->
+  <PropertyGroup>
+    <WatermarkingRuntimeDestination>$(TargetDir)</WatermarkingRuntimeDestination>
+    <WatermarkingRuntimeDestination Condition="'$(MSBuildProjectName)' == 'Watermarking-BenchUI'">$(OutDir)Watermarking-BenchUI\</WatermarkingRuntimeDestination>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(ConfigurationType)' == 'Application'">
+    <WatermarkingRuntimeFile Include="$(WatermarkingImplDir)libs\ffmpeg\bin\*.dll" />
+    <WatermarkingRuntimeFile Include="$(WatermarkingImplDir)libs\zlib\bin\zlib1.dll" />
+    <WatermarkingRuntimeFile Include="$(WatermarkingImplDir)libs\libjpeg\bin\jpeg62.dll" />
+    <WatermarkingRuntimeFile Include="$(WatermarkingImplDir)libs\libtiff\bin\tiff.dll" />
+    <WatermarkingRuntimeFile Include="$(WatermarkingImplDir)libs\libpng\bin\libpng16d.dll" Condition="$(Configuration.Contains('_Debug'))" />
+    <WatermarkingRuntimeFile Include="$(WatermarkingImplDir)libs\libpng\bin\libpng16.dll" Condition="!$(Configuration.Contains('_Debug'))" />
+    <WatermarkingRuntimeFile Include="$(LLVMInstallDir)\bin\libomp.dll" Condition="$(Configuration.StartsWith('EIGEN_')) and Exists('$(LLVMInstallDir)\bin\libomp.dll')" />
+    <WatermarkingSampleFile Include="$(WatermarkingRoot)samples\**\*" Condition="'$(MSBuildProjectName)' == 'Watermarking-CLI'" />
+  </ItemGroup>
+
+  <Target Name="CopyWatermarkingRuntimeFiles" AfterTargets="Build" Condition="'$(ConfigurationType)' == 'Application'">
+    <MakeDir Directories="$(WatermarkingRuntimeDestination)" />
+    <Copy SourceFiles="@(WatermarkingRuntimeFile)" DestinationFolder="$(WatermarkingRuntimeDestination)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(WatermarkingSampleFile)"
+          DestinationFiles="@(WatermarkingSampleFile->'$(TargetDir)samples\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true"
+          Condition="'@(WatermarkingSampleFile)' != ''" />
+  </Target>
+</Project>

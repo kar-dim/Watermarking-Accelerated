@@ -1,4 +1,5 @@
 #pragma once
+#include "../CudaCheck.hpp"
 #include "HdrTonemap.hpp"
 #include <algorithm>
 #include <cstdint>
@@ -30,9 +31,9 @@ inline int gridSize1DStridedCalculate(const int N, const int blockSize) { return
 template <typename KernelFunc>
 inline unsigned int gridSizeMeCalculate(KernelFunc kernel, const int blockSize) {
     int numSMs;
-    cudaDeviceGetAttribute(&numSMs, cudaDevAttrMultiProcessorCount, 0);
+    CUDA_CHECK(cudaDeviceGetAttribute(&numSMs, cudaDevAttrMultiProcessorCount, 0));
     int maxBlocksPerSM;
-    cudaOccupancyMaxActiveBlocksPerMultiprocessor(&maxBlocksPerSM, kernel, blockSize, 0);
+    CUDA_CHECK(cudaOccupancyMaxActiveBlocksPerMultiprocessor(&maxBlocksPerSM, kernel, blockSize, 0));
     // SM * Max blocks per SM for perfect persistent threads strategy
     return static_cast<unsigned int>(numSMs * maxBlocksPerSM);
 }

@@ -40,12 +40,12 @@ class CudaArray {
 
     CudaArray(const int rows, const int cols, const T* hostData, cudaStream_t stream) : rows(rows), cols(cols), stream(stream) {
         alloc();
-        cudaMemcpyAsync(ptr_, hostData, bytes(), cudaMemcpyHostToDevice, stream);
+        CUDA_CHECK(cudaMemcpyAsync(ptr_, hostData, bytes(), cudaMemcpyHostToDevice, stream));
     }
 
     CudaArray(const int rows, const int cols, const int channels, const T* hostData, cudaStream_t stream) : rows(rows), cols(cols), channels(channels), stream(stream) {
         alloc();
-        cudaMemcpyAsync(ptr_, hostData, bytes(), cudaMemcpyHostToDevice, stream);
+        CUDA_CHECK(cudaMemcpyAsync(ptr_, hostData, bytes(), cudaMemcpyHostToDevice, stream));
     }
 
     ~CudaArray() { freeArray(); }
@@ -86,28 +86,28 @@ class CudaArray {
 
     void fillZero() {
         if (ptr_)
-            cudaMemsetAsync(ptr_, 0, bytes(), stream);
+            CUDA_CHECK(cudaMemsetAsync(ptr_, 0, bytes(), stream));
     }
 
     T scalar() const {
         T val{};
         if (ptr_) {
-            cudaMemcpyAsync(&val, ptr_, sizeof(T), cudaMemcpyDeviceToHost, stream);
-            cudaStreamSynchronize(stream);
+            CUDA_CHECK(cudaMemcpyAsync(&val, ptr_, sizeof(T), cudaMemcpyDeviceToHost, stream));
+            CUDA_CHECK(cudaStreamSynchronize(stream));
         }
         return val;
     }
 
     void toHost(T* dst) const {
         if (ptr_) {
-            cudaMemcpyAsync(dst, ptr_, bytes(), cudaMemcpyDeviceToHost, stream);
-            cudaStreamSynchronize(stream);
+            CUDA_CHECK(cudaMemcpyAsync(dst, ptr_, bytes(), cudaMemcpyDeviceToHost, stream));
+            CUDA_CHECK(cudaStreamSynchronize(stream));
         }
     }
 
     void toHostAsync(T* dst) const {
         if (ptr_)
-            cudaMemcpyAsync(dst, ptr_, bytes(), cudaMemcpyDeviceToHost, stream);
+            CUDA_CHECK(cudaMemcpyAsync(dst, ptr_, bytes(), cudaMemcpyDeviceToHost, stream));
     }
 
     static CudaArray zeros(const int count, cudaStream_t stream) {
@@ -125,7 +125,7 @@ class CudaArray {
     CudaArray clone() const {
         CudaArray copy(rows, cols, channels, stream);
         if (ptr_)
-            cudaMemcpyAsync(copy.ptr_, ptr_, bytes(), cudaMemcpyDeviceToDevice, stream);
+            CUDA_CHECK(cudaMemcpyAsync(copy.ptr_, ptr_, bytes(), cudaMemcpyDeviceToDevice, stream));
         return copy;
     }
 };

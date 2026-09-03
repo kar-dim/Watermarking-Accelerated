@@ -22,10 +22,12 @@ class WatermarkBase {
     int baseRows, baseCols, totalPixels;
     ImageBuffer randomMatrix;
     float strengthFactor;
+    float strengthNumerator;
 
   public:
     WatermarkBase(const int rows, const int cols, const std::string& watermarkPassword, const float psnr, WatermarkLoader loader)
-        : baseRows(rows), baseCols(cols), totalPixels(baseRows * baseCols), randomMatrix(generateRandomMatrix(watermarkPassword, loader)), strengthFactor(computeStrengthFactor(psnr)) {}
+        : baseRows(rows), baseCols(cols), totalPixels(baseRows * baseCols), randomMatrix(generateRandomMatrix(watermarkPassword, loader)), strengthFactor(computeStrengthFactor(psnr)),
+          strengthNumerator(strengthFactor * std::sqrt(static_cast<float>(totalPixels))) {}
 
     // delete copy and move operations we don't wannt them
     WatermarkBase(const WatermarkBase&) = delete;
@@ -42,6 +44,13 @@ class WatermarkBase {
 
     // the main mask detector function
     virtual float detectWatermark(const ImageBuffer& inputImage, const MaskMethod maskType) = 0;
+
+    // PSNR affects only embedding strength. Updating it must not regenerate the
+    // deterministic watermark or rebuild prediction workspaces.
+    void updatePsnr(const float psnr) {
+        strengthFactor = computeStrengthFactor(psnr);
+        strengthNumerator = strengthFactor * std::sqrt(static_cast<float>(totalPixels));
+    }
 
   private:
     static inline float computeStrengthFactor(const float psnr) { return 255.0f / std::sqrt(std::pow(10.0f, psnr / 10.0f)); }

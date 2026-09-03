@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!-- Automatically imported by every project below this directory. -->
+  <PropertyGroup Label="Watermarking shared paths">
+    <WatermarkingRoot>$(MSBuildThisFileDirectory)</WatermarkingRoot>
+    <WatermarkingImplDir>$(WatermarkingRoot)Watermarking-Impl\</WatermarkingImplDir>
+    <WatermarkingUtilDir>$(WatermarkingRoot)Watermarking-Util\</WatermarkingUtilDir>
+    <WatermarkingPublicIncludeDirectories>$(WatermarkingImplDir)include;$(WatermarkingUtilDir)include</WatermarkingPublicIncludeDirectories>
+    <WatermarkingImageIncludeDirectories>$(WatermarkingImplDir)libs\CImg;$(WatermarkingImplDir)libs\zlib\include;$(WatermarkingImplDir)libs\libpng\include;$(WatermarkingImplDir)libs\libjpeg\include;$(WatermarkingImplDir)libs\libwebp\include;$(WatermarkingImplDir)libs\libtiff\include</WatermarkingImageIncludeDirectories>
+    <WatermarkingMediaIncludeDirectory>$(WatermarkingImplDir)libs\ffmpeg\include</WatermarkingMediaIncludeDirectory>
+    <WatermarkingThirdPartyLibraryDirectories>$(WatermarkingImplDir)libs\zlib\lib;$(WatermarkingImplDir)libs\libpng\lib;$(WatermarkingImplDir)libs\libjpeg\lib;$(WatermarkingImplDir)libs\libwebp\lib;$(WatermarkingImplDir)libs\libtiff\lib;$(WatermarkingImplDir)libs\ffmpeg\lib</WatermarkingThirdPartyLibraryDirectories>
+    <WatermarkingMediaDependencies>avutil.lib;avformat.lib;swscale.lib;avcodec.lib;avfilter.lib</WatermarkingMediaDependencies>
+    <WatermarkingReleaseImageDependencies>zlib.lib;libpng16.lib;jpeg.lib;libwebp.lib;tiff.lib</WatermarkingReleaseImageDependencies>
+    <WatermarkingDebugImageDependencies>zlibd.lib;libpng16d.lib;jpeg.lib;libwebp.lib;tiff.lib</WatermarkingDebugImageDependencies>
+  </PropertyGroup>
+
+  <ItemDefinitionGroup Label="Watermarking shared compiler defaults">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <LanguageStandard_C>stdc17</LanguageStandard_C>
+    </ClCompile>
+  </ItemDefinitionGroup>
+</Project>

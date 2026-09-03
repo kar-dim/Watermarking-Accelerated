@@ -240,6 +240,7 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile) {
         isRGB = true;
         break;
     case 4: {
+        // CImg<float> -> CImg<uint8_t> creates an owning copy, so we are safe
         alphaChannel.emplace(cimgRgb.get_shared_channel(3));
         auto rgbView = cimgRgb.get_shared_channels(0, 2);
         cimgAlphaZero(rgbView, *alphaChannel);
@@ -251,7 +252,7 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile) {
     default: throw std::runtime_error("Invalid image dimensions");
     }
 #if defined(_USE_CUDA_)
-    cudaStreamSynchronize(stream);
+    CUDA_CHECK(cudaStreamSynchronize(stream));
 #elif defined(_USE_OPENCL_)
     clFinish(stream);
 #endif
@@ -268,6 +269,7 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile) {
         break;
     }
     case 4: {
+        // Different types, thus it creates an owning 8-bit alpha plane, we are safe
         alphaChannel.emplace(cimgRgb.get_shared_channel(3));
         auto rgbView = cimgRgb.get_shared_channels(0, 2);
         cimgAlphaZero(rgbView, *alphaChannel);

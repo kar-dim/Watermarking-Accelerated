@@ -50,7 +50,8 @@ inline std::array<uint8_t, 32> sha256(const std::string& input) {
     for (size_t i = 0; i < data.size(); i += 64) {
         std::array<uint32_t, 64> W;
         for (int t = 0; t < 16; ++t)
-            W[t] = (data[i + t * 4] << 24) | (data[i + t * 4 + 1] << 16) | (data[i + t * 4 + 2] << 8) | (data[i + t * 4 + 3]);
+            W[t] = (static_cast<uint32_t>(data[i + t * 4]) << 24) | (static_cast<uint32_t>(data[i + t * 4 + 1]) << 16) |
+                   (static_cast<uint32_t>(data[i + t * 4 + 2]) << 8) | static_cast<uint32_t>(data[i + t * 4 + 3]);
         for (int t = 16; t < 64; ++t) {
             uint32_t s0 = std::rotr(W[t - 15], 7) ^ std::rotr(W[t - 15], 18) ^ (W[t - 15] >> 3);
             uint32_t s1 = std::rotr(W[t - 2], 17) ^ std::rotr(W[t - 2], 19) ^ (W[t - 2] >> 10);

@@ -30,6 +30,7 @@
 #include <variant>
 
 #if defined(_USE_CUDA_)
+#include "../CudaCheck.hpp"
 #include "CudaArray.hpp"
 #include "CudaStreamManager.hpp"
 #include "cuda_utils.hpp"
@@ -215,7 +216,7 @@ AVCodecContextPtr openDecoderHWAccel(const AVCodecParameters* inputCodecParams, 
     auto* hwCtx = reinterpret_cast<AVHWDeviceContext*>(hw_device_ctx->data);
     auto* cudaCtx = reinterpret_cast<AVCUDADeviceContext*>(hwCtx->hwctx);
     int runtimeDevice = 0;
-    cudaGetDevice(&runtimeDevice);
+    CUDA_CHECK(cudaGetDevice(&runtimeDevice));
     CUdevice cuDev = 0;
     if (cuDeviceGet(&cuDev, runtimeDevice) != CUDA_SUCCESS)
         return openSoftwareDecoder(inputCodecParams, pktTimebase);
@@ -360,8 +361,14 @@ void fillYPlane(const AVFrame* frame, VideoSession* s) {
 // pull all ready packets from the encoder and write them to the output container (non-blocking)
 void drainEncoderPackets(VideoSession* s) {
     const AVPacketPtr pkt(av_packet_alloc());
+    checkError(!pkt, "Failed to allocate encoder output packet");
     const AVStream* outVideoStream = s->outputFormatCtx->streams[s->outputVideoStreamIndex];
-    while (avcodec_receive_packet(s->outputEncoderCtx.get(), pkt.get()) == 0) {
+    while (true) {
+        const int receiveRet = avcodec_receive_packet(s->outputEncoderCtx.get(), pkt.get());
+        if (receiveRet == AVERROR(EAGAIN) || receiveRet == AVERROR_EOF)
+            return;
+        checkAv(receiveRet, "Failed to receive encoded video packet");
+
         av_packet_rescale_ts(pkt.get(), s->outputEncoderCtx->time_base, outVideoStream->time_base);
         pkt->stream_index = s->outputVideoStreamIndex;
         checkAv(av_interleaved_write_frame(s->outputFormatCtx.get(), pkt.get()), "Failed to write encoded video packet");
@@ -408,12 +415,12 @@ void encodeFrameGPU(VideoSession* s, const CudaArray<uint8_t>& yRowMajor, const 
     encFrame->height = height;
     encFrame->pts = pts;
     checkError(av_hwframe_get_buffer(s->outputEncoderCtx->hw_frames_ctx, encFrame.get(), 0) < 0, "Failed to get NVENC hw frame buffer");
-    cudaMemcpy2DAsync(encFrame->data[0], encFrame->linesize[0], yRowMajor.data(), width, width, height, cudaMemcpyDeviceToDevice, stream);
+    CUDA_CHECK(cudaMemcpy2DAsync(encFrame->data[0], encFrame->linesize[0], yRowMajor.data(), width, width, height, cudaMemcpyDeviceToDevice, stream));
     // HDR path passes preconverted uint8_t NV12 UV (stride=width) -> SDR path copies directly from decoded frame
     const uint8_t* uvSrc = uvOverride ? uvOverride : static_cast<const uint8_t*>(srcFrame->data[1]);
     const int uvPitch = uvOverride ? width : srcFrame->linesize[1];
-    cudaMemcpy2DAsync(encFrame->data[1], encFrame->linesize[1], uvSrc, uvPitch, width, height / 2, cudaMemcpyDeviceToDevice, stream);
-    cudaStreamSynchronize(stream);
+    CUDA_CHECK(cudaMemcpy2DAsync(encFrame->data[1], encFrame->linesize[1], uvSrc, uvPitch, width, height / 2, cudaMemcpyDeviceToDevice, stream));
+    CUDA_CHECK(cudaStreamSynchronize(stream));
     queue.push(std::move(encFrame));
 }
 #endif
@@ -556,7 +563,7 @@ void embedWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* fra
                 cuda_utils::launchP010HdrYToSdrU8Kernel(reinterpret_cast<const uint16_t*>(frame->data[0]), frame->linesize[0], reinterpret_cast<const uint16_t*>(frame->data[1]), frame->linesize[1],
                                                         yRowMajor.data(), width, height, mobius, stream);
             else
-                cudaMemcpy2DAsync(yRowMajor.data(), width, frame->data[0], frame->linesize[0], width, height, cudaMemcpyDeviceToDevice, stream);
+                CUDA_CHECK(cudaMemcpy2DAsync(yRowMajor.data(), width, frame->data[0], frame->linesize[0], width, height, cudaMemcpyDeviceToDevice, stream));
         }
         if (isHdr) {
             CudaArray<uint8_t> uvNV12 = convertHdrUV(s, frame, mobius, stream);
@@ -575,12 +582,12 @@ void embedWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* fra
             if (doEmbed) {
                 CudaArray<float> lumaFloat(height, width, stream);
                 loadHdrLuma(s, frame, lumaFloat, mobius, stream);
-                cudaStreamSynchronize(stream);
+                CUDA_CHECK(cudaStreamSynchronize(stream));
                 embedAndFillYPlane(s, lumaFloat);
             } else {
                 cuda_utils::launchP010HdrYToSdrU8Kernel(reinterpret_cast<const uint16_t*>(frame->data[0]), frame->linesize[0], reinterpret_cast<const uint16_t*>(frame->data[1]), frame->linesize[1],
                                                         s->hostFrame->get(), width, height, mobius, stream);
-                cudaStreamSynchronize(stream);
+                CUDA_CHECK(cudaStreamSynchronize(stream));
             }
         } else {
             CudaArray<uint8_t> chromaBuffer(width * height / 2, stream);
@@ -589,11 +596,11 @@ void embedWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* fra
             if (doEmbed) {
                 CudaArray<float> lumaBuffer(height, width, stream);
                 cuda_utils::launchPitchedToFloatKernel(frame->data[0], lumaBuffer.data(), width, height, frame->linesize[0], stream);
-                cudaStreamSynchronize(stream);
+                CUDA_CHECK(cudaStreamSynchronize(stream));
                 embedAndFillYPlane(s, lumaBuffer);
             } else {
-                cudaMemcpy2DAsync(s->hostFrame->get(), width, frame->data[0], frame->linesize[0], width, height, cudaMemcpyDeviceToHost, stream);
-                cudaStreamSynchronize(stream);
+                CUDA_CHECK(cudaMemcpy2DAsync(s->hostFrame->get(), width, frame->data[0], frame->linesize[0], width, height, cudaMemcpyDeviceToHost, stream));
+                CUDA_CHECK(cudaStreamSynchronize(stream));
             }
         }
         queue.push(buildEncFrame(s, framePts(frame)));
