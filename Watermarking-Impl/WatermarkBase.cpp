@@ -15,8 +15,25 @@ ImageBuffer WatermarkBase::generateRandomMatrix(const std::string& watermarkPass
 
     std::vector<float> randomNums(numElements);
     // main loop for generating randoms, process blocks of 8 because ChaCha20 outputs 8 64-bit values
+#if defined(__AVX2__)
+    // 2 ChaCha20 blocks = 8 Box-Muller pairs -> one AVX2 step (8 values, vectorized)
+    const int64_t numBlockPairs = numBlocks / 2;
 #pragma omp parallel for schedule(static)
-    for (int64_t block = 0; block < numBlocks; block++) {
+    for (int64_t blockPair = 0; blockPair < numBlockPairs; blockPair++) {
+        const int64_t block = blockPair * 2;
+        // generate random bytes
+        const std::array<uint64_t, 8> randomBits0 = WatermarkCrypto::chacha20Block(baseState, static_cast<uint64_t>(block));
+        const std::array<uint64_t, 8> randomBits1 = WatermarkCrypto::chacha20Block(baseState, static_cast<uint64_t>(block + 1));
+        // generate 16 random normal distributed values
+        WatermarkCrypto::generateBoxMullerNormalBlockPair(randomBits0, randomBits1, &randomNums[block * 8]);
+    }
+    // odd trailing block, if it exists it goes to the scalar loop below
+    const int64_t firstScalarBlock = numBlockPairs * 2;
+#else
+    const int64_t firstScalarBlock = 0;
+#endif
+#pragma omp parallel for schedule(static)
+    for (int64_t block = firstScalarBlock; block < numBlocks; block++) {
         // generate random bytes
         const std::array<uint64_t, 8> randomBits = WatermarkCrypto::chacha20Block(baseState, static_cast<uint64_t>(block));
         const int64_t baseIdx = block * 8;

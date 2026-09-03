@@ -288,6 +288,11 @@ bool AuxiliaryMux::transcodeSubtitle(SubtitleTranscode& transcode, AVPacket* pac
     if (avcodec_decode_subtitle2(transcode.decoder.get(), &subtitle, &decoded, packet) < 0 || decoded == 0) {
         return true;
     }
+    if (subtitle.pts == AV_NOPTS_VALUE) {
+        const int64_t packetTs = (packet->pts != AV_NOPTS_VALUE) ? packet->pts : packet->dts;
+        if (packetTs != AV_NOPTS_VALUE)
+            subtitle.pts = av_rescale_q(packetTs, input_->streams[transcode.inputStreamIndex]->time_base, AV_TIME_BASE_Q);
+    }
     bool success = true;
     if (subtitle.pts != AV_NOPTS_VALUE) {
         subtitle.pts += av_rescale_q(subtitle.start_display_time, AVRational{1, 1000}, AV_TIME_BASE_Q);

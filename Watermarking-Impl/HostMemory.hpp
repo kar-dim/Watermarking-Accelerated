@@ -38,6 +38,10 @@ class HostMemory {
 #endif
     }
 
+    // prevent copying to avoid double free or dangling pointer issues
+    HostMemory(const HostMemory&) = delete;
+    HostMemory& operator=(const HostMemory&) = delete;
+
     T* get() { return ptr; }
 
   private:

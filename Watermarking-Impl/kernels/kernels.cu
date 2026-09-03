@@ -57,7 +57,7 @@ __global__ void me_p3(const float* __restrict__ input, uint64_t* __restrict__ Rx
             load_neighbor_vec<3>(&vecBot, blockValues, centerBot, tid + 256);
         } else {
             vecBot = {};
-            centerBot = blockValues[1][tid + 128 + 1];
+            centerBot = blockValues[1][tid + 256 + 1];
         }
 
         // rx accumulation (do both pixels)
@@ -242,9 +242,6 @@ __global__ void me_p7(const float* __restrict__ input, uint64_t* __restrict__ Rx
         fillBlockStripVertical<7, 128>(blockValues, input, width, height, bx, by);
         __syncthreads();
 
-        if (by * blockDim.y + threadIdx.y >= height)
-            continue;
-
         half centerVal;
         half8 localVec8[6];
 
@@ -348,9 +345,6 @@ __global__ void me_p9(const float* __restrict__ input, uint64_t* __restrict__ Rx
 
         fillBlockStripVertical<9, 128>(blockValues, input, width, height, bx, by);
         __syncthreads();
-
-        if (by * blockDim.y + threadIdx.y >= height)
-            continue;
 
         // load window
         half centerVal;

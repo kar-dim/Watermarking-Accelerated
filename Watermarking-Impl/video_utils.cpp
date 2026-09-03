@@ -304,23 +304,38 @@ void filterFrame(AVFramePtr& frame, AVFramePtr& filteredFrame, const VideoSessio
     av_frame_move_ref(frame.get(), filteredFrame.get());
 }
 
-// upload a CPU uint8 Y plane into the GPU / Eigen input buffer
-void loadInputFrame(VideoSession* s, const uint8_t* hostPtr) {
+// upload a CPU uint8 Y plane into the GPU / Eigen input buffer.
+void loadInputFrame(VideoSession* s, const uint8_t* hostPtr, const int srcPitch) {
     const auto [height, width] = s->videoDims();
 #if defined(_USE_CUDA_)
     const auto stream = CudaStreamManager::getInstance().getComputeStream();
     // upload host uint8 row-major to GPU, then use pitchedToFloat kernel (stride=width) to convert to column-major float
-    CudaArray<uint8_t> hostGpu(height, width, hostPtr, stream);
+    CudaArray<uint8_t> hostGpu(height, width, stream);
+    if (srcPitch == width)
+        CUDA_CHECK(cudaMemcpyAsync(hostGpu.data(), hostPtr, static_cast<size_t>(width) * height, cudaMemcpyHostToDevice, stream));
+    else // strided upload
+        CUDA_CHECK(cudaMemcpy2DAsync(hostGpu.data(), width, hostPtr, srcPitch, width, height, cudaMemcpyHostToDevice, stream));
     s->inputFrame = CudaArray<float>(height, width, stream);
     cuda_utils::launchPitchedToFloatKernel(hostGpu.data(), s->inputFrame.data(), width, height, width, stream);
 #elif defined(_USE_OPENCL_)
     auto& mgr = OclQueueManager::getInstance();
     auto queue = mgr.getQueueRaw();
-    OclArray<uint8_t> hostGpu(height, width, hostPtr, queue);
+    OclArray<uint8_t> hostGpu(height, width, queue);
+    if (srcPitch == width) {
+        clEnqueueWriteBuffer(queue, hostGpu.data(), CL_TRUE, 0, hostGpu.bytes(), hostPtr, 0, nullptr, nullptr);
+    } else {
+        // strided upload
+        const size_t origin[3] = {0, 0, 0};
+        const size_t region[3] = {static_cast<size_t>(width), static_cast<size_t>(height), 1};
+        clEnqueueWriteBufferRect(queue, hostGpu.data(), CL_TRUE, origin, origin, region, static_cast<size_t>(width), 0, static_cast<size_t>(srcPitch), 0, hostPtr, 0, nullptr, nullptr);
+    }
     s->inputFrame = OclArray<float>(height, width, queue);
     cl_utils::launchPitchedToFloat(hostGpu.clBuffer(), s->inputFrame.clBuffer(), width, height, width, mgr.getQueue());
 #else
-    s->inputFrame = Map<const Gray8Buffer>(hostPtr, width, height).transpose().template cast<float>();
+    if (srcPitch == width)
+        s->inputFrame = Map<const Gray8Buffer>(hostPtr, width, height).transpose().template cast<float>();
+    else // map the padded plane in place through an outer stride
+        s->inputFrame = Map<const Gray8Buffer, 0, OuterStride<>>(hostPtr, width, height, OuterStride<>(srcPitch)).transpose().template cast<float>();
 #endif
 }
 
@@ -353,15 +368,7 @@ void embedAndFillYPlane(VideoSession* s, const ImageBuffer& buffer) {
 }
 
 void fillYPlane(const AVFrame* frame, VideoSession* s) {
-    const auto [height, width] = s->videoDims();
-    uint8_t* hostY = s->hostFrame->get();
-    const uint8_t* srcY = frame->data[0];
-    if (frame->linesize[0] != width) {
-        for (int y = 0; y < height; y++)
-            std::memcpy(hostY + y * width, srcY + y * frame->linesize[0], width);
-        srcY = hostY;
-    }
-    loadInputFrame(s, srcY);
+    loadInputFrame(s, frame->data[0], frame->linesize[0]);
     embedAndFillYPlane(s, s->inputFrame);
 }
 
@@ -499,14 +506,7 @@ void detectWatermark(VideoSession* s, int& framesCount, const AVFrame* frame) {
         framesCount++;
         return;
     }
-    const auto [height, width] = s->videoDims();
-    uint8_t* srcY = frame->data[0];
-    if (frame->linesize[0] != width) {
-        for (int y = 0; y < height; y++)
-            std::memcpy(s->hostFrame.get()->get() + y * width, frame->data[0] + y * frame->linesize[0], width);
-        srcY = s->hostFrame.get()->get();
-    }
-    loadInputFrame(s, srcY);
+    loadInputFrame(s, frame->data[0], frame->linesize[0]);
     const float correlation = s->watermarkObj->detectWatermark(s->inputFrame, MaskMethod::ME);
     cout << "Correlation for frame: " << (framesCount + 1) << ": " << correlation << "\n";
     framesCount++;

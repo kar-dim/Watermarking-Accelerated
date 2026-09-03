@@ -8,6 +8,9 @@
 #include <string>
 #include <utility>
 #include <vector>
+#if defined(__AVX2__)
+#include <immintrin.h>
+#endif
 
 /*!
  *  \brief  Functions for watermark secure watermark generation (ChaCha20, Box-Muller transform and SHA-256)
@@ -15,13 +18,129 @@
  */
 namespace WatermarkCrypto {
 
+// convert a 64-bit int to a float strictly in the range (0, 1].
+// only the top 24 bits are used, the result is always a multiple of 2^-24 in [2^-24, 1]
+inline float toUniformFloat(const uint64_t x) { return (x >> 40) * 0x1.0p-24f + 0x1.0p-24f; }
+
+// 2*pi for Box-Muller transform
+inline constexpr float kTwoPi = 2.0f * std::numbers::pi_v<float>;
+
 // convert 64-bit int to float strictly in the range (0, 1] and then convert it to Box-Muller normal distribution pair
 inline std::pair<float, float> generateBoxMullerNormalPair(const uint64_t x1, const uint64_t x2) {
-    constexpr auto toUniformFloat = [](const uint64_t x) -> float { return (x >> 40) * 0x1.0p-24f + 0x1.0p-24f; };
     const float radius = std::sqrt(-2.0f * std::log(toUniformFloat(x1)));
-    const float theta = 2.0f * std::numbers::pi_v<float> * toUniformFloat(x2);
+    const float theta = kTwoPi * toUniformFloat(x2);
     return {radius * std::cos(theta), radius * std::sin(theta)};
 }
+
+#if defined(__AVX2__)
+namespace detail {
+
+// AVX2 natural logarithm
+inline __m256 logAvx2(const __m256 x) {
+    // frexp: mantissa in [0.5, 1) plus the matching exponent
+    const __m256i bits = _mm256_castps_si256(x);
+    __m256 m = _mm256_or_ps(_mm256_and_ps(x, _mm256_castsi256_ps(_mm256_set1_epi32(0x807FFFFF))), _mm256_castsi256_ps(_mm256_set1_epi32(0x3F000000)));
+    __m256 e = _mm256_cvtepi32_ps(_mm256_sub_epi32(_mm256_srli_epi32(_mm256_and_si256(bits, _mm256_set1_epi32(0x7F800000)), 23), _mm256_set1_epi32(126)));
+
+    // keep the mantissa near 1: if (m < sqrt(0.5)) { e -= 1; m = 2m - 1; } else { m -= 1; }
+    const __m256 belowSqrtHalf = _mm256_cmp_ps(m, _mm256_set1_ps(0.707106781186547524f), _CMP_LT_OQ);
+    e = _mm256_sub_ps(e, _mm256_and_ps(belowSqrtHalf, _mm256_set1_ps(1.0f)));
+    m = _mm256_sub_ps(_mm256_add_ps(m, _mm256_and_ps(belowSqrtHalf, m)), _mm256_set1_ps(1.0f));
+
+    const __m256 z = _mm256_mul_ps(m, m);
+    __m256 y = _mm256_set1_ps(7.0376836292E-2f);
+    y = _mm256_fmadd_ps(y, m, _mm256_set1_ps(-1.1514610310E-1f));
+    y = _mm256_fmadd_ps(y, m, _mm256_set1_ps(1.1676998740E-1f));
+    y = _mm256_fmadd_ps(y, m, _mm256_set1_ps(-1.2420140846E-1f));
+    y = _mm256_fmadd_ps(y, m, _mm256_set1_ps(1.4249322787E-1f));
+    y = _mm256_fmadd_ps(y, m, _mm256_set1_ps(-1.6668057665E-1f));
+    y = _mm256_fmadd_ps(y, m, _mm256_set1_ps(2.0000714765E-1f));
+    y = _mm256_fmadd_ps(y, m, _mm256_set1_ps(-2.4999993993E-1f));
+    y = _mm256_fmadd_ps(y, m, _mm256_set1_ps(3.3333331174E-1f));
+    y = _mm256_mul_ps(_mm256_mul_ps(y, m), z);
+    // recombine, using the hi/lo split of ln(2) for the exponent term
+    y = _mm256_fmadd_ps(e, _mm256_set1_ps(-2.12194440e-4f), y);
+    y = _mm256_fmadd_ps(z, _mm256_set1_ps(-0.5f), y);
+    return _mm256_fmadd_ps(e, _mm256_set1_ps(0.693359375f), _mm256_add_ps(m, y));
+}
+
+// AVX2 sine and cosine, Cephes minimax polynomials
+inline void sinCosAvx2(const __m256 x, __m256& sinOut, __m256& cosOut) {
+    // reduce into an octant: j = ((int)(x * 4/pi) + 1) & ~1
+    __m256 y = _mm256_mul_ps(x, _mm256_set1_ps(1.27323954473516f));
+    const __m256i j = _mm256_and_si256(_mm256_add_epi32(_mm256_cvttps_epi32(y), _mm256_set1_epi32(1)), _mm256_set1_epi32(~1));
+    y = _mm256_cvtepi32_ps(j);
+
+    // extended precision modular arithmetic: r = ((x - y*DP1) - y*DP2) - y*DP3
+    __m256 r = _mm256_fmadd_ps(y, _mm256_set1_ps(-0.78515625f), x);
+    r = _mm256_fmadd_ps(y, _mm256_set1_ps(-2.4187564849853515625e-4f), r);
+    r = _mm256_fmadd_ps(y, _mm256_set1_ps(-3.77489497744594108e-8f), r);
+
+    // the octant bits decide which polynomial is sin and which is cos, and the sign of each
+    const __m256i j2 = _mm256_and_si256(j, _mm256_set1_epi32(2));
+    const __m256 swapSinSign = _mm256_castsi256_ps(_mm256_slli_epi32(_mm256_and_si256(j, _mm256_set1_epi32(4)), 29));
+    const __m256 polyMask = _mm256_castsi256_ps(_mm256_cmpeq_epi32(j2, _mm256_setzero_si256()));
+    const __m256 cosSign = _mm256_castsi256_ps(_mm256_slli_epi32(_mm256_andnot_si256(_mm256_sub_epi32(j, _mm256_set1_epi32(2)), _mm256_set1_epi32(4)), 29));
+
+    // cosine polynomial of the reduced argument
+    const __m256 z = _mm256_mul_ps(r, r);
+    __m256 cosPoly = _mm256_set1_ps(2.443315711809948E-005f);
+    cosPoly = _mm256_fmadd_ps(cosPoly, z, _mm256_set1_ps(-1.388731625493765E-003f));
+    cosPoly = _mm256_fmadd_ps(cosPoly, z, _mm256_set1_ps(4.166664568298827E-002f));
+    cosPoly = _mm256_mul_ps(_mm256_mul_ps(cosPoly, z), z);
+    cosPoly = _mm256_fmadd_ps(z, _mm256_set1_ps(-0.5f), cosPoly);
+    cosPoly = _mm256_add_ps(cosPoly, _mm256_set1_ps(1.0f));
+
+    // sin polynomial of the reduced argument
+    __m256 sinPoly = _mm256_set1_ps(-1.9515295891E-4f);
+    sinPoly = _mm256_fmadd_ps(sinPoly, z, _mm256_set1_ps(8.3321608736E-3f));
+    sinPoly = _mm256_fmadd_ps(sinPoly, z, _mm256_set1_ps(-1.6666654611E-1f));
+    sinPoly = _mm256_fmadd_ps(_mm256_mul_ps(sinPoly, z), r, r);
+
+    // pick the right polynomial per lane, then apply the octant signs
+    sinOut = _mm256_xor_ps(_mm256_blendv_ps(cosPoly, sinPoly, polyMask), swapSinSign);
+    cosOut = _mm256_xor_ps(_mm256_blendv_ps(sinPoly, cosPoly, polyMask), cosSign);
+}
+
+// take the top 24 bits of four uint64 lanes into the low 128 bits as four int32
+inline __m128i unpackTop24(const __m256i v) {
+    return _mm256_castsi256_si128(_mm256_permutevar8x32_epi32(_mm256_srli_epi64(v, 40), _mm256_setr_epi32(0, 2, 4, 6, 0, 2, 4, 6)));
+}
+
+} // namespace detail
+
+// vectorized Box-Muller over two ChaCha20 blocks (16 uint64 = 8 pairs), writing 16 floats.
+inline void generateBoxMullerNormalBlockPair(const std::array<uint64_t, 8>& block0, const std::array<uint64_t, 8>& block1, float* dst) {
+    // top 24 bits of every uint64, as int32, four per register
+    const __m128i k0 = detail::unpackTop24(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(block0.data())));
+    const __m128i k1 = detail::unpackTop24(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(block0.data() + 4)));
+    const __m128i k2 = detail::unpackTop24(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(block1.data())));
+    const __m128i k3 = detail::unpackTop24(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(block1.data() + 4)));
+
+    // deinterleave into the x1 (even) and x2 (odd) member of every pair
+    const __m128 even0 = _mm_shuffle_ps(_mm_castsi128_ps(k0), _mm_castsi128_ps(k1), _MM_SHUFFLE(2, 0, 2, 0));
+    const __m128 odd0 = _mm_shuffle_ps(_mm_castsi128_ps(k0), _mm_castsi128_ps(k1), _MM_SHUFFLE(3, 1, 3, 1));
+    const __m128 even1 = _mm_shuffle_ps(_mm_castsi128_ps(k2), _mm_castsi128_ps(k3), _MM_SHUFFLE(2, 0, 2, 0));
+    const __m128 odd1 = _mm_shuffle_ps(_mm_castsi128_ps(k2), _mm_castsi128_ps(k3), _MM_SHUFFLE(3, 1, 3, 1));
+
+    // exactly toUniformFloat: both the multiply and the add are exact for a 24-bit integer
+    const __m256 scale = _mm256_set1_ps(0x1.0p-24f);
+    const __m256 u1 = _mm256_fmadd_ps(_mm256_cvtepi32_ps(_mm256_castps_si256(_mm256_set_m128(even1, even0))), scale, scale);
+    const __m256 u2 = _mm256_fmadd_ps(_mm256_cvtepi32_ps(_mm256_castps_si256(_mm256_set_m128(odd1, odd0))), scale, scale);
+
+    const __m256 radius = _mm256_sqrt_ps(_mm256_mul_ps(_mm256_set1_ps(-2.0f), detail::logAvx2(u1)));
+    __m256 sinTheta, cosTheta;
+    detail::sinCosAvx2(_mm256_mul_ps(_mm256_set1_ps(kTwoPi), u2), sinTheta, cosTheta);
+    const __m256 z0 = _mm256_mul_ps(radius, cosTheta);
+    const __m256 z1 = _mm256_mul_ps(radius, sinTheta);
+
+    // interleave back into (z0, z1) pairs: block0's 8 floats, then block1's 8 floats
+    const __m256 lo = _mm256_unpacklo_ps(z0, z1);
+    const __m256 hi = _mm256_unpackhi_ps(z0, z1);
+    _mm256_storeu_ps(dst, _mm256_permute2f128_ps(lo, hi, 0x20));
+    _mm256_storeu_ps(dst + 8, _mm256_permute2f128_ps(lo, hi, 0x31));
+}
+#endif // __AVX2__
 
 // clang-format off
 // SHA-256 hash reference implementation
