@@ -19,7 +19,7 @@
 #include <vector>
 
 #if defined(_USE_CUDA_)
-#include "../CudaCheck.hpp"
+#include "CudaCheck.hpp"
 #include "CudaStreamManager.hpp"
 #include "CudaArray.hpp"
 #include <algorithm>

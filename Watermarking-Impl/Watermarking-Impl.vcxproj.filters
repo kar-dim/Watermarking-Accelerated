@@ -10,7 +10,7 @@
     <ClInclude Include="CudaStreamManager.hpp">
       <Filter>Header Files\cuda</Filter>
     </ClInclude>
-    <ClInclude Include="..\CudaCheck.hpp">
+    <ClInclude Include="CudaCheck.hpp">
       <Filter>Header Files\cuda</Filter>
     </ClInclude>
     <CudaCompile Include="utils.cpp">

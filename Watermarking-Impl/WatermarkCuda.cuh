@@ -3,7 +3,7 @@
 #include "cuda_utils.hpp"
 #include "CudaArray.hpp"
 #include "CudaStreamManager.hpp"
-#include "../CudaCheck.hpp"
+#include "CudaCheck.hpp"
 #include "include/WatermarkTypes.hpp"
 #include "kernels/kernels.cuh"
 #include "WatermarkBase.hpp"

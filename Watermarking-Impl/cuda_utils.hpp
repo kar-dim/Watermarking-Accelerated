@@ -1,5 +1,5 @@
 #pragma once
-#include "../CudaCheck.hpp"
+#include "CudaCheck.hpp"
 #include "HdrTonemap.hpp"
 #include <algorithm>
 #include <cstdint>

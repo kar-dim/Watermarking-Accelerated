@@ -1,6 +1,6 @@
 #pragma once
 #if defined(_USE_CUDA_)
-#include "../CudaCheck.hpp"
+#include "CudaCheck.hpp"
 #include <cuda_runtime.h>
 #elif defined(_USE_OPENCL_)
 #include "opencl_init.h"

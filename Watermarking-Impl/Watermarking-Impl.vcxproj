@@ -368,7 +368,7 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='OPENCL_Debug|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='OPENCL_Release|x64'">true</ExcludedFromBuild>
     </ClInclude>
-    <ClInclude Include="..\CudaCheck.hpp" />
+    <ClInclude Include="CudaCheck.hpp" />
     <ClInclude Include="CudaMemPool.hpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='EIGEN_Debug|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='EIGEN_Release|x64'">true</ExcludedFromBuild>

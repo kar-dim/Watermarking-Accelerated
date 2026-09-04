@@ -30,7 +30,7 @@
 #include <variant>
 
 #if defined(_USE_CUDA_)
-#include "../CudaCheck.hpp"
+#include "CudaCheck.hpp"
 #include "CudaArray.hpp"
 #include "CudaStreamManager.hpp"
 #include "cuda_utils.hpp"

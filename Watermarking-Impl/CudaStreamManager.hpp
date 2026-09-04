@@ -1,5 +1,5 @@
 #pragma once
-#include "../CudaCheck.hpp"
+#include "CudaCheck.hpp"
 #include "CudaMemPool.hpp"
 #include <cuda_runtime.h>
 
