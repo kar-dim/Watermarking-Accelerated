@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <cstdint>
 #include <cub/cub.cuh>
 #include <cuda_fp16.h>
@@ -136,7 +136,7 @@ __device__ __forceinline__ float compute_nvf_mask(const float (&region)[shDimSlo
     // calculate NVF with optimized math (avoid divisions)
     const float numerator = (nPixels * sumSq) - (sum * sum);
     const float output = __fdividef(numerator, nPixelsSq + numerator);
-    return clamp(output, 0.0f, 1.0f);
+    return __saturatef(output);
 }
 
 // NVF mask calculation and write to global memory, used for detection only
@@ -892,7 +892,7 @@ static __device__ const float bt1886LUT[1024] = {
 
 // LUT lookup with linear interpolation between adjacent values
 __device__ __forceinline__ float lutLerp1024(const float* __restrict__ lut, const float x01) {
-    const float idx = clamp(x01, 0.0f, 1.0f) * 1023.0f;
+    const float idx = __saturatef(x01) * 1023.0f;
     const int i0 = __float2int_rd(idx);
     const int i1 = min(i0 + 1, 1023);
     const float frac = idx - static_cast<float>(i0);
@@ -915,13 +915,13 @@ __device__ __forceinline__ float mobiusTonemap(const float x, const float mobA, 
 // NOTE: I had to use fmaf() explicitly, compiler did not do it automatically, I wonder why..
 __device__ __forceinline__ float3 hdrPixelToSdrRgb(const uint16_t yRaw, const uint16_t cbRaw, const uint16_t crRaw, const float mobA, const float mobB, const float mobK) {
     // P010LE limited range -> normalized [0,1] / [-0.5,0.5]
-    const float Y2020 = clamp(fmaf(static_cast<float>(yRaw >> 6), 1.0f / 876.0f, -64.0f / 876.0f), 0.0f, 1.0f);
+    const float Y2020 = __saturatef(fmaf(static_cast<float>(yRaw >> 6), 1.0f / 876.0f, -64.0f / 876.0f));
     const float Cb2020 = fmaf(static_cast<float>(cbRaw >> 6), 1.0f / 896.0f, -512.0f / 896.0f);
     const float Cr2020 = fmaf(static_cast<float>(crRaw >> 6), 1.0f / 896.0f, -512.0f / 896.0f);
-    // BT.2020 YCbCr -> PQ-encoded R'G'B' (Kr=0.2627, Kb=0.0593), explicit FMAs!
-    const float Rp = clamp(fmaf(1.4746f, Cr2020, Y2020), 0.0f, 1.0f);
-    const float Gp = clamp(fmaf(-0.16455f, Cb2020, fmaf(-0.57135f, Cr2020, Y2020)), 0.0f, 1.0f);
-    const float Bp = clamp(fmaf(1.8814f, Cb2020, Y2020), 0.0f, 1.0f);
+    // BT.2020 YCbCr -> PQ-encoded R'G'B' (Kr=0.2627, Kb=0.0593), explicit FMAs! (lutLerp1024 clamps [0, 1] via __saturatef internally)
+    const float Rp = fmaf(1.4746f, Cr2020, Y2020);
+    const float Gp = fmaf(-0.16455f, Cb2020, fmaf(-0.57135f, Cr2020, Y2020));
+    const float Bp = fmaf(1.8814f, Cb2020, Y2020);
     // PQ EOTF -> linear RGB (BT.2020), npl=100 is premultiplied in the LUT (we save 3 MULs per thread)
     float R = lutLerp1024(pqEotfLUT, Rp);
     float G = lutLerp1024(pqEotfLUT, Gp);
@@ -936,17 +936,17 @@ __device__ __forceinline__ float3 hdrPixelToSdrRgb(const uint16_t yRaw, const ui
     // hue preserving Mobius, tonemap MAX channel, then scale ALL 3 uniformly to preserve hue
     const float sig = fmaxf(fmaxf(R, G), B);
     if (sig > 1e-6f) {
-        const float scale = clamp(mobiusTonemap(sig, mobA, mobB, mobK), 0.0f, 1.0f) * __frcp_rn(sig);
+        const float scale = __saturatef(mobiusTonemap(sig, mobA, mobB, mobK)) * __frcp_rn(sig);
         R *= scale;
         G *= scale;
         B *= scale;
     } else {
         R = G = B = 0.0f;
     }
-    // BT.2020 -> BT.709 gamut matrix with clamping
-    const float R7 = clamp(fmaf(1.6605f, R, fmaf(-0.5876f, G, -0.0728f * B)), 0.0f, 1.0f);
-    const float G7 = clamp(fmaf(-0.1246f, R, fmaf(1.1329f, G, -0.0083f * B)), 0.0f, 1.0f);
-    const float B7 = clamp(fmaf(-0.0182f, R, fmaf(-0.1006f, G, 1.1187f * B)), 0.0f, 1.0f);
+    // BT.2020 -> BT.709 gamut matrix (lutLerp1024 clamps to [0,1] internally)
+    const float R7 = fmaf(1.6605f, R, fmaf(-0.5876f, G, -0.0728f * B));
+    const float G7 = fmaf(-0.1246f, R, fmaf(1.1329f, G, -0.0083f * B));
+    const float B7 = fmaf(-0.0182f, R, fmaf(-0.1006f, G, 1.1187f * B));
     // BT.1886 gamma (gamma 2.4) -> display referred [0,1]
     return make_float3(lutLerp1024(bt1886LUT, R7), lutLerp1024(bt1886LUT, G7), lutLerp1024(bt1886LUT, B7));
 }
