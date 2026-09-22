@@ -66,8 +66,8 @@ class WatermarkCuda final : public WatermarkBase {
             launchCholeskySolver(Rx, rx);
             const dim3 errorGridSize = cuda_utils::gridSizeCalculate(windowBlockSize, this->baseCols, this->baseRows);
             CudaArray<float> errorSeq(this->baseRows, this->baseCols, stream);
-            calculate_error_sequence<p><<<errorGridSize, windowBlockSize, 0, stream>>>(inputGrayImage.data(), nullptr, errorSeq.data(), this->coefficients.data(), this->baseCols, this->baseRows, true,
-                                                                                       this->stopFlag.data());
+            calculate_error_sequence<p><<<errorGridSize, windowBlockSize, 0, stream>>>(
+                inputGrayImage.data(), nullptr, errorSeq.data(), this->coefficients.data(), this->baseCols, this->baseRows, true, this->stopFlag.data());
             CUDA_CHECK(cudaGetLastError());
             // max-reduce for normalization
             CudaArray<float> errorSeqMax(1, stream);
@@ -79,8 +79,8 @@ class WatermarkCuda final : public WatermarkBase {
         }
         // scale u by strength factor and add to each channel of the input image
         const int blocksApply = cuda_utils::gridSize1DStridedCalculate(this->totalPixels, applyWatermarkBlockSize);
-        apply_watermark_fused<<<blocksApply, applyWatermarkBlockSize, 0, stream>>>(inputImage.data(), u.data(), sumSq.data(), output.data(), this->strengthNumerator, this->totalPixels,
-                                                                                   inputImage.getChannels());
+        apply_watermark_fused<<<blocksApply, applyWatermarkBlockSize, 0, stream>>>(
+            inputImage.data(), u.data(), sumSq.data(), output.data(), this->strengthNumerator, this->totalPixels, inputImage.getChannels());
         CUDA_CHECK(cudaGetLastError());
     }
 
@@ -120,8 +120,7 @@ class WatermarkCuda final : public WatermarkBase {
         CudaArray<float> uNormPartial(corrNumBlocks, stream);
         CudaArray<float> zNormPartial(corrNumBlocks, stream);
         calculate_error_sequence_and_partial_corr_fused<p><<<windowGrid, windowBlockSize, 0, stream>>>(mask.data(), this->randomMatrix.data(), errorSeq.data(), this->coefficients.data(),
-                                                                                                       dotPartial.data(), uNormPartial.data(), zNormPartial.data(), this->baseCols, this->baseRows,
-                                                                                                       this->stopFlag.data());
+            dotPartial.data(), uNormPartial.data(), zNormPartial.data(), this->baseCols, this->baseRows, this->stopFlag.data());
         CUDA_CHECK(cudaGetLastError());
         // reduce partials -> final normalized correlation
         CudaArray<float> corrResult(1, stream);

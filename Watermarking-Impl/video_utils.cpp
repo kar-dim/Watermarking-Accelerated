@@ -145,9 +145,7 @@ struct EncodeQueue {
 };
 
 // give an item to the encode thread, abandoning the decode loop if that thread has already failed
-void pushToEncoder(EncodeQueue& queue, EncodeQueue::Item item) {
-    checkError(!queue.push(std::move(item)), "Encode thread stopped, aborting the decode loop");
-}
+void pushToEncoder(EncodeQueue& queue, EncodeQueue::Item item) { checkError(!queue.push(std::move(item)), "Encode thread stopped, aborting the decode loop"); }
 
 AVCodecContextPtr openSoftwareDecoder(const AVCodecParameters* inputCodecParams, AVRational pktTimebase) {
     const AVCodec* inputDecoder = avcodec_find_decoder(inputCodecParams->codec_id);
@@ -259,8 +257,7 @@ AVCodecContextPtr openDecoderHWAccel(const AVCodecParameters* inputCodecParams, 
         return openSoftwareDecoder(inputCodecParams, pktTimebase);
     }
     if (!isPixelFormatSupported(supportedHwFormats, ctx->sw_pix_fmt)) {
-        cout << info(std::format("NVDEC output format '{}' unsupported, falling back to software decoder (CPU).\n",
-            av_get_pix_fmt_name(ctx->sw_pix_fmt) ? av_get_pix_fmt_name(ctx->sw_pix_fmt) : "?"));
+        cout << info(std::format("NVDEC output format '{}' unsupported, falling back to software decoder (CPU).\n", av_get_pix_fmt_name(ctx->sw_pix_fmt) ? av_get_pix_fmt_name(ctx->sw_pix_fmt) : "?"));
         return openSoftwareDecoder(inputCodecParams, pktTimebase);
     }
     useHwDecoder = true;
@@ -346,8 +343,8 @@ void embedAndFillYPlane(VideoSession* s, const ImageBuffer& buffer) {
     {
         const auto stream = CudaStreamManager::getInstance().getComputeStream();
         CudaArray<uint8_t> rowMajorOut(s->watermarkedFrame.getRows(), s->watermarkedFrame.getCols(), stream);
-        cuda_utils::launchColMajorToRowMajorU8Kernel(s->watermarkedFrame.data(), rowMajorOut.data(), static_cast<int>(s->watermarkedFrame.getCols()), static_cast<int>(s->watermarkedFrame.getRows()),
-                                                     1, stream);
+        cuda_utils::launchColMajorToRowMajorU8Kernel(
+            s->watermarkedFrame.data(), rowMajorOut.data(), static_cast<int>(s->watermarkedFrame.getCols()), static_cast<int>(s->watermarkedFrame.getRows()), 1, stream);
         rowMajorOut.toHost(s->hostFrame->get());
     }
 #elif defined(_USE_OPENCL_)
@@ -530,15 +527,15 @@ static float getHdrPeak(const VideoSession* s) {
 // HDR helpers: convert P010LE CUDA planes to SDR format
 static void loadHdrLuma(VideoSession* s, const AVFrame* frame, CudaArray<float>& dst, const MobiusParams& mobius, const cudaStream_t stream) {
     const auto [height, width] = s->videoDims();
-    cuda_utils::launchP010HdrYToSdrFloatKernel(reinterpret_cast<const uint16_t*>(frame->data[0]), frame->linesize[0], reinterpret_cast<const uint16_t*>(frame->data[1]), frame->linesize[1], dst.data(),
-                                               width, height, mobius, stream);
+    cuda_utils::launchP010HdrYToSdrFloatKernel(
+        reinterpret_cast<const uint16_t*>(frame->data[0]), frame->linesize[0], reinterpret_cast<const uint16_t*>(frame->data[1]), frame->linesize[1], dst.data(), width, height, mobius, stream);
 }
 
 static CudaArray<uint8_t> convertHdrUV(VideoSession* s, const AVFrame* frame, const MobiusParams& mobius, const cudaStream_t stream) {
     const auto [height, width] = s->videoDims();
     CudaArray<uint8_t> uvNV12(width * height / 2, stream);
-    cuda_utils::launchP010HdrUVToSdrNV12Kernel(reinterpret_cast<const uint16_t*>(frame->data[0]), frame->linesize[0], reinterpret_cast<const uint16_t*>(frame->data[1]), frame->linesize[1],
-                                               uvNV12.data(), width, height, mobius, stream);
+    cuda_utils::launchP010HdrUVToSdrNV12Kernel(
+        reinterpret_cast<const uint16_t*>(frame->data[0]), frame->linesize[0], reinterpret_cast<const uint16_t*>(frame->data[1]), frame->linesize[1], uvNV12.data(), width, height, mobius, stream);
     return uvNV12;
 }
 
@@ -568,7 +565,7 @@ void embedWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* fra
         } else {
             if (isHdr)
                 cuda_utils::launchP010HdrYToSdrU8Kernel(reinterpret_cast<const uint16_t*>(frame->data[0]), frame->linesize[0], reinterpret_cast<const uint16_t*>(frame->data[1]), frame->linesize[1],
-                                                        yRowMajor.data(), width, height, mobius, stream);
+                    yRowMajor.data(), width, height, mobius, stream);
             else
                 CUDA_CHECK(cudaMemcpy2DAsync(yRowMajor.data(), width, frame->data[0], frame->linesize[0], width, height, cudaMemcpyDeviceToDevice, stream));
         }
@@ -592,7 +589,7 @@ void embedWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* fra
                 embedAndFillYPlane(s, lumaFloat);
             } else {
                 cuda_utils::launchP010HdrYToSdrU8Kernel(reinterpret_cast<const uint16_t*>(frame->data[0]), frame->linesize[0], reinterpret_cast<const uint16_t*>(frame->data[1]), frame->linesize[1],
-                                                        s->hostFrame->get(), width, height, mobius, stream);
+                    s->hostFrame->get(), width, height, mobius, stream);
                 CUDA_CHECK(cudaStreamSynchronize(stream));
             }
         } else {
@@ -722,7 +719,7 @@ bool initFilterGraph(VideoSession* s) {
     const AVRational timeBase = s->videoStream->time_base;
     const char* pixFmtName = av_get_pix_fmt_name((AVPixelFormat)s->inputDecoderCtx->pix_fmt);
     string args = std::format("video_size={}x{}:pix_fmt={}:time_base={}/{}:pixel_aspect={}/{}", s->inputDecoderCtx->width, s->inputDecoderCtx->height, pixFmtName, timeBase.num, timeBase.den,
-                              s->inputDecoderCtx->sample_aspect_ratio.num, s->inputDecoderCtx->sample_aspect_ratio.den);
+        s->inputDecoderCtx->sample_aspect_ratio.num, s->inputDecoderCtx->sample_aspect_ratio.den);
 
     AVFilterGraphPtr graphPtr(avfilter_graph_alloc());
     checkError(!graphPtr, exceptionMessage + "avfilter_graph_alloc");
@@ -847,7 +844,7 @@ int videoDispatcher(VideoSession* s, VideoMode op, const bool needsFilter) {
 void initOutputEncoder(VideoSession* s) {
     checkError(s->settings.encodeOutputPath.empty(), "No output path specified for video encode");
     checkError(sameFileOnDisk(s->settings.videoFile, s->settings.encodeOutputPath),
-               "Output path points to the same physical file as the input file (" + s->settings.encodeOutputPath + "). Overwriting the input video is forbidden.");
+        "Output path points to the same physical file as the input file (" + s->settings.encodeOutputPath + "). Overwriting the input video is forbidden.");
 
     ParsedEncodeOptions parsed = parseEncodeOptions(s->settings.encodeOptions);
     const std::string& codecName = parsed.codecName;
@@ -865,8 +862,8 @@ void initOutputEncoder(VideoSession* s) {
     // backend and codec must agree: hw_encode_options must name a hardware encoder, encode_codec_options a software one
     const bool encIsHw = (encoder->capabilities & AV_CODEC_CAP_HARDWARE) != 0;
     if (s->settings.useHwEncoder && !encIsHw)
-        throw std::runtime_error("cuda_hw_encoder is ON but '" + codecName +
-                                 "' is a CPU (software) encoder. Use a hardware encoder like hevc_nvenc in hw_encode_options, or turn cuda_hw_encoder off.");
+        throw std::runtime_error(
+            "cuda_hw_encoder is ON but '" + codecName + "' is a CPU (software) encoder. Use a hardware encoder like hevc_nvenc in hw_encode_options, or turn cuda_hw_encoder off.");
     if (!s->settings.useHwEncoder && encIsHw)
         throw std::runtime_error("cuda_hw_encoder is OFF but '" + codecName + "' is a hardware encoder. Use a software encoder like libx265 in encode_codec_options, or turn cuda_hw_encoder on.");
 
@@ -885,8 +882,7 @@ void initOutputEncoder(VideoSession* s) {
 
     if (s->settings.useHwEncoder) {
         const int maxNvencRes = (codecName == "h264_nvenc") ? 4096 : 8192;
-        checkError(width > maxNvencRes || height > maxNvencRes,
-                   std::format("Output resolution ({}x{}) exceeds the NVENC hardware encoder limit of {}x{}.", width, height, maxNvencRes, maxNvencRes));
+        checkError(width > maxNvencRes || height > maxNvencRes, std::format("Output resolution ({}x{}) exceeds the NVENC hardware encoder limit of {}x{}.", width, height, maxNvencRes, maxNvencRes));
     }
 
     // build the encoder context
@@ -934,7 +930,7 @@ void initOutputEncoder(VideoSession* s) {
     const AVPixelFormat wantFmt = useGpuPipeline ? AV_PIX_FMT_CUDA : AV_PIX_FMT_YUV420P;
     if (!encoderSupportsPixFmt(encoder, wantFmt))
         throw std::runtime_error(std::format("Encoder '{}' cannot encode {} ({} output). Pick another codec or change options.", codecName,
-                                             av_get_pix_fmt_name(wantFmt) ? av_get_pix_fmt_name(wantFmt) : "?", useGpuPipeline ? "NVENC CUDA" : "YUV420P"));
+            av_get_pix_fmt_name(wantFmt) ? av_get_pix_fmt_name(wantFmt) : "?", useGpuPipeline ? "NVENC CUDA" : "YUV420P"));
 
     checkAv(avcodec_open2(encCtx.get(), encoder, opts.ptr()), "Failed to open encoder: " + codecName);
 

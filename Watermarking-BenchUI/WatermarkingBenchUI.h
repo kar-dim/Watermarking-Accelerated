@@ -25,8 +25,8 @@ class WatermarkingBenchUI : public QMainWindow {
 
   private slots:
     void startBenchmark();
-    void onResultReady(const QImage& img, const int p, const float psnr, const double embedTime, const double detectTime, const double embedFps, const double detectFps, const QString& file,
-                       const float correlation);
+    void onResultReady(
+        const QImage& img, const int p, const float psnr, const double embedTime, const double detectTime, const double embedFps, const double detectFps, const QString& file, const float correlation);
 
   private:
     QPushButton* startButton;

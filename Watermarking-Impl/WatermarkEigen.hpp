@@ -343,12 +343,14 @@ class WatermarkEigen final : public WatermarkBase {
                     Map<VectorXf> errorBatch(outData + colOffset, stripHeight);
                     // first block: initialization and calculation of 8 neighbors
                     // E = I - (c0*N0 + c1*N1... + c7*N7)
-                    errorBatch.noalias() =
-                        imgBatch -
-                        (Map<const VectorXf>(imgData + colOffset + offsets[0], stripHeight) * coefficients(0) + Map<const VectorXf>(imgData + colOffset + offsets[1], stripHeight) * coefficients(1) +
-                         Map<const VectorXf>(imgData + colOffset + offsets[2], stripHeight) * coefficients(2) + Map<const VectorXf>(imgData + colOffset + offsets[3], stripHeight) * coefficients(3) +
-                         Map<const VectorXf>(imgData + colOffset + offsets[4], stripHeight) * coefficients(4) + Map<const VectorXf>(imgData + colOffset + offsets[5], stripHeight) * coefficients(5) +
-                         Map<const VectorXf>(imgData + colOffset + offsets[6], stripHeight) * coefficients(6) + Map<const VectorXf>(imgData + colOffset + offsets[7], stripHeight) * coefficients(7));
+                    errorBatch.noalias() = imgBatch - (Map<const VectorXf>(imgData + colOffset + offsets[0], stripHeight) * coefficients(0) +
+                                                          Map<const VectorXf>(imgData + colOffset + offsets[1], stripHeight) * coefficients(1) +
+                                                          Map<const VectorXf>(imgData + colOffset + offsets[2], stripHeight) * coefficients(2) +
+                                                          Map<const VectorXf>(imgData + colOffset + offsets[3], stripHeight) * coefficients(3) +
+                                                          Map<const VectorXf>(imgData + colOffset + offsets[4], stripHeight) * coefficients(4) +
+                                                          Map<const VectorXf>(imgData + colOffset + offsets[5], stripHeight) * coefficients(5) +
+                                                          Map<const VectorXf>(imgData + colOffset + offsets[6], stripHeight) * coefficients(6) +
+                                                          Map<const VectorXf>(imgData + colOffset + offsets[7], stripHeight) * coefficients(7));
                     // calculate remaining blocks (indices 8 to localSize)
                     // for p=3 this won't even run (compiler will optimize it out entirely)
                     // E = E - (c8*N8 + ...)

@@ -3,7 +3,15 @@
   <PropertyGroup>
     <WatermarkingRuntimeDestination>$(TargetDir)</WatermarkingRuntimeDestination>
     <WatermarkingRuntimeDestination Condition="'$(MSBuildProjectName)' == 'Watermarking-BenchUI'">$(OutDir)Watermarking-BenchUI\</WatermarkingRuntimeDestination>
+    <WatermarkingFormatOnBuild Condition="'$(WatermarkingFormatOnBuild)' == ''">true</WatermarkingFormatOnBuild>
   </PropertyGroup>
+
+  <Target Name="FormatWatermarkingSources"
+          BeforeTargets="PrepareForBuild"
+          Condition="'$(DesignTimeBuild)' != 'true' and '$(WatermarkingFormatOnBuild)' == 'true'">
+    <Message Importance="high" Text="Formatting $(MSBuildProjectName) sources with repository clang-format.exe" />
+    <Exec Command="call &quot;$(WatermarkingRoot)format.bat&quot; &quot;$(ProjectDir).&quot;" />
+  </Target>
 
   <ItemGroup Condition="'$(ConfigurationType)' == 'Application'">
     <WatermarkingRuntimeFile Include="$(WatermarkingImplDir)libs\ffmpeg\bin\*.dll" />

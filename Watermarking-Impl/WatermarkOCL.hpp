@@ -72,7 +72,7 @@ class WatermarkOCL final : public WatermarkBase {
                         KernelBuilder(programs, "partial_max_reduce").args(errorSeq.clBuffer(), maxPartials.clBuffer(), this->totalPixels, cl::Local(partialMaxScratchBytes)).build(), cl::NDRange(),
                         cl::NDRange(maxGlobalSize), cl::NDRange(optimalLocalSize));
                     queue.enqueueNDRangeKernel(KernelBuilder(programs, "final_max_reduce").args(maxPartials.clBuffer(), errorSeqMax.clBuffer(), maxWorkGroups, cl::Local(finalMaxScratchBytes)).build(),
-                                               cl::NDRange(), cl::NDRange(optimalLocalSize), cl::NDRange(optimalLocalSize));
+                        cl::NDRange(), cl::NDRange(optimalLocalSize), cl::NDRange(optimalLocalSize));
                     // fused ME: normalized error x watermark -> strengthened watermark u + sum(u^2)
                     queue.enqueueNDRangeKernel(
                         KernelBuilder(programs, "me_u_and_sumsq_fused")
@@ -84,7 +84,7 @@ class WatermarkOCL final : public WatermarkBase {
                 queue.enqueueNDRangeKernel(KernelBuilder(programs, "apply_watermark_fused")
                                                .args(inputImage.clBuffer(), u.clBuffer(), sumSq.clBuffer(), output.clBuffer(), this->strengthNumerator, this->totalPixels, inputImage.getChannels())
                                                .build(),
-                                           cl::NDRange(), cl::NDRange(maxGlobalSize), cl::NDRange(optimalLocalSize));
+                    cl::NDRange(), cl::NDRange(maxGlobalSize), cl::NDRange(optimalLocalSize));
             },
             "makeWatermark");
     }
@@ -123,12 +123,12 @@ class WatermarkOCL final : public WatermarkBase {
                         KernelBuilder(programs, "reduce_abs_max_partials").args(errorSeq.clBuffer(), partialMax.clBuffer(), this->totalPixels, cl::Local(absMaxScratchBytes)).build(), cl::NDRange(),
                         cl::NDRange(maxGlobalSize), cl::NDRange(optimalLocalSize));
                     queue.enqueueNDRangeKernel(KernelBuilder(programs, "final_max_reduce").args(partialMax.clBuffer(), maxVal.clBuffer(), maxWorkGroups, cl::Local(finalMaxScratchBytes)).build(),
-                                               cl::NDRange(), cl::NDRange(optimalLocalSize), cl::NDRange(optimalLocalSize));
+                        cl::NDRange(), cl::NDRange(optimalLocalSize), cl::NDRange(optimalLocalSize));
                     queue.enqueueNDRangeKernel(KernelBuilder(programs, "compute_abs_normalized_mask").args(errorSeq.clBuffer(), mask.clBuffer(), maxVal.clBuffer(), this->totalPixels).build(),
-                                               cl::NDRange(), cl::NDRange(maxGlobalSize), cl::NDRange(optimalLocalSize));
+                        cl::NDRange(), cl::NDRange(maxGlobalSize), cl::NDRange(optimalLocalSize));
                 } else {
                     queue.enqueueNDRangeKernel(KernelBuilder(programs, "nvf").args(inputImage.clBuffer(), mask.clBuffer(), this->baseCols, this->baseRows).build(), cl::NDRange(),
-                                               cl::NDRange(texKernelDims.first, texKernelDims.second), cl::NDRange(windowLocalSize.first, windowLocalSize.second));
+                        cl::NDRange(texKernelDims.first, texKernelDims.second), cl::NDRange(windowLocalSize.first, windowLocalSize.second));
                 }
 
                 // fused: recompute error sequence from (mask * watermark), accumulate partial dot / normU / normZ
@@ -137,14 +137,14 @@ class WatermarkOCL final : public WatermarkBase {
                 const OclArray<float> zNormPartial(corrWorkGroups, this->queue.get());
                 queue.enqueueNDRangeKernel(KernelBuilder(programs, "calculate_error_sequence_and_partial_corr_fused")
                                                .args(mask.clBuffer(), this->randomMatrix.clBuffer(), errorSeq.clBuffer(), this->coefficients.clBuffer(), dotPartial.clBuffer(), uNormPartial.clBuffer(),
-                                                     zNormPartial.clBuffer(), this->baseCols, this->baseRows, this->stopFlag.clBuffer(), cl::Local(partialCorrScratchBytes))
+                                                   zNormPartial.clBuffer(), this->baseCols, this->baseRows, this->stopFlag.clBuffer(), cl::Local(partialCorrScratchBytes))
                                                .build(),
-                                           cl::NDRange(), cl::NDRange(texKernelDims.first, texKernelDims.second), cl::NDRange(windowLocalSize.first, windowLocalSize.second));
+                    cl::NDRange(), cl::NDRange(texKernelDims.first, texKernelDims.second), cl::NDRange(windowLocalSize.first, windowLocalSize.second));
                 // reduce partials -> final normalized correlation
                 queue.enqueueNDRangeKernel(KernelBuilder(programs, "calculate_final_correlation")
                                                .args(dotPartial.clBuffer(), uNormPartial.clBuffer(), zNormPartial.clBuffer(), corrResult.clBuffer(), corrWorkGroups, cl::Local(finalCorrScratchBytes))
                                                .build(),
-                                           cl::NDRange(), cl::NDRange(corrFinalLocalSize), cl::NDRange(corrFinalLocalSize));
+                    cl::NDRange(), cl::NDRange(corrFinalLocalSize), cl::NDRange(corrFinalLocalSize));
             },
             "detectWatermark");
 
@@ -185,12 +185,12 @@ class WatermarkOCL final : public WatermarkBase {
     // dispatch the ME kernel for the given prediction order p
     void launchMeKernel(const cl::Buffer& image, const cl::Buffer& RxBuf, const cl::Buffer& rxBuf) const {
         queue.enqueueNDRangeKernel(cl_utils::KernelBuilder(programs, "me").args(image, RxBuf, rxBuf, this->baseCols, this->baseRows).build(), cl::NDRange(),
-                                   cl::NDRange(meKernelDims.second, meKernelDims.first), cl::NDRange(optimalLocalSize));
+            cl::NDRange(meKernelDims.second, meKernelDims.first), cl::NDRange(optimalLocalSize));
     }
 
     // solve Rx*a = rx via Cholesky decomposition to get prediction coefficients
     void launchCholeskySolver(const cl::Buffer& RxBuf, const cl::Buffer& rxBuf) const {
         queue.enqueueNDRangeKernel(cl_utils::KernelBuilder(programs, "cholesky_solver").args(RxBuf, rxBuf, this->coefficients.clBuffer(), this->stopFlag.clBuffer()).build(), cl::NDRange(),
-                                   cl::NDRange(choleskyLocalSize), cl::NDRange(choleskyLocalSize));
+            cl::NDRange(choleskyLocalSize), cl::NDRange(choleskyLocalSize));
     }
 };

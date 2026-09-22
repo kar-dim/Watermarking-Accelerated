@@ -131,8 +131,8 @@ void WatermarkingBenchUI::startBenchmark() {
             statusLabel->setText("<b>BENCHMARK FAILED</b><br>");
             statusLabel->setProperty("benchmarkState", "failure");
             QMessageBox::critical(this, "Benchmark Failed",
-                                  "The benchmark encountered an error and could not complete.\n\nPossible causes:\n"
-                                  "- No temporary directory user rights\n- (GPU only case): OpenCL/CUDA driver crash\n- Out of memory");
+                "The benchmark encountered an error and could not complete.\n\nPossible causes:\n"
+                "- No temporary directory user rights\n- (GPU only case): OpenCL/CUDA driver crash\n- Out of memory");
         } else {
             // show the final score for both pipelines
             const QString backendName = QString::fromStdString(WatermarkCore::getDeviceName(deviceComboBox ? deviceComboBox->currentIndex() : -1));
@@ -157,8 +157,8 @@ void WatermarkingBenchUI::startBenchmark() {
     worker->start();
 }
 
-void WatermarkingBenchUI::onResultReady(const QImage& img, const int p, const float psnr, const double embedTime, const double detectTime, const double embedFps, const double detectFps,
-                                        const QString& file, const float correlation) {
+void WatermarkingBenchUI::onResultReady(
+    const QImage& img, const int p, const float psnr, const double embedTime, const double detectTime, const double embedFps, const double detectFps, const QString& file, const float correlation) {
     // clang-format off
     // update the status label with the current parameters and performance metrics
     const QString statusText = QString("File: %1 | Block (p): %2 | PSNR: %3 dB | Corr: %4\nEmbed: %5 ms (%6 FPS)  ||  Detect: %7 ms (%8 FPS)")

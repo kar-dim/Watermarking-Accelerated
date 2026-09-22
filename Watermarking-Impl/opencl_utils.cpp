@@ -212,31 +212,31 @@ std::size_t reductionScratchBytes(const cl::Program& program, const char* kernel
 void launchRowMajorToColMajorFloat(const cl::Buffer& src, const cl::Buffer& dst, const int width, const int height, const int channels, cl::CommandQueue& queue) {
     constexpr int blockSize = 16;
     queue.enqueueNDRangeKernel(KernelBuilder(UtilityKernelCache::getProgram(), "row_major_to_col_major_float").args(src, dst, width, height).build(), cl::NullRange,
-                               cl::NDRange(roundUp(width, blockSize), roundUp(height, blockSize), channels), cl::NDRange(blockSize, blockSize));
+        cl::NDRange(roundUp(width, blockSize), roundUp(height, blockSize), channels), cl::NDRange(blockSize, blockSize));
 }
 
 void launchRowMajorRGBToColMajorGray(const cl::Buffer& src, const cl::Buffer& dst, const int width, const int height, cl::CommandQueue& queue) {
     constexpr int blockSize = 16;
     queue.enqueueNDRangeKernel(KernelBuilder(UtilityKernelCache::getProgram(), "row_major_rgb_to_col_major_gray").args(src, dst, width, height).build(), cl::NullRange,
-                               cl::NDRange(roundUp(width, blockSize), roundUp(height, blockSize)), cl::NDRange(blockSize, blockSize));
+        cl::NDRange(roundUp(width, blockSize), roundUp(height, blockSize)), cl::NDRange(blockSize, blockSize));
 }
 
 void launchU8ToFloatGray(const cl::Buffer& input, const cl::Buffer& output, const int planeSize, const int numChannels, cl::CommandQueue& queue) {
     constexpr int localSize = 256;
     const int globalSize = calculateLocalGroupsNumber(planeSize, localSize) * localSize;
-    queue.enqueueNDRangeKernel(KernelBuilder(UtilityKernelCache::getProgram(), "u8_to_float_gray").args(input, output, planeSize, numChannels).build(), cl::NullRange, cl::NDRange(globalSize),
-                               cl::NDRange(localSize));
+    queue.enqueueNDRangeKernel(
+        KernelBuilder(UtilityKernelCache::getProgram(), "u8_to_float_gray").args(input, output, planeSize, numChannels).build(), cl::NullRange, cl::NDRange(globalSize), cl::NDRange(localSize));
 }
 
 void launchColMajorToRowMajorU8(const cl::Buffer& src, const cl::Buffer& dst, const int width, const int height, const int channels, cl::CommandQueue& queue) {
     constexpr int blockSize = 16;
     queue.enqueueNDRangeKernel(KernelBuilder(UtilityKernelCache::getProgram(), "col_major_to_row_major_u8").args(src, dst, width, height).build(), cl::NullRange,
-                               cl::NDRange(roundUp(width, blockSize), roundUp(height, blockSize), channels), cl::NDRange(blockSize, blockSize));
+        cl::NDRange(roundUp(width, blockSize), roundUp(height, blockSize), channels), cl::NDRange(blockSize, blockSize));
 }
 
 void launchPitchedToFloat(const cl::Buffer& src, const cl::Buffer& dst, const int width, const int height, const int pitch, cl::CommandQueue& queue) {
     constexpr int blockSize = 16;
     queue.enqueueNDRangeKernel(KernelBuilder(UtilityKernelCache::getProgram(), "pitched_to_float").args(src, dst, width, height, pitch).build(), cl::NullRange,
-                               cl::NDRange(roundUp(width, blockSize), roundUp(height, blockSize)), cl::NDRange(blockSize, blockSize));
+        cl::NDRange(roundUp(width, blockSize), roundUp(height, blockSize)), cl::NDRange(blockSize, blockSize));
 }
 } // namespace cl_utils

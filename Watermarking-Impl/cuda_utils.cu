@@ -52,24 +52,24 @@ void launchRowMajorRGBToColMajorGrayKernel(const float* src, float* dst, const i
     CUDA_CHECK(cudaGetLastError());
 }
 
-void launchP010HdrYToSdrFloatKernel(const uint16_t* ySrc, const int yPitchBytes, const uint16_t* uvSrc, const int uvPitchBytes, float* yDst, const int width, const int height, const video_utils::MobiusParams& mobius,
-                                    const cudaStream_t stream) {
+void launchP010HdrYToSdrFloatKernel(const uint16_t* ySrc, const int yPitchBytes, const uint16_t* uvSrc, const int uvPitchBytes, float* yDst, const int width, const int height,
+    const video_utils::MobiusParams& mobius, const cudaStream_t stream) {
     constexpr dim3 blockSize(32, 8);
     const dim3 gridSize((width + 31) / 32, (height + 31) / 32);
     p010HdrYToSdrFloat<<<gridSize, blockSize, 0, stream>>>(ySrc, yPitchBytes, uvSrc, uvPitchBytes, yDst, width, height, mobius.a, mobius.b, mobius.k);
     CUDA_CHECK(cudaGetLastError());
 }
 
-void launchP010HdrUVToSdrNV12Kernel(const uint16_t* ySrc, const int yPitchBytes, const uint16_t* uvSrc, const int uvPitchBytes, uint8_t* uvDst, const int width, const int height, const video_utils::MobiusParams& mobius,
-                                    const cudaStream_t stream) {
+void launchP010HdrUVToSdrNV12Kernel(const uint16_t* ySrc, const int yPitchBytes, const uint16_t* uvSrc, const int uvPitchBytes, uint8_t* uvDst, const int width, const int height,
+    const video_utils::MobiusParams& mobius, const cudaStream_t stream) {
     constexpr dim3 blockSize(32, 8);
     const dim3 gridSize((width / 2 + 31) / 32, (height / 2 + 7) / 8);
     p010HdrUVToSdrNV12<<<gridSize, blockSize, 0, stream>>>(ySrc, yPitchBytes, uvSrc, uvPitchBytes, uvDst, width, height, mobius.a, mobius.b, mobius.k);
     CUDA_CHECK(cudaGetLastError());
 }
 
-void launchP010HdrYToSdrU8Kernel(const uint16_t* ySrc, const int yPitchBytes, const uint16_t* uvSrc, const int uvPitchBytes, uint8_t* yDst, const int width, const int height, const video_utils::MobiusParams& mobius,
-                                 const cudaStream_t stream) {
+void launchP010HdrYToSdrU8Kernel(const uint16_t* ySrc, const int yPitchBytes, const uint16_t* uvSrc, const int uvPitchBytes, uint8_t* yDst, const int width, const int height,
+    const video_utils::MobiusParams& mobius, const cudaStream_t stream) {
     constexpr dim3 blockSize(32, 8);
     const dim3 gridSize((width + 31) / 32, (height + 31) / 32);
     p010HdrYToSdrU8<<<gridSize, blockSize, 0, stream>>>(ySrc, yPitchBytes, uvSrc, uvPitchBytes, yDst, width, height, mobius.a, mobius.b, mobius.k);

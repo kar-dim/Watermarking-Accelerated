@@ -2,17 +2,24 @@
 #include "libs/inih/INIReader.h"
 #include "WatermarkCore.hpp"
 #include <algorithm>
+#include <array>
+#include <cerrno>
+#include <cctype>
 #include <chrono>
 #include <cstdlib>
 #include <exception>
 #include <filesystem>
 #include <format>
+#include <fstream>
 #include <future>
+#include <iomanip>
 #include <iostream>
+#include <map>
 #include <omp.h>
 #include <queue>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 #include <WatermarkTypes.hpp>
@@ -24,12 +31,224 @@ namespace fs = std::filesystem;
 using std::cout;
 using std::string;
 
+namespace {
+// Command-line option definition mapping an INI section to its key name
+struct OptionDefinition {
+    std::string_view section;
+    std::string_view name;
+};
+
+// List of supported command-line settings matching INI configuration keys
+constexpr std::array cliSettings = {
+    OptionDefinition{"global",  "watermark_password"  },
+    OptionDefinition{"global",  "p"                   },
+    OptionDefinition{"global",  "psnr"                },
+    OptionDefinition{"global",  "display_fps"         },
+    OptionDefinition{"compute", "opencl_device_id"    },
+    OptionDefinition{"compute", "cuda_hw_decoder"     },
+    OptionDefinition{"compute", "cuda_hw_encoder"     },
+    OptionDefinition{"image",   "mode"                },
+    OptionDefinition{"image",   "path"                },
+    OptionDefinition{"image",   "save_to_disk"        },
+    OptionDefinition{"image",   "benchmark_loops"     },
+    OptionDefinition{"video",   "mode"                },
+    OptionDefinition{"video",   "path"                },
+    OptionDefinition{"video",   "encode_output_path"  },
+    OptionDefinition{"video",   "encode_codec_options"},
+    OptionDefinition{"video",   "hw_encode_options"   },
+    OptionDefinition{"video",   "watermark_interval"  }
+};
+
+// Builds a lookup key string from section and setting name
+string settingKey(const std::string_view section, const std::string_view name) { return string(section) + "=" + string(name); }
+
+// Holds parsed command-line flags and setting overrides
+struct CommandLineOptions {
+    std::map<string, string> settings;
+    string settingsFile = "settings.ini";
+    bool benchmark = false;
+    bool help = false;
+    bool noPause = false;
+};
+
+// Resolves a command-line option name to an OptionDefinition
+OptionDefinition resolveOption(const std::string_view option) {
+    const size_t separator = option.find('.');
+    if (separator != std::string_view::npos) {
+        // Find exact match when section prefix is explicitly specified
+        const std::string_view section = option.substr(0, separator);
+        const std::string_view name = option.substr(separator + 1);
+        for (const auto& definition : cliSettings)
+            if (definition.section == section && definition.name == name)
+                return definition;
+        throw std::runtime_error("Unknown command-line setting '--" + string(option) + "'");
+    }
+
+    // Find unique match when no section prefix is provided
+    const OptionDefinition* match = nullptr;
+    for (const auto& definition : cliSettings) {
+        if (definition.name != option)
+            continue;
+        if (match)
+            throw std::runtime_error("Ambiguous setting '--" + string(option) + "'; use '--image." + string(option) + "' or '--video." + string(option) + "'");
+        match = &definition;
+    }
+    if (!match)
+        throw std::runtime_error("Unknown command-line option '--" + string(option) + "'");
+    return *match;
+}
+
+// Parses command-line arguments into flags and setting overrides
+CommandLineOptions parseCommandLine(const int argc, char* argv[]) {
+    CommandLineOptions result;
+    for (int i = 1; i < argc; ++i) {
+        const string argument = argv[i];
+        if (argument == "--help" || argument == "-h") {
+            result.help = true;
+            continue;
+        }
+        if (argument == "--bench") {
+            result.benchmark = true;
+            result.noPause = true;
+            continue;
+        }
+        if (argument == "--no-pause") {
+            result.noPause = true;
+            continue;
+        }
+        if (!argument.starts_with("--"))
+            throw std::runtime_error("Unexpected positional argument '" + argument + "'");
+
+        // Parse key and value from arguments using equals sign or space separator
+        const size_t equals = argument.find('=');
+        const string option = argument.substr(2, equals == string::npos ? string::npos : equals - 2);
+        string value;
+        if (equals != string::npos)
+            value = argument.substr(equals + 1);
+        else {
+            if (i + 1 >= argc)
+                throw std::runtime_error("Missing value for '--" + option + "'");
+            value = argv[++i];
+        }
+
+        // Custom INI settings file override
+        if (option == "settings") {
+            result.settingsFile = std::move(value);
+            continue;
+        }
+        // Match option to setting definition and store override
+        const auto definition = resolveOption(option);
+        result.settings[settingKey(definition.section, definition.name)] = std::move(value);
+    }
+    return result;
+}
+
+// Displays command-line usage and available options
+void printHelp() {
+    cout << R"(
+Usage: Watermarking-CLI [options]
+
+The application reads settings.ini, then applies command-line overrides.
+
+Control options:
+  --bench                    Benchmark ME embed/detect for p=3,5,7,9 and 480p..4K.
+                             Writes benchmarks/{cuda,opencl,eigen}.csv.
+  --settings FILE            Read a different INI file (default: settings.ini).
+  --no-pause                 Do not wait for a key before exiting.
+  -h, --help                 Show this help.
+
+Settings:
+  --watermark_password VALUE --p VALUE                 --psnr VALUE
+  --display_fps VALUE        --opencl_device_id VALUE  --cuda_hw_decoder VALUE
+  --cuda_hw_encoder VALUE    --image.mode VALUE        --image.path VALUE
+  --save_to_disk VALUE       --benchmark_loops VALUE   --video.mode VALUE
+  --video.path VALUE         --encode_output_path VALUE
+  --encode_codec_options VALUE  --hw_encode_options VALUE
+  --watermark_interval VALUE
+
+Every setting also accepts its section-qualified spelling, for example
+--global.p=5 or --compute.opencl_device_id=1. Values may use '--key value' or
+'--key=value'. The duplicated mode/path names must be section-qualified.
+)";
+}
+
+// Configuration accessor that applies command-line overrides on top of INI values
+class Settings {
+  public:
+    Settings(const INIReader& ini, const std::map<string, string>& overrides) : ini_(ini), overrides_(overrides) {}
+
+    // Retrieves string value with command-line override precedence
+    string Get(const string& section, const string& name, const string& defaultValue) const {
+        const auto overrideValue = overrides_.find(settingKey(section, name));
+        return overrideValue == overrides_.end() ? ini_.Get(section, name, defaultValue) : overrideValue->second;
+    }
+
+    // Retrieves integer value with command-line override precedence
+    long GetInteger(const string& section, const string& name, const long defaultValue) const {
+        const string* value = findOverride(section, name);
+        if (!value)
+            return ini_.GetInteger(section, name, defaultValue);
+        errno = 0;
+        char* end = nullptr;
+        const long parsed = std::strtol(value->c_str(), &end, 0);
+        if (errno != 0 || end == value->c_str() || *end != '\0')
+            throw std::runtime_error("Invalid integer for '--" + name + "': " + *value);
+        return parsed;
+    }
+
+    // Retrieves float value with command-line override precedence
+    float GetFloat(const string& section, const string& name, const float defaultValue) const {
+        const string* value = findOverride(section, name);
+        if (!value)
+            return ini_.GetFloat(section, name, defaultValue);
+        errno = 0;
+        char* end = nullptr;
+        const float parsed = std::strtof(value->c_str(), &end);
+        if (errno != 0 || end == value->c_str() || *end != '\0')
+            throw std::runtime_error("Invalid number for '--" + name + "': " + *value);
+        return parsed;
+    }
+
+    // Retrieves boolean value with command-line override precedence
+    bool GetBoolean(const string& section, const string& name, const bool defaultValue) const {
+        const string* value = findOverride(section, name);
+        if (!value)
+            return ini_.GetBoolean(section, name, defaultValue);
+        string normalized = *value;
+        std::transform(normalized.begin(), normalized.end(), normalized.begin(), [](const unsigned char c) { return static_cast<char>(std::tolower(c)); });
+        if (normalized == "true" || normalized == "yes" || normalized == "on" || normalized == "1")
+            return true;
+        if (normalized == "false" || normalized == "no" || normalized == "off" || normalized == "0")
+            return false;
+        throw std::runtime_error("Invalid boolean for '--" + name + "': " + *value);
+    }
+
+  private:
+    // Looks up a setting override by section and key name
+    const string* findOverride(const string& section, const string& name) const {
+        const auto value = overrides_.find(settingKey(section, name));
+        return value == overrides_.end() ? nullptr : &value->second;
+    }
+
+    const INIReader& ini_;
+    const std::map<string, string>& overrides_;
+};
+
+// Escapes and quotes a string for CSV formatting
+string csvString(const string& value) {
+    string escaped = "\"";
+    for (const char c : value)
+        escaped += c == '"' ? "\"\"" : string(1, c);
+    return escaped + "\"";
+}
+} // namespace
+
 /*!
  *  \brief  Helper functions for testing the watermark algorithms
  *  \author Dimitris Karatzas
  */
 // batch processing of images in a directory (for both embed and detect)
-static int testForImageBatch(const INIReader& inir, const int p, const float psnr, const bool isEmbed) {
+static int testForImageBatch(const Settings& inir, const int p, const float psnr, const bool isEmbed) {
     const string watermarkPassword = inir.Get("global", "watermark_password", "");
     checkError(watermarkPassword.empty(), "No valid watermark password specified!");
 
@@ -139,7 +358,7 @@ static int testForImageBatch(const INIReader& inir, const int p, const float psn
 }
 
 // single image processing, it loads the image, embeds the watermark, detects it, and optionally saves the watermarked image to disk
-static int testForImageSingle(const INIReader& inir, const int p, const float psnr) {
+static int testForImageSingle(const Settings& inir, const int p, const float psnr) {
     const string imageFile = inir.Get("image", "path", "NO_IMAGE");
     checkError(imageFile == "NO_IMAGE", "No valid image file specified!");
     const string watermarkPassword = inir.Get("global", "watermark_password", "");
@@ -193,7 +412,7 @@ static int testForImageSingle(const INIReader& inir, const int p, const float ps
 
 // video processing, it opens the video, embeds or detects the watermark based on the mode specified in settings.ini,
 // and optionally encodes the output video with the embedded watermark (using hardware acceleration if specified and available)
-static int testForVideo(const INIReader& inir, const string& videoFile, const int p, const float psnr) {
+static int testForVideo(const Settings& inir, const string& videoFile, const int p, const float psnr) {
     const bool showFps = inir.GetBoolean("global", "display_fps", true);
     const string videoMode = inir.Get("video", "mode", "embed");
     checkError(videoMode != "embed" && videoMode != "detect", "Invalid video mode. Must be 'embed' or 'detect'.");
@@ -235,27 +454,111 @@ static int testForVideo(const INIReader& inir, const string& videoFile, const in
     return EXIT_SUCCESS;
 }
 
+// Runs ME mask benchmark across standard resolutions and prediction orders, writing CSV output
+static int runCliBenchmark(const Settings& settings, const float psnr) {
+    // Benchmark test image definition
+    struct BenchmarkImage {
+        const char* resolution;
+        const char* path;
+    };
+    constexpr std::array images = {
+        BenchmarkImage{"480p",  "samples/images/480p.png" },
+        BenchmarkImage{"720p",  "samples/images/720p.png" },
+        BenchmarkImage{"1080p", "samples/images/1080p.png"},
+        BenchmarkImage{"4K",    "samples/images/4k.png"   }
+    };
+    constexpr std::array predictionOrders = {3, 5, 7, 9};
+
+    const string backend = getBackendName();
+    const string device = getDeviceName();
+    // Use fewer iterations for CPU backend to keep benchmark duration reasonable
+    const int loops = backend == "eigen" ? 100 : 1000;
+    const string watermarkPassword = settings.Get("global", "watermark_password", "");
+    checkError(watermarkPassword.empty(), "No valid watermark password specified!");
+
+    // Create output folder and initialize benchmark CSV file
+    const fs::path outputDir = "benchmarks";
+    fs::create_directories(outputDir);
+    const fs::path outputPath = outputDir / (backend + ".csv");
+    std::ofstream output(outputPath, std::ios::trunc);
+    if (!output)
+        throw std::runtime_error("Could not write benchmark CSV: " + outputPath.string());
+    output << "backend,device,p,resolution,operation,fps,seconds,loops,image\n" << std::setprecision(17);
+
+    cout << info(std::format("CLI benchmark: {} on {} ({} loops per measurement)\n", backend, device, loops));
+    // Test each prediction order
+    for (const int p : predictionOrders) {
+        auto session = createImageSession(watermarkPassword, p, psnr);
+        // Test each resolution image
+        for (const auto& image : images) {
+            if (!fs::is_regular_file(image.path))
+                throw std::runtime_error("Benchmark image not found: " + string(image.path));
+            loadImage(session.get(), image.path);
+
+            // Measure embedding execution time
+            const double embedSeconds = executionTime(
+                                            [&]() {
+                                                embedImage(session.get(), MaskMethod::ME);
+                                                finish();
+                                            },
+                                            loops) /
+                                        loops;
+            // Measure detection execution time and correlation
+            prepareDetectionImage(session.get(), MaskMethod::ME);
+            float correlation = 0.0f;
+            const double detectSeconds = executionTime([&]() { correlation = detectEmbeddedBuffer(session.get(), MaskMethod::ME); }, loops) / loops;
+
+            // Writes a single measurement record to CSV
+            const auto writeResult = [&](const char* operation, const double seconds) {
+                output << csvString(backend) << ',' << csvString(device) << ',' << p << ',' << csvString(image.resolution) << ',' << csvString(operation) << ',' << 1.0 / seconds << ',' << seconds
+                       << ',' << loops << ',' << csvString(image.path) << '\n';
+            };
+            writeResult("embed", embedSeconds);
+            writeResult("detect", detectSeconds);
+            output.flush();
+            cout << std::format("p={}, {:>5}: embed {:>10.2f} FPS, detect {:>10.2f} FPS, correlation {:.8f}\n", p, image.resolution, 1.0 / embedSeconds, 1.0 / detectSeconds, correlation);
+        }
+    }
+    cout << success("Benchmark CSV written to " + outputPath.string() + "\n");
+    return EXIT_SUCCESS;
+}
+
 /*!
  *  \brief  This is a project implementation of my Thesis with title:
  *			EFFICIENT IMPLEMENTATION OF WATERMARKING ALGORITHMS AND
  *			WATERMARK DETECTION IN IMAGE AND VIDEO USING GPU.
  *  \author Dimitris Karatzas
  */
-int main() {
+int main(const int argc, char* argv[]) {
     int exitCode = EXIT_SUCCESS;
+    // Supplying any argument implies non-interactive use
+    bool pauseBeforeExit = argc == 1;
     try {
+        // Parse command-line options and overrides
+        const CommandLineOptions commandLine = parseCommandLine(argc, argv);
+        pauseBeforeExit = !commandLine.noPause;
+        if (commandLine.help) {
+            printHelp();
+            return EXIT_SUCCESS;
+        }
         // open parameters file
-        const INIReader inir("settings.ini");
-        if (inir.ParseError() < 0)
-            throw std::runtime_error("Could not load settings.ini");
+        const INIReader ini(commandLine.settingsFile);
+        if (ini.ParseError() < 0)
+            throw std::runtime_error("Could not load " + commandLine.settingsFile);
+        // Combine INI settings with command-line overrides
+        const Settings inir(ini, commandLine.settings);
         // initialize backend data (GPU devices, OpenMP threads, etc.)
         initializeEnvironment(inir.GetInteger("compute", "opencl_device_id", 0));
-        const int p = inir.GetInteger("global", "p", -1);
-        if (p != 3 && p != 5 && p != 7 && p != 9)
-            throw std::runtime_error("p must be 3, 5, 7 or 9");
         const float psnr = inir.GetFloat("global", "psnr", -1.0f);
         if (psnr <= 0)
             throw std::runtime_error("PSNR must be a positive number");
+        // Run standalone benchmark if requested
+        if (commandLine.benchmark)
+            return runCliBenchmark(inir, psnr);
+
+        const int p = inir.GetInteger("global", "p", -1);
+        if (p != 3 && p != 5 && p != 7 && p != 9)
+            throw std::runtime_error("p must be 3, 5, 7 or 9");
         // test algorithms
         const string videoFile = inir.Get("video", "path", "");
         const string imageMode = inir.Get("image", "mode", "");
@@ -275,6 +578,8 @@ int main() {
     }
     // flush first
     cout.flush();
-    system("pause");
+    // Pause terminal only if run interactively
+    if (pauseBeforeExit)
+        system("pause");
     return exitCode;
 }

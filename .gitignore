@@ -365,3 +365,6 @@ FodyWeavers.xsd
 *.y4m
 *.yuv
 *.avi
+
+# skip local CLI benchmark results
+/benchmarks/*.csv

@@ -1,6 +1,28 @@
 ###############################################################################
 # Set default behavior to automatically normalize line endings.
+###############################################################################
 * text=auto
+
+# Windows C++ source line endings
+Watermarking-CLI/**/*.cpp text eol=crlf
+Watermarking-CLI/**/*.hpp text eol=crlf
+Watermarking-CLI/**/*.h text eol=crlf
+Watermarking-Impl/**/*.cpp text eol=crlf
+Watermarking-Impl/**/*.hpp text eol=crlf
+Watermarking-Impl/**/*.h text eol=crlf
+Watermarking-Impl/**/*.cu text eol=crlf
+Watermarking-Impl/**/*.cuh text eol=crlf
+Watermarking-Impl/**/*.cl text eol=crlf
+Watermarking-Impl-tests/**/*.cpp text eol=crlf
+Watermarking-Impl-tests/**/*.hpp text eol=crlf
+Watermarking-Impl-tests/**/*.h text eol=crlf
+Watermarking-BenchUI/**/*.cpp text eol=crlf
+Watermarking-BenchUI/**/*.hpp text eol=crlf
+Watermarking-BenchUI/**/*.h text eol=crlf
+Watermarking-Util/**/*.cpp text eol=crlf
+Watermarking-Util/**/*.hpp text eol=crlf
+Watermarking-Util/**/*.h text eol=crlf
+
 # Set default behavior for command prompt diff.
 #
 # This is need for earlier builds of msysgit that does not have it on by

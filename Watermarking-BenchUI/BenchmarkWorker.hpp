@@ -17,7 +17,7 @@ class BenchmarkWorker : public QThread {
 
   signals:
     void resultReady(const QImage& img, const int p, const float psnr, const double embedTime, const double detectTime, const double embedFps, const double detectFps, const QString& fileName,
-                     const float correlation);
+        const float correlation);
     void progressUpdated(const int currentStep, const int totalSteps);
     void benchmarkFinished(const double finalEmbedFps, const double finalDetectFps, const int finalScore);
 

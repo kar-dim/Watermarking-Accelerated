@@ -299,7 +299,7 @@ __kernel void me_u_and_sumsq_fused(
 }
 
 )CLC"
-R"CLC(
+                                   R"CLC(
 
 //use pointer arithmetic for dot product to help compilers optimize address calculations fast
 inline float error_sequence_coeffs_filter(__local float* centerPtr, __constant float* coeffs) {
@@ -373,7 +373,7 @@ __kernel void apply_watermark_fused(
 }
 
 )CLC"
-R"CLC(
+                                   R"CLC(
 
 inline int2 getPackedCoords(const int k) {
     const int r = (int)((sqrt(1.0f + 8.0f * k) - 1.0f) / 2.0f);
@@ -690,7 +690,7 @@ __kernel void compute_abs_normalized_mask(
 }
 
 )CLC"
-R"CLC(
+                                   R"CLC(
 
 __kernel void final_max_reduce(
     __global const float* restrict partials,

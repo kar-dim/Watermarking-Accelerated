@@ -233,6 +233,18 @@ bool isOpenCLBackend() {
 #endif
 }
 
+string getBackendName() {
+#if defined(_USE_CUDA_)
+    return "cuda";
+#elif defined(_USE_OPENCL_)
+    return "opencl";
+#elif defined(_USE_EIGEN_)
+    return "eigen";
+#else
+    return "unknown";
+#endif
+}
+
 void buildOpenCLKernels() {
 #if defined(_USE_OPENCL_)
     cl_utils::OpenCLKernelCache<3>::getProgram();
@@ -364,8 +376,7 @@ VideoHandle initVideo(const VideoSettings& settings) {
     checkError(!session->inputDecoderCtx.get(), "Could not open video decoder");
     const int height = session->videoStream->codecpar->height;
     const int width = session->videoStream->codecpar->width;
-    checkError((width & 1) != 0 || (height & 1) != 0,
-               std::format("YUV 4:2:0 video requires even dimensions; input is {}x{}.", width, height));
+    checkError((width & 1) != 0 || (height & 1) != 0, std::format("YUV 4:2:0 video requires even dimensions; input is {}x{}.", width, height));
     session->watermarkObj = createWatermarkObject(height, width, settings.watermarkPassword, settings.p, settings.psnr);
     session->hostFrame = std::make_unique<HostMemory<uint8_t>>(width * height * 3 / 2);
 #if defined(_USE_EIGEN_)
@@ -389,7 +400,7 @@ int embedVideo(VideoSession* s) {
 // main function to detect the watermark from the video
 int detectVideo(VideoSession* s) {
     checkError(is10bit(s->inputDecoderCtx.get(), s->videoStream) || isHDR(s->inputDecoderCtx.get()),
-               "Video watermark detection supports only 8-bit SDR YUV 4:2:0 input. 10-bit and HDR detection are not supported.");
+        "Video watermark detection supports only 8-bit SDR YUV 4:2:0 input. 10-bit and HDR detection are not supported.");
     return videoDispatcher(s, VideoMode::DETECT, false);
 }
 

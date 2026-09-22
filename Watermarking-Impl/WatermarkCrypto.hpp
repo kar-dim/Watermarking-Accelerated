@@ -103,9 +103,7 @@ inline void sinCosAvx2(const __m256 x, __m256& sinOut, __m256& cosOut) {
 }
 
 // take the top 24 bits of four uint64 lanes into the low 128 bits as four int32
-inline __m128i unpackTop24(const __m256i v) {
-    return _mm256_castsi256_si128(_mm256_permutevar8x32_epi32(_mm256_srli_epi64(v, 40), _mm256_setr_epi32(0, 2, 4, 6, 0, 2, 4, 6)));
-}
+inline __m128i unpackTop24(const __m256i v) { return _mm256_castsi256_si128(_mm256_permutevar8x32_epi32(_mm256_srli_epi64(v, 40), _mm256_setr_epi32(0, 2, 4, 6, 0, 2, 4, 6))); }
 
 } // namespace detail
 

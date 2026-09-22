@@ -90,8 +90,7 @@ __global__ void me_p3(const float* __restrict__ input, uint64_t* __restrict__ Rx
     float* warpOutput = &RxLocal[warpId * 32][0];
     wmma::store_matrix_sync(warpOutput, acc_C, OUT_STRIDE, wmma::mem_row_major);
     // write rx (cub)
-    writeRxVec<8>(rx, rxPersistent, temp_storage[warpId], &rxStaging[warpId][0]);
-    __syncthreads();
+    writeRxVec<8, 8, 8>(rx, rxPersistent, temp_storage[warpId], &rxStaging[0][0]);
 
     // write Rx (top left + bottom right)
     if (tid < 36) {
@@ -190,8 +189,7 @@ __global__ void me_p5(const float* __restrict__ input, uint64_t* __restrict__ Rx
     wmma::store_matrix_sync(warpOutput + 16 * OUT_STRIDE, acc_C10, OUT_STRIDE, wmma::mem_row_major);
     wmma::store_matrix_sync(warpOutput + 16 * OUT_STRIDE + 16, acc_C11, OUT_STRIDE, wmma::mem_row_major);
     // write rx (cub) before the barrier to hide latency
-    writeRxVec<24>(rx, rxPersistent, temp_storage[warpId], &rxStaging[warpId][0]);
-    __syncthreads();
+    writeRxVec<24, 8, 24>(rx, rxPersistent, temp_storage[warpId], &rxStaging[0][0]);
 
     // write Rx lambda
     auto writeRx = [&](const int k) {
@@ -299,8 +297,7 @@ __global__ void me_p7(const float* __restrict__ input, uint64_t* __restrict__ Rx
     wmma::store_matrix_sync(warpOutput + 32 * OUT_STRIDE + 16, acc_Rx[4], OUT_STRIDE, wmma::mem_row_major);
     wmma::store_matrix_sync(warpOutput + 32 * OUT_STRIDE + 32, acc_Rx[5], OUT_STRIDE, wmma::mem_row_major);
     // write rx (cub) before the barrier to hide latency
-    writeRxVec<48>(rx, rxPersistent, temp_storage[warpId], &rxStaging[warpId][0]);
-    __syncthreads();
+    writeRxVec<48, 4, 48>(rx, rxPersistent, temp_storage[warpId], &rxStaging[0][0]);
 
     // write Rx, loop stride 128, sum over 4 warps
     for (int k = tid; k < 1176; k += 128) {
@@ -360,7 +357,7 @@ __global__ void me_p9(const float* __restrict__ input, uint64_t* __restrict__ Rx
         const float center = __half2float(centerVal);
 
         // accumulate rx, note: for p=9 because we reuse shared memory we are forced to sync here!
-        accumulateRxVec<10>(localVec8, rxPersistent.vals, __half2float(centerVal));
+        accumulateRxVec<10>(localVec8, rxPersistent.vals, center);
         __syncthreads();
 
         // accumulate Rx (Tensor Cores)
@@ -455,11 +452,11 @@ __global__ void me_p9(const float* __restrict__ input, uint64_t* __restrict__ Rx
 
     // write rx (cub) after the barrier, we can't interleave (we are dangerously close to max limit, plus register pressure is already high)
     __syncthreads();
-    writeRxVec<80>(rx, rxPersistent, temp_storage[warpId], warpOutput);
+    writeRxVec<80, 4, 32 * OUT_STRIDE>(rx, rxPersistent, temp_storage[warpId], &RxLocal[0][0]);
 }
 
-__global__ void me_u_and_sumsq_fused(const float* __restrict__ errorSeq, const float* __restrict__ w, float* __restrict__ u, uint64_t* __restrict__ globalSumSq, const float* __restrict__ maxVal,
-                                     const int N) {
+__global__ void me_u_and_sumsq_fused(
+    const float* __restrict__ errorSeq, const float* __restrict__ w, float* __restrict__ u, uint64_t* __restrict__ globalSumSq, const float* __restrict__ maxVal, const int N) {
     constexpr int blockSize = 768;
 
     using BlockReduceT = cub::BlockReduce<float, blockSize>;
@@ -489,7 +486,7 @@ __global__ void me_u_and_sumsq_fused(const float* __restrict__ errorSeq, const f
 }
 
 __global__ void apply_watermark_fused(const float* __restrict__ input, const float* __restrict__ u, const uint64_t* __restrict__ sumSqPtr, uint8_t* __restrict__ output, const float strengthNumerator,
-                                      const int planeElements, const int numChannels) {
+    const int planeElements, const int numChannels) {
     const float uSumSquared = toUnscaledFloat(*sumSqPtr); // read the precomputed sum of squares from global memory (all threads read the same value, it is cached)
     const float strength = uSumSquared > 1e-12f ? strengthNumerator * rsqrtf(uSumSquared) : 0.0f;
     // grid stride loop over the PLANE (HxW) only (if 1 channel then it's the whole image)
@@ -518,8 +515,8 @@ __global__ void compute_abs_normalized_mask(const float* __restrict__ errorSeq, 
     }
 }
 
-__global__ void calculate_final_correlation(const float* __restrict__ partialDots, const float* __restrict__ partialNormU, const float* __restrict__ partialNormZ, float* __restrict__ result,
-                                            const int numBlocks) {
+__global__ void calculate_final_correlation(
+    const float* __restrict__ partialDots, const float* __restrict__ partialNormU, const float* __restrict__ partialNormZ, float* __restrict__ result, const int numBlocks) {
     constexpr int blockSize = 1024;
 
     // we can use CUB to reduce with warp shuffles and reduce the boilerplate
@@ -672,7 +669,7 @@ __global__ void rowMajorToColMajorFloat(const float* __restrict__ src, float* __
 // Each thread reads its Y sample AND the colocated UV at (x/2, y/2), runs the full RGB pipeline,
 // extracts Y_709 in limited range float [16,235], then transposes via shared memory
 __global__ void p010HdrYToSdrFloat(const uint16_t* __restrict__ ySrc, const int yPitchBytes, const uint16_t* __restrict__ uvSrc, const int uvPitchBytes, float* __restrict__ output, const int width,
-                                   const int height, const float mobA, const float mobB, const float mobK) {
+    const int height, const float mobA, const float mobB, const float mobK) {
     __shared__ float tile[32][33];
     const int yPitchU16 = yPitchBytes / 2;
     const int uvPitchU16 = uvPitchBytes / 2;
@@ -707,7 +704,7 @@ __global__ void p010HdrYToSdrFloat(const uint16_t* __restrict__ ySrc, const int 
 // UV load: uint32_t[uvX] on row uvY, reads U[uvX](lo16) + V[uvX](hi16) in one transaction
 // UV store: uint16_t[uvX] on row uvY, writes Cb(lo8) + Cr(hi8) in one transaction
 __global__ void p010HdrUVToSdrNV12(const uint16_t* __restrict__ ySrc, const int yPitchBytes, const uint16_t* __restrict__ uvSrc, const int uvPitchBytes, uint8_t* __restrict__ uvDst, const int width,
-                                   const int height, const float mobA, const float mobB, const float mobK) {
+    const int height, const float mobA, const float mobB, const float mobK) {
     const int uvX = blockIdx.x * blockDim.x + threadIdx.x;
     const int uvY = blockIdx.y * blockDim.y + threadIdx.y;
     if (uvX >= width / 2 || uvY >= height / 2)
@@ -734,7 +731,7 @@ __global__ void p010HdrUVToSdrNV12(const uint16_t* __restrict__ ySrc, const int 
 
 // HDR Y passthrough: P010LE Y + UV -> uint8_t row-major limited range [16,235] (no transpose/watermark)
 __global__ void p010HdrYToSdrU8(const uint16_t* __restrict__ ySrc, const int yPitchBytes, const uint16_t* __restrict__ uvSrc, const int uvPitchBytes, uint8_t* __restrict__ output, const int width,
-                                const int height, const float mobA, const float mobB, const float mobK) {
+    const int height, const float mobA, const float mobB, const float mobK) {
     const int yPitchU16 = yPitchBytes / 2;
     const int uvPitchU16 = uvPitchBytes / 2;
     const int x = blockIdx.x * 32 + threadIdx.x;

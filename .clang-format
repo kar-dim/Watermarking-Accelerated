@@ -8,3 +8,5 @@ BreakConstructorInitializers: BeforeColon
 AllowShortCaseLabelsOnASingleLine: true
 AllowShortBlocksOnASingleLine: Always
 ColumnLimit: 200
+AlignAfterOpenBracket: DontAlign
+AlignArrayOfStructures: Left
