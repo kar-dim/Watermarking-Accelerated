@@ -1,7 +1,8 @@
 #pragma once
-#include "opencl_init.h"
 #include "OclQueueManager.hpp"
+#include "opencl_init.h"
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
@@ -37,6 +38,14 @@ cl::Program buildKernels(const int p);
 // helper method to build utility opencl kernels from source (no WINDOW_SIZE dependency)
 cl::Program buildUtilityKernels();
 
+// WATERMARK_OPENCL_FORCE_PORTABLE_REDUCTIONS=1 disables optimized reductions
+bool forcePortableReductionsRequested();
+
+enum class ReductionMode { Portable, WorkGroupCollective, Subgroup };
+
+// inspect the selected reduction implementation in a built watermark program
+ReductionMode reductionMode(const cl::Program& program);
+
 // cache for reusing opencl kernels (static/global opencl program for each p) for each device
 // automatically invalidates when OclQueueManager's context generation changes (device switch)
 template <int p>
@@ -51,9 +60,10 @@ struct OpenCLKernelCache {
             cachedGeneration = currentGen;
         }
         const int deviceId = mgr.getDeviceIndex();
-        if (programs.find(deviceId) == programs.end())
-            programs[deviceId] = buildKernels(p);
-        return programs[deviceId];
+        const int cacheKey = (deviceId << 1) | static_cast<int>(forcePortableReductionsRequested());
+        if (programs.find(cacheKey) == programs.end())
+            programs[cacheKey] = buildKernels(p);
+        return programs[cacheKey];
     }
 };
 
@@ -77,6 +87,10 @@ struct UtilityKernelCache {
 
 // calculate the maximum power of two work group size for a device
 unsigned int maxPow2WorkGroupSize(const cl::Device& device);
+
+// local-memory bytes needed by a reduction kernel for the requested launch shape
+// (one slot per subgroup on the optimized path, one per work-item on the fallback)
+std::size_t reductionScratchBytes(const cl::Program& program, const char* kernelName, const cl::NDRange& localRange, std::size_t valuesPerReduction);
 
 // coalesced tiled transpose: row-major float -> column-major float on GPU, supports multi-channel via 3D grid
 void launchRowMajorToColMajorFloat(const cl::Buffer& src, const cl::Buffer& dst, const int width, const int height, const int channels, cl::CommandQueue& queue);

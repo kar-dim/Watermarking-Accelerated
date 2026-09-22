@@ -1,14 +1,19 @@
 #include "../Watermarking-Impl/EncodeOptions.hpp"
 #include "../Watermarking-Impl/WatermarkCrypto.hpp"
+#if defined(_USE_OPENCL_)
+#include "../Watermarking-Impl/opencl_utils.hpp"
+#endif
 #include "WatermarkCore.hpp"
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <filesystem>
 #include <gtest/gtest.h>
 #include <iomanip>
 #include <regex>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -77,6 +82,60 @@ std::vector<float> capturedCorrelations(VideoSession* session, int& framesProces
         correlations.push_back(std::stof((*it)[1].str()));
     return correlations;
 }
+
+#if defined(_USE_OPENCL_)
+void setPortableReductionOverride(const bool enabled) {
+#ifdef _WIN32
+    _putenv_s("WATERMARK_OPENCL_FORCE_PORTABLE_REDUCTIONS", enabled ? "1" : "");
+#else
+    if (enabled)
+        setenv("WATERMARK_OPENCL_FORCE_PORTABLE_REDUCTIONS", "1", 1);
+    else
+        unsetenv("WATERMARK_OPENCL_FORCE_PORTABLE_REDUCTIONS");
+#endif
+}
+
+class PortableReductionOverrideGuard {
+    std::optional<std::string> original;
+
+  public:
+    PortableReductionOverrideGuard() {
+        if (const char* value = std::getenv("WATERMARK_OPENCL_FORCE_PORTABLE_REDUCTIONS"))
+            original = value;
+    }
+
+    ~PortableReductionOverrideGuard() {
+#ifdef _WIN32
+        _putenv_s("WATERMARK_OPENCL_FORCE_PORTABLE_REDUCTIONS", original ? original->c_str() : "");
+#else
+        if (original)
+            setenv("WATERMARK_OPENCL_FORCE_PORTABLE_REDUCTIONS", original->c_str(), 1);
+        else
+            unsetenv("WATERMARK_OPENCL_FORCE_PORTABLE_REDUCTIONS");
+#endif
+    }
+};
+
+struct ReductionPathResult {
+    SessionPixelData pixels;
+    float correlation = 0.0f;
+};
+
+std::array<ReductionPathResult, 2> runReductionPath() {
+    std::array<ReductionPathResult, 2> results;
+    const std::array methods = {MaskMethod::NVF, MaskMethod::ME};
+    for (size_t index = 0; index < methods.size(); ++index) {
+        ImageHandle reductionSession = createImageSession(defaultPassword, defaultP, defaultPsnr);
+        loadImage(reductionSession.get(), colorImage.string());
+        embedImage(reductionSession.get(), methods[index]);
+        finish();
+        results[index].pixels = getSessionPixelData(reductionSession.get());
+        prepareDetectionImage(reductionSession.get(), methods[index]);
+        results[index].correlation = detectEmbeddedBuffer(reductionSession.get(), methods[index]);
+    }
+    return results;
+}
+#endif
 } // namespace
 
 class WatermarkTest : public ::testing::Test {
@@ -104,6 +163,44 @@ TEST(WatermarkCryptoTest, Sha256MatchesPublishedVectors) {
     EXPECT_EQ(hexDigest(WatermarkCrypto::sha256("")), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
     EXPECT_EQ(hexDigest(WatermarkCrypto::sha256("abc")), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
 }
+
+#if defined(_USE_OPENCL_)
+TEST(OpenCLReductionTest, AvailableDevicesMatchForcedPortableResults) {
+    PortableReductionOverrideGuard restoreOverride;
+    const std::vector<std::string> devices = getAvailableDevices();
+    ASSERT_FALSE(devices.empty());
+
+    for (size_t deviceIndex = 0; deviceIndex < devices.size(); ++deviceIndex) {
+        setPortableReductionOverride(false);
+        ASSERT_TRUE(initializeEnvironment(static_cast<int>(deviceIndex))) << devices[deviceIndex];
+        buildOpenCLKernels(); // every documented prediction order must compile on every device
+        const cl::Program selectedProgram = cl_utils::OpenCLKernelCache<defaultP>::getProgram();
+        const cl_utils::ReductionMode selectedMode = cl_utils::reductionMode(selectedProgram);
+        const auto selected = runReductionPath();
+
+        for (size_t method = 0; method < selected.size(); ++method) {
+            EXPECT_TRUE(std::isfinite(selected[method].correlation)) << devices[deviceIndex];
+            EXPECT_GT(selected[method].correlation, 0.5f) << devices[deviceIndex];
+        }
+
+        if (selectedMode == cl_utils::ReductionMode::Portable)
+            continue;
+
+        setPortableReductionOverride(true);
+        const cl::Program portableProgram = cl_utils::OpenCLKernelCache<defaultP>::getProgram();
+        ASSERT_EQ(cl_utils::reductionMode(portableProgram), cl_utils::ReductionMode::Portable) << devices[deviceIndex];
+        const auto portable = runReductionPath();
+
+        for (size_t method = 0; method < selected.size(); ++method) {
+            EXPECT_EQ(selected[method].pixels.width, portable[method].pixels.width) << devices[deviceIndex];
+            EXPECT_EQ(selected[method].pixels.height, portable[method].pixels.height) << devices[deviceIndex];
+            EXPECT_EQ(selected[method].pixels.channels, portable[method].pixels.channels) << devices[deviceIndex];
+            EXPECT_EQ(selected[method].pixels.pixels, portable[method].pixels.pixels) << devices[deviceIndex];
+            EXPECT_NEAR(selected[method].correlation, portable[method].correlation, 1.0e-4f) << devices[deviceIndex];
+        }
+    }
+}
+#endif
 
 TEST_F(WatermarkTest, EmbedsAndDetectsBothMasks) {
     for (const MaskMethod method : {MaskMethod::NVF, MaskMethod::ME}) {

@@ -12,28 +12,143 @@ inline const std::string kernels = R"CLC(
 #pragma OPENCL EXTENSION cl_khr_fp16 : enable
 #pragma OPENCL EXTENSION cl_khr_int64_base_atomics : enable
 
-// TREE REDUCTION MACROS
-#define REDUCE_SUM(TID, START_OFFSET, ARR)                              \
-    for (int _s = (START_OFFSET); _s > 0; _s >>= 1) {                   \
-        if ((TID) < _s) ARR[(TID)] += ARR[(TID) + _s];                  \
+#if !defined(WM_DISABLE_SUBGROUPS)
+#if defined(WM_INTEL_SUBGROUPS)
+#pragma OPENCL EXTENSION cl_intel_subgroups : enable
+#define WM_USE_SUBGROUPS 1
+#elif defined(WM_KHR_SUBGROUPS)
+#pragma OPENCL EXTENSION cl_khr_subgroups : enable
+#define WM_USE_SUBGROUPS 1
+#elif defined(__opencl_c_subgroups)
+#define WM_USE_SUBGROUPS 1
+#endif
+#endif
+
+// REDUCTION MACROS
+// Subgroup kernels receive one scratch element per subgroup from the host.
+// Portable kernels receive one scratch element per work-item.
+#if defined(WM_WORK_GROUP_REDUCTIONS)
+#define REDUCTION_SCRATCH_STRIDE 1
+#define REDUCE_SUM(TID, START_OFFSET, ARR, VALUE)                    \
+    do {                                                             \
+        const float _groupValue = work_group_reduce_add(VALUE);      \
+        if ((TID) == 0)                                              \
+            (ARR)[0] = _groupValue;                                  \
+    } while (0)
+
+#define REDUCE_MAX(TID, START_OFFSET, ARR, VALUE)                    \
+    do {                                                             \
+        const float _groupValue = work_group_reduce_max(VALUE);      \
+        if ((TID) == 0)                                              \
+            (ARR)[0] = _groupValue;                                  \
+    } while (0)
+
+#define REDUCE_SUM_3(TID, START_OFFSET, ARR1, ARR2, ARR3, VALUE1, VALUE2, VALUE3) \
+    do {                                                                        \
+        const float _groupValue1 = work_group_reduce_add(VALUE1);                \
+        const float _groupValue2 = work_group_reduce_add(VALUE2);                \
+        const float _groupValue3 = work_group_reduce_add(VALUE3);                \
+        if ((TID) == 0) {                                                        \
+            (ARR1)[0] = _groupValue1;                                            \
+            (ARR2)[0] = _groupValue2;                                            \
+            (ARR3)[0] = _groupValue3;                                            \
+        }                                                                        \
+    } while (0)
+#elif defined(WM_USE_SUBGROUPS)
+#define REDUCTION_SCRATCH_STRIDE get_num_sub_groups()
+#define REDUCE_SUM(TID, START_OFFSET, ARR, VALUE)                               \
+    do {                                                                        \
+        const float _subgroupValue = sub_group_reduce_add(VALUE);               \
+        if (get_sub_group_local_id() == 0)                                      \
+            (ARR)[get_sub_group_id()] = _subgroupValue;                         \
+        barrier(CLK_LOCAL_MEM_FENCE);                                           \
+        if ((TID) == 0) {                                                       \
+            float _groupValue = 0.0f;                                           \
+            for (uint _group = 0; _group < get_num_sub_groups(); ++_group)      \
+                _groupValue += (ARR)[_group];                                   \
+            (ARR)[0] = _groupValue;                                             \
+        }                                                                       \
+    } while (0)
+
+#define REDUCE_MAX(TID, START_OFFSET, ARR, VALUE)                               \
+    do {                                                                        \
+        const float _subgroupValue = sub_group_reduce_max(VALUE);               \
+        if (get_sub_group_local_id() == 0)                                      \
+            (ARR)[get_sub_group_id()] = _subgroupValue;                         \
+        barrier(CLK_LOCAL_MEM_FENCE);                                           \
+        if ((TID) == 0) {                                                       \
+            float _groupValue = 0.0f;                                           \
+            for (uint _group = 0; _group < get_num_sub_groups(); ++_group)      \
+                _groupValue = fmax(_groupValue, (ARR)[_group]);                 \
+            (ARR)[0] = _groupValue;                                             \
+        }                                                                       \
+    } while (0)
+
+#define REDUCE_SUM_3(TID, START_OFFSET, ARR1, ARR2, ARR3, VALUE1, VALUE2, VALUE3) \
+    do {                                                                        \
+        const float _subgroupValue1 = sub_group_reduce_add(VALUE1);             \
+        const float _subgroupValue2 = sub_group_reduce_add(VALUE2);             \
+        const float _subgroupValue3 = sub_group_reduce_add(VALUE3);             \
+        if (get_sub_group_local_id() == 0) {                                    \
+            const uint _subgroup = get_sub_group_id();                          \
+            (ARR1)[_subgroup] = _subgroupValue1;                                \
+            (ARR2)[_subgroup] = _subgroupValue2;                                \
+            (ARR3)[_subgroup] = _subgroupValue3;                                \
+        }                                                                       \
+        barrier(CLK_LOCAL_MEM_FENCE);                                           \
+        if ((TID) == 0) {                                                       \
+            float _groupValue1 = 0.0f;                                          \
+            float _groupValue2 = 0.0f;                                          \
+            float _groupValue3 = 0.0f;                                          \
+            for (uint _group = 0; _group < get_num_sub_groups(); ++_group) {    \
+                _groupValue1 += (ARR1)[_group];                                 \
+                _groupValue2 += (ARR2)[_group];                                 \
+                _groupValue3 += (ARR3)[_group];                                 \
+            }                                                                   \
+            (ARR1)[0] = _groupValue1;                                           \
+            (ARR2)[0] = _groupValue2;                                           \
+            (ARR3)[0] = _groupValue3;                                           \
+        }                                                                       \
+    } while (0)
+#else
+#define REDUCTION_SCRATCH_STRIDE \
+    (get_local_size(0) * get_local_size(1) * get_local_size(2))
+#define REDUCE_SUM(TID, START_OFFSET, ARR, VALUE)                       \
+    do {                                                                \
+        (ARR)[(TID)] = (VALUE);                                         \
         barrier(CLK_LOCAL_MEM_FENCE);                                   \
-    }
-
-#define REDUCE_MAX(TID, START_OFFSET, ARR)                              \
-    for (int _s = (START_OFFSET); _s > 0; _s >>= 1) {                   \
-        if ((TID) < _s) ARR[(TID)] = fmax(ARR[(TID)], ARR[(TID) + _s]); \
-        barrier(CLK_LOCAL_MEM_FENCE); \
-    }
-
-#define REDUCE_SUM_3(TID, START_OFFSET, ARR1, ARR2, ARR3)               \
-    for (int _s = (START_OFFSET); _s > 0; _s >>= 1) {                   \
-        if ((TID) < _s) {                                               \
-            ARR1[(TID)] += ARR1[(TID) + _s];                            \
-            ARR2[(TID)] += ARR2[(TID) + _s];                            \
-            ARR3[(TID)] += ARR3[(TID) + _s];                            \
+        for (int _s = (START_OFFSET); _s > 0; _s >>= 1) {               \
+            if ((TID) < _s) ARR[(TID)] += ARR[(TID) + _s];              \
+            barrier(CLK_LOCAL_MEM_FENCE);                               \
         }                                                               \
+    } while (0)
+
+#define REDUCE_MAX(TID, START_OFFSET, ARR, VALUE)                       \
+    do {                                                                \
+        (ARR)[(TID)] = (VALUE);                                         \
         barrier(CLK_LOCAL_MEM_FENCE);                                   \
-    }
+        for (int _s = (START_OFFSET); _s > 0; _s >>= 1) {               \
+            if ((TID) < _s) ARR[(TID)] = fmax(ARR[(TID)], ARR[(TID) + _s]); \
+            barrier(CLK_LOCAL_MEM_FENCE);                               \
+        }                                                               \
+    } while (0)
+
+#define REDUCE_SUM_3(TID, START_OFFSET, ARR1, ARR2, ARR3, VALUE1, VALUE2, VALUE3) \
+    do {                                                                \
+        (ARR1)[(TID)] = (VALUE1);                                       \
+        (ARR2)[(TID)] = (VALUE2);                                       \
+        (ARR3)[(TID)] = (VALUE3);                                       \
+        barrier(CLK_LOCAL_MEM_FENCE);                                   \
+        for (int _s = (START_OFFSET); _s > 0; _s >>= 1) {               \
+            if ((TID) < _s) {                                           \
+                ARR1[(TID)] += ARR1[(TID) + _s];                        \
+                ARR2[(TID)] += ARR2[(TID) + _s];                        \
+                ARR3[(TID)] += ARR3[(TID) + _s];                        \
+            }                                                           \
+            barrier(CLK_LOCAL_MEM_FENCE);                               \
+        }                                                               \
+    } while (0)
+#endif
 
 // FILL WINDOW MACRO
 #define FILL_BLOCK_IMPL(LOAD_EXPR)                                             \
@@ -127,7 +242,8 @@ __kernel void nvf_u_and_sumsq_fused(
     const __global float* restrict w,
     __global float* restrict u,
     volatile __global ulong* restrict globalSumSq,
-    const int width, const int height)
+    const int width, const int height,
+    __local float* reductionScratch)
 {
     const int x = get_global_id(1);
     const int y = get_global_id(0);
@@ -135,8 +251,6 @@ __kernel void nvf_u_and_sumsq_fused(
     const int linearTid = get_local_id(1) * get_local_size(0) + get_local_id(0);
 
     __local __attribute__((aligned(16))) float region[SH_DIM_SLOW][SH_DIM_FAST];
-    __local float sums[256];
-
     fillBlock(input, &region[0][0], width, height);
     barrier(CLK_LOCAL_MEM_FENCE);
 
@@ -151,12 +265,9 @@ __kernel void nvf_u_and_sumsq_fused(
         u[idx] = uVal;
         threadSumSq = uVal * uVal;
     }
-    sums[linearTid] = threadSumSq;
-    barrier(CLK_LOCAL_MEM_FENCE);
-    
-    REDUCE_SUM(linearTid, (get_local_size(0) * get_local_size(1)) / 2, sums);
+    REDUCE_SUM(linearTid, (get_local_size(0) * get_local_size(1)) / 2, reductionScratch, threadSumSq);
     if (linearTid == 0)
-        atom_add(globalSumSq, toScaledUlong(sums[0]));
+        atom_add(globalSumSq, toScaledUlong(reductionScratch[0]));
 }
 
 __kernel void me_u_and_sumsq_fused(
@@ -165,13 +276,12 @@ __kernel void me_u_and_sumsq_fused(
     __global float* restrict u,
     volatile __global ulong* restrict globalSumSq,
     __global const float* restrict maxVal,
-    const int N)
+    const int N,
+    __local float* reductionScratch)
 {
     const int tid = get_local_id(0);
     const int stride = get_global_size(0);
     int idx = get_global_id(0);
-
-    __local float sums[256];
 
     const float invDenom = 1.0f / ((*maxVal) + 1.0e-6f);
     float localSumSq = 0.0f;
@@ -183,13 +293,13 @@ __kernel void me_u_and_sumsq_fused(
         localSumSq += uVal * uVal;
         idx += stride;
     }
-    sums[tid] = localSumSq;
-    barrier(CLK_LOCAL_MEM_FENCE);
-
-    REDUCE_SUM(tid, get_local_size(0) / 2, sums);
+    REDUCE_SUM(tid, get_local_size(0) / 2, reductionScratch, localSumSq);
     if (tid == 0)
-        atom_add(globalSumSq, toScaledUlong(sums[0]));
+        atom_add(globalSumSq, toScaledUlong(reductionScratch[0]));
 }
+
+)CLC"
+R"CLC(
 
 //use pointer arithmetic for dot product to help compilers optimize address calculations fast
 inline float error_sequence_coeffs_filter(__local float* centerPtr, __constant float* coeffs) {
@@ -585,46 +695,38 @@ R"CLC(
 __kernel void final_max_reduce(
     __global const float* restrict partials,
     __global float* restrict output,
-    const int numPartials)
+    const int numPartials,
+    __local float* reductionScratch)
 {
     const int tid = get_local_id(0);
-
-    __local float scratch[256];
 
     float threadMax = 0.0f;
     for(int i = tid; i < numPartials; i += get_local_size(0))
         threadMax = max(threadMax, partials[i]);
-    scratch[tid] = threadMax;
-    barrier(CLK_LOCAL_MEM_FENCE);
-
-    REDUCE_MAX(tid, get_local_size(0) / 2, scratch);
+    REDUCE_MAX(tid, get_local_size(0) / 2, reductionScratch, threadMax);
     if (tid == 0)
-        output[0] = scratch[0];
+        output[0] = reductionScratch[0];
 }
 
 #define DEFINE_MAX_REDUCE_KERNEL(NAME, TRANSFORM)                  \
 __kernel void NAME(                                                \
     __global const float* restrict input,                          \
     __global float* restrict partials,                             \
-    const int N)                                                   \
+    const int N,                                                   \
+    __local float* reductionScratch)                               \
 {                                                                  \
     const int tid = get_local_id(0);                               \
     const int stride = get_global_size(0);                         \
     int idx = get_global_id(0);                                    \
-                                                                   \
-    __local float cache[256];                                      \
                                                                    \
     float localMax = 0.0f;                                         \
     while (idx < N) {                                              \
         localMax = fmax(localMax, TRANSFORM(input[idx]));          \
         idx += stride;                                             \
     }                                                              \
-    cache[tid] = localMax;                                         \
-    barrier(CLK_LOCAL_MEM_FENCE);                                  \
-                                                                   \
-    REDUCE_MAX(tid, get_local_size(0) / 2, cache);                 \
+    REDUCE_MAX(tid, get_local_size(0) / 2, reductionScratch, localMax); \
     if (tid == 0)                                                  \
-        partials[get_group_id(0)] = cache[0];                      \
+        partials[get_group_id(0)] = reductionScratch[0];           \
 }
 
 #define IDENTITY(x) (x)
@@ -644,7 +746,8 @@ __kernel void calculate_error_sequence_and_partial_corr_fused(
     __global float* restrict partialNormU,
     __global float* restrict partialNormZ,
     const int width, const int height,
-    __constant int* restrict stopFlag)
+    __constant int* restrict stopFlag,
+    __local float* reductionScratch)
 {
     const int x = get_global_id(1);
     const int y = get_global_id(0);
@@ -655,9 +758,9 @@ __kernel void calculate_error_sequence_and_partial_corr_fused(
     // create the pointer directly to the center pixel of this thread's window
     __local float* centerPtr = &region[get_local_id(1) + PAD][get_local_id(0) + PAD];
     
-    __local float dotCache[256];
-    __local float normUCache[256];
-    __local float normZCache[256];
+    __local float* dotCache = reductionScratch;
+    __local float* normUCache = reductionScratch + REDUCTION_SCRATCH_STRIDE;
+    __local float* normZCache = reductionScratch + (2 * REDUCTION_SCRATCH_STRIDE);
 
     fillBlockFused(mask, w, &region[0][0], width, height);
     barrier(CLK_LOCAL_MEM_FENCE);
@@ -673,12 +776,7 @@ __kernel void calculate_error_sequence_and_partial_corr_fused(
         threadNormU = eu * eu;
         threadNormZ = ez * ez;
     }
-    dotCache[linearTid] = threadDot;
-    normUCache[linearTid] = threadNormU;
-    normZCache[linearTid] = threadNormZ;
-    barrier(CLK_LOCAL_MEM_FENCE);
-
-    REDUCE_SUM_3(linearTid, 128, dotCache, normUCache, normZCache);
+    REDUCE_SUM_3(linearTid, 128, dotCache, normUCache, normZCache, threadDot, threadNormU, threadNormZ);
     if (linearTid == 0) {
         const int groupId1D = get_group_id(1) * get_num_groups(0) + get_group_id(0);
         partialDots[groupId1D] = dotCache[0];
@@ -692,7 +790,8 @@ __kernel void calculate_final_correlation(
     __global const float* restrict partialNormU,
     __global const float* restrict partialNormZ,
     __global float* restrict result,
-    const int numBlocks) {
+    const int numBlocks,
+    __local float* reductionScratch) {
 
     const int tid = get_local_id(0);
     const int localSize = get_local_size(0);
@@ -701,9 +800,9 @@ __kernel void calculate_final_correlation(
     float localU = 0.0f;
     float localZ = 0.0f;
 
-    __local float sumDot[1024];
-    __local float sumU[1024];
-    __local float sumZ[1024];
+    __local float* sumDot = reductionScratch;
+    __local float* sumU = reductionScratch + REDUCTION_SCRATCH_STRIDE;
+    __local float* sumZ = reductionScratch + (2 * REDUCTION_SCRATCH_STRIDE);
 
     const size_t rawDots = (size_t)partialDots;
     const size_t rawU = (size_t)partialNormU;
@@ -735,12 +834,7 @@ __kernel void calculate_final_correlation(
             localZ += partialNormZ[i];
         }
     }
-    sumDot[tid] = localDot;
-    sumU[tid] = localU;
-    sumZ[tid] = localZ;
-    barrier(CLK_LOCAL_MEM_FENCE);
-
-    REDUCE_SUM_3(tid, localSize / 2, sumDot, sumU, sumZ);
+    REDUCE_SUM_3(tid, localSize / 2, sumDot, sumU, sumZ, localDot, localU, localZ);
     if (tid == 0) {
         const float final_dot = sumDot[0];
         const float final_norm_u = sqrt(sumU[0]);
