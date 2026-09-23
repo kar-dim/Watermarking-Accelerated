@@ -173,7 +173,15 @@ AVCodecContextPtr openSoftwareDecoder(const AVCodecParameters* inputCodecParams,
 #if defined(_USE_CUDA_)
 // H264 NVDEC extra checks: It opens these profiles but decodes them wrong (unsupported by NVDEC hardware)
 bool nvdecMisdecodesProfile(const AVCodecParameters* codecParams) {
-    return codecParams->codec_id == AV_CODEC_ID_H264 && (codecParams->profile == AV_PROFILE_H264_HIGH_444_PREDICTIVE || codecParams->profile == AV_PROFILE_H264_CAVLC_444);
+    if (codecParams->codec_id != AV_CODEC_ID_H264)
+        return false;
+    const int profile = codecParams->profile & ~AV_PROFILE_H264_INTRA;
+    return profile == AV_PROFILE_H264_HIGH_422 || profile == AV_PROFILE_H264_HIGH_444 || profile == AV_PROFILE_H264_HIGH_444_PREDICTIVE || profile == AV_PROFILE_H264_CAVLC_444;
+}
+
+bool nvdecUnsupportedFormat(const AVCodecParameters* codecParams) {
+    const auto* format = av_pix_fmt_desc_get(static_cast<AVPixelFormat>(codecParams->format));
+    return format != nullptr && (format->log2_chroma_w != 1 || format->log2_chroma_h != 1 || format->comp[0].depth > 10);
 }
 
 const char* cuvidNameFor(const AVCodecID codecId) {
@@ -202,6 +210,10 @@ AVCodecContextPtr openDecoderHWAccel(const AVCodecParameters* inputCodecParams, 
     if (nvdecMisdecodesProfile(inputCodecParams)) {
         const char* profileName = avcodec_profile_name(inputCodecParams->codec_id, inputCodecParams->profile);
         cout << info(std::format("NVDEC decodes H.264 profile '{}' incorrectly, falling back to software decoder (CPU).\n", profileName ? profileName : "?"));
+        return openSoftwareDecoder(inputCodecParams, pktTimebase);
+    }
+    if (nvdecUnsupportedFormat(inputCodecParams)) {
+        cout << info("NVDEC cannot use this source chroma format or bit depth; falling back to software decoder (CPU).\n");
         return openSoftwareDecoder(inputCodecParams, pktTimebase);
     }
     const AVCodec* inputDecoder = avcodec_find_decoder_by_name(decoderName);
@@ -318,14 +330,17 @@ void loadInputFrame(VideoSession* s, const uint8_t* hostPtr, const int srcPitch)
     auto& mgr = OclQueueManager::getInstance();
     auto queue = mgr.getQueueRaw();
     OclArray<uint8_t> hostGpu(height, width, queue);
+    cl_int uploadStatus;
     if (srcPitch == width) {
-        clEnqueueWriteBuffer(queue, hostGpu.data(), CL_TRUE, 0, hostGpu.bytes(), hostPtr, 0, nullptr, nullptr);
+        uploadStatus = clEnqueueWriteBuffer(queue, hostGpu.data(), CL_TRUE, 0, hostGpu.bytes(), hostPtr, 0, nullptr, nullptr);
     } else {
         // strided upload
         const size_t origin[3] = {0, 0, 0};
         const size_t region[3] = {static_cast<size_t>(width), static_cast<size_t>(height), 1};
-        clEnqueueWriteBufferRect(queue, hostGpu.data(), CL_TRUE, origin, origin, region, static_cast<size_t>(width), 0, static_cast<size_t>(srcPitch), 0, hostPtr, 0, nullptr, nullptr);
+        uploadStatus = clEnqueueWriteBufferRect(queue, hostGpu.data(), CL_TRUE, origin, origin, region, static_cast<size_t>(width), 0, static_cast<size_t>(srcPitch), 0, hostPtr, 0, nullptr, nullptr);
     }
+    if (uploadStatus != CL_SUCCESS)
+        throw std::runtime_error("Failed to upload video frame to OpenCL buffer: " + std::to_string(uploadStatus));
     s->inputFrame = OclArray<float>(height, width, queue);
     cl_utils::launchPitchedToFloat(hostGpu.clBuffer(), s->inputFrame.clBuffer(), width, height, width, mgr.getQueue());
 #else
@@ -380,8 +395,14 @@ void drainEncoderPackets(VideoSession* s) {
             return;
         checkAv(receiveRet, "Failed to receive encoded video packet");
 
+        s->frameDurations.restore(pkt.get());
         av_packet_rescale_ts(pkt.get(), s->outputEncoderCtx->time_base, outVideoStream->time_base);
         pkt->stream_index = s->outputVideoStreamIndex;
+        pkt->pos = -1;
+        if (enforceMonotonicDts(pkt.get(), s->lastWrittenVideoDts) && !s->reportedDtsRepair) {
+            cout << info("Encoder emitted invalid or non-monotonic video DTS, repairing output timestamps.\n");
+            s->reportedDtsRepair = true;
+        }
         checkAv(av_interleaved_write_frame(s->outputFormatCtx.get(), pkt.get()), "Failed to write encoded video packet");
         av_packet_unref(pkt.get());
     }
@@ -395,6 +416,7 @@ void encodeWorker(VideoSession* s, EncodeQueue& queue, std::exception_ptr& encEr
         while (auto item = queue.pop()) {
             if (std::holds_alternative<AVFramePtr>(*item)) {
                 AVFramePtr frame = std::move(std::get<AVFramePtr>(*item));
+                s->frameDurations.remember(frame.get());
                 int ret = avcodec_send_frame(s->outputEncoderCtx.get(), frame.get());
                 while (ret == AVERROR(EAGAIN)) {
                     drainEncoderPackets(s);
@@ -425,6 +447,7 @@ void encodeFrameGPU(VideoSession* s, const CudaArray<uint8_t>& yRowMajor, const 
     encFrame->width = width;
     encFrame->height = height;
     encFrame->pts = pts;
+    encFrame->duration = srcFrame->duration;
     checkError(av_hwframe_get_buffer(s->outputEncoderCtx->hw_frames_ctx, encFrame.get(), 0) < 0, "Failed to get NVENC hw frame buffer");
     CUDA_CHECK(cudaMemcpy2DAsync(encFrame->data[0], encFrame->linesize[0], yRowMajor.data(), width, width, height, cudaMemcpyDeviceToDevice, stream));
     // HDR path passes preconverted uint8_t NV12 UV (stride=width) -> SDR path copies directly from decoded frame
@@ -440,7 +463,7 @@ void encodeFrameGPU(VideoSession* s, const CudaArray<uint8_t>& yRowMajor, const 
 // Chroma: copy directly from srcChromaFrame when provided (SW-decode path) to avoid a
 // double copy through hostFrame, when null (NVDEC+SW-encoder path) chroma is already in
 // hostFrame after the GPU NV12->YUV420p kernel so we read it from there
-AVFramePtr buildEncFrame(VideoSession* s, const int64_t pts, const AVFrame* srcChromaFrame = nullptr) {
+AVFramePtr buildEncFrame(VideoSession* s, const int64_t pts, const AVFrame* srcChromaFrame = nullptr, const int64_t duration = 0) {
     const auto [height, width] = s->videoDims();
     const uint8_t* src = s->hostFrame->get();
     AVFramePtr encFrame(av_frame_alloc());
@@ -449,6 +472,7 @@ AVFramePtr buildEncFrame(VideoSession* s, const int64_t pts, const AVFrame* srcC
     encFrame->width = width;
     encFrame->height = height;
     encFrame->pts = pts;
+    encFrame->duration = duration;
     checkError(av_frame_get_buffer(encFrame.get(), 0) < 0, "Failed to allocate encoder frame buffer");
     // Y: av_frame_get_buffer with align=0 sets linesize==width, so one memcpy covers the whole plane
     // fall back to row-by-row only when the encoder has a different stride
@@ -483,7 +507,7 @@ void embedWatermark(VideoSession* s, int& framesCount, const AVFrame* frame, Enc
         cout << std::format(" [Embedding frame {}]\n", framesCount + 1);
         fillYPlane(frame, s);
         // chroma goes decoded frame → encFrame directly inside buildEncFrame (no hostFrame hop)
-        pushToEncoder(queue, buildEncFrame(s, framePts(frame), frame));
+        pushToEncoder(queue, buildEncFrame(s, framePts(frame), frame, frame->duration));
     } else {
         // passthrough: take a refcounted reference to the decoded frame (zero data copy)
         AVFramePtr ref(av_frame_alloc());
@@ -605,7 +629,7 @@ void embedWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* fra
                 CUDA_CHECK(cudaStreamSynchronize(stream));
             }
         }
-        pushToEncoder(queue, buildEncFrame(s, framePts(frame)));
+        pushToEncoder(queue, buildEncFrame(s, framePts(frame), nullptr, frame->duration));
     }
     framesCount++;
 }
@@ -649,6 +673,10 @@ int processFrames(VideoSession* s, const bool needsFilter, Func&& processFrameAr
             if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
                 break;
             checkAv(ret, "FFmpeg decoding error");
+            const auto [expectedHeight, expectedWidth] = s->videoDims();
+            checkError(frame->width != expectedWidth || frame->height != expectedHeight,
+                std::format("Video dimensions changed during decode (expected {}x{}, got {}x{}). Split or re-encode the source before watermarking.", expectedWidth, expectedHeight, frame->width,
+                    frame->height));
             if (needsFilter)
                 filterFrame(frame, filteredFrame, s);
             processFrame(frame.get(), framesCount);

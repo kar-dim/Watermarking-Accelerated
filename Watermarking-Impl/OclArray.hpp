@@ -1,6 +1,8 @@
 #pragma once
 #include "OclQueueManager.hpp"
 #include "opencl_init.h"
+#include <stdexcept>
+#include <string>
 
 /*!
  *  \brief  GPU buffer class for OpenCL, equivalent to CUDA CudaArray<T>
@@ -15,6 +17,11 @@ class OclArray {
     int cols = 0;
     int channels = 1;
     cl_command_queue queue = nullptr;
+
+    static void checkCl(const cl_int status, const char* operation) {
+        if (status != CL_SUCCESS)
+            throw std::runtime_error(std::string(operation) + " failed with OpenCL error " + std::to_string(status));
+    }
 
     void alloc() {
         if (size() > 0) {
@@ -42,14 +49,24 @@ class OclArray {
     // constructors that accept pointer data, pass CL_TRUE wait until copy is finished before returning
     OclArray(const int rows, const int cols, const T* hostData, cl_command_queue queue) : rows(rows), cols(cols), queue(queue) {
         alloc();
-        if (mem)
-            clEnqueueWriteBuffer(queue, mem, CL_TRUE, 0, bytes(), hostData, 0, nullptr, nullptr);
+        try {
+            if (mem)
+                checkCl(clEnqueueWriteBuffer(queue, mem, CL_TRUE, 0, bytes(), hostData, 0, nullptr, nullptr), "clEnqueueWriteBuffer");
+        } catch (...) {
+            freeArray();
+            throw;
+        }
     }
 
     OclArray(const int rows, const int cols, const int channels, const T* hostData, cl_command_queue queue) : rows(rows), cols(cols), channels(channels), queue(queue) {
         alloc();
-        if (mem)
-            clEnqueueWriteBuffer(queue, mem, CL_TRUE, 0, bytes(), hostData, 0, nullptr, nullptr);
+        try {
+            if (mem)
+                checkCl(clEnqueueWriteBuffer(queue, mem, CL_TRUE, 0, bytes(), hostData, 0, nullptr, nullptr), "clEnqueueWriteBuffer");
+        } catch (...) {
+            freeArray();
+            throw;
+        }
     }
 
     ~OclArray() { freeArray(); }
@@ -93,25 +110,25 @@ class OclArray {
     void fillZero() {
         if (mem) {
             T zero{};
-            clEnqueueFillBuffer(queue, mem, &zero, sizeof(T), 0, bytes(), 0, nullptr, nullptr);
+            checkCl(clEnqueueFillBuffer(queue, mem, &zero, sizeof(T), 0, bytes(), 0, nullptr, nullptr), "clEnqueueFillBuffer");
         }
     }
 
     T scalar() const {
         T val{};
         if (mem)
-            clEnqueueReadBuffer(queue, mem, CL_TRUE, 0, sizeof(T), &val, 0, nullptr, nullptr);
+            checkCl(clEnqueueReadBuffer(queue, mem, CL_TRUE, 0, sizeof(T), &val, 0, nullptr, nullptr), "clEnqueueReadBuffer");
         return val;
     }
 
     void toHost(T* dst) const {
         if (mem)
-            clEnqueueReadBuffer(queue, mem, CL_TRUE, 0, bytes(), dst, 0, nullptr, nullptr);
+            checkCl(clEnqueueReadBuffer(queue, mem, CL_TRUE, 0, bytes(), dst, 0, nullptr, nullptr), "clEnqueueReadBuffer");
     }
 
     void toHostAsync(T* dst) const {
         if (mem)
-            clEnqueueReadBuffer(queue, mem, CL_FALSE, 0, bytes(), dst, 0, nullptr, nullptr);
+            checkCl(clEnqueueReadBuffer(queue, mem, CL_FALSE, 0, bytes(), dst, 0, nullptr, nullptr), "clEnqueueReadBuffer");
     }
 
     static OclArray zeros(const int count, cl_command_queue queue) {
@@ -135,7 +152,7 @@ class OclArray {
     OclArray clone() const {
         OclArray copy(rows, cols, channels, queue);
         if (mem && copy.mem)
-            clEnqueueCopyBuffer(queue, mem, copy.mem, 0, 0, bytes(), 0, nullptr, nullptr);
+            checkCl(clEnqueueCopyBuffer(queue, mem, copy.mem, 0, 0, bytes(), 0, nullptr, nullptr), "clEnqueueCopyBuffer");
         return copy;
     }
 };

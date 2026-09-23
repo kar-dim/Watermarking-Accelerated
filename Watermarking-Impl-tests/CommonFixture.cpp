@@ -1,19 +1,23 @@
+#include "../Watermarking-Impl/AuxiliaryMux.hpp"
+#include "../Watermarking-Impl/AvUtil.hpp"
 #include "../Watermarking-Impl/EncodeOptions.hpp"
 #include "../Watermarking-Impl/WatermarkCrypto.hpp"
 #if defined(_USE_OPENCL_)
 #include "../Watermarking-Impl/opencl_utils.hpp"
+#include <cstdlib>
+#include <optional>
 #endif
 #include "WatermarkCore.hpp"
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
-#include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <gtest/gtest.h>
 #include <iomanip>
+#include <iterator>
 #include <regex>
-#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -202,6 +206,27 @@ TEST(OpenCLReductionTest, AvailableDevicesMatchForcedPortableResults) {
 }
 #endif
 
+TEST_F(WatermarkTest, RejectsImagesSmallerThanPredictionWindow) {
+    // Minimal valid 2x2, 24-bit BMP: 54-byte header + 2 padded rows
+    std::array<uint8_t, 70> bmp{};
+    bmp[0] = 'B';
+    bmp[1] = 'M';
+    bmp[2] = 70;
+    bmp[10] = 54;
+    bmp[14] = 40;
+    bmp[18] = 2;
+    bmp[22] = 2;
+    bmp[26] = 1;
+    bmp[28] = 24;
+    bmp[34] = 16;
+    const fs::path tinyImage = tempDir / "tiny.bmp";
+    {
+        std::ofstream output(tinyImage, std::ios::binary);
+        ASSERT_TRUE(output.write(reinterpret_cast<const char*>(bmp.data()), bmp.size()));
+    }
+    EXPECT_THROW(loadImage(session.get(), tinyImage.string()), std::invalid_argument);
+}
+
 TEST_F(WatermarkTest, EmbedsAndDetectsBothMasks) {
     for (const MaskMethod method : {MaskMethod::NVF, MaskMethod::ME}) {
         embedImage(session.get(), method);
@@ -248,6 +273,36 @@ TEST_F(WatermarkTest, SameInputsAreDeterministicAcrossSessions) {
     loadImage(secondSession.get(), colorImage.string());
     const SessionPixelData second = embedAndRead(secondSession.get(), MaskMethod::NVF);
     EXPECT_EQ(first.pixels, second.pixels);
+}
+
+TEST_F(WatermarkTest, ExportedImageRemainsStableAcrossSessionReuse) {
+    embedImage(session.get(), MaskMethod::NVF);
+    finish();
+    ExportHandle exported = createReusableExportBuffer();
+    exportForSave(session.get(), exported.get(), MaskMethod::NVF);
+    const fs::path first = tempDir / "firstW_NVF.png";
+    const fs::path second = tempDir / "secondW_NVF.png";
+    const fs::path third = tempDir / "thirdW_NVF.png";
+    flushToDiskAsync(exported.get(), (tempDir / "first.png").string(), MaskMethod::NVF);
+
+    updateSessionParams(session.get(), defaultP, 30.0f);
+    embedImage(session.get(), MaskMethod::NVF);
+    finish();
+    flushToDiskAsync(exported.get(), (tempDir / "second.png").string(), MaskMethod::NVF);
+
+    std::ifstream firstFile(first, std::ios::binary);
+    std::ifstream secondFile(second, std::ios::binary);
+    ASSERT_TRUE(firstFile && secondFile);
+    const std::vector<char> firstBytes(std::istreambuf_iterator<char>{firstFile}, {});
+    const std::vector<char> secondBytes(std::istreambuf_iterator<char>{secondFile}, {});
+    EXPECT_EQ(firstBytes, secondBytes);
+
+    exportForSave(session.get(), exported.get(), MaskMethod::NVF);
+    flushToDiskAsync(exported.get(), (tempDir / "third.png").string(), MaskMethod::NVF);
+    std::ifstream thirdFile(third, std::ios::binary);
+    ASSERT_TRUE(thirdFile);
+    const std::vector<char> thirdBytes(std::istreambuf_iterator<char>{thirdFile}, {});
+    EXPECT_NE(firstBytes, thirdBytes);
 }
 
 TEST_F(WatermarkTest, DifferentPasswordsProduceDifferentWatermarks) {
@@ -394,6 +449,56 @@ TEST_F(WatermarkTest, RejectsAnEncodeOptionsStringWithoutAnEncoder) {
 }
 
 // encode option parsing
+TEST(VideoTimestampTest, RepairsOnlyInvalidDecodeTimestamps) {
+    int64_t lastDts = AV_NOPTS_VALUE;
+    AVPacket packet{};
+    packet.pts = 100;
+    packet.dts = 90;
+    EXPECT_FALSE(video_utils::enforceMonotonicDts(&packet, lastDts));
+    EXPECT_EQ(lastDts, 90);
+    packet.pts = 101;
+    packet.dts = 90;
+    EXPECT_TRUE(video_utils::enforceMonotonicDts(&packet, lastDts));
+    EXPECT_EQ(packet.dts, 91);
+    EXPECT_EQ(packet.pts, 101);
+    packet.pts = 91;
+    packet.dts = 105;
+    EXPECT_TRUE(video_utils::enforceMonotonicDts(&packet, lastDts));
+    EXPECT_EQ(packet.dts, 92);
+    EXPECT_EQ(packet.pts, 92);
+}
+
+TEST(VideoMuxTest, CopiesMatroskaAttachmentsAndDropsThemForMp4) {
+    auto input = std::unique_ptr<AVFormatContext, decltype(&avformat_free_context)>(avformat_alloc_context(), avformat_free_context);
+    ASSERT_NE(input, nullptr);
+    AVStream* attachment = avformat_new_stream(input.get(), nullptr);
+    ASSERT_NE(attachment, nullptr);
+    attachment->codecpar->codec_type = AVMEDIA_TYPE_ATTACHMENT;
+    attachment->codecpar->codec_id = AV_CODEC_ID_TTF;
+    av_dict_set(&attachment->metadata, "filename", "font.ttf", 0);
+    av_dict_set(&attachment->metadata, "mimetype", "application/x-truetype-font", 0);
+
+    for (const char* extension : {"mkv", "mp4"}) {
+        AVFormatContext* rawOutput = nullptr;
+        ASSERT_EQ(avformat_alloc_output_context2(&rawOutput, nullptr, nullptr, (std::string("test.") + extension).c_str()), 0);
+        auto output = std::unique_ptr<AVFormatContext, decltype(&avformat_free_context)>(rawOutput, avformat_free_context);
+        video_utils::AuxiliaryMux mux;
+        video_utils::AuxiliaryMuxSetup setup;
+        setup.input = input.get();
+        setup.output = output.get();
+        setup.outputPath = std::string("test.") + extension;
+        std::string error;
+        ASSERT_TRUE(mux.configure(setup, error)) << error;
+        if (std::string_view(extension) == "mkv") {
+            ASSERT_EQ(output->nb_streams, 1u);
+            EXPECT_EQ(output->streams[0]->codecpar->codec_id, AV_CODEC_ID_TTF);
+            EXPECT_STREQ(av_dict_get(output->streams[0]->metadata, "filename", nullptr, 0)->value, "font.ttf");
+        } else {
+            EXPECT_EQ(output->nb_streams, 0u);
+        }
+    }
+}
+
 TEST(EncodeOptionsTest, ExtractsTheEncoderAndForwardsTheRest) {
     const video_utils::ParsedEncodeOptions parsed = video_utils::parseEncodeOptions("-c:v libx265 -preset fast -crf 23");
     EXPECT_EQ(parsed.codecName, "libx265");

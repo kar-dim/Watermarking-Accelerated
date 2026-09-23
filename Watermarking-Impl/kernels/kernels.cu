@@ -488,7 +488,7 @@ __global__ void me_u_and_sumsq_fused(
 __global__ void apply_watermark_fused(const float* __restrict__ input, const float* __restrict__ u, const uint64_t* __restrict__ sumSqPtr, uint8_t* __restrict__ output, const float strengthNumerator,
     const int planeElements, const int numChannels) {
     const float uSumSquared = toUnscaledFloat(*sumSqPtr); // read the precomputed sum of squares from global memory (all threads read the same value, it is cached)
-    const float strength = uSumSquared > 1e-12f ? strengthNumerator * rsqrtf(uSumSquared) : 0.0f;
+    const float strength = uSumSquared > 1e-3f ? strengthNumerator * rsqrtf(uSumSquared) : 0.0f;
     // grid stride loop over the PLANE (HxW) only (if 1 channel then it's the whole image)
     const int gridSize = blockDim.x * gridDim.x;
     int idx = blockIdx.x * blockDim.x + threadIdx.x;

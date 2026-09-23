@@ -3,8 +3,8 @@
 #include "WatermarkCore.hpp"
 #include <algorithm>
 #include <array>
-#include <cerrno>
 #include <cctype>
+#include <cerrno>
 #include <chrono>
 #include <cstdlib>
 #include <exception>
@@ -20,6 +20,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 #include <WatermarkTypes.hpp>
@@ -49,7 +50,7 @@ constexpr std::array cliSettings = {
     OptionDefinition{"compute", "cuda_hw_encoder"     },
     OptionDefinition{"image",   "mode"                },
     OptionDefinition{"image",   "path"                },
-    OptionDefinition{"image",   "save_to_disk"        },
+    OptionDefinition{"image",   "output_path"         },
     OptionDefinition{"image",   "benchmark_loops"     },
     OptionDefinition{"video",   "mode"                },
     OptionDefinition{"video",   "path"                },
@@ -67,6 +68,7 @@ struct CommandLineOptions {
     std::map<string, string> settings;
     string settingsFile = "settings.ini";
     bool benchmark = false;
+    bool benchmarkSave = false;
     bool help = false;
     bool noPause = false;
 };
@@ -112,6 +114,12 @@ CommandLineOptions parseCommandLine(const int argc, char* argv[]) {
             result.noPause = true;
             continue;
         }
+        if (argument == "--bench-save") {
+            result.benchmark = true;
+            result.benchmarkSave = true;
+            result.noPause = true;
+            continue;
+        }
         if (argument == "--no-pause") {
             result.noPause = true;
             continue;
@@ -153,6 +161,7 @@ The application reads settings.ini, then applies command-line overrides.
 Control options:
   --bench                    Benchmark ME embed/detect for p=3,5,7,9 and 480p..4K.
                              Writes benchmarks/{cuda,opencl,eigen}.csv.
+  --bench-save               Also save one embedded image per benchmark case.
   --settings FILE            Read a different INI file (default: settings.ini).
   --no-pause                 Do not wait for a key before exiting.
   -h, --help                 Show this help.
@@ -161,7 +170,7 @@ Settings:
   --watermark_password VALUE --p VALUE                 --psnr VALUE
   --display_fps VALUE        --opencl_device_id VALUE  --cuda_hw_decoder VALUE
   --cuda_hw_encoder VALUE    --image.mode VALUE        --image.path VALUE
-  --save_to_disk VALUE       --benchmark_loops VALUE   --video.mode VALUE
+  --output_path VALUE        --benchmark_loops VALUE   --video.mode VALUE
   --video.path VALUE         --encode_output_path VALUE
   --encode_codec_options VALUE  --hw_encode_options VALUE
   --watermark_interval VALUE
@@ -357,56 +366,35 @@ static int testForImageBatch(const Settings& inir, const int p, const float psnr
     return EXIT_SUCCESS;
 }
 
-// single image processing, it loads the image, embeds the watermark, detects it, and optionally saves the watermarked image to disk
+// embed one ME watermark and write the requested output image
 static int testForImageSingle(const Settings& inir, const int p, const float psnr) {
     const string imageFile = inir.Get("image", "path", "NO_IMAGE");
     checkError(imageFile == "NO_IMAGE", "No valid image file specified!");
+    const string outputPath = inir.Get("image", "output_path", "");
+    checkError(outputPath.empty(), "Single image mode requires --output_path (or [image]/output_path).");
+    std::error_code pathError;
+    checkError(fs::equivalent(imageFile, outputPath, pathError), "Input and output image must be different files.");
     const string watermarkPassword = inir.Get("global", "watermark_password", "");
     checkError(watermarkPassword.empty(), "No valid watermark seed specified!");
     const bool showFps = inir.GetBoolean("global", "display_fps", true);
-    const bool saveToDisk = inir.GetBoolean("image", "save_to_disk", false);
-    int loops = inir.GetInteger("image", "benchmark_loops", 5);
-    loops = loops <= 0 ? 5 : loops;
 
-    cout << "Each test will be executed " << loops << " times.\n";
-
-    // load watermarking session
     auto s = createImageSession(watermarkPassword, p, psnr);
     const double loadTime = executionTime([&]() { loadImage(s.get(), imageFile); }, 1, false);
     cout << "Time to load image data from disk: " << loadTime << " seconds\n";
     const auto dims = getImageDims(s.get());
     cout << info("Image size is: " + std::to_string(dims.first) + "x" + std::to_string(dims.second) + " (HxW)\n\n");
-
-    // helper lambda for embedding and detection benchmarks
-    auto runWatermarkingProcess = [&](MaskMethod method, const string& name) {
-        // embed
-        const double embedTime = executionTime(
-            [&]() {
-                embedImage(s.get(), method);
-                finish();
-            },
-            loops);
-        cout << std::format("Calculation of {} mask (p = {}, PSNR = {}dB)\n{}\n\n", name, p, psnr, formatExecutionTime(showFps, embedTime / loops));
-        // prepare buffer for detection (convert to float)
-        prepareDetectionImage(s.get(), method);
-        // detect
-        float corr = 0;
-        const double detectTime = executionTime([&]() { corr = detectEmbeddedBuffer(s.get(), method); }, loops);
-        cout << std::format("Calculation of {} correlation:\n{}\n\n", name, formatExecutionTime(showFps, detectTime / loops));
-        // optionally save to disk
-        if (saveToDisk) {
-            cout << "Writing to disk... ";
-            saveImage(s.get(), imageFile, method);
-            cout << success("Successfully saved to disk\n\n");
-        }
-        return corr;
-    };
-
-    // run benchmarks for ME and NVF
-    const float corrNvf = runWatermarkingProcess(MaskMethod::NVF, "NVF");
-    const float corrMe = runWatermarkingProcess(MaskMethod::ME, "ME");
-    cout << std::format("Correlation [NVF]: {:.16f}\n", corrNvf);
-    cout << std::format("Correlation [ME]:  {:.16f}\n", corrMe);
+    const double embedTime = executionTime(
+        [&]() {
+            embedImage(s.get(), MaskMethod::ME);
+            finish();
+        },
+        1, false);
+    saveImageExact(s.get(), outputPath);
+    cout << success(std::format("Embedded ME watermark in '{}' (p = {}, PSNR = {} dB).\n", outputPath, p, psnr));
+    cout << std::format("Embed time: {:.6f} seconds", embedTime);
+    if (showFps && embedTime > 0)
+        cout << std::format(" ({:.2f} FPS)", 1.0 / embedTime);
+    cout << '\n';
     return EXIT_SUCCESS;
 }
 
@@ -455,7 +443,7 @@ static int testForVideo(const Settings& inir, const string& videoFile, const int
 }
 
 // Runs ME mask benchmark across standard resolutions and prediction orders, writing CSV output
-static int runCliBenchmark(const Settings& settings, const float psnr) {
+static int runCliBenchmark(const Settings& settings, const float psnr, const bool saveImages) {
     // Benchmark test image definition
     struct BenchmarkImage {
         const char* resolution;
@@ -472,7 +460,9 @@ static int runCliBenchmark(const Settings& settings, const float psnr) {
     const string backend = getBackendName();
     const string device = getDeviceName();
     // Use fewer iterations for CPU backend to keep benchmark duration reasonable
-    const int loops = backend == "eigen" ? 100 : 1000;
+    const int defaultLoops = backend == "eigen" ? 100 : 1000;
+    const int loops = settings.GetInteger("image", "benchmark_loops", defaultLoops);
+    checkError(loops <= 0, "benchmark_loops must be positive.");
     const string watermarkPassword = settings.Get("global", "watermark_password", "");
     checkError(watermarkPassword.empty(), "No valid watermark password specified!");
 
@@ -503,6 +493,11 @@ static int runCliBenchmark(const Settings& settings, const float psnr) {
                                             },
                                             loops) /
                                         loops;
+            if (saveImages) {
+                const fs::path imagesDir = outputDir / (backend + "_images");
+                fs::create_directories(imagesDir);
+                saveImageExact(session.get(), (imagesDir / std::format("p{}_{}.png", p, image.resolution)).string());
+            }
             // Measure detection execution time and correlation
             prepareDetectionImage(session.get(), MaskMethod::ME);
             float correlation = 0.0f;
@@ -554,7 +549,7 @@ int main(const int argc, char* argv[]) {
             throw std::runtime_error("PSNR must be a positive number");
         // Run standalone benchmark if requested
         if (commandLine.benchmark)
-            return runCliBenchmark(inir, psnr);
+            return runCliBenchmark(inir, psnr, commandLine.benchmarkSave);
 
         const int p = inir.GetInteger("global", "p", -1);
         if (p != 3 && p != 5 && p != 7 && p != 9)

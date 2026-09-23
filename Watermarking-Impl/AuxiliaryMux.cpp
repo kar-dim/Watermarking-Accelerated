@@ -156,6 +156,14 @@ bool AuxiliaryMux::configure(const AuxiliaryMuxSetup& setup, std::string& error)
             if (!addSubtitle(stream, index, setup.outputPath, setup.videoWidth, setup.videoHeight, error)) {
                 return false;
             }
+        } else if (stream->codecpar->codec_type == AVMEDIA_TYPE_ATTACHMENT) {
+            const std::string_view formatName = output_->oformat->name != nullptr ? output_->oformat->name : "";
+            if (formatName == "matroska") {
+                if (!copyStream(stream, index, error))
+                    return false;
+            } else if (log_) {
+                log_(std::format("attachment stream #{} ({}) cannot be stored in this container, dropping it", index, codecName(stream->codecpar->codec_id)));
+            }
         }
     }
 

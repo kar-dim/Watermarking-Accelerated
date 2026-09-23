@@ -358,7 +358,7 @@ __kernel void apply_watermark_fused(
     const int numChannels) 
 {
     const float uSumSquared = toUnscaledFloat(*sumSqPtr);
-    float strength = (uSumSquared > 1e-12f) ? (strengthNumerator * rsqrt(uSumSquared)) : 0.0f;
+    float strength = (uSumSquared > 1e-3f) ? (strengthNumerator * rsqrt(uSumSquared)) : 0.0f;
     const int stride = get_global_size(0);
     int idx = get_global_id(0);
     while (idx < planeElements) {

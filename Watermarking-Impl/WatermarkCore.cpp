@@ -79,12 +79,14 @@ void ExportedImageDeleter::operator()(ExportedImage* p) const { delete p; }
 
 ExportHandle createReusableExportBuffer() { return ExportHandle(new ExportedImage()); }
 
-// copy data to the export buffer (D2D clone for GPU builds, shallow copy for Eigen)
-void exportForSave(const ImageSession* s, ExportedImage* p, MaskMethod method) {
+// Move the CPU output into an idle export buffer, GPU builds clone device data
+void exportForSave(ImageSession* s, ExportedImage* p, MaskMethod method) {
 #if defined(_USE_GPU_)
     p->finalPixels = s->watermarkBuffer.clone();
 #else
-    p->finalPixels = s->watermarkBuffer;
+    if (!p->finalPixels.matches(s->currentRows, s->currentCols, s->currentIsRGB))
+        p->finalPixels = s->currentIsRGB ? ImageOutputBuffer(eigen_utils::makeEigenRGBu8(s->currentRows, s->currentCols)) : ImageOutputBuffer(Gray8Buffer(s->currentRows, s->currentCols));
+    std::swap(p->finalPixels, s->watermarkBuffer);
 #endif
     p->alpha = s->imgBuffer.alphaChannel;
 }
@@ -354,6 +356,8 @@ void saveImage(const ImageSession* s, const string& outPath, MaskMethod method) 
     const string suffix = method == MaskMethod::NVF ? "W_NVF" : "W_ME";
     InternalUtils::saveImage(outPath, suffix, s->watermarkBuffer, s->imgBuffer.alphaChannel);
 }
+
+void saveImageExact(const ImageSession* s, const string& outPath) { InternalUtils::saveImage(outPath, "", s->watermarkBuffer, s->imgBuffer.alphaChannel); }
 
 // definition of the Video session struct and its deleter
 void VideoSessionDeleter::operator()(VideoSession* s) const { delete s; }

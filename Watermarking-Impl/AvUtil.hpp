@@ -9,6 +9,8 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <map>
+#include <limits>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -42,6 +44,48 @@ inline void checkAv(const int avRet, const std::string& what) {
 
 // retrieve PTS for a decoded frame (falls back to best_effort_timestamp if pts is missing)
 inline int64_t framePts(const AVFrame* f) { return (f->pts != AV_NOPTS_VALUE) ? f->pts : f->best_effort_timestamp; }
+
+inline bool enforceMonotonicDts(AVPacket* packet, int64_t& lastWrittenDts) {
+    if (packet->dts == AV_NOPTS_VALUE)
+        return false;
+    bool repaired = false;
+    if (packet->pts != AV_NOPTS_VALUE && packet->dts > packet->pts) {
+        packet->dts = packet->pts;
+        repaired = true;
+    }
+    if (lastWrittenDts != AV_NOPTS_VALUE && packet->dts <= lastWrittenDts) {
+        if (lastWrittenDts == std::numeric_limits<int64_t>::max())
+            throw std::runtime_error("Encoded video DTS exceeds the supported timestamp range");
+        const int64_t earliest = lastWrittenDts + 1;
+        if (packet->pts != AV_NOPTS_VALUE && packet->pts < earliest)
+            packet->pts = earliest;
+        packet->dts = earliest;
+        repaired = true;
+    }
+    lastWrittenDts = packet->dts;
+    return repaired;
+}
+
+class PacketDurations {
+  public:
+    void remember(const AVFrame* frame) {
+        if (frame->pts != AV_NOPTS_VALUE && frame->duration > 0)
+            byPts_.insert_or_assign(frame->pts, frame->duration);
+        if (byPts_.size() > 4096)
+            byPts_.erase(byPts_.begin());
+    }
+    void restore(AVPacket* packet) {
+        const auto found = byPts_.find(packet->pts);
+        if (found == byPts_.end())
+            return;
+        if (packet->duration <= 0)
+            packet->duration = found->second;
+        byPts_.erase(found);
+    }
+
+  private:
+    std::map<int64_t, int64_t> byPts_;
+};
 
 // RAII wrapper for AVDictionary*
 class OptionDict {

@@ -19,7 +19,7 @@ This repository provides a high performance implementation designed for real-wor
   <img width="625" height="232" alt="backends" src="https://github.com/user-attachments/assets/4f82798b-d0e1-4ad7-8015-2ba506280575" />
 </p>
 
-This project implements and evaluates the performance (execution speed) of image watermarking algorithms on CPU versus GPU. It provides multiple implementations to enable comparisons between compute backends. Watermarks are generated as standard normal distributed matrices (μ=0, σ=1). For cryptographic robustness, a user password is hashed with ```SHA-256``` and this 256-bit value is used as a 256-bit key for the ```ChaCha20 block cipher```. This CSPRNG ensures bit exact, and cross platform determinism. The implementation is highly parallelized with OpenMP. The chosen transform for normal distribution is ```Box-Muller transform```. Two watermark masks are used: The proposed Prediction Error mask, which is the main focus of the Thesis, and the NVF (Noise Visibility Function) mask for comparison purposes. The system supports both embedding and detection of watermarks in disk images and video streams. Video processing is handled via FFmpeg, enabling broad codec and container support, along with advanced features such as GPU-accelerated video decoding and encoding (CUDA only) and 10-bit/HDR (tonemapped) video support.
+This project implements and evaluates the performance (execution speed) of image watermarking algorithms on CPU versus GPU. It provides multiple implementations to enable comparisons between compute backends. Watermarks are generated as standard normal distributed matrices (μ=0, σ=1). For cryptographic robustness, a user password is hashed with ```SHA-256``` and this 256-bit value is used as a 256-bit key for the ```ChaCha20 block cipher```. The CSPRNG produces a deterministic stream of random bits; the floating-point normal transform can differ slightly between builds or hardware. The implementation is highly parallelized with OpenMP. The chosen transform for normal distribution is ```Box-Muller transform```. Two watermark masks are used: The proposed Prediction Error mask, which is the main focus of the Thesis, and the NVF (Noise Visibility Function) mask for comparison purposes. The system supports both embedding and detection of watermarks in disk images and video streams. Video processing is handled via FFmpeg, enabling broad codec and container support, along with advanced features such as GPU-accelerated video decoding and encoding (CUDA only) and 10-bit/HDR (tonemapped) video support.
 
 The repository contains all required source code and dependencies needed to reproduce the benchmarks and experiments.
 
@@ -46,9 +46,9 @@ Get the latest binaries [here](https://github.com/kar-dim/Watermarking-Accelerat
 - Some sample image and video files
 
 The CLI application:
-   - Embeds or detects the watermark using the NVF and the proposed Prediction-Error mask for images and videos.
+   - Embeds the proposed Prediction-Error mask once for a single image and writes the requested output file.
    - For image mode only: Supports **batched** operation: It can embed or detect the watermark for all images under a specified folder. It is highly parallelized for both operations to reduce disk I/O latency.
-   - Prints FPS/execution time for both operations, and both masks.
+   - Provides a separate `--bench` mode for repeated ME embedding and detection measurements and CSV output. Add `--bench-save` to save the benchmark images.
 
 The Benchmark application:
   - Embeds the proposed Prediction-Error mask watermark for a predefined set of images and shows the watermarkedf result on the fly in a window.
@@ -59,7 +59,7 @@ The Benchmark application:
 $$\text{Score} = C \cdot \sqrt{\text{FPS}_{\text{embed}} \cdot \text{FPS}_{\text{detect}}}$$
 
 **NOTE**:
-1. For video and image batched operations only the proposed mask is used, which is more optimal. The NVF based watermarked image is only saved for single images (explained below) and not in batched mode.
+1. The CLI uses the proposed mask for single images, batches, video, and its `--bench` mode.
 2. All implementations are built with ```AVX2``` support:
      - clang (CPU builds): ```-mavx2 -mfma```
      - MSVC (GPU builds): ```/arch:AVX2```
@@ -68,16 +68,18 @@ To enable ```AVX-512``` replace the previous with: ```-march=native``` (clang) o
 
 The CLI application can be parameterized from the corresponding ```settings.ini``` file or with command-line arguments. Command-line values override the INI file, use the INI key as the option name (for example, ```--p 5```, ```--psnr=42```, or ```--opencl_device_id 1```). Because both image and video settings contain ```mode``` and ```path```, those options must include their section: ```--image.mode single```, ```--image.path samples/images/720p.png```, ```--video.mode detect```, etc. Run ```Watermarking-CLI.exe --help``` for the complete list. Here is a detailed explanation for each parameter:
 
+For a one-shot image embed: `Watermarking-CLI.exe --image.mode single --image.path samples/images/720p.png --output_path 720p_watermarked.png --no-pause`. For the repeated benchmark instead: `Watermarking-CLI.exe --bench --benchmark_loops 100`.
+
 | Parameter                         | Description                                                                                                                 |
 |-----------------------------------|-----------------------------------------------------------------------------------------------------------------------------               |
-| \[image\]/mode                    | ```[single, batch_embed, batch_detect]```: (Image mode only) Set the image mode option. If ```single``` the application will read the image file specified at ```[image]/path]``` and embeds/detects the watermark and prints results. If ```batch_embed``` or ```batch_detect``` then it reads a directory specified at at ```[image]/path]``` and it either embeds the watermark for all the image files it finds, writing them in a new folder called ```watermark_output``` in the specified folder, or it tries to detect the watermark and prints the correlation values.
+| \[image\]/mode                    | ```[single, batch_embed, batch_detect]```: `single` embeds ME once into `[image]/path`, writes `[image]/output_path`, and reports embed time. Batch modes embed or detect all images under the directory in `[image]/path`; embedding writes to its `watermark_output` subdirectory. |
 | \[image\]/path                    | Path to the input image (or directory for batched operations) to embed/detect watermark. This will set the sample application to ```image mode``` |
+| \[image\]/output_path             | Required output filename for `single` mode. The input image cannot be overwritten. |
 | watermark_password                | The watermark password. Used to generate a deterministic and secure (as much as possible) watermark. |
-| save_to_disk                      | ```[true/false]```: (Image mode only) Set to true to save the watermarked NVF and Prediction-Error files to disk, works only if mode is ```single```.                                                |
 | display_fps                       | ```[true/false]```: Set to true to display execution times in FPS. Else, it will display execution time in seconds.                            |
-| p                                 | Window size for masking algorithms. All implementations support values of ```p=3,5,7``` and ```9```. |
+| p                                 | Window size for masking algorithms. All implementations support values of ```p=3,5,7``` and ```9```. Images and video frames must be at least ```p x p``` pixels. |
 | psnr                              | PSNR (Peak Signal-to-Noise Ratio). Higher values correspond to less watermark in the image, reducing noise, but making detection harder.   |
-| benchmark_loops                   | (Image mode only) Loops the algorithms many times, simulating more work. A value of ```100~1000``` produces consistent execution times. Works only if mode is ```single```.                         |
+| benchmark_loops                   | Positive iteration count for `--bench` only. The default is 100 on Eigen and 1000 on GPU backends. |
 | opencl_device_id                  | ```[OpenCL only / Number]```: Works only for OpenCL binary. If multiple OpenCL devices are found, then set this to the desired device. Set it to 0 if one device is found. |
 
 
@@ -96,7 +98,7 @@ The CLI application can be parameterized from the corresponding ```settings.ini`
 
 # Video Encoding Pipeline
 
-The application uses the **FFmpeg libraries (libav\*)** directly, no `ffmpeg.exe` is required or invoked. The pipeline decodes the input with libavcodec, watermarks each selected luma frame, re-encodes the watermarked video with the chosen codec, and remuxes all audio and subtitle streams directly from the source container without re-encoding them. PTS timestamps are passed through unchanged, so both **CFR and VFR** inputs are handled correctly.
+The application uses the **FFmpeg libraries (libav\*)** directly, no `ffmpeg.exe` is required or invoked. It decodes the input, watermarks selected luma frames, re-encodes the video, and remuxes compatible audio and subtitle streams. Incompatible text subtitles may be transcoded; unsupported subtitles are dropped. Matroska attachments, chapters, and metadata are preserved where supported. Decoded frame PTS and durations are forwarded to the encoder; invalid output video DTS is repaired before muxing.
 
 You can customize the video codec and its quality settings via the ```encode_codec_options``` / ```hw_encode_options``` parameters described above.
 
@@ -211,7 +213,7 @@ The CLI benchmark sweep can be reproduced automatically from the repository root
 python benchmark.py --run
 ```
 
-This runs the CUDA and OpenCL Release CLIs with 1000 loops per measurement and the Eigen/CPU Release CLI with 100 loops. Each CLI's ```--bench``` mode benchmarks ME embedding and detection for p=3,5,7,9 using the 480p, 720p, 1080p, and 4K sample images. Raw results are written to ```benchmarks/cuda.csv```, ```benchmarks/opencl.csv```, and ```benchmarks/eigen.csv```, after which figures 1–4 are regenerated. To redraw the figures without rerunning the benchmarks, use ```python benchmark.py --figures```. An OpenCL device can be selected with ```--opencl-device-id N``` when using ```--run```.
+This runs the CUDA and OpenCL Release CLIs with 1000 loops per measurement and the Eigen/CPU Release CLI with 100 loops. Pass `--loops N` to `benchmark.py --run` to set the same positive loop count for all three backends. Each CLI's ```--bench``` mode benchmarks ME embedding and detection for p=3,5,7,9 using the 480p, 720p, 1080p, and 4K sample images. Raw results are written to ```benchmarks/cuda.csv```, ```benchmarks/opencl.csv```, and ```benchmarks/eigen.csv```, after which figures 1–4 are regenerated. To redraw the figures without rerunning the benchmarks, use ```python benchmark.py --figures```. An OpenCL device can be selected with ```--opencl-device-id N``` when using ```--run```.
 
 p = 3            |  p = 5
 :-------------------------:|:-------------------------:

@@ -49,6 +49,9 @@ struct VideoSession {
     video_utils::AVCodecContextPtr outputEncoderCtx;
     video_utils::AuxiliaryMux auxMux; // handles audio remux and subtitle transcoding
     int outputVideoStreamIndex = -1;
+    video_utils::PacketDurations frameDurations;
+    int64_t lastWrittenVideoDts = AV_NOPTS_VALUE;
+    bool reportedDtsRepair = false;
     // convenient getter for video properties
     inline std::pair<int, int> videoDims() const { return {videoStream->codecpar->height, videoStream->codecpar->width}; }
 };

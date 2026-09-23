@@ -55,8 +55,11 @@ void prepareDetectionImage(ImageSession* session, MaskMethod method);
 float detectLoadedImage(const ImageSession* session, MaskMethod method);
 float detectEmbeddedBuffer(const ImageSession* session, MaskMethod method);
 void saveImage(const ImageSession* session, const std::string& outPath, MaskMethod method);
+void saveImageExact(const ImageSession* session, const std::string& outPath);
 ExportHandle createReusableExportBuffer();
-void exportForSave(const ImageSession* session, ExportedImage* reusableBuffer, MaskMethod method);
+// on the Eigen backend this transfers the session output to the export buffer
+// call embedImage again before reading, detecting, or saving the session output
+void exportForSave(ImageSession* session, ExportedImage* reusableBuffer, MaskMethod method);
 void flushToDiskAsync(ExportedImage* handle, const std::string& outPath, MaskMethod method);
 SessionPixelData getSessionPixelData(const ImageSession* session);
 void optimizeThreadsForVideoEmbedding();

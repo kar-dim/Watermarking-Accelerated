@@ -23,6 +23,17 @@ class ImageEigenOutputBuffer {
     ImageEigenOutputBuffer(EigenArrayU8RGB&& rgb) noexcept : data(std::move(rgb)) {}
 
     bool isRGB() const { return std::holds_alternative<EigenArrayU8RGB>(data); }
+    bool matches(const int rows, const int cols, const bool rgb) const {
+        if (rgb) {
+            if (!isRGB())
+                return false;
+            const auto& channels = getRGB();
+            return channels[0].rows() == rows && channels[0].cols() == cols;
+        }
+        if (!std::holds_alternative<Gray8Buffer>(data))
+            return false;
+        return getGray().rows() == rows && getGray().cols() == cols;
+    }
     const Gray8Buffer& getGray() const { return std::get<Gray8Buffer>(data); }
     const EigenArrayU8RGB& getRGB() const { return std::get<EigenArrayU8RGB>(data); }
     Gray8Buffer& getGray() { return std::get<Gray8Buffer>(data); }

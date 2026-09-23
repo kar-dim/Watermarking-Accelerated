@@ -11,6 +11,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #if defined(_USE_OPENCL_)
 #include "OclQueueManager.hpp"
 #include "OclArray.hpp"
@@ -92,22 +93,15 @@ ImageBuffer cimgGrayToGpu(const FloatBufferIO& img, cudaStream_t stream) {
     return colMajor;
 }
 
-ImageBuffer cimgRgbToGpu(const FloatBufferIO& img, cudaStream_t stream) {
+std::pair<ImageBuffer, ImageBuffer> cimgRgbToGpuAndGray(const FloatBufferIO& img, cudaStream_t stream) {
     const int rows = img.height();
     const int cols = img.width();
     CudaArray<float> rowMajor(rows, cols, 3, img.data(), stream);
-    CudaArray<float> colMajor(rows, cols, 3, stream);
-    cuda_utils::launchRowMajorToColMajorFloatKernel(rowMajor.data(), colMajor.data(), cols, rows, 3, stream);
-    return colMajor;
-}
-
-ImageBuffer cimgRgbToGpuGray(const FloatBufferIO& img, cudaStream_t stream) {
-    const int rows = img.height();
-    const int cols = img.width();
-    CudaArray<float> rowMajor(rows, cols, 3, img.data(), stream);
-    CudaArray<float> colMajor(rows, cols, stream);
-    cuda_utils::launchRowMajorRGBToColMajorGrayKernel(rowMajor.data(), colMajor.data(), cols, rows, stream);
-    return colMajor;
+    CudaArray<float> rgb(rows, cols, 3, stream);
+    CudaArray<float> gray(rows, cols, stream);
+    cuda_utils::launchRowMajorToColMajorFloatKernel(rowMajor.data(), rgb.data(), cols, rows, 3, stream);
+    cuda_utils::launchRowMajorRGBToColMajorGrayKernel(rowMajor.data(), gray.data(), cols, rows, stream);
+    return {std::move(rgb), std::move(gray)};
 }
 
 #elif defined(_USE_OPENCL_)
@@ -122,24 +116,16 @@ ImageBuffer cimgGrayToGpu(const FloatBufferIO& img, cl_command_queue queue) {
     return colMajor;
 }
 
-ImageBuffer cimgRgbToGpu(const FloatBufferIO& img, cl_command_queue queue) {
+std::pair<ImageBuffer, ImageBuffer> cimgRgbToGpuAndGray(const FloatBufferIO& img, cl_command_queue queue) {
     const int rows = img.height();
     const int cols = img.width();
     OclArray<float> rowMajor(rows, cols, 3, img.data(), queue);
-    OclArray<float> colMajor(rows, cols, 3, queue);
+    OclArray<float> rgb(rows, cols, 3, queue);
+    OclArray<float> gray(rows, cols, queue);
     auto& q = OclQueueManager::getInstance().getQueue();
-    cl_utils::launchRowMajorToColMajorFloat(rowMajor.clBuffer(), colMajor.clBuffer(), cols, rows, 3, q);
-    return colMajor;
-}
-
-ImageBuffer cimgRgbToGpuGray(const FloatBufferIO& img, cl_command_queue queue) {
-    const int rows = img.height();
-    const int cols = img.width();
-    OclArray<float> rowMajor(rows, cols, 3, img.data(), queue);
-    OclArray<float> colMajor(rows, cols, queue);
-    auto& q = OclQueueManager::getInstance().getQueue();
-    cl_utils::launchRowMajorRGBToColMajorGray(rowMajor.clBuffer(), colMajor.clBuffer(), cols, rows, q);
-    return colMajor;
+    cl_utils::launchRowMajorToColMajorFloat(rowMajor.clBuffer(), rgb.clBuffer(), cols, rows, 3, q);
+    cl_utils::launchRowMajorRGBToColMajorGray(rowMajor.clBuffer(), gray.clBuffer(), cols, rows, q);
+    return {std::move(rgb), std::move(gray)};
 }
 #endif
 
@@ -174,6 +160,10 @@ void InternalUtils::saveImage(const string& imagePath, const string& suffix, con
 }
 
 std::unique_ptr<WatermarkBase> InternalUtils::createWatermarkObject(const unsigned int height, const unsigned int width, const string& watermarkPassword, const int p, const float psnr) {
+    if (p != 3 && p != 5 && p != 7 && p != 9)
+        throw std::invalid_argument("Unsupported value for p. Allowed p values: 3, 5, 7, 9");
+    if (height < static_cast<unsigned int>(p) || width < static_cast<unsigned int>(p))
+        throw std::invalid_argument("Image dimensions must each be at least p pixels");
 #if defined(_USE_OPENCL_)
     switch (p) {
     case 3: return std::make_unique<WatermarkOCL<3>>(height, width, watermarkPassword, psnr); break;
@@ -234,18 +224,21 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile) {
 #endif
     switch (cimgRgb.spectrum()) {
     case 1: image = cimgGrayToGpu(cimgRgb, stream); break;
-    case 3:
-        rgbImage = cimgRgbToGpu(cimgRgb, stream);
-        image = cimgRgbToGpuGray(cimgRgb, stream);
+    case 3: {
+        auto [rgb, gray] = cimgRgbToGpuAndGray(cimgRgb, stream);
+        rgbImage = std::move(rgb);
+        image = std::move(gray);
         isRGB = true;
         break;
+    }
     case 4: {
         // CImg<float> -> CImg<uint8_t> creates an owning copy, so we are safe
         alphaChannel.emplace(cimgRgb.get_shared_channel(3));
         auto rgbView = cimgRgb.get_shared_channels(0, 2);
         cimgAlphaZero(rgbView, *alphaChannel);
-        rgbImage = cimgRgbToGpu(rgbView, stream);
-        image = cimgRgbToGpuGray(rgbView, stream);
+        auto [rgb, gray] = cimgRgbToGpuAndGray(rgbView, stream);
+        rgbImage = std::move(rgb);
+        image = std::move(gray);
         isRGB = true;
         break;
     }
