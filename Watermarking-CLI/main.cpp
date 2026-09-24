@@ -45,6 +45,7 @@ constexpr std::array cliSettings = {
     OptionDefinition{"global",  "p"                   },
     OptionDefinition{"global",  "psnr"                },
     OptionDefinition{"global",  "display_fps"         },
+    OptionDefinition{"compute", "gpu_device_id"       },
     OptionDefinition{"compute", "opencl_device_id"    },
     OptionDefinition{"compute", "cuda_hw_decoder"     },
     OptionDefinition{"compute", "cuda_hw_encoder"     },
@@ -146,7 +147,8 @@ CommandLineOptions parseCommandLine(const int argc, char* argv[]) {
         }
         // Match option to setting definition and store override
         const auto definition = resolveOption(option);
-        result.settings[settingKey(definition.section, definition.name)] = std::move(value);
+        const auto name = definition.name == "opencl_device_id" ? "gpu_device_id" : definition.name;
+        result.settings[settingKey(definition.section, name)] = std::move(value);
     }
     return result;
 }
@@ -160,23 +162,40 @@ The application reads settings.ini, then applies command-line overrides.
 
 Control options:
   --bench                    Benchmark ME embed/detect for p=3,5,7,9 and 480p..4K.
-                             Writes benchmarks/{cuda,opencl,eigen}.csv.
+                             Writes readme_pictures/{cuda,opencl,eigen}.csv.
   --bench-save               Also save one embedded image per benchmark case.
   --settings FILE            Read a different INI file (default: settings.ini).
   --no-pause                 Do not wait for a key before exiting.
   -h, --help                 Show this help.
 
-Settings:
-  --watermark_password VALUE --p VALUE                 --psnr VALUE
-  --display_fps VALUE        --opencl_device_id VALUE  --cuda_hw_decoder VALUE
-  --cuda_hw_encoder VALUE    --image.mode VALUE        --image.path VALUE
-  --output_path VALUE        --benchmark_loops VALUE   --video.mode VALUE
-  --video.path VALUE         --encode_output_path VALUE
-  --encode_codec_options VALUE  --hw_encode_options VALUE
-  --watermark_interval VALUE
+Global settings:
+  --watermark_password TEXT  Password used to generate the watermark.
+  --p N                      Prediction window size: 3, 5, 7, or 9.
+  --psnr DB                  Embed strength as a positive PSNR value in dB.
+  --display_fps BOOL         Show FPS for video operations (true/false).
+
+Compute settings:
+  --gpu_device_id N          GPU device index (CUDA and OpenCL builds, defaults to 0).
+  --opencl_device_id N       Legacy alias for gpu_device_id.
+  --cuda_hw_decoder BOOL     Use NVDEC for video, with CPU fallback (CUDA only).
+  --cuda_hw_encoder BOOL     Use NVENC for video (true/false; all builds).
+
+Image settings:
+  --image.mode MODE          single, batch_embed, or batch_detect.
+  --image.path PATH          Input image, or input directory for batch mode.
+  --output_path FILE         Required destination file for single mode.
+  --benchmark_loops N        Positive measured loop count for --bench only.
+
+Video settings:
+  --video.mode MODE          embed or detect.
+  --video.path FILE          Input video; selects video mode when provided.
+  --encode_output_path FILE  Destination video file for embed mode.
+  --encode_codec_options STR Software encoder and options, e.g. -c:v libx265.
+  --hw_encode_options STR    NVENC encoder and options, e.g. -c:v hevc_nvenc.
+  --watermark_interval N     Embed or detect every Nth video frame (N >= 1).
 
 Every setting also accepts its section-qualified spelling, for example
---global.p=5 or --compute.opencl_device_id=1. Values may use '--key value' or
+--global.p=5 or --compute.gpu_device_id=1. Values may use '--key value' or
 '--key=value'. The duplicated mode/path names must be section-qualified.
 )";
 }
@@ -309,14 +328,15 @@ static int testForImageBatch(const Settings& inir, const int p, const float psnr
     // start the batch process (begin timer)
     const auto batchStart = std::chrono::high_resolution_clock::now();
     // preload the first image
-    std::future<PreloadedHandle> prefetchTask = std::async(std::launch::async, preloadImageFromDisk, validFiles[0].string());
+    const int selectedDevice = getCurrentDeviceIndex();
+    std::future<PreloadedHandle> prefetchTask = std::async(std::launch::async, preloadImageFromDisk, validFiles[0].string(), selectedDevice, false);
     for (size_t i = 0; i < validFiles.size(); i++) {
         bool nextPrefetchStarted = false;
         try {
             auto currentImage = prefetchTask.get();
             // spawn background thread to read the next image
             if (i + 1 < validFiles.size()) {
-                prefetchTask = std::async(std::launch::async, preloadImageFromDisk, validFiles[i + 1].string());
+                prefetchTask = std::async(std::launch::async, preloadImageFromDisk, validFiles[i + 1].string(), selectedDevice, false);
                 nextPrefetchStarted = true;
             }
             // give the buffer to the watermark engine (may trigger lazy init)
@@ -346,7 +366,7 @@ static int testForImageBatch(const Settings& inir, const int p, const float psnr
             // If the current prefetch failed before the next one was launched,
             // keep the pipeline moving. Do not launch the same prefetch twice.
             if (!nextPrefetchStarted && i + 1 < validFiles.size())
-                prefetchTask = std::async(std::launch::async, preloadImageFromDisk, validFiles[i + 1].string());
+                prefetchTask = std::async(std::launch::async, preloadImageFromDisk, validFiles[i + 1].string(), selectedDevice, false);
         }
     }
     // finish any pending saves before exiting
@@ -376,25 +396,17 @@ static int testForImageSingle(const Settings& inir, const int p, const float psn
     checkError(fs::equivalent(imageFile, outputPath, pathError), "Input and output image must be different files.");
     const string watermarkPassword = inir.Get("global", "watermark_password", "");
     checkError(watermarkPassword.empty(), "No valid watermark seed specified!");
-    const bool showFps = inir.GetBoolean("global", "display_fps", true);
-
+    const auto started = std::chrono::steady_clock::now();
     auto s = createImageSession(watermarkPassword, p, psnr);
-    const double loadTime = executionTime([&]() { loadImage(s.get(), imageFile); }, 1, false);
-    cout << "Time to load image data from disk: " << loadTime << " seconds\n";
+    loadImage(s.get(), imageFile);
     const auto dims = getImageDims(s.get());
     cout << info("Image size is: " + std::to_string(dims.first) + "x" + std::to_string(dims.second) + " (HxW)\n\n");
-    const double embedTime = executionTime(
-        [&]() {
-            embedImage(s.get(), MaskMethod::ME);
-            finish();
-        },
-        1, false);
+    embedImage(s.get(), MaskMethod::ME);
+    finish();
     saveImageExact(s.get(), outputPath);
+    const double totalSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
     cout << success(std::format("Embedded ME watermark in '{}' (p = {}, PSNR = {} dB).\n", outputPath, p, psnr));
-    cout << std::format("Embed time: {:.6f} seconds", embedTime);
-    if (showFps && embedTime > 0)
-        cout << std::format(" ({:.2f} FPS)", 1.0 / embedTime);
-    cout << '\n';
+    cout << std::format("Total image time (load, watermark setup, embed, save): {:.3f} seconds\n", totalSeconds);
     return EXIT_SUCCESS;
 }
 
@@ -467,7 +479,7 @@ static int runCliBenchmark(const Settings& settings, const float psnr, const boo
     checkError(watermarkPassword.empty(), "No valid watermark password specified!");
 
     // Create output folder and initialize benchmark CSV file
-    const fs::path outputDir = "benchmarks";
+    const fs::path outputDir = "readme_pictures";
     fs::create_directories(outputDir);
     const fs::path outputPath = outputDir / (backend + ".csv");
     std::ofstream output(outputPath, std::ios::trunc);
@@ -543,7 +555,8 @@ int main(const int argc, char* argv[]) {
         // Combine INI settings with command-line overrides
         const Settings inir(ini, commandLine.settings);
         // initialize backend data (GPU devices, OpenMP threads, etc.)
-        initializeEnvironment(inir.GetInteger("compute", "opencl_device_id", 0));
+        // the generic key takes precedence while old INI files remain valid
+        initializeEnvironment(inir.GetInteger("compute", "gpu_device_id", inir.GetInteger("compute", "opencl_device_id", 0)));
         const float psnr = inir.GetFloat("global", "psnr", -1.0f);
         if (psnr <= 0)
             throw std::runtime_error("PSNR must be a positive number");

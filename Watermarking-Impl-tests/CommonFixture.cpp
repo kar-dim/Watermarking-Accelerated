@@ -14,6 +14,7 @@
 #include <cmath>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <gtest/gtest.h>
 #include <iomanip>
 #include <iterator>
@@ -22,8 +23,13 @@
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <utility>
 #include <vector>
 #include <WatermarkTypes.hpp>
+
+#if defined(_USE_EIGEN_)
+#include <omp.h>
+#endif
 
 extern "C" {
 #include "libavutil/dict.h"
@@ -227,6 +233,42 @@ TEST_F(WatermarkTest, RejectsImagesSmallerThanPredictionWindow) {
     EXPECT_THROW(loadImage(session.get(), tinyImage.string()), std::invalid_argument);
 }
 
+TEST_F(WatermarkTest, OriginalPreviewInterleavesRgbPixelsAndTail) {
+    // 3x3 BMP -> one 8 pixel AVX2 block AND 1 scalar pixel (test when it is not multiple of 8)
+    std::array<uint8_t, 90> bmp{};
+    bmp[0] = 'B';
+    bmp[1] = 'M';
+    bmp[2] = 90;
+    bmp[10] = 54;
+    bmp[14] = 40;
+    bmp[18] = 3;
+    bmp[22] = 3;
+    bmp[26] = 1;
+    bmp[28] = 24;
+    bmp[34] = 36;
+    std::vector<uint8_t> expected;
+    for (int row = 0; row < 3; ++row)
+        for (int col = 0; col < 3; ++col) {
+            const uint8_t red = static_cast<uint8_t>((row * 3 + col) * 17);
+            expected.insert(expected.end(), {red, static_cast<uint8_t>(red + 1), static_cast<uint8_t>(red + 2)});
+            const size_t offset = 54 + static_cast<size_t>(2 - row) * 12 + col * 3;
+            bmp[offset] = static_cast<uint8_t>(red + 2);
+            bmp[offset + 1] = static_cast<uint8_t>(red + 1);
+            bmp[offset + 2] = red;
+        }
+    const fs::path input = tempDir / "preview_tail.bmp";
+    {
+        std::ofstream output(input, std::ios::binary);
+        ASSERT_TRUE(output.write(reinterpret_cast<const char*>(bmp.data()), bmp.size()));
+    }
+    loadImage(session.get(), input.string(), true);
+    const OriginalPixelData preview = takeOriginalPixelData(session.get());
+    EXPECT_EQ(preview.width, 3);
+    EXPECT_EQ(preview.height, 3);
+    EXPECT_EQ(preview.channels, 3);
+    EXPECT_EQ(preview.pixels, expected);
+}
+
 TEST_F(WatermarkTest, EmbedsAndDetectsBothMasks) {
     for (const MaskMethod method : {MaskMethod::NVF, MaskMethod::ME}) {
         embedImage(session.get(), method);
@@ -347,7 +389,9 @@ TEST_F(WatermarkTest, RejectsUndocumentedPredictionOrder) {
 TEST_F(WatermarkTest, PreservesTheAlphaChannelWhenSaving) {
     ASSERT_TRUE(fs::exists(alphaImage)) << alphaImage;
     ImageHandle alphaSession = createImageSession(defaultPassword, defaultP, defaultPsnr);
-    loadImage(alphaSession.get(), alphaImage.string());
+    loadImage(alphaSession.get(), alphaImage.string(), true);
+    const OriginalPixelData original = takeOriginalPixelData(alphaSession.get());
+    ASSERT_EQ(original.channels, 4);
     embedImage(alphaSession.get(), MaskMethod::ME);
     finish();
 
@@ -356,12 +400,117 @@ TEST_F(WatermarkTest, PreservesTheAlphaChannelWhenSaving) {
     saveImage(alphaSession.get(), requested.string(), MaskMethod::ME);
     ASSERT_TRUE(fs::exists(saved));
 
-    // reloading 4 channel PNG must still detect, and the alpha channel must not bleed into the colour planes
-    ImageHandle reloaded = createImageSession(defaultPassword, defaultP, defaultPsnr);
-    loadImage(reloaded.get(), saved.string());
-    const float correlation = detectLoadedImage(reloaded.get(), MaskMethod::ME);
-    EXPECT_TRUE(std::isfinite(correlation));
-    EXPECT_GT(correlation, 0.5f);
+    ExportHandle exported = createReusableExportBuffer();
+    exportForSave(alphaSession.get(), exported.get(), MaskMethod::ME);
+    const fs::path exportedSaved = tempDir / "alpha_exportW_ME.png";
+    auto saveTask = std::async(std::launch::async, flushToDiskAsync, exported.get(), (tempDir / "alpha_export.png").string(), MaskMethod::ME);
+    loadImage(alphaSession.get(), colorImage.string());
+    saveTask.get();
+    ASSERT_TRUE(fs::exists(exportedSaved));
+
+    for (const fs::path& output : {saved, exportedSaved}) {
+        // Reloading must preserve every alpha byte and keep the watermark detectable
+        ImageHandle reloaded = createImageSession(defaultPassword, defaultP, defaultPsnr);
+        loadImage(reloaded.get(), output.string(), true);
+        const OriginalPixelData result = takeOriginalPixelData(reloaded.get());
+        ASSERT_EQ(result.width, original.width);
+        ASSERT_EQ(result.height, original.height);
+        ASSERT_EQ(result.channels, 4);
+        ASSERT_EQ(result.pixels.size(), original.pixels.size());
+        for (size_t offset = 3; offset < original.pixels.size(); offset += 4) {
+            if (result.pixels[offset] != original.pixels[offset]) {
+                ADD_FAILURE() << output << " differs in alpha at pixel " << offset / 4;
+                break;
+            }
+        }
+        const float correlation = detectLoadedImage(reloaded.get(), MaskMethod::ME);
+        EXPECT_TRUE(std::isfinite(correlation));
+        EXPECT_GT(correlation, 0.5f);
+    }
+}
+
+#if defined(_USE_EIGEN_)
+TEST(EigenDetectionTest, LargePredictionWindowsRemainStableWithOneThread) {
+    initializeEnvironment(0);
+    const int originalThreads = omp_get_max_threads();
+    struct RestoreThreadCount {
+        int count;
+        ~RestoreThreadCount() { omp_set_num_threads(count); }
+    } restore{originalThreads};
+
+    const auto correlationAt = [](const int threads, const int order) {
+        omp_set_num_threads(threads);
+        auto image = createImageSession(defaultPassword, order, defaultPsnr);
+        loadImage(image.get(), "samples/images/4k.png");
+        embedImage(image.get(), MaskMethod::ME);
+        prepareDetectionImage(image.get(), MaskMethod::ME);
+        return detectEmbeddedBuffer(image.get(), MaskMethod::ME);
+    };
+
+    for (const int order : {7, 9}) {
+        const float singleThread = correlationAt(1, order);
+        EXPECT_TRUE(std::isfinite(singleThread)) << "p=" << order;
+        EXPECT_GT(singleThread, 0.75f) << "p=" << order;
+        if (originalThreads > 1) {
+            const float parallel = correlationAt(std::min(originalThreads, 16), order);
+            EXPECT_NEAR(singleThread, parallel, 0.01f) << "p=" << order;
+        }
+    }
+}
+
+#endif
+
+#if defined(_USE_GPU_)
+TEST(GpuDetectionTest, FourKLargePredictionWindowsRemainDetectable) {
+    const auto devices = getAvailableDevices();
+    ASSERT_FALSE(devices.empty());
+    for (size_t deviceIndex = 0; deviceIndex < devices.size(); ++deviceIndex) {
+        ASSERT_TRUE(initializeEnvironment(static_cast<int>(deviceIndex))) << devices[deviceIndex];
+        for (const int order : {7, 9}) {
+            auto image = createImageSession(defaultPassword, order, defaultPsnr);
+            loadImage(image.get(), "samples/images/4k.png");
+            embedImage(image.get(), MaskMethod::ME);
+            prepareDetectionImage(image.get(), MaskMethod::ME);
+            const float correlation = detectEmbeddedBuffer(image.get(), MaskMethod::ME);
+            EXPECT_TRUE(std::isfinite(correlation)) << devices[deviceIndex] << " p=" << order;
+            EXPECT_GT(correlation, 0.75f) << devices[deviceIndex] << " p=" << order;
+        }
+    }
+}
+#endif
+
+TEST(PreviewPixelConversionTest, HandlesPlanarRgbAndGrayWithPaddedRows) {
+    for (const auto [width, height] : {
+             std::pair{5,  3 },
+             std::pair{8,  8 },
+             std::pair{13, 11},
+             std::pair{16, 31},
+             std::pair{17, 35}
+    }) {
+        for (const int channels : {1, 3}) {
+            SessionPixelData source;
+            source.width = width;
+            source.height = height;
+            source.channels = channels;
+            const size_t planeSize = static_cast<size_t>(source.width) * source.height;
+            source.pixels.resize(planeSize * channels);
+            for (int channel = 0; channel < channels; ++channel)
+                for (int col = 0; col < source.width; ++col)
+                    for (int row = 0; row < source.height; ++row)
+                        source.pixels[static_cast<size_t>(channel) * planeSize + static_cast<size_t>(col) * source.height + row] = static_cast<uint8_t>(channel * 50 + col * 7 + row);
+
+            const size_t stride = static_cast<size_t>(source.width) * channels + 3;
+            std::vector<uint8_t> preview(stride * source.height, 0xA5);
+            copySessionPixelsForPreview(source, preview.data(), stride);
+            for (int row = 0; row < source.height; ++row) {
+                for (int col = 0; col < source.width; ++col)
+                    for (int channel = 0; channel < channels; ++channel)
+                        EXPECT_EQ(preview[static_cast<size_t>(row) * stride + col * channels + channel], static_cast<uint8_t>(channel * 50 + col * 7 + row));
+                for (size_t padding = static_cast<size_t>(source.width) * channels; padding < stride; ++padding)
+                    EXPECT_EQ(preview[static_cast<size_t>(row) * stride + padding], 0xA5);
+            }
+        }
+    }
 }
 
 TEST_F(WatermarkTest, RejectsHighBitDepthVideoDetection) {

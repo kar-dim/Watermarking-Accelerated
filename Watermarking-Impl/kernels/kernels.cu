@@ -590,7 +590,8 @@ __global__ void u8ToFloatGray(const uint8_t* __restrict__ input, float* __restri
     const int stride = blockDim.x * gridDim.x;
     for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < planeSize; i += stride) {
         if (numChannels == 3)
-            output[i] = static_cast<float>(input[i]) * kLumaR + static_cast<float>(input[i + planeSize]) * kLumaG + static_cast<float>(input[i + 2 * planeSize]) * kLumaB;
+            output[i] = static_cast<float>(input[i]) * CommonUtils::kLumaR + static_cast<float>(input[i + planeSize]) * CommonUtils::kLumaG +
+                        static_cast<float>(input[i + 2 * planeSize]) * CommonUtils::kLumaB;
         else
             output[i] = static_cast<float>(input[i]);
     }
@@ -760,7 +761,7 @@ __global__ void rowMajorRGBToColMajorGray(const float* __restrict__ src, float* 
     for (int i = 0; i < 32; i += 8) {
         if (col < width && (row + i) < height) {
             const int rmIdx = (row + i) * width + col;
-            tile[threadIdx.y + i][threadIdx.x] = src[rmIdx] * kLumaR + G[rmIdx] * kLumaG + B[rmIdx] * kLumaB;
+            tile[threadIdx.y + i][threadIdx.x] = src[rmIdx] * CommonUtils::kLumaR + G[rmIdx] * CommonUtils::kLumaG + B[rmIdx] * CommonUtils::kLumaB;
         }
     }
     __syncthreads();

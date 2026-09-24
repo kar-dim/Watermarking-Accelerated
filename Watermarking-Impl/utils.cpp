@@ -1,12 +1,16 @@
 #include "buffer.hpp"
 #include "common_utils.hpp"
+#include "luma_coefficients.hpp"
 #include "ImageFileBuffer.hpp"
 #include "TinyEXIF.h"
 #include "utils.hpp"
 #include "WatermarkBase.hpp"
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
+#include <immintrin.h>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -17,17 +21,14 @@
 #include "OclArray.hpp"
 #include "opencl_utils.hpp"
 #include "WatermarkOCL.hpp"
-#include <algorithm>
 #include <cctype>
 #elif defined(_USE_CUDA_)
 #include "CudaStreamManager.hpp"
 #include "CudaArray.hpp"
 #include "WatermarkCuda.cuh"
 #include "cuda_utils.hpp"
-#include <algorithm>
 #include <cctype>
 #elif defined(_USE_EIGEN_)
-#include <algorithm>
 #include <cctype>
 #include "cimg_init.h"
 #include "eigen_utils.hpp"
@@ -39,12 +40,6 @@ using namespace CommonUtils;
 
 // save a CImg image selecting the correct encoder by file extension
 namespace {
-#if defined(_USE_EIGEN_)
-// standard ITU-R 601 Luma coefficients for RGB to Grayscale conversion
-constexpr float kRW = 0.299f;
-constexpr float kGW = 0.587f;
-constexpr float kBW = 0.114f;
-#endif
 void saveCimgByExtension(const Gray8BufferIO& cimgToSave, const string& path) {
     string extension = path.substr(path.find_last_of('.') + 1);
     std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
@@ -76,6 +71,55 @@ void cimgAlphaZero(FloatBufferIO& rgb, const Gray8BufferIO& alpha) {
         G[i] *= mask;
         B[i] *= mask;
     }
+}
+
+// clamp and truncate eight planar float samples to eight display bytes (used by the preview code)
+inline __m128i packPreviewBytes(const float* source) {
+    const __m256 values = _mm256_loadu_ps(source);
+    const __m256 clamped = _mm256_max_ps(_mm256_setzero_ps(), _mm256_min_ps(values, _mm256_set1_ps(255.0f)));
+    const __m256i integers = _mm256_cvttps_epi32(clamped);
+    const __m128i halves = _mm_packs_epi32(_mm256_castsi256_si128(integers), _mm256_extracti128_si256(integers, 1));
+    return _mm_packus_epi16(halves, _mm_setzero_si128());
+}
+
+// this interleaves CImg's planar pixels for the preview without an intermediate image
+void makeOriginalPreview(const float* source, uint8_t* preview, const size_t pixelCount, const int channels) {
+    const size_t blocks = pixelCount / 8;
+    const float* green = channels >= 3 ? source + pixelCount : source;
+    const float* blue = channels >= 3 ? green + pixelCount : source;
+    const float* alpha = channels == 4 ? blue + pixelCount : source;
+    const __m128i zero = _mm_setzero_si128();
+    const __m128i rgbMask = _mm_setr_epi8(0, 1, 2, 4, 5, 6, 8, 9, 10, 12, 13, 14, -1, -1, -1, -1);
+    // note: 1000000 is an heuristic threshold, seems good enough
+#pragma omp parallel for if (pixelCount > 1000000) schedule(static)
+    for (std::ptrdiff_t block = 0; block < static_cast<std::ptrdiff_t>(blocks); ++block) {
+        const size_t offset = static_cast<size_t>(block) * 8;
+        const __m128i redBytes = packPreviewBytes(source + offset);
+        if (channels == 1) {
+            _mm_storel_epi64(reinterpret_cast<__m128i*>(preview + offset), redBytes);
+        } else {
+            const __m128i greenBytes = packPreviewBytes(green + offset);
+            const __m128i blueBytes = packPreviewBytes(blue + offset);
+            const __m128i rg = _mm_unpacklo_epi8(redBytes, greenBytes);
+            const __m128i ba = _mm_unpacklo_epi8(blueBytes, channels == 4 ? packPreviewBytes(alpha + offset) : zero);
+            const __m128i first = _mm_unpacklo_epi16(rg, ba);
+            const __m128i second = _mm_unpackhi_epi16(rg, ba);
+            if (channels == 4) {
+                _mm_storeu_si128(reinterpret_cast<__m128i*>(preview + offset * 4), first);
+                _mm_storeu_si128(reinterpret_cast<__m128i*>(preview + offset * 4 + 16), second);
+            } else {
+                const __m128i packedFirst = _mm_shuffle_epi8(first, rgbMask);
+                const __m128i packedSecond = _mm_shuffle_epi8(second, rgbMask);
+                const __m128i front = _mm_or_si128(packedFirst, _mm_slli_si128(packedSecond, 12));
+                _mm_storeu_si128(reinterpret_cast<__m128i*>(preview + offset * 3), front);
+                _mm_storel_epi64(reinterpret_cast<__m128i*>(preview + offset * 3 + 16), _mm_srli_si128(packedSecond, 4));
+            }
+        }
+    }
+    // tail pixels (not multiple by AVX2 size (8))
+    for (size_t pixel = blocks * 8; pixel < pixelCount; ++pixel)
+        for (int channel = 0; channel < channels; ++channel)
+            preview[pixel * channels + channel] = static_cast<uint8_t>(std::clamp(source[static_cast<size_t>(channel) * pixelCount + pixel], 0.0f, 255.0f));
 }
 } // namespace
 
@@ -140,6 +184,8 @@ void InternalUtils::saveImage(const string& imagePath, const string& suffix, con
     const int channels = watermark.getChannels();
     const bool hasAlpha = alphaChannel.has_value();
 #if defined(_USE_CUDA_)
+    // async saves can run on another host thread, select the buffer device first
+    CUDA_CHECK(cudaSetDevice(watermark.getDeviceIndex()));
     auto stream = CudaStreamManager::getInstance().getComputeStream();
     CudaArray<uint8_t> rowMajor(rows, cols, channels, stream);
     cuda_utils::launchColMajorToRowMajorU8Kernel(watermark.data(), rowMajor.data(), cols, rows, channels, stream);
@@ -206,15 +252,30 @@ void InternalUtils::rotate(FloatBufferIO& img, const uint16_t orientation) {
     }
 }
 
-ImageFileBuffer InternalUtils::loadImage(const string& imageFile) {
+ImageFileBuffer InternalUtils::loadImage(const string& imageFile, const bool captureOriginal) {
     ImageFileBuffer buf;
-    auto& [rgbImage, image, alphaChannel, rows, cols, isRGB] = buf;
+    auto& rgbImage = buf.rgbImage;
+    auto& image = buf.image;
+    auto& alphaChannel = buf.alphaChannel;
+    auto& rows = buf.rows;
+    auto& cols = buf.cols;
+    auto& isRGB = buf.isRGB;
     std::ifstream fileStream(imageFile, std::ifstream::binary);
     TinyEXIF::EXIFInfo exif(fileStream); // parse EXIF for orientation
     auto cimgRgb = FloatBufferIO(imageFile.c_str());
     InternalUtils::rotate(cimgRgb, exif.Orientation); // optional rotate (if required)
     rows = cimgRgb.height();
     cols = cimgRgb.width();
+
+    if (captureOriginal && (cimgRgb.spectrum() == 1 || cimgRgb.spectrum() == 3 || cimgRgb.spectrum() == 4)) {
+        // Convert the CPU pixels for the single image preview
+        const int channels = cimgRgb.spectrum();
+        const size_t planeSize = static_cast<size_t>(rows) * cols;
+        const float* source = cimgRgb.data();
+        buf.previewChannels = channels;
+        buf.originalPreview.resize(planeSize * channels);
+        makeOriginalPreview(source, buf.originalPreview.data(), planeSize, channels);
+    }
 
 #if defined(_USE_GPU_)
 #if defined(_USE_CUDA_)
@@ -256,9 +317,9 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile) {
         image = rgbImage;
         break;
     case 3: {
-        rgbImage = eigen_utils::cimgToEigenRgb(cimgRgb);
-        const auto& rgb = rgbImage.getRGB();
-        image = ((rgb[0] * kRW) + (rgb[1] * kGW) + (rgb[2] * kBW)).eval();
+        auto [rgb, gray] = eigen_utils::cimgToEigenRgbAndGray(cimgRgb);
+        rgbImage = std::move(rgb);
+        image = std::move(gray);
         break;
     }
     case 4: {
@@ -266,9 +327,9 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile) {
         alphaChannel.emplace(cimgRgb.get_shared_channel(3));
         auto rgbView = cimgRgb.get_shared_channels(0, 2);
         cimgAlphaZero(rgbView, *alphaChannel);
-        rgbImage = eigen_utils::cimgToEigenRgb(rgbView);
-        const auto& rgb = rgbImage.getRGB();
-        image = ((rgb[0] * kRW) + (rgb[1] * kGW) + (rgb[2] * kBW)).eval();
+        auto [rgb, gray] = eigen_utils::cimgToEigenRgbAndGray(rgbView);
+        rgbImage = std::move(rgb);
+        image = std::move(gray);
         break;
     }
     default: throw std::runtime_error("Invalid image dimensions");
@@ -296,7 +357,7 @@ ImageBuffer InternalUtils::castToFloatGray(const ImageOutputBuffer& buffer, cons
 #else
     if (isRGB) {
         const auto& rgbU8 = buffer.getRGB();
-        return ImageBuffer((rgbU8[0].cast<float>() * kRW + rgbU8[1].cast<float>() * kGW + rgbU8[2].cast<float>() * kBW).eval());
+        return ImageBuffer((rgbU8[0].cast<float>() * kLumaR + rgbU8[1].cast<float>() * kLumaG + rgbU8[2].cast<float>() * kLumaB).eval());
     } else {
         return ImageBuffer(buffer.getGray().cast<float>());
     }

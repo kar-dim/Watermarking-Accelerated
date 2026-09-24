@@ -13,7 +13,7 @@
  *  \author Dimitris Karatzas
  */
 namespace InternalUtils {
-ImageFileBuffer loadImage(const std::string& imageFile);
+ImageFileBuffer loadImage(const std::string& imageFile, bool captureOriginal = false);
 void saveImage(const std::string& imagePath, const std::string& suffix, const ImageOutputBuffer& watermark, const std::optional<Gray8BufferIO>& alphaChannel);
 ImageBuffer castToFloatGray(const ImageOutputBuffer& buffer, const bool isRGB);
 void rotate(FloatBufferIO& img, uint16_t orientation);

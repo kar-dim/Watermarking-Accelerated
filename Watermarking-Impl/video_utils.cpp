@@ -351,8 +351,8 @@ void loadInputFrame(VideoSession* s, const uint8_t* hostPtr, const int srcPitch)
 #endif
 }
 
-// watermark the frame and fill hostFrame[0..W*H-1] with the processed Y plane
-void embedAndFillYPlane(VideoSession* s, const ImageBuffer& buffer) {
+// watermark the frame and fill the processed Y plane
+void embedAndFillYPlane(VideoSession* s, const ImageBuffer& buffer, AVFrame* encFrame = nullptr) {
     s->watermarkObj->makeWatermark(buffer, buffer, s->watermarkedFrame, MaskMethod::ME);
 #if defined(_USE_CUDA_)
     {
@@ -372,16 +372,19 @@ void embedAndFillYPlane(VideoSession* s, const ImageBuffer& buffer) {
     }
 #elif defined(_USE_EIGEN_)
     {
+        checkError(!encFrame, "CPU video output frame is missing");
         const auto [height, width] = s->videoDims();
-        s->grayFrame = s->watermarkedFrame.getGray().transpose();
-        std::memcpy(s->hostFrame->get(), s->grayFrame.data(), static_cast<size_t>(width) * height);
+        using RowMajorGray8 = Eigen::Array<uint8_t, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
+        // use FFmpeg's row pitch (we allow unaligned SIMD stores though)
+        Eigen::Map<RowMajorGray8, Eigen::Unaligned, Eigen::OuterStride<>> yPlane(encFrame->data[0], height, width, Eigen::OuterStride<>(encFrame->linesize[0]));
+        yPlane = s->watermarkedFrame.getGray();
     }
 #endif
 }
 
-void fillYPlane(const AVFrame* frame, VideoSession* s) {
+void fillYPlane(const AVFrame* frame, VideoSession* s, AVFrame* encFrame = nullptr) {
     loadInputFrame(s, frame->data[0], frame->linesize[0]);
-    embedAndFillYPlane(s, s->inputFrame);
+    embedAndFillYPlane(s, s->inputFrame, encFrame);
 }
 
 // pull all ready packets from the encoder and write them to the output container (non-blocking)
@@ -459,13 +462,15 @@ void encodeFrameGPU(VideoSession* s, const CudaArray<uint8_t>& yRowMajor, const 
 }
 #endif
 
-// Y always comes from hostFrame (watermarked output)
-// Chroma: copy directly from srcChromaFrame when provided (SW-decode path) to avoid a
-// double copy through hostFrame, when null (NVDEC+SW-encoder path) chroma is already in
-// hostFrame after the GPU NV12->YUV420p kernel so we read it from there
-AVFramePtr buildEncFrame(VideoSession* s, const int64_t pts, const AVFrame* srcChromaFrame = nullptr, const int64_t duration = 0) {
+// CPU embedding writes Y directly into this frame, GPU output comes from hostFrame
+// chroma comes from the decoded frame when available, otherwise from hostFrame
+AVFramePtr buildEncFrame(VideoSession* s, const int64_t pts, const AVFrame* srcChromaFrame = nullptr, const int64_t duration = 0, const bool copyHostY = true) {
     const auto [height, width] = s->videoDims();
-    const uint8_t* src = s->hostFrame->get();
+    const uint8_t* src = nullptr;
+    if (copyHostY || !srcChromaFrame) {
+        checkError(!s->hostFrame, "GPU video output buffer is missing");
+        src = s->hostFrame->get();
+    }
     AVFramePtr encFrame(av_frame_alloc());
     checkError(!encFrame, "Failed to allocate encoder AVFrame");
     encFrame->format = AV_PIX_FMT_YUV420P;
@@ -474,13 +479,13 @@ AVFramePtr buildEncFrame(VideoSession* s, const int64_t pts, const AVFrame* srcC
     encFrame->pts = pts;
     encFrame->duration = duration;
     checkError(av_frame_get_buffer(encFrame.get(), 0) < 0, "Failed to allocate encoder frame buffer");
-    // Y: av_frame_get_buffer with align=0 sets linesize==width, so one memcpy covers the whole plane
-    // fall back to row-by-row only when the encoder has a different stride
-    if (encFrame->linesize[0] == width)
-        std::memcpy(encFrame->data[0], src, static_cast<size_t>(width) * height);
-    else
-        for (int y = 0; y < height; y++)
-            std::memcpy(encFrame->data[0] + y * encFrame->linesize[0], src + y * width, width);
+    if (copyHostY) {
+        if (encFrame->linesize[0] == width)
+            std::memcpy(encFrame->data[0], src, static_cast<size_t>(width) * height);
+        else
+            for (int y = 0; y < height; y++)
+                std::memcpy(encFrame->data[0] + y * encFrame->linesize[0], src + y * width, width);
+    }
     // chroma
     const int chromaH = height / 2;
     const int chromaW = width / 2;
@@ -505,9 +510,16 @@ void embedWatermark(VideoSession* s, int& framesCount, const AVFrame* frame, Enc
     const bool doEmbed = framesCount % s->settings.watermarkInterval == 0;
     if (doEmbed) {
         cout << std::format(" [Embedding frame {}]\n", framesCount + 1);
+#if defined(_USE_EIGEN_)
+        // the encoder frame owns the destination while the encode thread processes earlier frames
+        auto encFrame = buildEncFrame(s, framePts(frame), frame, frame->duration, false);
+        fillYPlane(frame, s, encFrame.get());
+        pushToEncoder(queue, std::move(encFrame));
+#else
         fillYPlane(frame, s);
         // chroma goes decoded frame → encFrame directly inside buildEncFrame (no hostFrame hop)
         pushToEncoder(queue, buildEncFrame(s, framePts(frame), frame, frame->duration));
+#endif
     } else {
         // passthrough: take a refcounted reference to the decoded frame (zero data copy)
         AVFramePtr ref(av_frame_alloc());

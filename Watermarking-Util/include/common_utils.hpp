@@ -14,6 +14,7 @@
 namespace CommonUtils {
 
 std::string addSuffixBeforeExtension(const std::string& file, const std::string& suffix);
+bool hasSupportedImageExtension(const std::filesystem::path& path);
 std::vector<std::filesystem::path> getValidImageFiles(const std::filesystem::path& inputDir);
 double calculateCV(const std::vector<double>& times);
 

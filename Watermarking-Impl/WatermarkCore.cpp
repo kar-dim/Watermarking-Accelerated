@@ -8,12 +8,15 @@
 #include "video_utils.hpp"
 #include "VideoProcessingContext.hpp"
 #include "WatermarkBase.hpp"
+#include <algorithm>
 #include <cstdint>
 #include <format>
+#include <immintrin.h>
 #include <iostream>
 #include <memory>
 #include <omp.h>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -22,10 +25,8 @@
 #include "CudaCheck.hpp"
 #include "CudaStreamManager.hpp"
 #include "CudaArray.hpp"
-#include <algorithm>
 #include <cuda_runtime.h>
 #elif defined(_USE_OPENCL_)
-#include <algorithm>
 #include "OclQueueManager.hpp"
 #include "opencl_utils.hpp"
 #elif defined(_USE_EIGEN_)
@@ -88,7 +89,8 @@ void exportForSave(ImageSession* s, ExportedImage* p, MaskMethod method) {
         p->finalPixels = s->currentIsRGB ? ImageOutputBuffer(eigen_utils::makeEigenRGBu8(s->currentRows, s->currentCols)) : ImageOutputBuffer(Gray8Buffer(s->currentRows, s->currentCols));
     std::swap(p->finalPixels, s->watermarkBuffer);
 #endif
-    p->alpha = s->imgBuffer.alphaChannel;
+    // Batch export consumes the alpha plane, the next image bind replaces the input buffer
+    p->alpha = std::move(s->imgBuffer.alphaChannel);
 }
 
 // same as saveImage, but used as a separate step to allow for asynchronous saving (in batched mode)
@@ -154,12 +156,119 @@ SessionPixelData extractPixelData(const ImageOutputBuffer& buffer) {
 // main function to get the data from the image session buffer (column-wise) directly, it also fills the width, height and channels parameters for the caller
 SessionPixelData getSessionPixelData(const ImageSession* session) { return extractPixelData(session->watermarkBuffer); }
 
+namespace {
+// transpose 8 column-major byte columns into eight row vectors
+void transposePreviewBlock(const uint8_t* source, const size_t columnStride, __m128i rows[8]) {
+    const __m128i c0 = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(source + 0 * columnStride));
+    const __m128i c1 = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(source + 1 * columnStride));
+    const __m128i c2 = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(source + 2 * columnStride));
+    const __m128i c3 = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(source + 3 * columnStride));
+    const __m128i c4 = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(source + 4 * columnStride));
+    const __m128i c5 = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(source + 5 * columnStride));
+    const __m128i c6 = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(source + 6 * columnStride));
+    const __m128i c7 = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(source + 7 * columnStride));
+    const __m128i p0 = _mm_unpacklo_epi8(c0, c1);
+    const __m128i p1 = _mm_unpacklo_epi8(c2, c3);
+    const __m128i p2 = _mm_unpacklo_epi8(c4, c5);
+    const __m128i p3 = _mm_unpacklo_epi8(c6, c7);
+    const __m128i q0 = _mm_unpacklo_epi16(p0, p1);
+    const __m128i q1 = _mm_unpackhi_epi16(p0, p1);
+    const __m128i q2 = _mm_unpacklo_epi16(p2, p3);
+    const __m128i q3 = _mm_unpackhi_epi16(p2, p3);
+    const __m128i r01 = _mm_unpacklo_epi32(q0, q2);
+    const __m128i r23 = _mm_unpackhi_epi32(q0, q2);
+    const __m128i r45 = _mm_unpacklo_epi32(q1, q3);
+    const __m128i r67 = _mm_unpackhi_epi32(q1, q3);
+    rows[0] = r01;
+    rows[1] = _mm_srli_si128(r01, 8);
+    rows[2] = r23;
+    rows[3] = _mm_srli_si128(r23, 8);
+    rows[4] = r45;
+    rows[5] = _mm_srli_si128(r45, 8);
+    rows[6] = r67;
+    rows[7] = _mm_srli_si128(r67, 8);
+}
+} // namespace
+
+void copySessionPixelsForPreview(const SessionPixelData& source, uint8_t* destination, const size_t bytesPerLine) {
+    const int rows = source.height;
+    const int cols = source.width;
+    const int channels = source.channels;
+    if (rows <= 0 || cols <= 0 || (channels != 1 && channels != 3) || !destination || bytesPerLine < static_cast<size_t>(cols) * channels ||
+        source.pixels.size() < static_cast<size_t>(rows) * cols * channels)
+        throw std::invalid_argument("Invalid session pixels for preview");
+
+    // small row tiles keeps cache lines HOT (while we read each planar column in order)
+    constexpr int tileRows = 32;
+    const size_t planeSize = static_cast<size_t>(rows) * cols;
+    const uint8_t* red = source.pixels.data();
+    const uint8_t* green = channels == 3 ? red + planeSize : nullptr;
+    const uint8_t* blue = channels == 3 ? green + planeSize : nullptr;
+    const __m128i zero = _mm_setzero_si128();
+    const __m128i rgbMask = _mm_setr_epi8(0, 1, 2, 4, 5, 6, 8, 9, 10, 12, 13, 14, -1, -1, -1, -1);
+#pragma omp parallel for schedule(static)
+    for (int rowBlock = 0; rowBlock < rows; rowBlock += tileRows) {
+        const int rowEnd = std::min(rowBlock + tileRows, rows);
+        int row = rowBlock;
+        for (; row + 7 < rowEnd; row += 8) {
+            int col = 0;
+            for (; col + 7 < cols; col += 8) {
+                const size_t sourceOffset = static_cast<size_t>(col) * rows + row;
+                __m128i redRows[8];
+                transposePreviewBlock(red + sourceOffset, rows, redRows);
+                if (channels == 1) {
+                    for (int lane = 0; lane < 8; ++lane)
+                        _mm_storel_epi64(reinterpret_cast<__m128i*>(destination + static_cast<size_t>(row + lane) * bytesPerLine + col), redRows[lane]);
+                } else {
+                    __m128i greenRows[8];
+                    __m128i blueRows[8];
+                    transposePreviewBlock(green + sourceOffset, rows, greenRows);
+                    transposePreviewBlock(blue + sourceOffset, rows, blueRows);
+                    for (int lane = 0; lane < 8; ++lane) {
+                        const __m128i rg = _mm_unpacklo_epi8(redRows[lane], greenRows[lane]);
+                        const __m128i bz = _mm_unpacklo_epi8(blueRows[lane], zero);
+                        const __m128i rgbaFirst = _mm_unpacklo_epi16(rg, bz);
+                        const __m128i rgbaSecond = _mm_unpackhi_epi16(rg, bz);
+                        const __m128i rgbFirst = _mm_shuffle_epi8(rgbaFirst, rgbMask);
+                        const __m128i rgbSecond = _mm_shuffle_epi8(rgbaSecond, rgbMask);
+                        uint8_t* pixel = destination + static_cast<size_t>(row + lane) * bytesPerLine + static_cast<size_t>(col) * 3;
+                        _mm_storeu_si128(reinterpret_cast<__m128i*>(pixel), _mm_or_si128(rgbFirst, _mm_slli_si128(rgbSecond, 12)));
+                        _mm_storel_epi64(reinterpret_cast<__m128i*>(pixel + 16), _mm_srli_si128(rgbSecond, 4));
+                    }
+                }
+            }
+            // tail columns that don't fit into 8x8 block scalar
+            for (; col < cols; ++col)
+                for (int lane = 0; lane < 8; ++lane) {
+                    const size_t sourceIndex = static_cast<size_t>(col) * rows + row + lane;
+                    uint8_t* pixel = destination + static_cast<size_t>(row + lane) * bytesPerLine + static_cast<size_t>(col) * channels;
+                    pixel[0] = red[sourceIndex];
+                    if (channels == 3) {
+                        pixel[1] = green[sourceIndex];
+                        pixel[2] = blue[sourceIndex];
+                    }
+                }
+        }
+        // tail rows that don't fit into 8x8 block should be scalar
+        for (; row < rowEnd; ++row)
+            for (int col = 0; col < cols; ++col) {
+                const size_t sourceIndex = static_cast<size_t>(col) * rows + row;
+                uint8_t* pixel = destination + static_cast<size_t>(row) * bytesPerLine + static_cast<size_t>(col) * channels;
+                pixel[0] = red[sourceIndex];
+                if (channels == 3) {
+                    pixel[1] = green[sourceIndex];
+                    pixel[2] = blue[sourceIndex];
+                }
+            }
+    }
+}
+
 // initialization, including device setup, info display, and OpenMP thread pool initialization
-bool initializeEnvironment(const int openclDevice) {
+bool initializeEnvironment(const int deviceIndex) {
     bool deviceSetSuccess = true;
 #if defined(_USE_OPENCL_)
     try {
-        OclQueueManager::initialize(openclDevice);
+        OclQueueManager::initialize(deviceIndex);
     } catch (...) {
         std::cout << "NOTE: Invalid OpenCL device index, using default 0\n";
         OclQueueManager::initialize(0);
@@ -168,12 +277,20 @@ bool initializeEnvironment(const int openclDevice) {
     const auto& dev = OclQueueManager::getInstance().getDevice();
     std::cout << "OpenCL Device [" << OclQueueManager::getInstance().getDeviceIndex() << "]: " << dev.getInfo<CL_DEVICE_NAME>() << "\n\n";
 #elif defined(_USE_CUDA_)
-    int device = 0;
-    CUDA_CHECK(cudaGetDevice(&device));
+    int count = 0;
+    CUDA_CHECK(cudaGetDeviceCount(&count));
+    if (count == 0)
+        throw std::runtime_error("No CUDA GPU devices found");
+    const int device = deviceIndex >= 0 && deviceIndex < count ? deviceIndex : 0;
+    if (device != deviceIndex) {
+        std::cout << "NOTE: Invalid CUDA device index, using default 0\n";
+        deviceSetSuccess = false;
+    }
+    CUDA_CHECK(cudaSetDevice(device));
     cudaDeviceProp prop;
     CUDA_CHECK(cudaGetDeviceProperties(&prop, device));
     std::cout << "CUDA Device [" << device << "]: " << prop.name << " (Compute " << prop.major << "." << prop.minor << ")\n\n";
-    CudaStreamManager::getInstance(); // lazy initalization of the CUDA stream manager (create streams and pool)
+    CudaStreamManager::getInstance().getComputeStream(); // initialize the selected device's stream and pool
 #endif
 #pragma omp parallel
     {}
@@ -225,6 +342,18 @@ std::vector<string> getAvailableDevices() {
     devices.push_back(getDeviceName(0));
 #endif
     return devices;
+}
+
+int getCurrentDeviceIndex() {
+#if defined(_USE_CUDA_)
+    int device = 0;
+    CUDA_CHECK(cudaGetDevice(&device));
+    return device;
+#elif defined(_USE_OPENCL_)
+    return OclQueueManager::getInstance().getDeviceIndex();
+#else
+    return 0;
+#endif
 }
 
 bool isOpenCLBackend() {
@@ -282,20 +411,30 @@ ImageHandle createImageSession(const string& watermarkPassword, const int p, con
 }
 
 // used for disk images preloading, useful for scenarios where multiple images need to be processed in parallel, as it allows the loading step to be done in parallel
-PreloadedHandle preloadImageFromDisk(const string& imagePath) {
+PreloadedHandle preloadImageFromDisk(const string& imagePath, const int deviceIndex, const bool captureOriginal) {
+#if defined(_USE_CUDA_)
+    // Each prefetch thread must activate the GPU used by its owning session
+    if (deviceIndex >= 0)
+        CUDA_CHECK(cudaSetDevice(deviceIndex));
+#endif
     PreloadedHandle p(new PreloadedImage());
-    p->buffer = InternalUtils::loadImage(imagePath);
+    p->buffer = InternalUtils::loadImage(imagePath, captureOriginal);
     return p;
 }
 
 // used to get the current image dimensions
 std::pair<int, int> getImageDims(const ImageSession* s) { return {s->currentRows, s->currentCols}; }
+OriginalPixelData takeOriginalPixelData(ImageSession* s) {
+    return {std::move(s->imgBuffer.originalPreview), static_cast<int>(s->imgBuffer.cols), static_cast<int>(s->imgBuffer.rows), s->imgBuffer.previewChannels};
+}
 
 // binds a disk preloaded image buffer into the watermark session. It also lazily initializes the watermark object and buffers based on the dimensions of the loaded image, which is useful for
 // scenarios where multiple images of different dimensions need to be processed in parallel, as it avoids unnecessary allocations and initializations until the actual image data is available.
 void bindPreloadedImage(ImageSession* s, PreloadedHandle preloadedData) {
     s->imgBuffer = std::move(preloadedData->buffer);
-    auto& [rgb, img, alpha, rows, cols, isRGB] = s->imgBuffer;
+    const auto rows = s->imgBuffer.rows;
+    const auto cols = s->imgBuffer.cols;
+    const auto isRGB = s->imgBuffer.isRGB;
     // lazy initialization of the watermark object and buffers, only if dimensions change or not initialized yet
     if (!s->watermarkObj || s->currentRows != rows || s->currentCols != cols || s->currentIsRGB != isRGB) {
         s->watermarkObj = createWatermarkObject(rows, cols, s->watermarkPassword, s->p, s->psnr);
@@ -309,7 +448,7 @@ void bindPreloadedImage(ImageSession* s, PreloadedHandle preloadedData) {
 }
 
 // combines the loading and binding steps, useful for single image processing without the need for preloading multiple images in parallel
-void loadImage(ImageSession* session, const string& imagePath) { bindPreloadedImage(session, preloadImageFromDisk(imagePath)); }
+void loadImage(ImageSession* session, const string& imagePath, const bool captureOriginal) { bindPreloadedImage(session, preloadImageFromDisk(imagePath, -1, captureOriginal)); }
 
 // main function to embed the watermark into the loaded image, it calls the makeWatermark method of the watermark object,
 // which implements the actual embedding algorithm based on the specified mask method (NVF or ME)
@@ -382,7 +521,9 @@ VideoHandle initVideo(const VideoSettings& settings) {
     const int width = session->videoStream->codecpar->width;
     checkError((width & 1) != 0 || (height & 1) != 0, std::format("YUV 4:2:0 video requires even dimensions; input is {}x{}.", width, height));
     session->watermarkObj = createWatermarkObject(height, width, settings.watermarkPassword, settings.p, settings.psnr);
+#if !defined(_USE_EIGEN_)
     session->hostFrame = std::make_unique<HostMemory<uint8_t>>(width * height * 3 / 2);
+#endif
 #if defined(_USE_EIGEN_)
     // video is always grayscale, initialize the output buffer to the gray variant (bad_variant_access fix)
     session->watermarkedFrame = ImageOutputBuffer(Gray8Buffer(height, width));

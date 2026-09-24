@@ -43,7 +43,6 @@ struct VideoSession {
     // image buffers for processing the frames, reused for each frame to save memory allocations
     ImageBuffer inputFrame;
     ImageOutputBuffer watermarkedFrame;
-    Gray8Buffer grayFrame;
     // output encoding (embed mode only, initialized in embedVideo, null for detect)
     video_utils::AVOutputFormatContextPtr outputFormatCtx;
     video_utils::AVCodecContextPtr outputEncoderCtx;

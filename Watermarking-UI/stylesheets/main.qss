@@ -1,0 +1,208 @@
+QWidget {
+    background-color: @CANVAS@;
+    color: @TEXT@;
+    font-size: 14px;
+}
+
+QMainWindow > QWidget {
+    background-color: @CANVAS@;
+}
+
+QWidget#workflowPage {
+    background-color: @SURFACE@;
+}
+
+QLabel {
+    background-color: transparent;
+}
+
+QLabel#mutedLabel, QLabel#deviceName {
+    color: @MUTED@;
+}
+
+QLabel#backendLabel {
+    color: @ACCENT_LIGHT@;
+    font-weight: bold;
+}
+
+QWidget#settingsRow, QWidget#settingsColumn {
+    background-color: transparent;
+}
+
+QLineEdit, QComboBox, QDoubleSpinBox {
+    background-color: #201f1f;
+    color: @TEXT@;
+    border: 1px solid #333333;
+    border-radius: 6px;
+    padding: 7px 9px;
+    min-height: 22px;
+    selection-background-color: @ACCENT@;
+}
+
+QLineEdit:focus, QComboBox:focus, QDoubleSpinBox:focus {
+    border: 1px solid @ACCENT_BORDER@;
+}
+
+QComboBox::drop-down {
+    border: none;
+    width: 24px;
+}
+
+QComboBox QAbstractItemView {
+    background-color: #201f1f;
+    color: @TEXT@;
+    border: 1px solid #333333;
+    selection-background-color: @ACCENT_DARK@;
+}
+
+QPushButton {
+    background-color: @SURFACE@;
+    color: @TEXT@;
+    border: 1px solid @ACCENT@;
+    border-radius: 8px;
+    padding: 9px 18px;
+    min-height: 22px;
+    font-weight: bold;
+}
+
+QPushButton:hover {
+    background-color: @SURFACE_HOVER@;
+}
+
+QPushButton:pressed {
+    background-color: #2d2d2d;
+}
+
+QPushButton#primaryButton {
+    background-color: @ACCENT@;
+    color: @ACCENT_INK@;
+    border-color: @ACCENT@;
+}
+
+QPushButton#primaryButton:hover {
+    background-color: @ACCENT_HOVER@;
+}
+
+QPushButton:disabled {
+    color: @MUTED@;
+    border-color: #333333;
+}
+
+QTabWidget#workflowTabs::pane {
+    background-color: @SURFACE@;
+    border: 1px solid #333333;
+    border-radius: 9px;
+    top: -1px;
+}
+
+QTabBar::tab {
+    background-color: #1a1a1a;
+    color: #c1c6d7;
+    border: 1px solid #333333;
+    border-bottom: none;
+    border-top-left-radius: 8px;
+    border-top-right-radius: 8px;
+    padding: 10px 20px;
+    margin-right: 4px;
+}
+
+QTabBar::tab:selected {
+    background-color: @SURFACE@;
+    color: @ACCENT_LIGHT@;
+    border-top: 2px solid @ACCENT_BORDER@;
+}
+
+QTabBar::tab:hover:!selected {
+    color: @TEXT@;
+    background-color: @SURFACE_HOVER@;
+}
+
+QLabel#imageCanvas {
+    background-color: @CANVAS@;
+    color: @MUTED@;
+    border: 1px dashed #333333;
+    border-radius: 9px;
+}
+
+QWidget#comparisonCanvas {
+    background-color: @CANVAS@;
+    border: 1px dashed #333333;
+    border-radius: 9px;
+}
+
+QWidget#singleDetectArea {
+    background-color: transparent;
+}
+
+QLabel#detectionResult {
+    background-color: #1a1a1a;
+    color: @ACCENT_LIGHT@;
+    border: 1px solid #333333;
+    border-radius: 9px;
+    font-size: 20px;
+}
+
+QLabel#dropOverlay {
+    background-color: rgba(14, 14, 14, 225);
+    color: @ACCENT_LIGHT@;
+    border: 2px dashed @ACCENT@;
+    border-radius: 9px;
+    font-size: 20px;
+    font-weight: bold;
+}
+
+QLabel#singleStatus, QLabel#batchStatus, QLabel#benchmarkStatus {
+    color: #c1c6d7;
+    padding: 4px;
+}
+
+QLabel#singleStatus[state="running"], QLabel#batchStatus[state="running"], QLabel#benchmarkStatus[state="running"] { color: @WARNING@; }
+QLabel#singleStatus[state="done"], QLabel#batchStatus[state="done"], QLabel#benchmarkStatus[state="done"] { color: @ACCENT_LIGHT@; }
+QLabel#singleStatus[state="error"], QLabel#batchStatus[state="error"], QLabel#benchmarkStatus[state="error"] { color: @ERROR@; }
+
+QProgressBar {
+    background-color: #201f1f;
+    color: @TEXT@;
+    border: 1px solid #333333;
+    border-radius: 5px;
+    text-align: center;
+    min-height: 17px;
+}
+
+QProgressBar::chunk {
+    background-color: @ACCENT@;
+    border-radius: 4px;
+}
+
+QTableWidget {
+    background-color: #1a1a1a;
+    alternate-background-color: #1c1b1b;
+    gridline-color: #333333;
+    border: 1px solid #333333;
+    border-radius: 6px;
+    selection-background-color: @ACCENT_DARK@;
+}
+
+QHeaderView::section {
+    background-color: #201f1f;
+    color: #c1c6d7;
+    border: none;
+    border-right: 1px solid #333333;
+    padding: 7px;
+    font-weight: bold;
+}
+
+QScrollBar:vertical {
+    background-color: #1a1a1a;
+    width: 11px;
+}
+
+QScrollBar::handle:vertical {
+    background-color: #414754;
+    border-radius: 5px;
+    min-height: 30px;
+}
+
+QMessageBox {
+    background-color: #1a1a1a;
+}

@@ -16,14 +16,28 @@ class CudaArray {
     int cols = 0;
     int channels = 1;
     cudaStream_t stream = nullptr;
+    int deviceIndex = -1;
+
+    cudaError_t selectOwnDevice() const {
+        int current = 0;
+        const cudaError_t result = cudaGetDevice(&current);
+        if (result != cudaSuccess || current == deviceIndex)
+            return result;
+        return cudaSetDevice(deviceIndex);
+    }
 
     void alloc() {
-        if (size() > 0)
+        if (size() > 0) {
+            CUDA_CHECK(cudaGetDevice(&deviceIndex));
             ptr_ = static_cast<T*>(CudaStreamManager::getInstance().getPool().acquire(bytes(), stream));
+        }
     }
 
     void freeArray() {
         if (ptr_) {
+            // this check is needed because a session can be released by a different host thread
+            if (selectOwnDevice() != cudaSuccess)
+                return;
             CudaStreamManager::getInstance().getPool().release(bytes(), ptr_, stream);
             ptr_ = nullptr;
         }
@@ -53,10 +67,11 @@ class CudaArray {
     CudaArray(const CudaArray&) = delete;
     CudaArray& operator=(const CudaArray&) = delete;
 
-    CudaArray(CudaArray&& o) noexcept : ptr_(o.ptr_), rows(o.rows), cols(o.cols), channels(o.channels), stream(o.stream) {
+    CudaArray(CudaArray&& o) noexcept : ptr_(o.ptr_), rows(o.rows), cols(o.cols), channels(o.channels), stream(o.stream), deviceIndex(o.deviceIndex) {
         o.ptr_ = nullptr;
         o.rows = o.cols = 0;
         o.channels = 1;
+        o.deviceIndex = -1;
     }
 
     CudaArray& operator=(CudaArray&& o) noexcept {
@@ -67,9 +82,11 @@ class CudaArray {
             cols = o.cols;
             channels = o.channels;
             stream = o.stream;
+            deviceIndex = o.deviceIndex;
             o.ptr_ = nullptr;
             o.rows = o.cols = 0;
             o.channels = 1;
+            o.deviceIndex = -1;
         }
         return *this;
     }
@@ -79,6 +96,7 @@ class CudaArray {
     int getRows() const { return rows; }
     int getCols() const { return cols; }
     int getChannels() const { return channels; }
+    int getDeviceIndex() const { return deviceIndex; }
     int size() const { return rows * cols * channels; }
     size_t bytes() const { return static_cast<size_t>(size()) * sizeof(T); }
     bool empty() const { return ptr_ == nullptr; }
@@ -92,6 +110,7 @@ class CudaArray {
     T scalar() const {
         T val{};
         if (ptr_) {
+            CUDA_CHECK(selectOwnDevice());
             CUDA_CHECK(cudaMemcpyAsync(&val, ptr_, sizeof(T), cudaMemcpyDeviceToHost, stream));
             CUDA_CHECK(cudaStreamSynchronize(stream));
         }
@@ -100,14 +119,17 @@ class CudaArray {
 
     void toHost(T* dst) const {
         if (ptr_) {
+            CUDA_CHECK(selectOwnDevice());
             CUDA_CHECK(cudaMemcpyAsync(dst, ptr_, bytes(), cudaMemcpyDeviceToHost, stream));
             CUDA_CHECK(cudaStreamSynchronize(stream));
         }
     }
 
     void toHostAsync(T* dst) const {
-        if (ptr_)
+        if (ptr_) {
+            CUDA_CHECK(selectOwnDevice());
             CUDA_CHECK(cudaMemcpyAsync(dst, ptr_, bytes(), cudaMemcpyDeviceToHost, stream));
+        }
     }
 
     static CudaArray zeros(const int count, cudaStream_t stream) {

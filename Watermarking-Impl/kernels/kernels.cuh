@@ -1,14 +1,10 @@
 #pragma once
+#include "luma_coefficients.hpp"
 #include <cstdint>
 #include <cub/cub.cuh>
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
-
-// ITU-R 601 luma coefficients, shared across all kernels
-static constexpr float kLumaR = 0.299f;
-static constexpr float kLumaG = 0.587f;
-static constexpr float kLumaB = 0.114f;
 
 // convert FLOAT to UINT64 safely by multiplying with a very large power of 10 in order to not lose digits
 // for converting back to float, we multiply with the inverse

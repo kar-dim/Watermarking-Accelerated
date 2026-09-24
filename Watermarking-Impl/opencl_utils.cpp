@@ -1,11 +1,13 @@
 #include "kernels/kernels.hpp"
 #include "kernels/utility_kernels.hpp"
+#include "luma_coefficients.hpp"
 #include "OclQueueManager.hpp"
 #include "opencl_utils.hpp"
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <exception>
+#include <format>
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
@@ -167,7 +169,9 @@ cl::Program buildUtilityKernels() {
     cl::Program program;
     try {
         program = cl::Program(context, utilityKernels);
-        program.build(device, (openClStdOption(device) + " -cl-unsafe-math-optimizations").c_str());
+        const string options = openClStdOption(device) + " -cl-unsafe-math-optimizations" +
+                               std::format(" -DK_LUMA_R={:.9g}f -DK_LUMA_G={:.9g}f -DK_LUMA_B={:.9g}f", CommonUtils::kLumaR, CommonUtils::kLumaG, CommonUtils::kLumaB);
+        program.build(device, options.c_str());
         return program;
     } catch (const cl::Error& e) {
         cout << "Could not build utility kernels, Reason: " << e.what() << "\n\n";

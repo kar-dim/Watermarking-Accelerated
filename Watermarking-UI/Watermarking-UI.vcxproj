@@ -98,63 +98,63 @@
     <QtModules>core;gui;widgets</QtModules>
     <QtBuildConfig>debug</QtBuildConfig>
     <QtDeployDebugRelease>debug</QtDeployDebugRelease>
-    <QtDeploy>true</QtDeploy>
+    <QtDeploy>false</QtDeploy>
     <QtDeployCopyFiles>true</QtDeployCopyFiles>
-    <QtDeployDir>@(_-->'%(OutDir)')Watermarking-BenchUI</QtDeployDir>
+    <QtDeployDir>@(_-->'%(OutDir)')Watermarking-UI</QtDeployDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='EIGEN_Debug|x64'" Label="QtSettings">
     <QtInstall>6.8.0_msvc2022_64</QtInstall>
     <QtModules>core;gui;widgets</QtModules>
     <QtBuildConfig>debug</QtBuildConfig>
     <QtDeployDebugRelease>debug</QtDeployDebugRelease>
-    <QtDeploy>true</QtDeploy>
+    <QtDeploy>false</QtDeploy>
     <QtDeployCopyFiles>true</QtDeployCopyFiles>
-    <QtDeployDir>@(_-->'%(OutDir)')Watermarking-BenchUI</QtDeployDir>
+    <QtDeployDir>@(_-->'%(OutDir)')Watermarking-UI</QtDeployDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='OPENCL_Release|x64'" Label="QtSettings">
     <QtInstall>6.8.0_msvc2022_64</QtInstall>
     <QtModules>core;gui;widgets</QtModules>
     <QtBuildConfig>release</QtBuildConfig>
     <QtDeployDebugRelease>release</QtDeployDebugRelease>
-    <QtDeploy>true</QtDeploy>
+    <QtDeploy>false</QtDeploy>
     <QtDeployCopyFiles>true</QtDeployCopyFiles>
-    <QtDeployDir>@(_-->'%(OutDir)')Watermarking-BenchUI</QtDeployDir>
+    <QtDeployDir>@(_-->'%(OutDir)')Watermarking-UI</QtDeployDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='OPENCL_Debug|x64'" Label="QtSettings">
     <QtInstall>6.8.0_msvc2022_64</QtInstall>
     <QtModules>core;gui;widgets</QtModules>
     <QtBuildConfig>debug</QtBuildConfig>
     <QtDeployDebugRelease>debug</QtDeployDebugRelease>
-    <QtDeploy>true</QtDeploy>
+    <QtDeploy>false</QtDeploy>
     <QtDeployCopyFiles>true</QtDeployCopyFiles>
-    <QtDeployDir>@(_-->'%(OutDir)')Watermarking-BenchUI</QtDeployDir>
+    <QtDeployDir>@(_-->'%(OutDir)')Watermarking-UI</QtDeployDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='EIGEN_Release|x64'" Label="QtSettings">
     <QtInstall>6.8.0_msvc2022_64</QtInstall>
     <QtModules>core;gui;widgets</QtModules>
     <QtBuildConfig>release</QtBuildConfig>
     <QtDeployDebugRelease>release</QtDeployDebugRelease>
-    <QtDeploy>true</QtDeploy>
+    <QtDeploy>false</QtDeploy>
     <QtDeployCopyFiles>true</QtDeployCopyFiles>
-    <QtDeployDir>@(_-->'%(OutDir)')Watermarking-BenchUI</QtDeployDir>
+    <QtDeployDir>@(_-->'%(OutDir)')Watermarking-UI</QtDeployDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='CUDA_ReleaseDist|x64'" Label="QtSettings">
     <QtInstall>6.8.0_msvc2022_64</QtInstall>
     <QtModules>core;gui;widgets</QtModules>
     <QtBuildConfig>release</QtBuildConfig>
     <QtDeployDebugRelease>release</QtDeployDebugRelease>
-    <QtDeploy>true</QtDeploy>
+    <QtDeploy>false</QtDeploy>
     <QtDeployCopyFiles>true</QtDeployCopyFiles>
-    <QtDeployDir>@(_-->'%(OutDir)')Watermarking-BenchUI</QtDeployDir>
+    <QtDeployDir>@(_-->'%(OutDir)')Watermarking-UI</QtDeployDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='CUDA_Release|x64'" Label="QtSettings">
     <QtInstall>6.8.0_msvc2022_64</QtInstall>
     <QtModules>core;gui;widgets</QtModules>
     <QtBuildConfig>release</QtBuildConfig>
     <QtDeployDebugRelease>release</QtDeployDebugRelease>
-    <QtDeploy>true</QtDeploy>
+    <QtDeploy>false</QtDeploy>
     <QtDeployCopyFiles>true</QtDeployCopyFiles>
-    <QtDeployDir>@(_-->'%(OutDir)')Watermarking-BenchUI</QtDeployDir>
+    <QtDeployDir>@(_-->'%(OutDir)')Watermarking-UI</QtDeployDir>
   </PropertyGroup>
   <Target Name="QtMsBuildNotFound" BeforeTargets="CustomBuild;ClCompile" Condition="!Exists('$(QtMsBuild)\qt.targets') or !Exists('$(QtMsBuild)\qt.props')">
     <Message Importance="High" Text="QtMsBuild: could not locate qt.targets, qt.props; project may not build correctly." />
@@ -412,10 +412,14 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <QtRcc Include="WatermarkingBenchUI.qrc" />
-    <QtMoc Include="WatermarkingBenchUI.h" />
+    <QtRcc Include="WatermarkingUI.qrc" />
+    <QtMoc Include="WatermarkingUI.h" />
     <ClCompile Include="BenchmarkWorker.cpp" />
-    <ClCompile Include="WatermarkingBenchUI.cpp" />
+    <ClCompile Include="AnimatedButton.cpp" />
+    <ClCompile Include="ComparisonView.cpp" />
+    <ClCompile Include="ImagePreview.cpp" />
+    <ClCompile Include="ImageWorker.cpp" />
+    <ClCompile Include="WatermarkingUI.cpp" />
     <ClCompile Include="main.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -428,10 +432,23 @@
   </ItemGroup>
   <ItemGroup>
     <QtMoc Include="BenchmarkWorker.hpp" />
+    <ClInclude Include="ComparisonView.hpp" />
+    <ClInclude Include="AnimatedButton.hpp" />
+    <ClInclude Include="ThemePalette.hpp" />
+    <QtMoc Include="ImageWorker.hpp" />
+    <ClInclude Include="ImagePreview.hpp" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="resources.rc" />
   </ItemGroup>
+  <PropertyGroup>
+    <WatermarkingUiDeploy Condition="'$(WatermarkingUiDeploy)' == ''">true</WatermarkingUiDeploy>
+  </PropertyGroup>
+  <Target Name="DeployWatermarkingQt" AfterTargets="CopyWatermarkingRuntimeFiles" Condition="'$(WatermarkingUiDeploy)' == 'true'">
+    <MakeDir Directories="$(OutDir)Watermarking-UI" />
+    <Copy SourceFiles="$(TargetPath)" DestinationFiles="$(OutDir)Watermarking-UI\$(TargetFileName)" SkipUnchangedFiles="true" />
+    <Exec Command="&quot;$(QtToolsPath)\windeployqt.exe&quot; --no-compiler-runtime --no-system-d3d-compiler --no-system-dxc-compiler --dir &quot;$(OutDir)Watermarking-UI&quot; &quot;$(OutDir)Watermarking-UI\$(TargetFileName)&quot;" />
+  </Target>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Condition="Exists('$(QtMsBuild)\qt.targets')">
     <Import Project="$(QtMsBuild)\qt.targets" />

@@ -9,7 +9,7 @@ if not exist "%CLANG_FORMAT%" (
 )
 
 if "%~1"=="" (
-    set "PWSH_PATHS='Watermarking-CLI', 'Watermarking-Impl', 'Watermarking-Impl-tests', 'Watermarking-BenchUI', 'Watermarking-Util'"
+    set "PWSH_PATHS='Watermarking-CLI', 'Watermarking-Impl', 'Watermarking-Impl-tests', 'Watermarking-UI', 'Watermarking-Util'"
 ) else (
     set "PWSH_PATHS='%~1'"
 )

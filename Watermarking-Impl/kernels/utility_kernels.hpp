@@ -2,11 +2,6 @@
 #include <string>
 inline const std::string utilityKernels = R"CLC(
 
-// ITU-R 601 luma coefficients
-#define K_LUMA_R 0.299f
-#define K_LUMA_G 0.587f
-#define K_LUMA_B 0.114f
-
 // coalesced tiled transpose: row-major float to column-major float, multi-channel via z-dimension
 __kernel void row_major_to_col_major_float(
     const __global float* restrict src,

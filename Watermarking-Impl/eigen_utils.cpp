@@ -1,6 +1,7 @@
 #include "buffer.hpp"
 #include "eigen_rgb_array.hpp"
 #include "eigen_utils.hpp"
+#include "luma_coefficients.hpp"
 #include <cstdint>
 #include <cstring>
 #include <Eigen/Core>
@@ -39,16 +40,35 @@ Gray8BufferIO eigenGrayToCimg(const Gray8Buffer& arrayGray) {
     return output;
 }
 
-EigenArrayRGB cimgToEigenRgb(const FloatBufferIO& rgbImage) {
+std::pair<EigenArrayRGB, ArrayXXf> cimgToEigenRgbAndGray(const FloatBufferIO& rgbImage) {
     const int rows = rgbImage.height();
     const int cols = rgbImage.width();
+    const size_t planeSize = static_cast<size_t>(rows) * cols;
+    const float* red = rgbImage.data();
+    const float* green = red + planeSize;
+    const float* blue = green + planeSize;
     EigenArrayRGB output = {ArrayXXf(rows, cols), ArrayXXf(rows, cols), ArrayXXf(rows, cols)};
+    ArrayXXf gray(rows, cols);
+    float* outputRed = output[0].data();
+    float* outputGreen = output[1].data();
+    float* outputBlue = output[2].data();
+    float* outputGray = gray.data();
 #pragma omp parallel for schedule(static)
-    for (int x = 0; x < cols; x++)
-        for (int y = 0; y < rows; y++)
-            for (int channel = 0; channel < 3; channel++)
-                output[channel](y, x) = rgbImage(x, y, 0, channel);
-    return output;
+    for (int col = 0; col < cols; ++col) {
+        const size_t outputColumn = static_cast<size_t>(col) * rows;
+        for (int row = 0; row < rows; ++row) {
+            const size_t inputIndex = static_cast<size_t>(row) * cols + col;
+            const size_t outputIndex = outputColumn + row;
+            const float r = red[inputIndex];
+            const float g = green[inputIndex];
+            const float b = blue[inputIndex];
+            outputRed[outputIndex] = r;
+            outputGreen[outputIndex] = g;
+            outputBlue[outputIndex] = b;
+            outputGray[outputIndex] = (r * CommonUtils::kLumaR + g * CommonUtils::kLumaG) + b * CommonUtils::kLumaB;
+        }
+    }
+    return {std::move(output), std::move(gray)};
 }
 
 ImageBuffer cimgToEigenGray(const FloatBufferIO& grayImage) {

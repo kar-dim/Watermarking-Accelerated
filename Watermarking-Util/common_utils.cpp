@@ -21,19 +21,22 @@ string addSuffixBeforeExtension(const string& file, const string& suffix) {
     return file.substr(0, dot) + suffix + file.substr(dot);
 }
 
+bool hasSupportedImageExtension(const std::filesystem::path& path) {
+    static constexpr std::array<string_view, 7> validExts{".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"};
+    string ext = path.extension().string();
+    std::ranges::transform(ext, ext.begin(), [](unsigned char c) { return std::tolower(c); });
+    return std::ranges::find(validExts, ext) != validExts.end();
+}
+
 // retrieve a list of valid image file paths based on their extension (case insensitive)
 std::vector<std::filesystem::path> getValidImageFiles(const std::filesystem::path& inputDir) {
-    static constexpr std::array<string_view, 7> validExts{".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"};
-
     std::vector<std::filesystem::path> validFiles;
     if (!std::filesystem::exists(inputDir) || !std::filesystem::is_directory(inputDir))
         return validFiles;
     for (const auto& entry : std::filesystem::directory_iterator(inputDir)) {
         if (!entry.is_regular_file())
             continue;
-        string ext = entry.path().extension().string();
-        std::ranges::transform(ext, ext.begin(), [](unsigned char c) { return std::tolower(c); });
-        if (std::ranges::find(validExts, ext) != validExts.end())
+        if (hasSupportedImageExtension(entry.path()))
             validFiles.push_back(entry.path());
     }
     std::sort(validFiles.begin(), validFiles.end());

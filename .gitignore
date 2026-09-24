@@ -367,4 +367,4 @@ FodyWeavers.xsd
 *.avi
 
 # skip local CLI benchmark results
-/benchmarks/*.csv
+/readme_pictures/*.csv

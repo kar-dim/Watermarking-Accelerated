@@ -2,7 +2,7 @@
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup>
     <WatermarkingRuntimeDestination>$(TargetDir)</WatermarkingRuntimeDestination>
-    <WatermarkingRuntimeDestination Condition="'$(MSBuildProjectName)' == 'Watermarking-BenchUI'">$(OutDir)Watermarking-BenchUI\</WatermarkingRuntimeDestination>
+    <WatermarkingRuntimeDestination Condition="'$(MSBuildProjectName)' == 'Watermarking-UI'">$(OutDir)Watermarking-UI\</WatermarkingRuntimeDestination>
     <WatermarkingFormatOnBuild Condition="'$(WatermarkingFormatOnBuild)' == ''">true</WatermarkingFormatOnBuild>
   </PropertyGroup>
 

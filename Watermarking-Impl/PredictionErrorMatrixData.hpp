@@ -22,13 +22,16 @@ class PredictionErrorMatrixData {
     static constexpr int localSize = (p * p) - 1;
     static constexpr int center = p / 2;
     using LocalVector = Eigen::Matrix<float, localSize, 1>;
-    using LocalMatrix = Eigen::Matrix<float, localSize, localSize>;
+    // double because float precision may not be enough especially for this combo: LOW threads, HIGH p, HIGH image size
+    using AccumVector = Eigen::Matrix<double, localSize, 1>;
+    using AccumMatrix = Eigen::Matrix<double, localSize, localSize>;
 
   public:
-    LocalVector coefficients, rx;
-    LocalMatrix Rx;
-    std::vector<AlignedMatrix<LocalMatrix>> RxAll;
-    std::vector<AlignedMatrix<LocalVector>> rxAll;
+    LocalVector coefficients;
+    AccumVector rx;
+    AccumMatrix Rx;
+    std::vector<AlignedMatrix<AccumMatrix>> RxAll;
+    std::vector<AlignedMatrix<AccumVector>> rxAll;
     std::vector<AlignedMatrix<Eigen::MatrixXf>> neighborMatricesAll;
     std::vector<int> offsets;
 
@@ -61,8 +64,9 @@ class PredictionErrorMatrixData {
 
     // border pixels: rank 1 symmetric update (upper triangle) + rx accumulation
     void computePredictionErrorMatrices(const LocalVector& x_, const float pixelValue, const int index) {
-        RxAll[index].mat.template selfadjointView<Eigen::Upper>().rankUpdate(x_);
-        rxAll[index].mat.noalias() += x_ * pixelValue;
+        const AccumVector neighbors = x_.template cast<double>();
+        RxAll[index].mat.template selfadjointView<Eigen::Upper>().rankUpdate(neighbors);
+        rxAll[index].mat.noalias() += neighbors * static_cast<double>(pixelValue);
     }
 
     // reduce thread local matrices, then solve Rx * coefficients = rx with Cholesky
@@ -74,10 +78,10 @@ class PredictionErrorMatrixData {
         if (!Rx.allFinite() || !rx.allFinite())
             return false;
         // Cholesky reads upper triangle only
-        Eigen::LLT<LocalMatrix, Eigen::Upper> llt(Rx);
+        Eigen::LLT<AccumMatrix, Eigen::Upper> llt(Rx);
         if (llt.info() != Eigen::Success)
             return false;
-        coefficients = llt.solve(rx);
+        coefficients = llt.solve(rx).template cast<float>();
         return true;
     }
 };

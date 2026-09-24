@@ -6,6 +6,7 @@
 #include "PredictionErrorMatrixData.hpp"
 #include "WatermarkBase.hpp"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdlib>
 #include <omp.h>
@@ -42,8 +43,7 @@ class WatermarkEigen final : public WatermarkBase {
 
   public:
     WatermarkEigen<p>(const int rows, const int cols, const std::string& watermarkPassword, const float psnr)
-        : WatermarkBase(rows, cols, watermarkPassword, psnr, initializeRandomMatrix), errorSequence(rows, cols), filteredEstimation(rows, cols), u(rows, cols), uStrengthened(rows, cols),
-          meMatrixData(omp_get_max_threads(), rows) {}
+        : WatermarkBase(rows, cols, watermarkPassword, psnr, initializeRandomMatrix), errorSequence(rows, cols), u(rows, cols), meMatrixData(omp_get_max_threads(), rows) {}
 
     // main watermark embedding method
     void makeWatermark(const ImageBuffer& inputGrayImage, const ImageBuffer& inputImage, ImageOutputBuffer& output, const MaskMethod maskType) override {
@@ -54,20 +54,20 @@ class WatermarkEigen final : public WatermarkBase {
             return;
         }
         // embed the watermark into the input image
-        inputImage.applyWatermark(uStrengthened, *scale, output);
+        inputImage.applyWatermark(u, *scale, output);
     }
 
     // main watermark detection method
     float detectWatermark(const ImageBuffer& inputImage, MaskMethod maskType) override {
         const auto& watermarkedBuffer = inputImage.getGray();
         if (maskType == MaskMethod::NVF) {
-            if (!computePredictionErrorData(watermarkedBuffer))
+            if (!computePredictionErrorData<false>(watermarkedBuffer))
                 return 0.0f;
             // fused: NVF mask + (u = mask*w)
             computeCustomMaskFused<false>(watermarkedBuffer, u);
         } else {
             // ME detect uses fused computations
-            const auto maxAbsOpt = computePredictionErrorData(watermarkedBuffer);
+            const auto maxAbsOpt = computePredictionErrorData<true>(watermarkedBuffer);
             if (!maxAbsOpt)
                 return 0.0f;
             const auto& w = randomMatrix.getGray();
@@ -76,34 +76,14 @@ class WatermarkEigen final : public WatermarkBase {
             for (int i = 0; i < u.size(); i++)
                 u(i) = std::abs(errorSequence(i)) * invMax * w(i);
         }
-        computeErrorSequence(u, filteredEstimation);
-        // optimized and fused correlation calculation using Eigen and OpenMP
-        float globalDot = 0.0f;
-        float globalSqEz = 0.0f;
-        float globalSqEu = 0.0f;
-        const float* ezPtr = errorSequence.data();
-        const float* euPtr = filteredEstimation.data();
-#pragma omp parallel reduction(+ : globalDot, globalSqEz, globalSqEu)
-        {
-            const int numThreads = omp_get_num_threads();
-            const int tid = omp_get_thread_num();
-            const auto chunkSize = totalPixels / numThreads;
-            const auto start = tid * chunkSize;
-            const auto actualSize = (tid == numThreads - 1) ? (totalPixels - start) : chunkSize;
-            if (actualSize > 0) {
-                const Map<const VectorXf> ezVec(ezPtr + start, actualSize);
-                const Map<const VectorXf> euVec(euPtr + start, actualSize);
-                globalDot += ezVec.dot(euVec);
-                globalSqEz += ezVec.squaredNorm();
-                globalSqEu += euVec.squaredNorm();
-            }
-        }
-        const float correlation = globalDot / (std::sqrt(globalSqEz) * std::sqrt(globalSqEu));
+        const auto [dot, sqEz, sqEu] = computeDetectionCorrelation(u);
+        const float correlation = dot / (std::sqrt(sqEz) * std::sqrt(sqEu));
         return std::isfinite(correlation) ? correlation : 0.0f;
     }
 
   private:
-    ArrayXXf errorSequence, filteredEstimation, u, uStrengthened;
+    // embedding and detection use this watermark plane at separate times (reused)
+    ArrayXXf errorSequence, u;
     PredictionErrorMatrixData<p> meMatrixData;
 
     // initialize the watermark random matrix into an Eigen buffer
@@ -244,10 +224,10 @@ class WatermarkEigen final : public WatermarkBase {
         float sumSq = 0.0f;
         if (maskType == MaskMethod::NVF) {
             // fused NVF mask + u = mask*w + sumSq accumulation
-            sumSq = computeCustomMaskFused<true>(inputImage, uStrengthened);
+            sumSq = computeCustomMaskFused<true>(inputImage, u);
         } else {
             // ME: skip mask creation entirely, populate errorSequence and its max abs, fuse (abs(e)*invMax)*w
-            const auto maxAbsOpt = computePredictionErrorData(inputImage);
+            const auto maxAbsOpt = computePredictionErrorData<true>(inputImage);
             if (!maxAbsOpt || *maxAbsOpt <= 0.0f)
                 return std::nullopt;
             const auto& w = randomMatrix.getGray();
@@ -256,9 +236,9 @@ class WatermarkEigen final : public WatermarkBase {
 #pragma omp parallel for schedule(static) reduction(+ : sumSq)
             for (int i = 0; i < errorSequence.size(); i++) {
                 // mask is calculated inline here, helps calculate u directly
-                const float u = std::abs(ePtr[i]) * invMax * w(i);
-                uStrengthened(i) = u;
-                sumSq += u * u;
+                const float uValue = std::abs(ePtr[i]) * invMax * w(i);
+                u(i) = uValue;
+                sumSq += uValue * uValue;
             }
         }
         if (sumSq <= 1e-3f) // for flat images/frames
@@ -266,8 +246,8 @@ class WatermarkEigen final : public WatermarkBase {
         return strengthFactor / std::sqrt(sumSq / totalPixels);
     }
 
-    // compute Prediction error data (coefficients, error sequence), and if needed, prediction error mask,
-    // returns the max absolute value of the computed error sequence
+    // compute prediction coefficients and the first error sequence, with an optional maximum for ME normalization
+    template <bool FindMax>
     std::optional<float> computePredictionErrorData(const ArrayXXf& image) {
         meMatrixData.setZero();
         const float* imgData = image.data();
@@ -297,6 +277,8 @@ class WatermarkEigen final : public WatermarkBase {
                     // large localSize (24, 48 and 80): neighbor matrix + SSYRK is faster
                     // pre-allocated at construction (per thread), reused across frames and columns
                     auto& neighborMatrix = meMatrixData.neighborMatricesAll[threadId].mat;
+                    Eigen::Matrix<float, localSize, localSize> columnRx;
+                    LocalVector columnRxVector;
 #pragma omp for schedule(static) nowait
                     for (int j = startCol; j < endCol; j++) {
                         const int colOffset = j * baseRows;
@@ -304,10 +286,11 @@ class WatermarkEigen final : public WatermarkBase {
                         const Map<const VectorXf> centerBatch(centerPtr, stripHeight);
                         for (int u = 0; u < localSize; u++)
                             neighborMatrix.col(u) = Map<const VectorXf>(centerPtr + offsets[u], stripHeight);
-                        // Rx += neighborMatrix^T * neighborMatrix (SSYRK upper triangle only)
-                        RxLocal.template selfadjointView<Eigen::Upper>().rankUpdate(neighborMatrix.transpose());
-                        // rx += neighborMatrix^T * center
-                        rxLocal.noalias() += neighborMatrix.transpose() * centerBatch;
+                        columnRx.setZero();
+                        columnRx.template selfadjointView<Eigen::Upper>().rankUpdate(neighborMatrix.transpose());
+                        RxLocal += columnRx.template cast<double>();
+                        columnRxVector.noalias() = neighborMatrix.transpose() * centerBatch;
+                        rxLocal += columnRxVector.template cast<double>();
                     }
                 }
             }
@@ -317,15 +300,36 @@ class WatermarkEigen final : public WatermarkBase {
         // solve system and coefficients
         if (!meMatrixData.computeCoefficients())
             return std::nullopt;
-        // calculate ex(i,j) AND its max abs in a single fused pass
-        return computeErrorSequence(image, errorSequence);
+        // calculate ex(i,j) and, when requested, its maximum absolute value in the same pass
+        return computeErrorSequence<FindMax>(image, errorSequence);
     }
 
-    // computes the prediction error sequence of the input image and returns its max abs value,
-    // The max abs reduction is fused into the per column loop, eliminating a separate full pass
-    float computeErrorSequence(const ArrayXXf& image, ArrayXXf& outputErrorSequence) {
+    // evaluate one center column into a reusable destination, keeping each eight-neighbor expression vectorized
+    void computeCenterErrorBatch(const float* imgData, const int colOffset, Map<VectorXf>& errorBatch) const {
         const auto& coefficients = meMatrixData.coefficients;
         const auto& offsets = meMatrixData.offsets;
+        const Map<const VectorXf> imgBatch(imgData + colOffset, stripHeight);
+        errorBatch.noalias() =
+            imgBatch - (Map<const VectorXf>(imgData + colOffset + offsets[0], stripHeight) * coefficients(0) + Map<const VectorXf>(imgData + colOffset + offsets[1], stripHeight) * coefficients(1) +
+                           Map<const VectorXf>(imgData + colOffset + offsets[2], stripHeight) * coefficients(2) + Map<const VectorXf>(imgData + colOffset + offsets[3], stripHeight) * coefficients(3) +
+                           Map<const VectorXf>(imgData + colOffset + offsets[4], stripHeight) * coefficients(4) + Map<const VectorXf>(imgData + colOffset + offsets[5], stripHeight) * coefficients(5) +
+                           Map<const VectorXf>(imgData + colOffset + offsets[6], stripHeight) * coefficients(6) + Map<const VectorXf>(imgData + colOffset + offsets[7], stripHeight) * coefficients(7));
+        for (int k = 8; k < localSize; k += 8) {
+            errorBatch.noalias() -= (Map<const VectorXf>(imgData + colOffset + offsets[k + 0], stripHeight) * coefficients(k + 0) +
+                                     Map<const VectorXf>(imgData + colOffset + offsets[k + 1], stripHeight) * coefficients(k + 1) +
+                                     Map<const VectorXf>(imgData + colOffset + offsets[k + 2], stripHeight) * coefficients(k + 2) +
+                                     Map<const VectorXf>(imgData + colOffset + offsets[k + 3], stripHeight) * coefficients(k + 3) +
+                                     Map<const VectorXf>(imgData + colOffset + offsets[k + 4], stripHeight) * coefficients(k + 4) +
+                                     Map<const VectorXf>(imgData + colOffset + offsets[k + 5], stripHeight) * coefficients(k + 5) +
+                                     Map<const VectorXf>(imgData + colOffset + offsets[k + 6], stripHeight) * coefficients(k + 6) +
+                                     Map<const VectorXf>(imgData + colOffset + offsets[k + 7], stripHeight) * coefficients(k + 7));
+        }
+    }
+
+    // compute the first prediction error sequence, skipping the maximum reduction when detection does not use it
+    template <bool FindMax>
+    float computeErrorSequence(const ArrayXXf& image, ArrayXXf& outputErrorSequence) {
+        const auto& coefficients = meMatrixData.coefficients;
         float centerMax = 0.0f;
         const float* imgData = image.data();
         float* outData = outputErrorSequence.data();
@@ -333,53 +337,71 @@ class WatermarkEigen final : public WatermarkBase {
 #pragma omp parallel
         {
             if (hasCenterRegion) {
-                // calculate prediction error for center region using Eigen maps and OpenMP
-                // optimized to calculate 8 neighbors at a time to fully utilize vectorization
-                // and eigen lazy evaluation with big expression trees
+                if constexpr (FindMax) {
 #pragma omp for schedule(static) reduction(max : centerMax) nowait
-                for (int j = startCol; j < endCol; j++) {
-                    const int colOffset = (j * baseRows) + startRow;
-                    const Map<const VectorXf> imgBatch(imgData + colOffset, stripHeight);
-                    Map<VectorXf> errorBatch(outData + colOffset, stripHeight);
-                    // first block: initialization and calculation of 8 neighbors
-                    // E = I - (c0*N0 + c1*N1... + c7*N7)
-                    errorBatch.noalias() = imgBatch - (Map<const VectorXf>(imgData + colOffset + offsets[0], stripHeight) * coefficients(0) +
-                                                          Map<const VectorXf>(imgData + colOffset + offsets[1], stripHeight) * coefficients(1) +
-                                                          Map<const VectorXf>(imgData + colOffset + offsets[2], stripHeight) * coefficients(2) +
-                                                          Map<const VectorXf>(imgData + colOffset + offsets[3], stripHeight) * coefficients(3) +
-                                                          Map<const VectorXf>(imgData + colOffset + offsets[4], stripHeight) * coefficients(4) +
-                                                          Map<const VectorXf>(imgData + colOffset + offsets[5], stripHeight) * coefficients(5) +
-                                                          Map<const VectorXf>(imgData + colOffset + offsets[6], stripHeight) * coefficients(6) +
-                                                          Map<const VectorXf>(imgData + colOffset + offsets[7], stripHeight) * coefficients(7));
-                    // calculate remaining blocks (indices 8 to localSize)
-                    // for p=3 this won't even run (compiler will optimize it out entirely)
-                    // E = E - (c8*N8 + ...)
-                    for (int k = 8; k < localSize; k += 8) {
-                        errorBatch.noalias() -= (Map<const VectorXf>(imgData + colOffset + offsets[k + 0], stripHeight) * coefficients(k + 0) +
-                                                 Map<const VectorXf>(imgData + colOffset + offsets[k + 1], stripHeight) * coefficients(k + 1) +
-                                                 Map<const VectorXf>(imgData + colOffset + offsets[k + 2], stripHeight) * coefficients(k + 2) +
-                                                 Map<const VectorXf>(imgData + colOffset + offsets[k + 3], stripHeight) * coefficients(k + 3) +
-                                                 Map<const VectorXf>(imgData + colOffset + offsets[k + 4], stripHeight) * coefficients(k + 4) +
-                                                 Map<const VectorXf>(imgData + colOffset + offsets[k + 5], stripHeight) * coefficients(k + 5) +
-                                                 Map<const VectorXf>(imgData + colOffset + offsets[k + 6], stripHeight) * coefficients(k + 6) +
-                                                 Map<const VectorXf>(imgData + colOffset + offsets[k + 7], stripHeight) * coefficients(k + 7));
+                    for (int j = startCol; j < endCol; j++) {
+                        const int colOffset = (j * baseRows) + startRow;
+                        Map<VectorXf> errorBatch(outData + colOffset, stripHeight);
+                        computeCenterErrorBatch(imgData, colOffset, errorBatch);
+                        centerMax = std::max(centerMax, errorBatch.cwiseAbs().maxCoeff());
                     }
-                    // max abs reduction on the fly for each column fused here, no separate pass needed
-                    centerMax = std::max(centerMax, errorBatch.cwiseAbs().maxCoeff());
+                } else {
+#pragma omp for schedule(static) nowait
+                    for (int j = startCol; j < endCol; j++) {
+                        const int colOffset = (j * baseRows) + startRow;
+                        Map<VectorXf> errorBatch(outData + colOffset, stripHeight);
+                        computeCenterErrorBatch(imgData, colOffset, errorBatch);
+                    }
                 }
             }
             processBorder(image, [&](const int i, const int j, const LocalVector& neighbors, const int) { outputErrorSequence(i, j) = image(i, j) - neighbors.dot(coefficients); });
         }
-        // border max via small Eigen block reductions
-        float borderMax = 0.0f;
-        if (startRow > 0)
-            borderMax = std::max(borderMax, outputErrorSequence.topRows(startRow).abs().maxCoeff());
-        if (endRow < baseRows)
-            borderMax = std::max(borderMax, outputErrorSequence.bottomRows(baseRows - endRow).abs().maxCoeff());
-        if (startCol > 0 && hasCenterRegion)
-            borderMax = std::max(borderMax, outputErrorSequence.block(startRow, 0, stripHeight, startCol).abs().maxCoeff());
-        if (endCol < baseCols && hasCenterRegion)
-            borderMax = std::max(borderMax, outputErrorSequence.block(startRow, endCol, stripHeight, baseCols - endCol).abs().maxCoeff());
-        return std::max(centerMax, borderMax);
+        if constexpr (FindMax) {
+            float borderMax = 0.0f;
+            if (startRow > 0)
+                borderMax = std::max(borderMax, outputErrorSequence.topRows(startRow).abs().maxCoeff());
+            if (endRow < baseRows)
+                borderMax = std::max(borderMax, outputErrorSequence.bottomRows(baseRows - endRow).abs().maxCoeff());
+            if (startCol > 0 && hasCenterRegion)
+                borderMax = std::max(borderMax, outputErrorSequence.block(startRow, 0, stripHeight, startCol).abs().maxCoeff());
+            if (endCol < baseCols && hasCenterRegion)
+                borderMax = std::max(borderMax, outputErrorSequence.block(startRow, endCol, stripHeight, baseCols - endCol).abs().maxCoeff());
+            return std::max(centerMax, borderMax);
+        }
+        return 0.0f;
+    }
+
+    // accumulate detection correlation while generating the second prediction error sequence
+    std::array<float, 3> computeDetectionCorrelation(const ArrayXXf& image) {
+        const auto& coefficients = meMatrixData.coefficients;
+        const float* imgData = image.data();
+        const float* errorData = errorSequence.data();
+        float dot = 0.0f;
+        float sqEz = 0.0f;
+        float sqEu = 0.0f;
+#pragma omp parallel reduction(+ : dot, sqEz, sqEu)
+        {
+            VectorXf columnError(stripHeight);
+            if (hasCenterRegion) {
+#pragma omp for schedule(static) nowait
+                for (int j = startCol; j < endCol; j++) {
+                    const int colOffset = (j * baseRows) + startRow;
+                    Map<VectorXf> errorBatch(columnError.data(), stripHeight);
+                    computeCenterErrorBatch(imgData, colOffset, errorBatch);
+                    const Map<const VectorXf> sourceError(errorData + colOffset, stripHeight);
+                    dot += sourceError.dot(errorBatch);
+                    sqEz += sourceError.squaredNorm();
+                    sqEu += errorBatch.squaredNorm();
+                }
+            }
+            processBorder(image, [&](const int i, const int j, const LocalVector& neighbors, const int) {
+                const float eu = image(i, j) - neighbors.dot(coefficients);
+                const float ez = errorSequence(i, j);
+                dot += ez * eu;
+                sqEz += ez * ez;
+                sqEu += eu * eu;
+            });
+        }
+        return {dot, sqEz, sqEu};
     }
 };

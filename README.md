@@ -23,7 +23,7 @@ This project implements and evaluates the performance (execution speed) of image
 
 The repository contains all required source code and dependencies needed to reproduce the benchmarks and experiments.
 
-- Comparative performance analysis between CPU and GPU implementations (check [benchmarks](benchmarks/) folder for more information). To ensure fair and reproducible comparisons across hardware (discrete GPUs vs iGPUs for example), an adaptive time budget benchmarking algorithm is implemented. Unlike fixed loop benchmarks (which can be very slow on weak devices or undersaturate fast ones), the system dynamically adjusts iteration loops based on the coefficient of variation of the execution times, combined with a fixed time budget constraint. This ensures that the FPS values are stable rather than driver latency or OS jitter.
+- Comparative performance analysis between CPU and GPU implementations (see the [benchmark figures](readme_pictures/)). The CLI benchmark uses a configurable fixed loop count. The Qt Benchmark tab adapts its measurement time and loop count using the coefficient of variation, which helps stabilize FPS readings across devices.
 
 Implementations are optimized for maximum performance:
 - CPU implementation: Uses the ```Eigen``` library for linear algebra operations combined with efficient use of ```OpenMP``` multithreading (reductions, parallel loops). The application utilizes all available logical (or physical, specifically on video embedding) CPU cores for maximum performance. The project is configured to use ```clang``` compiler (clang-cl toolset) instead of MSVC, because it optimizes much better the heavily templated Eigen code.
@@ -42,19 +42,18 @@ Implementations are optimized for maximum performance:
 Get the latest binaries [here](https://github.com/kar-dim/Watermarking-Accelerated/releases) for Eigen, OpenCL or CUDA platform. The binaries contain:
 - The CLI (command line) application and a sample config file (settings.ini).
 - The embedded CUDA/OpenCL/Eigen implementations of the watermarking algorithms.
-- The benchmark application which benchmarks each backend.
+- The Qt application for single-image watermarking, image batches, and backend benchmarking.
 - Some sample image and video files
 
 The CLI application:
-   - Embeds the proposed Prediction-Error mask once for a single image and writes the requested output file.
+   - Embeds the proposed Prediction-Error mask once for a single image, writes the requested output file, and reports total image time including load, watermark setup, embed, and save.
    - For image mode only: Supports **batched** operation: It can embed or detect the watermark for all images under a specified folder. It is highly parallelized for both operations to reduce disk I/O latency.
    - Provides a separate `--bench` mode for repeated ME embedding and detection measurements and CSV output. Add `--bench-save` to save the benchmark images.
 
-The Benchmark application:
-  - Embeds the proposed Prediction-Error mask watermark for a predefined set of images and shows the watermarkedf result on the fly in a window.
-  - It uses various values of p (window size) and PSNR to test a broad set of combinations.
-  - Does not need to parameterized, it is a standalone application used for image benchmarking only. Does not write to disk (only temporary files) nor is used for video.
-  - Calculates a **Total Score** using the geometric mean of the two pipelines, scaled by a constant ($C=10$) for readability:
+The Qt application:
+  - **Single image:** choose Embed or Detect, an image, password, and p. Embed also lets you set PSNR, compare the original and watermarked result with a draggable divider, pan and zoom the preview, then save the result. The comparison respects EXIF orientation. Detect shows the ME correlation in a compact result card without writing a file. Drop supported images into the window to select the first one. Changing embed settings keeps the previous comparison visible until you preview again.
+  - **Batch images:** choose or drop a folder to embed or detect the ME watermark. Supported image files in that folder populate a queue, which shows the state of each image; a completion dialog summarizes the run. PSNR is shown only for embedding. Embedded images go to a `watermark_output` subfolder.
+  - **Benchmark:** runs the predefined image, p, and PSNR sweep, shows the live watermarked image and timings, and can be stopped without a score dialog. A completed run presents the final score in a dialog. The score uses the geometric mean of the two pipelines, scaled by a constant ($C=10$) for readability:
 
 $$\text{Score} = C \cdot \sqrt{\text{FPS}_{\text{embed}} \cdot \text{FPS}_{\text{detect}}}$$
 
@@ -66,7 +65,7 @@ $$\text{Score} = C \cdot \sqrt{\text{FPS}_{\text{embed}} \cdot \text{FPS}_{\text
 
 To enable ```AVX-512``` replace the previous with: ```-march=native``` (clang) or ```/arch:AVX512``` (MSVC). The performance gains are minimal, and for much broader compatibility we use AVX2 by default.
 
-The CLI application can be parameterized from the corresponding ```settings.ini``` file or with command-line arguments. Command-line values override the INI file, use the INI key as the option name (for example, ```--p 5```, ```--psnr=42```, or ```--opencl_device_id 1```). Because both image and video settings contain ```mode``` and ```path```, those options must include their section: ```--image.mode single```, ```--image.path samples/images/720p.png```, ```--video.mode detect```, etc. Run ```Watermarking-CLI.exe --help``` for the complete list. Here is a detailed explanation for each parameter:
+The CLI application can be parameterized from the corresponding ```settings.ini``` file or with command-line arguments. Command-line values override the INI file, use the INI key as the option name (for example, ```--p 5```, ```--psnr=42```, or ```--gpu_device_id 1```). Because both image and video settings contain ```mode``` and ```path```, those options must include their section: ```--image.mode single```, ```--image.path samples/images/720p.png```, ```--video.mode detect```, etc. Run ```Watermarking-CLI.exe --help``` for the complete list. Here is a detailed explanation for each parameter:
 
 For a one-shot image embed: `Watermarking-CLI.exe --image.mode single --image.path samples/images/720p.png --output_path 720p_watermarked.png --no-pause`. For the repeated benchmark instead: `Watermarking-CLI.exe --bench --benchmark_loops 100`.
 
@@ -80,7 +79,7 @@ For a one-shot image embed: `Watermarking-CLI.exe --image.mode single --image.pa
 | p                                 | Window size for masking algorithms. All implementations support values of ```p=3,5,7``` and ```9```. Images and video frames must be at least ```p x p``` pixels. |
 | psnr                              | PSNR (Peak Signal-to-Noise Ratio). Higher values correspond to less watermark in the image, reducing noise, but making detection harder.   |
 | benchmark_loops                   | Positive iteration count for `--bench` only. The default is 100 on Eigen and 1000 on GPU backends. |
-| opencl_device_id                  | ```[OpenCL only / Number]```: Works only for OpenCL binary. If multiple OpenCL devices are found, then set this to the desired device. Set it to 0 if one device is found. |
+| gpu_device_id                     | ```[CUDA/OpenCL / Number]```: Selects a GPU by its zero-based index. An invalid index falls back to 0. The previous ```opencl_device_id``` key remains accepted for older settings files and scripts. |
 
 
 **Video-only settings:**
@@ -88,7 +87,7 @@ For a one-shot image embed: `Watermarking-CLI.exe --image.mode single --image.pa
 | Parameter                         | Description                                                                                                                 |
 |-----------------------------------|-----------------------------------------------------------------------------------------------------------------------------                |
 | mode                              | ```[embed/detect]```: Sets the video mode. Both options read the ```[video]/path``` as input video and either embed the watermark (re-encoding the output via libav) or try to detect the watermark.
-| \[video\]/path                    | Path to the video file, if we want to embed or detect the watermark for a video. This will set the sample application to ```video mode``` and will read the video-only settings that are described in this section plus the common settings (```watermark_seed```, ```display_fps```, ```p```, ```psnr``` and ```opencl_device_id```) |
+| \[video\]/path                    | Path to the video file, if we want to embed or detect the watermark for a video. This will set the sample application to ```video mode``` and will read the video-only settings that are described in this section plus the common settings (```watermark_password```, ```display_fps```, ```p```, ```psnr``` and ```gpu_device_id```) |
 | watermark_interval                | ```[Number]```: Embed or try to detect the watermark every ```watermark_interval``` frames. If set to 1 when embedding, the watermark will be embedded for all frames, which degrades video quality. If the current frame is not divisible by this parameter, then for embedding the frame is passed to the encoder as-is (no watermark), and for detection the frame is decoded and skipped. |
 | cuda_hw_decoder                   | ```[true/false]``` (CUDA only): Offload decoding to the GPU using **NVDEC**. When set to ```true```, the application automatically detects the input video's codec and selects the appropriate hardware decoder (```hevc_cuvid```, ```h264_cuvid```, ```av1_cuvid```, etc.). If NVDEC cannot open the stream or is unsupported, the application will automatically fall back to CPU decoding.|
 | cuda_hw_encoder                   | ```[true/false]```: Offload encoding to the GPU using **NVENC**. This makes more sense when combined with **NVDEC** but it is not necessary. If set, then the encoder options of ```encode_codec_options``` settings are ignored, and valid nvenc codec options must be provided in the ```hw_encode_options``` section. This works even for Eigen/OpenCL builds, assuming a compatible NVIDIA GPU exists, but incurs transparent Host/Device transfers reducing slightly its effectiveness (in CUDA build it is zero copy if used alongside **NVDEC**). |
@@ -98,13 +97,13 @@ For a one-shot image embed: `Watermarking-CLI.exe --image.mode single --image.pa
 
 # Video Encoding Pipeline
 
-The application uses the **FFmpeg libraries (libav\*)** directly, no `ffmpeg.exe` is required or invoked. It decodes the input, watermarks selected luma frames, re-encodes the video, and remuxes compatible audio and subtitle streams. Incompatible text subtitles may be transcoded; unsupported subtitles are dropped. Matroska attachments, chapters, and metadata are preserved where supported. Decoded frame PTS and durations are forwarded to the encoder; invalid output video DTS is repaired before muxing.
+The application uses the **FFmpeg libraries (libav\*)** directly, no `ffmpeg.exe` is required or invoked. It decodes the input, watermarks selected luma frames, re-encodes the video, and remuxes compatible audio and subtitle streams. Incompatible text subtitles may be transcoded and unsupported subtitles are dropped. Matroska attachments, chapters, and metadata are preserved where supported. Decoded frame PTS and durations are forwarded to the encoder and invalid output video DTS is repaired before muxing.
 
 You can customize the video codec and its quality settings via the ```encode_codec_options``` / ```hw_encode_options``` parameters described above.
 
 ### Equivalent FFmpeg CLI command (for reference)
 
-The pipeline is functionally equivalent to the following FFmpeg CLI invocation. This is provided purely for documentation purposes, the application does **not** call `ffmpeg.exe`.
+The pipeline is functionally equivalent to the following FFmpeg CLI invocation. This is provided purely for documentation purposes, the application does **not** call `ffmpeg.exe`. NOTE: ffmpeg normally requires `-framerate` option when `rawvideo` is used, but because we use libav directly, we control PTS/DTS handling, and thus both CFR **AND** VFR are supported.
 
 ```
 ffmpeg -y -f rawvideo
@@ -135,7 +134,7 @@ ffmpeg -y -f rawvideo
 This project is built using **Visual Studio** and consists of a **solution with various projects**.
 - Watermarking-Impl: The Core of this project, implements the algorithms for each backend. It also implements a fast, efficient, secure and deterministic watermark generation with OpenMP (CPU-only based). It is built as a **static library**.
 - Watermarking-CLI: The sample command line application that interacts with the Core project to embed and detect watermark in images and video.
-- Watermarking-BenchUI: The benchmarking project. It interacts with the Core project and benchmarks the performance of image watermarking. It uses Qt for UI.
+- Watermarking-UI: The Qt image workflow and benchmark application. It uses the Core project for single-image embedding, image batches, and performance measurements.
 - Watermarking-Util: Common utility methods without dependencies, that may be used by any project. It is built as a **static library**.
 - Watermarking-Impl-tests: GoogleTest suite for the Core project. Runs from the build output folder (the samples are copied there at build time).
 
@@ -203,7 +202,7 @@ This section includes performance comparisons between the three backends: CPU (E
     - CPU: AMD Ryzen 7 7800X3D (8-Core)
     - GPU: NVIDIA RTX 4070 SUPER (12 GB VRAM)
     - RAM: 32 GB DDR5 @ 6000 MHz (2x16GB)
-- The second set uses the dedicated Benchmark GUI application. While currently tested on a limited selection of hardware, we aim to expand this list significantly. Community submissions are of course welcome!
+- The second set uses the Benchmark tab of the Qt application. While currently tested on a limited selection of hardware, we aim to expand this list significantly. Community submissions are of course welcome!
 
 ## CLI Benchmark
 
@@ -213,28 +212,29 @@ The CLI benchmark sweep can be reproduced automatically from the repository root
 python benchmark.py --run
 ```
 
-This runs the CUDA and OpenCL Release CLIs with 1000 loops per measurement and the Eigen/CPU Release CLI with 100 loops. Pass `--loops N` to `benchmark.py --run` to set the same positive loop count for all three backends. Each CLI's ```--bench``` mode benchmarks ME embedding and detection for p=3,5,7,9 using the 480p, 720p, 1080p, and 4K sample images. Raw results are written to ```benchmarks/cuda.csv```, ```benchmarks/opencl.csv```, and ```benchmarks/eigen.csv```, after which figures 1–4 are regenerated. To redraw the figures without rerunning the benchmarks, use ```python benchmark.py --figures```. An OpenCL device can be selected with ```--opencl-device-id N``` when using ```--run```.
+This runs the CUDA and OpenCL Release CLIs with 1000 loops per measurement and the Eigen/CPU Release CLI with 100 loops. Pass `--loops N` to `benchmark.py --run` to set the same positive loop count for all three backends. Each CLI's ```--bench``` mode benchmarks ME embedding and detection for p=3,5,7,9 using the 480p, 720p, 1080p, and 4K sample images. Raw results are written to ```readme_pictures/cuda.csv```, ```readme_pictures/opencl.csv```, and ```readme_pictures/eigen.csv```, after which figures 1–4 are regenerated. To redraw the figures without rerunning the benchmarks, use ```python benchmark.py --figures```. An OpenCL device can be selected with ```--opencl-device-id N``` when using ```--run```.
 
 p = 3            |  p = 5
 :-------------------------:|:-------------------------:
-![Benchmark 1](benchmarks/1.png) | ![Benchmark 2](benchmarks/2.png)
+![Benchmark 1](readme_pictures/1.png) | ![Benchmark 2](readme_pictures/2.png)
 p = 7            |  p = 9
-![Benchmark 3](benchmarks/3.png) | ![Benchmark 4](benchmarks/4.png)
+![Benchmark 3](readme_pictures/3.png) | ![Benchmark 4](readme_pictures/4.png)
 
 ## GUI Benchmark Results
 
 CUDA            |  OpenCL
 :-------------------------:|:-------------------------:
-![Benchmark 5](benchmarks/5.png) | ![Benchmark 6](benchmarks/6.png)
+![Benchmark 5](readme_pictures/5.png) | ![Benchmark 6](readme_pictures/6.png)
 CPU/Eigen            | 
-![Benchmark 7](benchmarks/7.png) | 
+![Benchmark 7](readme_pictures/7.png) |
 
 
-## GUI Benchmark Screens
+## GUI Screens
 
- Benchmark screen | Result screen
+Preview | Detail
 :-------------------------:|:-------------------------:
-![Watermarking-BenchUI_QTaFwyJDQY](https://github.com/user-attachments/assets/96776c9b-19d9-4cc4-970c-6ef1b87f35df) | ![Benchmark 9 CPU](benchmarks/9.png)
-![Watermarking-BenchUI_8FfBLuXMk7](https://github.com/user-attachments/assets/53adbc25-1f93-43be-810f-7e17069f1937) | ![Benchmark 8 GPU](benchmarks/8.png)
+**Single image comparison**<br>![Single image comparison](readme_pictures/8.png) | **Zoomed comparison**<br>![Zoomed single image comparison](readme_pictures/9.png)
+**Batch in progress**<br>![Batch image queue in progress](readme_pictures/10.png) | **Batch complete**<br>![Completed batch and summary](readme_pictures/11.png)
+**Benchmark in progress**<br>![Benchmark in progress](readme_pictures/12.png) | **Benchmark score**<br>![Completed benchmark score](readme_pictures/13.png)
 
  

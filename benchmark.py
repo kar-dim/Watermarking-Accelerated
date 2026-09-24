@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the three CLI backends and generate benchmarks/1.png through 4.png."""
+"""Run the three CLI backends and generate readme_pictures/1.png through 4.png."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent
-BENCHMARK_DIR = ROOT / "benchmarks"
+BENCHMARK_DIR = ROOT / "readme_pictures"
 BACKENDS = {
     "eigen": ROOT / "x64" / "EIGEN_Release" / "Watermarking-CLI.exe",
     "cuda": ROOT / "x64" / "CUDA_Release" / "Watermarking-CLI.exe",

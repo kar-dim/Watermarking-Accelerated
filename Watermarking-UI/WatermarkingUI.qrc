@@ -5,7 +5,7 @@
         <file>assets/theme_images/checkbox.png</file>
         <file alias="down_arrow.png">assets/theme_images/down_arrow.png</file>
         <file>assets/theme_images/handle.png</file>
-        <file>assets/fonts/TitilliumWeb-Regular.ttf</file>
+        <file>assets/fonts/SofiaSansSemiCondensed.ttf</file>
     </qresource>
     <qresource prefix="/samples">
         <file alias="4k.png">../samples/images/4k.png</file>
