@@ -487,7 +487,16 @@ static int runCliBenchmark(const Settings& settings, const float psnr, const boo
         throw std::runtime_error("Could not write benchmark CSV: " + outputPath.string());
     output << "backend,device,p,resolution,operation,fps,seconds,loops,image\n" << std::setprecision(17);
 
-    cout << info(std::format("CLI benchmark: {} on {} ({} loops per measurement)\n", backend, device, loops));
+    // warm up before each measurement
+    const int warmupLoops = std::max(loops / 10, 3);
+    constexpr auto warmupMinDuration = std::chrono::milliseconds(250);
+    const auto warmup = [warmupLoops, warmupMinDuration](const auto& func) {
+        const auto started = std::chrono::steady_clock::now();
+        for (int i = 0; i < warmupLoops || std::chrono::steady_clock::now() - started < warmupMinDuration; i++)
+            func();
+    };
+
+    cout << info(std::format("CLI benchmark: {} on {} ({} loops per measurement, >= {} warmup loops and >= {} ms)\n", backend, device, loops, warmupLoops, warmupMinDuration.count()));
     // Test each prediction order
     for (const int p : predictionOrders) {
         auto session = createImageSession(watermarkPassword, p, psnr);
@@ -497,14 +506,13 @@ static int runCliBenchmark(const Settings& settings, const float psnr, const boo
                 throw std::runtime_error("Benchmark image not found: " + string(image.path));
             loadImage(session.get(), image.path);
 
-            // Measure embedding execution time
-            const double embedSeconds = executionTime(
-                                            [&]() {
-                                                embedImage(session.get(), MaskMethod::ME);
-                                                finish();
-                                            },
-                                            loops) /
-                                        loops;
+            // Measure embedding execution time (after warming up clocks, caches and memory pools)
+            const auto embedOnce = [&]() {
+                embedImage(session.get(), MaskMethod::ME);
+                finish();
+            };
+            warmup(embedOnce);
+            const double embedSeconds = executionTime(embedOnce, loops, false) / loops;
             if (saveImages) {
                 const fs::path imagesDir = outputDir / (backend + "_images");
                 fs::create_directories(imagesDir);
@@ -513,7 +521,9 @@ static int runCliBenchmark(const Settings& settings, const float psnr, const boo
             // Measure detection execution time and correlation
             prepareDetectionImage(session.get(), MaskMethod::ME);
             float correlation = 0.0f;
-            const double detectSeconds = executionTime([&]() { correlation = detectEmbeddedBuffer(session.get(), MaskMethod::ME); }, loops) / loops;
+            const auto detectOnce = [&]() { correlation = detectEmbeddedBuffer(session.get(), MaskMethod::ME); };
+            warmup(detectOnce);
+            const double detectSeconds = executionTime(detectOnce, loops, false) / loops;
 
             // Writes a single measurement record to CSV
             const auto writeResult = [&](const char* operation, const double seconds) {

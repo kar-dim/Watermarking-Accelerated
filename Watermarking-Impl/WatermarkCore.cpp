@@ -453,12 +453,10 @@ void loadImage(ImageSession* session, const string& imagePath, const bool captur
 // main function to embed the watermark into the loaded image, it calls the makeWatermark method of the watermark object,
 // which implements the actual embedding algorithm based on the specified mask method (NVF or ME)
 void embedImage(ImageSession* s, MaskMethod method) {
-#if defined(_USE_GPU_)
-    const auto& inputImg = s->imgBuffer.isRGB ? s->imgBuffer.rgbImage : s->imgBuffer.image;
-    s->watermarkObj->makeWatermark(s->imgBuffer.image, inputImg, s->watermarkBuffer, method);
-#else
-    s->watermarkObj->makeWatermark(s->imgBuffer.image, s->imgBuffer.rgbImage, s->watermarkBuffer, method);
-#endif
+    if (s->imgBuffer.isRGB)
+        s->watermarkObj->makeWatermark(s->imgBuffer.image, s->imgBuffer.rgbImage, s->watermarkBuffer, method);
+    else
+        s->watermarkObj->makeWatermark(s->imgBuffer.image, s->watermarkBuffer, method, WatermarkBase::Layout::ColMajor);
 }
 
 void finish() {
@@ -523,10 +521,6 @@ VideoHandle initVideo(const VideoSettings& settings) {
     session->watermarkObj = createWatermarkObject(height, width, settings.watermarkPassword, settings.p, settings.psnr);
 #if !defined(_USE_EIGEN_)
     session->hostFrame = std::make_unique<HostMemory<uint8_t>>(width * height * 3 / 2);
-#endif
-#if defined(_USE_EIGEN_)
-    // video is always grayscale, initialize the output buffer to the gray variant (bad_variant_access fix)
-    session->watermarkedFrame = ImageOutputBuffer(Gray8Buffer(height, width));
 #endif
     return session;
 }

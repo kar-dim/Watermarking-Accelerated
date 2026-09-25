@@ -2,20 +2,22 @@
 #include "common_utils.hpp"
 #include "luma_coefficients.hpp"
 #include "ImageFileBuffer.hpp"
+#include "simd.hpp"
 #include "TinyEXIF.h"
 #include "utils.hpp"
 #include "WatermarkBase.hpp"
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
-#include <immintrin.h>
 #include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <vector>
 #if defined(_USE_OPENCL_)
 #include "OclQueueManager.hpp"
 #include "OclArray.hpp"
@@ -73,11 +75,11 @@ void cimgAlphaZero(FloatBufferIO& rgb, const Gray8BufferIO& alpha) {
     }
 }
 
-// clamp and truncate eight planar float samples to eight display bytes (used by the preview code)
-inline __m128i packPreviewBytes(const float* source) {
+// clamp and round 8 float samples to 8 bytes (the low 8 bytes of the result). 8-bit input have integer values, they convert perfectly
+inline __m128i packBytes(const float* source) {
     const __m256 values = _mm256_loadu_ps(source);
     const __m256 clamped = _mm256_max_ps(_mm256_setzero_ps(), _mm256_min_ps(values, _mm256_set1_ps(255.0f)));
-    const __m256i integers = _mm256_cvttps_epi32(clamped);
+    const __m256i integers = _mm256_cvtps_epi32(clamped);
     const __m128i halves = _mm_packs_epi32(_mm256_castsi256_si128(integers), _mm256_extracti128_si256(integers, 1));
     return _mm_packus_epi16(halves, _mm_setzero_si128());
 }
@@ -94,14 +96,14 @@ void makeOriginalPreview(const float* source, uint8_t* preview, const size_t pix
 #pragma omp parallel for if (pixelCount > 1000000) schedule(static)
     for (std::ptrdiff_t block = 0; block < static_cast<std::ptrdiff_t>(blocks); ++block) {
         const size_t offset = static_cast<size_t>(block) * 8;
-        const __m128i redBytes = packPreviewBytes(source + offset);
+        const __m128i redBytes = packBytes(source + offset);
         if (channels == 1) {
             _mm_storel_epi64(reinterpret_cast<__m128i*>(preview + offset), redBytes);
         } else {
-            const __m128i greenBytes = packPreviewBytes(green + offset);
-            const __m128i blueBytes = packPreviewBytes(blue + offset);
+            const __m128i greenBytes = packBytes(green + offset);
+            const __m128i blueBytes = packBytes(blue + offset);
             const __m128i rg = _mm_unpacklo_epi8(redBytes, greenBytes);
-            const __m128i ba = _mm_unpacklo_epi8(blueBytes, channels == 4 ? packPreviewBytes(alpha + offset) : zero);
+            const __m128i ba = _mm_unpacklo_epi8(blueBytes, channels == 4 ? packBytes(alpha + offset) : zero);
             const __m128i first = _mm_unpacklo_epi16(rg, ba);
             const __m128i second = _mm_unpackhi_epi16(rg, ba);
             if (channels == 4) {
@@ -119,60 +121,80 @@ void makeOriginalPreview(const float* source, uint8_t* preview, const size_t pix
     // tail pixels (not multiple by AVX2 size (8))
     for (size_t pixel = blocks * 8; pixel < pixelCount; ++pixel)
         for (int channel = 0; channel < channels; ++channel)
-            preview[pixel * channels + channel] = static_cast<uint8_t>(std::clamp(source[static_cast<size_t>(channel) * pixelCount + pixel], 0.0f, 255.0f));
+            preview[pixel * channels + channel] = static_cast<uint8_t>(std::lround(std::clamp(source[static_cast<size_t>(channel) * pixelCount + pixel], 0.0f, 255.0f)));
 }
 } // namespace
 
-// GPU helpers for CImg (row-major) <-> GPU array (column-major) conversion
+// GPU helpers for CImg (row-major) -> GPU array (column-major) conversion
 #if defined(_USE_GPU_)
 namespace {
+// CImg image (planar, row-major) as bytes, return the 8-bit image the embedding reads
+std::vector<uint8_t> toBytes(const FloatBufferIO& img) {
+    const size_t count = img.size();
+    const float* source = img.data();
+    std::vector<uint8_t> bytes(count);
+#if defined(__AVX512F__)
+    // 16 samples per step for AVX512
+    constexpr size_t lanes = 16;
+    const size_t blocks = count / lanes;
+#pragma omp parallel for if (count > 1000000) schedule(static)
+    for (std::ptrdiff_t block = 0; block < static_cast<std::ptrdiff_t>(blocks); ++block) {
+        const __m512 clamped = _mm512_max_ps(_mm512_setzero_ps(), _mm512_min_ps(_mm512_loadu_ps(source + block * lanes), _mm512_set1_ps(255.0f)));
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(bytes.data() + block * lanes), _mm512_cvtusepi32_epi8(_mm512_cvtps_epi32(clamped)));
+    }
+#else
+    // 8 samples per step for AVX2
+    constexpr size_t lanes = 8;
+    const size_t blocks = count / lanes;
+#pragma omp parallel for if (count > 1000000) schedule(static)
+    for (std::ptrdiff_t block = 0; block < static_cast<std::ptrdiff_t>(blocks); ++block)
+        _mm_storel_epi64(reinterpret_cast<__m128i*>(bytes.data() + block * lanes), packBytes(source + block * lanes));
+#endif
+    for (size_t i = blocks * lanes; i < count; ++i)
+        bytes[i] = static_cast<uint8_t>(std::lround(std::clamp(source[i], 0.0f, 255.0f)));
+    return bytes;
+}
+
 #if defined(_USE_CUDA_)
-// For CUDA: upload the raw row-major CImg data to a temp GPU buffer, then transpose on GPU
 ImageBuffer cimgGrayToGpu(const FloatBufferIO& img, cudaStream_t stream) {
     const int rows = img.height();
     const int cols = img.width();
-    CudaArray<float> rowMajor(rows, cols, img.data(), stream);
-    CudaArray<float> colMajor(rows, cols, stream);
-    cuda_utils::launchRowMajorToColMajorFloatKernel(rowMajor.data(), colMajor.data(), cols, rows, 1, stream);
-    return colMajor;
+    const CudaArray<uint8_t> rowMajor(rows, cols, toBytes(img).data(), stream);
+    CudaArray<float> gray(rows, cols, stream);
+    cuda_utils::launchPitchedToFloatKernel(rowMajor.data(), gray.data(), cols, rows, cols, stream);
+    return gray;
 }
 
-std::pair<ImageBuffer, ImageBuffer> cimgRgbToGpuAndGray(const FloatBufferIO& img, cudaStream_t stream) {
+std::pair<ImageOutputBuffer, ImageBuffer> cimgRgbToGpuAndGray(const FloatBufferIO& img, cudaStream_t stream) {
     const int rows = img.height();
     const int cols = img.width();
-    CudaArray<float> rowMajor(rows, cols, 3, img.data(), stream);
-    CudaArray<float> rgb(rows, cols, 3, stream);
+    const CudaArray<uint8_t> rowMajor(rows, cols, 3, toBytes(img).data(), stream);
+    CudaArray<uint8_t> rgb(rows, cols, 3, stream);
     CudaArray<float> gray(rows, cols, stream);
-    cuda_utils::launchRowMajorToColMajorFloatKernel(rowMajor.data(), rgb.data(), cols, rows, 3, stream);
-    cuda_utils::launchRowMajorRGBToColMajorGrayKernel(rowMajor.data(), gray.data(), cols, rows, stream);
+    cuda_utils::launchRowMajorRgbToColMajorKernel(rowMajor.data(), rgb.data(), gray.data(), cols, rows, stream);
     return {std::move(rgb), std::move(gray)};
 }
 
 #elif defined(_USE_OPENCL_)
-// For OpenCL: upload the raw row-major CImg data to a temp GPU buffer, then transpose on GPU (mirrors CUDA)
 ImageBuffer cimgGrayToGpu(const FloatBufferIO& img, cl_command_queue queue) {
     const int rows = img.height();
     const int cols = img.width();
-    OclArray<float> rowMajor(rows, cols, img.data(), queue);
-    OclArray<float> colMajor(rows, cols, queue);
-    auto& q = OclQueueManager::getInstance().getQueue();
-    cl_utils::launchRowMajorToColMajorFloat(rowMajor.clBuffer(), colMajor.clBuffer(), cols, rows, 1, q);
-    return colMajor;
+    const OclArray<uint8_t> rowMajor(rows, cols, toBytes(img).data(), queue);
+    OclArray<float> gray(rows, cols, queue);
+    cl_utils::launchPitchedToFloat(rowMajor.clBuffer(), gray.clBuffer(), cols, rows, cols, OclQueueManager::getInstance().getQueue());
+    return gray;
 }
 
-std::pair<ImageBuffer, ImageBuffer> cimgRgbToGpuAndGray(const FloatBufferIO& img, cl_command_queue queue) {
+std::pair<ImageOutputBuffer, ImageBuffer> cimgRgbToGpuAndGray(const FloatBufferIO& img, cl_command_queue queue) {
     const int rows = img.height();
     const int cols = img.width();
-    OclArray<float> rowMajor(rows, cols, 3, img.data(), queue);
-    OclArray<float> rgb(rows, cols, 3, queue);
+    const OclArray<uint8_t> rowMajor(rows, cols, 3, toBytes(img).data(), queue);
+    OclArray<uint8_t> rgb(rows, cols, 3, queue);
     OclArray<float> gray(rows, cols, queue);
-    auto& q = OclQueueManager::getInstance().getQueue();
-    cl_utils::launchRowMajorToColMajorFloat(rowMajor.clBuffer(), rgb.clBuffer(), cols, rows, 3, q);
-    cl_utils::launchRowMajorRGBToColMajorGray(rowMajor.clBuffer(), gray.clBuffer(), cols, rows, q);
+    cl_utils::launchRowMajorRgbToColMajor(rowMajor.clBuffer(), rgb.clBuffer(), gray.clBuffer(), cols, rows, OclQueueManager::getInstance().getQueue());
     return {std::move(rgb), std::move(gray)};
 }
 #endif
-
 } // namespace
 #endif
 
@@ -312,10 +334,7 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile, const bool cap
 #endif
 #elif defined(_USE_EIGEN_)
     switch (cimgRgb.spectrum()) {
-    case 1:
-        rgbImage = eigen_utils::cimgToEigenGray(cimgRgb);
-        image = rgbImage;
-        break;
+    case 1: image = eigen_utils::cimgToEigenGray(cimgRgb); break;
     case 3: {
         auto [rgb, gray] = eigen_utils::cimgToEigenRgbAndGray(cimgRgb);
         rgbImage = std::move(rgb);

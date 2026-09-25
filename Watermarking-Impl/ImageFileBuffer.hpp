@@ -9,7 +9,8 @@
  *  \author Dimitris Karatzas
  */
 struct ImageFileBuffer {
-    ImageBuffer rgbImage;
+    // 8-bit RGB image (empty for grayscale images) and the float luma the watermark is computed from
+    ImageOutputBuffer rgbImage;
     ImageBuffer image;
     std::optional<Gray8BufferIO> alphaChannel;
     unsigned int rows = 0, cols = 0;

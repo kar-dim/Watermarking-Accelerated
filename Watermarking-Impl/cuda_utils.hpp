@@ -14,8 +14,7 @@ void launchNV12ToYUV420pKernel(const uint8_t* uvSrc, const int uvPitch, uint8_t*
 void launchPitchedToFloatKernel(const uint8_t* ySrc, float* yDst, const int width, const int height, const int pitch, const cudaStream_t stream);
 void launchU8ToFloatGrayKernel(const uint8_t* input, float* output, const int planeSize, const int numChannels, const cudaStream_t stream);
 void launchColMajorToRowMajorU8Kernel(const uint8_t* src, uint8_t* dst, const int width, const int height, const int channels, const cudaStream_t stream);
-void launchRowMajorToColMajorFloatKernel(const float* src, float* dst, const int width, const int height, const int channels, const cudaStream_t stream);
-void launchRowMajorRGBToColMajorGrayKernel(const float* src, float* dst, const int width, const int height, const cudaStream_t stream);
+void launchRowMajorRgbToColMajorKernel(const uint8_t* src, uint8_t* rgbDst, float* grayDst, const int width, const int height, const cudaStream_t stream);
 // HDR (P010LE BT.2020 PQ) -> SDR (BT.709) conversion kernels
 void launchP010HdrYToSdrFloatKernel(const uint16_t* ySrc, const int yPitchBytes, const uint16_t* uvSrc, const int uvPitchBytes, float* yDst, const int width, const int height,
     const video_utils::MobiusParams& mobius, const cudaStream_t stream);

@@ -37,18 +37,11 @@ void launchColMajorToRowMajorU8Kernel(const uint8_t* src, uint8_t* dst, const in
     colMajorToRowMajorU8<<<gridSize, blockSize, 0, stream>>>(src, dst, width, height);
     CUDA_CHECK(cudaGetLastError());
 }
-// transpose row-major float (CImg) to column-major float (CudaArray)
-void launchRowMajorToColMajorFloatKernel(const float* src, float* dst, const int width, const int height, const int channels, const cudaStream_t stream) {
-    constexpr dim3 blockSize(32, 8);
-    const dim3 gridSize((width + 31) / 32, (height + 31) / 32, channels);
-    rowMajorToColMajorFloat<<<gridSize, blockSize, 0, stream>>>(src, dst, width, height);
-    CUDA_CHECK(cudaGetLastError());
-}
-// fused row-major 3-channel RGB to col-major grayscale with luma weights
-void launchRowMajorRGBToColMajorGrayKernel(const float* src, float* dst, const int width, const int height, const cudaStream_t stream) {
+// row-major planar 8-bit RGB (CImg) to column-major planar 8-bit RGB + column-major float luma (CudaArray)
+void launchRowMajorRgbToColMajorKernel(const uint8_t* src, uint8_t* rgbDst, float* grayDst, const int width, const int height, const cudaStream_t stream) {
     constexpr dim3 blockSize(32, 8);
     const dim3 gridSize((width + 31) / 32, (height + 31) / 32);
-    rowMajorRGBToColMajorGray<<<gridSize, blockSize, 0, stream>>>(src, dst, width, height);
+    rowMajorRgbToColMajor<<<gridSize, blockSize, 0, stream>>>(src, rgbDst, grayDst, width, height);
     CUDA_CHECK(cudaGetLastError());
 }
 

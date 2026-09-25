@@ -23,7 +23,7 @@ RESOLUTIONS = ("480p", "720p", "1080p", "4K")
 OPERATIONS = ("embed", "detect")
 
 
-def run_benchmarks(opencl_device_id: int | None, loops: int | None) -> None:
+def run_benchmarks(device_ids: dict[str, int | None], loops: int | None) -> None:
     BENCHMARK_DIR.mkdir(exist_ok=True)
     for backend, executable in BACKENDS.items():
         if not executable.is_file():
@@ -31,8 +31,8 @@ def run_benchmarks(opencl_device_id: int | None, loops: int | None) -> None:
         command = [str(executable), "--bench"]
         if loops is not None:
             command.extend(("--benchmark_loops", str(loops)))
-        if backend == "opencl" and opencl_device_id is not None:
-            command.extend(("--opencl_device_id", str(opencl_device_id)))
+        if device_ids.get(backend) is not None:
+            command.extend(("--gpu_device_id", str(device_ids[backend])))
         print(f"\n=== Running {BACKEND_LABELS[backend]} benchmark ===", flush=True)
         subprocess.run(command, cwd=ROOT, check=True)
 
@@ -119,7 +119,9 @@ def parse_args() -> argparse.Namespace:
     action = parser.add_mutually_exclusive_group(required=True)
     action.add_argument("--run", action="store_true", help="run all three Release CLIs, then generate figures")
     action.add_argument("--figures", action="store_true", help="generate figures from existing CSV files only")
-    parser.add_argument("--opencl-device-id", type=int, help="override settings.ini for the OpenCL benchmark")
+    # CUDA and OpenCL number the GPUs differently, each backend gets its own index
+    parser.add_argument("--cuda-device-id", type=int, help="GPU index for the CUDA benchmark (overrides settings.ini)")
+    parser.add_argument("--opencl-device-id", type=int, help="GPU index for the OpenCL benchmark (overrides settings.ini)")
     parser.add_argument("--loops", type=int, help="iterations per measurement for each backend (requires --run)")
     return parser.parse_args()
 
@@ -130,7 +132,7 @@ def main() -> int:
         if arguments.loops is not None and (not arguments.run or arguments.loops <= 0):
             raise ValueError("--loops requires --run and a positive integer")
         if arguments.run:
-            run_benchmarks(arguments.opencl_device_id, arguments.loops)
+            run_benchmarks({"cuda": arguments.cuda_device_id, "opencl": arguments.opencl_device_id}, arguments.loops)
         generate_figures(read_results())
     except (FileNotFoundError, RuntimeError, ValueError, subprocess.CalledProcessError) as error:
         print(f"error: {error}", file=sys.stderr)

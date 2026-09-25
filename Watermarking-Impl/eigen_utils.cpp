@@ -2,6 +2,8 @@
 #include "eigen_rgb_array.hpp"
 #include "eigen_utils.hpp"
 #include "luma_coefficients.hpp"
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <Eigen/Core>
@@ -40,18 +42,20 @@ Gray8BufferIO eigenGrayToCimg(const Gray8Buffer& arrayGray) {
     return output;
 }
 
-std::pair<EigenArrayRGB, ArrayXXf> cimgToEigenRgbAndGray(const FloatBufferIO& rgbImage) {
+// row-major planar float RGB (CImg) -> column-major 8-bit RGB (clamped and rounded) + float luma
+std::pair<EigenArrayU8RGB, ArrayXXf> cimgToEigenRgbAndGray(const FloatBufferIO& rgbImage) {
     const int rows = rgbImage.height();
     const int cols = rgbImage.width();
     const size_t planeSize = static_cast<size_t>(rows) * cols;
     const float* red = rgbImage.data();
     const float* green = red + planeSize;
     const float* blue = green + planeSize;
-    EigenArrayRGB output = {ArrayXXf(rows, cols), ArrayXXf(rows, cols), ArrayXXf(rows, cols)};
+    EigenArrayU8RGB output = makeEigenRGBu8(rows, cols);
     ArrayXXf gray(rows, cols);
-    float* outputRed = output[0].data();
-    float* outputGreen = output[1].data();
-    float* outputBlue = output[2].data();
+    uint8_t* outputRed = output[0].data();
+    uint8_t* outputGreen = output[1].data();
+    uint8_t* outputBlue = output[2].data();
+    const auto toByte = [](const float value) { return static_cast<uint8_t>(std::lround(std::clamp(value, 0.0f, 255.0f))); };
     float* outputGray = gray.data();
 #pragma omp parallel for schedule(static)
     for (int col = 0; col < cols; ++col) {
@@ -59,13 +63,13 @@ std::pair<EigenArrayRGB, ArrayXXf> cimgToEigenRgbAndGray(const FloatBufferIO& rg
         for (int row = 0; row < rows; ++row) {
             const size_t inputIndex = static_cast<size_t>(row) * cols + col;
             const size_t outputIndex = outputColumn + row;
-            const float r = red[inputIndex];
-            const float g = green[inputIndex];
-            const float b = blue[inputIndex];
+            const uint8_t r = toByte(red[inputIndex]);
+            const uint8_t g = toByte(green[inputIndex]);
+            const uint8_t b = toByte(blue[inputIndex]);
             outputRed[outputIndex] = r;
             outputGreen[outputIndex] = g;
             outputBlue[outputIndex] = b;
-            outputGray[outputIndex] = (r * CommonUtils::kLumaR + g * CommonUtils::kLumaG) + b * CommonUtils::kLumaB;
+            outputGray[outputIndex] = (static_cast<float>(r) * CommonUtils::kLumaR + static_cast<float>(g) * CommonUtils::kLumaG) + static_cast<float>(b) * CommonUtils::kLumaB;
         }
     }
     return {std::move(output), std::move(gray)};

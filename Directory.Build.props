@@ -1,8 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup Label="Watermarking SIMD level">
+    <WatermarkingSimd Condition="'$(WatermarkingSimd)' == ''">AVX2</WatermarkingSimd>
+    <WatermarkingInstructionSet Condition="'$(WatermarkingSimd)' == 'AVX512'">AdvancedVectorExtensions512</WatermarkingInstructionSet>
+    <WatermarkingInstructionSet Condition="'$(WatermarkingSimd)' != 'AVX512'">AdvancedVectorExtensions2</WatermarkingInstructionSet>
+    <WatermarkingArch Condition="'$(WatermarkingSimd)' == 'AVX512'">/arch:AVX512</WatermarkingArch>
+    <WatermarkingArch Condition="'$(WatermarkingSimd)' != 'AVX512'">/arch:AVX2</WatermarkingArch>
+    <WatermarkingClangSimdFlags Condition="'$(WatermarkingSimd)' == 'AVX512'">-mavx512f -mavx512cd -mavx512bw -mavx512dq -mavx512vl -mfma -mf16c</WatermarkingClangSimdFlags>
+    <WatermarkingClangSimdFlags Condition="'$(WatermarkingSimd)' != 'AVX512'">-mavx2 -mfma -mf16c</WatermarkingClangSimdFlags>
+    <WatermarkingOutputSuffix Condition="'$(WatermarkingSimd)' == 'AVX512'">_AVX512</WatermarkingOutputSuffix>
+    <OutDir Condition="'$(WatermarkingSimd)' == 'AVX512'">$(MSBuildThisFileDirectory)$(Platform)\$(Configuration)_AVX512\</OutDir>
+    <IntDir Condition="'$(WatermarkingSimd)' == 'AVX512'">$(Platform)\$(Configuration)_AVX512\</IntDir>
+  </PropertyGroup>
   <PropertyGroup Label="Watermarking shared paths">
     <WatermarkingRoot>$(MSBuildThisFileDirectory)</WatermarkingRoot>
-    <WatermarkingLibraryOutputDirectory>$(WatermarkingRoot)$(Platform)\lib\$(Configuration)\</WatermarkingLibraryOutputDirectory>
+    <WatermarkingLibraryOutputDirectory>$(WatermarkingRoot)$(Platform)\lib\$(Configuration)$(WatermarkingOutputSuffix)\</WatermarkingLibraryOutputDirectory>
     <WatermarkingImplDir>$(WatermarkingRoot)Watermarking-Impl\</WatermarkingImplDir>
     <WatermarkingUtilDir>$(WatermarkingRoot)Watermarking-Util\</WatermarkingUtilDir>
     <WatermarkingPublicIncludeDirectories>$(WatermarkingImplDir)include;$(WatermarkingUtilDir)include</WatermarkingPublicIncludeDirectories>

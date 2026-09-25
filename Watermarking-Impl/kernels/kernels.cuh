@@ -5,18 +5,20 @@
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
+#include <type_traits>
 
-// convert FLOAT to UINT64 safely by multiplying with a very large power of 10 in order to not lose digits
-// for converting back to float, we multiply with the inverse
+// Convert float to fixed point uint64 for deterministic atomic additions
 __device__ inline uint64_t toScaledUint64(float value) { return static_cast<uint64_t>(value * 1000000000.0f); }
 __device__ inline float toUnscaledFloat(uint64_t value) { return static_cast<float>(value * 1.0e-9f); }
 
-// half8 struct for vectorized operations on 8 half values
-struct alignas(16) half8 {
-    half a, b, c, d, e, f, g, h;
+inline constexpr float kMeMaskPrescale = 1.0f / 255.0f;
+
+// Max functor for CUB block reductions
+struct MaxOp {
+    __device__ __forceinline__ float operator()(const float a, const float b) const { return fmaxf(a, b); }
 };
 
-// struct to hold correlation data for reduction (cub), used in correlation calculation kernels
+// Stores the three correlation sums reduced together by CUB
 struct CorrelationData {
     float dot;
     float normU;
@@ -24,191 +26,58 @@ struct CorrelationData {
     __device__ __forceinline__ CorrelationData operator+(const CorrelationData& other) const { return {dot + other.dot, normU + other.normU, normZ + other.normZ}; }
 };
 
-// struct to hold rx vector values for reduction (cub) with vectorized addition with operator+
-template <int N>
-struct alignas(16) rxVecData {
-    float vals[N];
-
-    // it is better to initialize whenever we want instead of constructor
-    // though for now we always initialize and immediately initialize to zero, but this may change in the future
-    __device__ __forceinline__ void zero() {
-#pragma unroll
-        for (int i = 0; i < N; i++)
-            vals[i] = 0.0f;
-    }
-
-    __device__ __forceinline__ rxVecData operator+(const rxVecData& other) const {
-        rxVecData res;
-#pragma unroll
-        for (int i = 0; i < N; i++)
-            res.vals[i] = vals[i] + other.vals[i];
-        return res;
-    }
-};
-
-// CUB Transform Functor for absolute value, used in error sequence calculation when we want absolute error sequence (for detection)
-struct AbsTransformOp {
-    __device__ __forceinline__ float operator()(const float& val) const { return fabsf(val); }
-};
-
-// maps a linear index k to(row, col) coordinates for a packed lower triangular matrix
-__device__ inline int2 getPackedCoords(const int k) {
-    // inverse triangular number formula: r = floor((sqrt(1 + 8k) - 1) / 2)
+// Converts a packed lower triangular index to row and column coordinates
+__device__ inline int2 packedToRowCol(const int k) {
+    // Inverse triangular formula to find row coordinate
     const int r = __float2int_rd(0.5f * (sqrtf(1.0f + 8.0f * k) - 1.0f));
     const int c = k - (r * (r + 1)) / 2;
     return make_int2(r, c);
 }
 
-// helper methods to clamp a value between two limits
+// Clamps a value between lower and upper bounds
 inline __device__ float clamp(float f, float a, float b) { return fmaxf(a, fminf(f, b)); }
 inline __device__ int clamp(int f, int a, int b) { return max(a, min(f, b)); }
 
-// helper function to fill block-wide shared memory cooperatively for error sequence and NVF kernels
-// sharedMem must be rectangle with dimensions [shDimFast][shDimSlow + 1]
-template <bool FUSED, int p, int shDimFast, int shDimSlow>
-__device__ __forceinline__ void fillBlock(const float* __restrict__ inputA, const float* __restrict__ inputB, float* __restrict__ sharedMem, const int width, const int height) {
+// Fills shared memory with the image tile around block outputs with clamped edges
+// Loads all values into registers first before writing to shared memory
+template <bool FUSED, int p, int shDimFast, int shDimSlow, int THREADS, bool ABS_A = false>
+__device__ __forceinline__ void fillBlock(
+    const float* __restrict__ inputA, const __half* __restrict__ inputB, float* __restrict__ sharedMem, const int tileSlow0, const int tileFast0, const int width, const int height) {
     constexpr int pad = p / 2;
     constexpr int totalElements = shDimFast * shDimSlow;
+    constexpr int iterations = (totalElements + THREADS - 1) / THREADS;
 
-    const int baseGlobalX = (int)(blockIdx.y * blockDim.y) - pad;
-    const int baseGlobalY = (int)(blockIdx.x * blockDim.x) - pad;
+    const int baseGlobalX = tileSlow0 - pad;
+    const int baseGlobalY = tileFast0 - pad;
     const int tid = threadIdx.y * blockDim.x + threadIdx.x;
-    // cooperatively fill 2D shared memory
-    for (int i = tid; i < totalElements; i += blockDim.x * blockDim.y) {
-        const int r = i % shDimFast;
-        const int c = i / shDimFast;
-        const int globalX = clamp(baseGlobalX + c, 0, width - 1);
-        const int globalY = clamp(baseGlobalY + r, 0, height - 1);
-        const int idx = globalX * height + globalY;
-        float val = inputA[idx];
-        // if we need to fuse (A*B), do it here, branch-free because it its known at compile time
-        if constexpr (FUSED)
-            val *= inputB[idx];
-        sharedMem[i] = val;
+    float values[iterations];
+#pragma unroll
+    for (int it = 0; it < iterations; it++) {
+        const int i = tid + (it * THREADS);
+        if (i < totalElements) {
+            const int r = i % shDimFast;
+            const int c = i / shDimFast;
+            const int globalX = clamp(baseGlobalX + c, 0, width - 1);
+            const int globalY = clamp(baseGlobalY + r, 0, height - 1);
+            const int idx = globalX * height + globalY;
+            float val = inputA[idx];
+            // Evaluated at compile time to avoid branches
+            if constexpr (ABS_A)
+                val = fabsf(val);
+            if constexpr (FUSED)
+                val *= __half2float(inputB[idx]);
+            values[it] = val;
+        }
+    }
+#pragma unroll
+    for (int it = 0; it < iterations; it++) {
+        const int i = tid + (it * THREADS);
+        if (i < totalElements)
+            sharedMem[i] = values[it];
     }
 }
 
-// helper function to fill block-wide shared memory cooperatively for ME kernels
-// optimized to minimize uncoalesced reads and warp stalls
-template <int p, int PixelsPerBlock, int StripHeight = PixelsPerBlock + p - 1>
-__device__ __forceinline__ void fillBlockStripVertical(half blockValues[p][StripHeight], const float* __restrict__ input, const int width, const int height, const int bx, const int by) {
-    constexpr float scaleFactor = 0.00392156862f;
-    constexpr int radius = (p - 1) / 2;
-    constexpr int totalPixels = p * StripHeight;
-    constexpr int blockSize = p <= 5 ? 256 : 128; // note: blockDim.x is slower here! it is important to use constexpr for this critical hot loop!
-
-    const int baseGlobalCol = (bx * 1) - radius;
-    const int baseGlobalRow = (by * PixelsPerBlock) - radius;
-
-    // ME kernels are VERY sensitive to the latency and indexing cost of these loads,
-    // for a strip whose COLUMN pitch is aligned, we can load 8 pixels per thread from
-    // 32byte (aligned!) sectors! NOTE: border and unaligned strips use the fallback scalar path
-    if constexpr (p == 9) {
-        constexpr int prefix = 8 - radius;
-        constexpr int chunksPerColumn = (prefix + StripHeight + 7) / 8;
-        const int alignedBaseRow = baseGlobalRow - prefix;
-        if ((height & 7) == 0 && alignedBaseRow >= 0 && alignedBaseRow + (chunksPerColumn * 8) <= height) {
-            constexpr int totalChunks = p * chunksPerColumn;
-            for (int chunk = threadIdx.x; chunk < totalChunks; chunk += blockSize) {
-                const int c = chunk / chunksPerColumn;
-                const int v = chunk - (c * chunksPerColumn);
-                const int globalCol = clamp(baseGlobalCol + c, 0, width - 1);
-                const int globalRow = alignedBaseRow + (v * 8);
-                const float* const src = input + (globalCol * height) + globalRow;
-                const int sharedRow = (v * 8) - prefix;
-
-                const float4 lo = *reinterpret_cast<const float4*>(src);
-                if (sharedRow >= 0) {
-                    half2* const dst = reinterpret_cast<half2*>(&blockValues[c][sharedRow]);
-                    dst[0] = __floats2half2_rn(lo.x * scaleFactor, lo.y * scaleFactor);
-                    dst[1] = __floats2half2_rn(lo.z * scaleFactor, lo.w * scaleFactor);
-                }
-
-                const float4 hi = *reinterpret_cast<const float4*>(src + 4);
-                if (sharedRow + 4 < StripHeight) {
-                    half2* const dst = reinterpret_cast<half2*>(&blockValues[c][sharedRow + 4]);
-                    dst[0] = __floats2half2_rn(hi.x * scaleFactor, hi.y * scaleFactor);
-                    dst[1] = __floats2half2_rn(hi.z * scaleFactor, hi.w * scaleFactor);
-                }
-            }
-            return;
-        }
-    } else if constexpr (p == 5) {
-        constexpr int prefix = 8 - radius;
-        constexpr int chunksPerColumn = (prefix + StripHeight + 7) / 8;
-        const int alignedBaseRow = baseGlobalRow - prefix;
-        if ((height & 7) == 0 && alignedBaseRow >= 0 && alignedBaseRow + (chunksPerColumn * 8) <= height) {
-            constexpr int totalChunks = p * chunksPerColumn;
-            for (int chunk = threadIdx.x; chunk < totalChunks; chunk += blockSize) {
-                const int c = chunk / chunksPerColumn;
-                const int v = chunk - (c * chunksPerColumn);
-                const int globalCol = clamp(baseGlobalCol + c, 0, width - 1);
-                const int globalRow = alignedBaseRow + (v * 8);
-                const float* const src = input + (globalCol * height) + globalRow;
-                const int sharedRow = (v * 8) - prefix;
-                const float4 lo = *reinterpret_cast<const float4*>(src);
-                const float4 hi = *reinterpret_cast<const float4*>(src + 4);
-
-                if (sharedRow >= 0 && sharedRow + 1 < StripHeight)
-                    *reinterpret_cast<half2*>(&blockValues[c][sharedRow]) = __floats2half2_rn(lo.x * scaleFactor, lo.y * scaleFactor);
-                if (sharedRow + 2 >= 0 && sharedRow + 3 < StripHeight)
-                    *reinterpret_cast<half2*>(&blockValues[c][sharedRow + 2]) = __floats2half2_rn(lo.z * scaleFactor, lo.w * scaleFactor);
-                if (sharedRow + 4 >= 0 && sharedRow + 5 < StripHeight)
-                    *reinterpret_cast<half2*>(&blockValues[c][sharedRow + 4]) = __floats2half2_rn(hi.x * scaleFactor, hi.y * scaleFactor);
-                if (sharedRow + 6 >= 0 && sharedRow + 7 < StripHeight)
-                    *reinterpret_cast<half2*>(&blockValues[c][sharedRow + 6]) = __floats2half2_rn(hi.z * scaleFactor, hi.w * scaleFactor);
-            }
-            return;
-        }
-    } else if constexpr (p == 3 || p == 7) {
-        constexpr int prefix = 8 - radius;
-        constexpr int chunksPerColumn = (prefix + StripHeight + 7) / 8;
-        const int alignedBaseRow = baseGlobalRow - prefix;
-        if ((height & 7) == 0 && alignedBaseRow >= 0 && alignedBaseRow + (chunksPerColumn * 8) <= height) {
-            constexpr int totalChunks = p * chunksPerColumn;
-            for (int chunk = threadIdx.x; chunk < totalChunks; chunk += blockSize) {
-                const int c = chunk / chunksPerColumn;
-                const int v = chunk - (c * chunksPerColumn);
-                const int globalCol = clamp(baseGlobalCol + c, 0, width - 1);
-                const int globalRow = alignedBaseRow + (v * 8);
-                const float* const src = input + (globalCol * height) + globalRow;
-                const int sharedRow = (v * 8) - prefix;
-                const float4 lo = *reinterpret_cast<const float4*>(src);
-                const float4 hi = *reinterpret_cast<const float4*>(src + 4);
-
-                if (sharedRow >= 0 && sharedRow < StripHeight)
-                    blockValues[c][sharedRow] = __float2half(lo.x * scaleFactor);
-                if (sharedRow + 1 >= 0 && sharedRow + 1 < StripHeight)
-                    blockValues[c][sharedRow + 1] = __float2half(lo.y * scaleFactor);
-                if (sharedRow + 2 >= 0 && sharedRow + 2 < StripHeight)
-                    blockValues[c][sharedRow + 2] = __float2half(lo.z * scaleFactor);
-                if (sharedRow + 3 >= 0 && sharedRow + 3 < StripHeight)
-                    blockValues[c][sharedRow + 3] = __float2half(lo.w * scaleFactor);
-                if (sharedRow + 4 >= 0 && sharedRow + 4 < StripHeight)
-                    blockValues[c][sharedRow + 4] = __float2half(hi.x * scaleFactor);
-                if (sharedRow + 5 >= 0 && sharedRow + 5 < StripHeight)
-                    blockValues[c][sharedRow + 5] = __float2half(hi.y * scaleFactor);
-                if (sharedRow + 6 >= 0 && sharedRow + 6 < StripHeight)
-                    blockValues[c][sharedRow + 6] = __float2half(hi.z * scaleFactor);
-                if (sharedRow + 7 >= 0 && sharedRow + 7 < StripHeight)
-                    blockValues[c][sharedRow + 7] = __float2half(hi.w * scaleFactor);
-            }
-            return;
-        }
-    }
-
-    int idx = threadIdx.x;
-    while (idx < totalPixels) {
-        const int r = idx % StripHeight;
-        const int c = idx / StripHeight;
-        const int globalCol = clamp(baseGlobalCol + c, 0, width - 1);
-        const int globalRow = clamp(baseGlobalRow + r, 0, height - 1);
-        blockValues[c][r] = __float2half(input[(globalCol * height) + globalRow] * scaleFactor);
-        idx += blockSize;
-    }
-}
-
-// NVF mask calculation helper for a block
+// Computes the NVF mask for one pixel from its shared memory window
 template <int p, int shDimFast, int shDimSlow>
 __device__ __forceinline__ float compute_nvf_mask(const float (&region)[shDimSlow][shDimFast], const int shSlow, const int shFast) {
     constexpr int pad = p / 2;
@@ -227,13 +96,13 @@ __device__ __forceinline__ float compute_nvf_mask(const float (&region)[shDimSlo
         }
     }
 
-    // calculate NVF with optimized math (avoid divisions)
+    // NVF formula using variance with a single division
     const float numerator = (nPixels * sumSq) - (sum * sum);
     const float output = __fdividef(numerator, nPixelsSq + numerator);
     return __saturatef(output);
 }
 
-// NVF mask calculation and write to global memory, used for detection only
+// Computes the NVF mask for every pixel during detection
 template <int p>
 __global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, const int width, const int height) {
     constexpr int pad = p / 2;
@@ -245,7 +114,7 @@ __global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, co
 
     __shared__ alignas(16) float region[shDimSlow][shDimFast];
 
-    fillBlock<false, p, shDimFast, shDimSlow>(input, nullptr, &region[0][0], width, height);
+    fillBlock<false, p, shDimFast, shDimSlow, 32 * 8>(input, nullptr, &region[0][0], blockIdx.y * blockDim.y, blockIdx.x * blockDim.x, width, height);
     __syncthreads();
 
     if (x >= width || y >= height)
@@ -256,10 +125,9 @@ __global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, co
     nvf[x * height + y] = compute_nvf_mask<p, shDimFast, shDimSlow>(region, shSlow, shFast);
 }
 
-// NVF mask calculation AND u calculation fused in one kernel to save global memory bandwidth and increase speed
-// this is used ONLY for embedding, not for detection, because in detection we need the error sequence of the mask itself
+// Fused kernel computing NVF mask, u = mask * w, and sum of u squared
 template <int p>
-__global__ void nvf_u_and_sumsq_fused(const float* __restrict__ input, const float* __restrict__ w, float* __restrict__ u, uint64_t* __restrict__ globalSumSq, const int width, const int height) {
+__global__ void nvf_u_and_sumsq_fused(const float* __restrict__ input, const __half* __restrict__ w, __half* __restrict__ u, uint64_t* __restrict__ globalSumSq, const int width, const int height) {
     constexpr int pad = p / 2;
     constexpr int shDimFast = 32 + (2 * pad);
     constexpr int shDimSlow = 8 + (2 * pad);
@@ -268,186 +136,312 @@ __global__ void nvf_u_and_sumsq_fused(const float* __restrict__ input, const flo
     const int y = blockIdx.x * blockDim.x + threadIdx.x;
     const int linearTid = threadIdx.y * blockDim.x + threadIdx.x;
 
-    using BlockReduceT = cub::BlockReduce<float, 32, cub::BLOCK_REDUCE_WARP_REDUCTIONS, 8>; // block size is {32, 8}
+    using BlockReduceT = cub::BlockReduce<float, 32, cub::BLOCK_REDUCE_WARP_REDUCTIONS, 8>; // Block size is 32 by 8
     __shared__ alignas(16) float region[shDimSlow][shDimFast];
     __shared__ typename BlockReduceT::TempStorage temp_storage;
 
-    fillBlock<false, p, shDimFast, shDimSlow>(input, nullptr, &region[0][0], width, height);
+    fillBlock<false, p, shDimFast, shDimSlow, 32 * 8>(input, nullptr, &region[0][0], blockIdx.y * blockDim.y, blockIdx.x * blockDim.x, width, height);
     __syncthreads();
 
-    // default to 0 so out of bounds threads don't corrupt the CUB reduction
+    // Threads outside image bounds contribute zero
     float threadSumSq = 0.0f;
     if (x < width && y < height) {
         const int shSlow = threadIdx.y + pad;
         const int shFast = threadIdx.x + pad;
-        // calculate the mask value and fuse u calculation with local sum of squares of u
+        // Accumulate squared u values in half precision
         const float maskVal = compute_nvf_mask<p, shDimFast, shDimSlow>(region, shSlow, shFast);
         const int idx = x * height + y;
-        const float uVal = maskVal * w[idx];
-        u[idx] = uVal;
-        // local sum for CUB
+        const __half uHalf = __float2half_rn(maskVal * __half2float(w[idx]));
+        u[idx] = uHalf;
+        const float uVal = __half2float(uHalf);
         threadSumSq = uVal * uVal;
     }
 
-    // block reduce with cub and atomic add to global sum by the leader
+    // Reduce block sum and update global total with atomic addition
     const float blockTotalSq = BlockReduceT(temp_storage).Sum(threadSumSq);
     if (linearTid == 0)
         atomicAdd(globalSumSq, toScaledUint64(blockTotalSq));
 }
 
-// main kernel for error sequence calculation
+// Prediction error tile where each thread processes 4 rows by 2 columns
+// Reuses loaded window columns across outputs while keeping coefficients in registers
 template <int p>
-__global__ void calculate_error_sequence(const float* __restrict__ inputA, const float* __restrict__ inputB, float* __restrict__ x_, const float* __restrict__ coeffs, const int width,
-    const int height, const bool calculateAbs, const int* __restrict__ stopFlag) {
-    constexpr int pad = p / 2;
-    constexpr int coeffsSize = (p * p) - 1;
-    constexpr int shDimFast = 32 + (2 * pad);
-    constexpr int shDimSlow = 8 + (2 * pad);
+struct ErrorTile {
+    static constexpr int pad = p / 2;
+    static constexpr int coeffsSize = (p * p) - 1;
+    static constexpr int threads = 256;
+    static constexpr int rows = 4; // Rows per thread along fast dimension
+    static constexpr int cols = 2; // Columns per thread along slow dimension
+    // Warp threads cover tile rows while warps step across columns
+    static constexpr int tileFast = 32 * rows;
+    static constexpr int tileSlow = (threads / 32) * cols;
+    // Per-thread column window rounded up to float4 alignment
+    static constexpr int windowFast = ((rows + (2 * pad) + 3) / 4) * 4;
+    // Shared memory tile sized to cover padded windows across all threads
+    static constexpr int shFast = tileFast - rows + windowFast;
+    static constexpr int shSlow = tileSlow + (2 * pad);
 
-    const int tid = threadIdx.y * blockDim.x + threadIdx.x;
+    __host__ static dim3 grid(const int width, const int height) { return dim3((height + tileFast - 1) / tileFast, (width + tileSlow - 1) / tileSlow); }
+};
 
-    __shared__ alignas(16) float region[shDimSlow][shDimFast];
-    __shared__ alignas(16) float sCoeffs[coeffsSize];
-
-    if (tid < coeffsSize)
-        sCoeffs[tid] = coeffs[tid];
-    fillBlock<false, p, shDimFast, shDimSlow>(inputA, inputB, &region[0][0], width, height);
-    __syncthreads();
-
-    const int y = blockIdx.x * blockDim.x + threadIdx.x;
-    const int x = blockIdx.y * blockDim.y + threadIdx.y;
-    if (x < width && y < height) {
-        if (*stopFlag) {
-            x_[(x * height + y)] = 0.0f;
-            return;
-        }
-        const int shFast = threadIdx.x + pad;
-        const int shSlow = threadIdx.y + pad;
-        float dot = 0.0f;
-        int k = 0;
+// Loads prediction coefficients into registers using float4 loads
+template <int p>
+__device__ __forceinline__ void loadCoefficients(const float* __restrict__ coeffs, float (&coef)[ErrorTile<p>::coeffsSize]) {
 #pragma unroll
-        for (int i = -pad; i <= pad; i++) {
-#pragma unroll
-            for (int j = -pad; j <= pad; j++) {
-                if (i == 0 && j == 0)
-                    continue; // skip the center pixel (branch is optimized fully at compile time)
-                dot += sCoeffs[k] * region[shSlow + i][shFast + j];
-                k++;
-            }
-        }
-        const float errorSequence = region[shSlow][shFast] - dot;
-        x_[(x * height + y)] = calculateAbs ? fabsf(errorSequence) : errorSequence;
+    for (int v = 0; v < ErrorTile<p>::coeffsSize / 4; v++) {
+        const float4 c = __ldg(reinterpret_cast<const float4*>(coeffs) + v);
+        coef[(4 * v) + 0] = c.x;
+        coef[(4 * v) + 1] = c.y;
+        coef[(4 * v) + 2] = c.z;
+        coef[(4 * v) + 3] = c.w;
     }
 }
 
-// main fused kernel for correlation calculation (error sequence and partial correlation), used in detection
+// Computes prediction errors for all outputs assigned to this thread
 template <int p>
-__global__ void calculate_error_sequence_and_partial_corr_fused(const float* __restrict__ mask, const float* __restrict__ w, const float* __restrict__ e_u, const float* __restrict__ coeffs,
-    float* __restrict__ partialDots, float* __restrict__ partialNormU, float* __restrict__ partialNormZ, const int width, const int height, const int* __restrict__ stopFlag) {
-    constexpr int pad = p / 2;
-    constexpr int coeffsSize = (p * p) - 1;
-    constexpr int shDimFast = 32 + (2 * pad);
-    constexpr int shDimSlow = 8 + (2 * pad);
-
-    const int linearTid = threadIdx.y * blockDim.x + threadIdx.x;
-
-    using BlockReduceT = cub::BlockReduce<CorrelationData, 32, cub::BLOCK_REDUCE_WARP_REDUCTIONS, 8>;
-    __shared__ typename BlockReduceT::TempStorage temp_storage;
-    __shared__ alignas(16) float region[shDimSlow][shDimFast];
-    __shared__ alignas(16) float sCoeffs[coeffsSize];
-
-    if (linearTid < coeffsSize)
-        sCoeffs[linearTid] = coeffs[linearTid];
-
-    fillBlock<true, p, shDimFast, shDimSlow>(mask, w, &region[0][0], width, height);
-    __syncthreads();
-
-    const int y = blockIdx.x * blockDim.x + threadIdx.x;
-    const int x = blockIdx.y * blockDim.y + threadIdx.y;
-
-    // default to zero for threads out of bounds (or if stopFlag says so)
-    CorrelationData threadData = {0.0f, 0.0f, 0.0f};
-
-    if (x < width && y < height && !(*stopFlag)) {
-        const int shFast = threadIdx.x + pad;
-        const int shSlow = threadIdx.y + pad;
-        float dot = 0.0f;
-        int k = 0;
-
+__device__ __forceinline__ void predictionErrorTile(
+    const float* __restrict__ region, const float (&coef)[ErrorTile<p>::coeffsSize], const int slow0, const int fast0, float (&error)[ErrorTile<p>::cols][ErrorTile<p>::rows]) {
+    using T = ErrorTile<p>;
+    constexpr int center = (p * p) / 2;
+    float dot[T::cols][T::rows] = {};
+    float pixel[T::cols][T::rows];
+    // Maps window column wc to output column c
 #pragma unroll
-        for (int i = -pad; i <= pad; i++) {
+    for (int wc = 0; wc < p + T::cols - 1; wc++) {
+        float window[T::windowFast];
+        const float4* src = reinterpret_cast<const float4*>(region + ((slow0 + wc) * T::shFast) + fast0);
 #pragma unroll
-            for (int j = -pad; j <= pad; j++) {
-                if (i == 0 && j == 0)
+        for (int v = 0; v < T::windowFast / 4; v++) {
+            const float4 value = src[v];
+            window[(4 * v) + 0] = value.x;
+            window[(4 * v) + 1] = value.y;
+            window[(4 * v) + 2] = value.z;
+            window[(4 * v) + 3] = value.w;
+        }
+#pragma unroll
+        for (int c = 0; c < T::cols; c++) {
+            const int i = wc - c;
+            if (i < 0 || i >= p)
+                continue;
+#pragma unroll
+            for (int j = 0; j < p; j++) {
+                const int k = (i * p) + j;
+                if (k == center) {
+#pragma unroll
+                    for (int r = 0; r < T::rows; r++)
+                        pixel[c][r] = window[r + j];
                     continue;
-                dot += sCoeffs[k] * region[shSlow + i][shFast + j];
-                k++;
+                }
+#pragma unroll
+                for (int r = 0; r < T::rows; r++)
+                    dot[c][r] += coef[k - (k > center)] * window[r + j];
             }
         }
-        // calculate the e_z pixel
-        const float ez = region[shSlow][shFast] - dot;
-        // fused read of e_u and compute of correlation values
-        const float eu = e_u[x * height + y];
-        threadData.dot = eu * ez;
-        threadData.normU = eu * eu;
-        threadData.normZ = ez * ez;
+    }
+#pragma unroll
+    for (int c = 0; c < T::cols; c++)
+#pragma unroll
+        for (int r = 0; r < T::rows; r++)
+            error[c][r] = pixel[c][r] - dot[c][r];
+}
+
+// Loads 4 consecutive rows using float4 when aligned or scalar reads otherwise
+__device__ __forceinline__ float4 loadRows4(const float* __restrict__ input, const int x, const int y0, const int height) {
+    const int idx = (x * height) + y0;
+    if ((height & 3) == 0)
+        return y0 < height ? __ldg(reinterpret_cast<const float4*>(input + idx)) : make_float4(0.0f, 0.0f, 0.0f, 0.0f);
+    return make_float4(y0 < height ? input[idx] : 0.0f, y0 + 1 < height ? input[idx + 1] : 0.0f, y0 + 2 < height ? input[idx + 2] : 0.0f, y0 + 3 < height ? input[idx + 3] : 0.0f);
+}
+__device__ __forceinline__ void storeRows4(float* __restrict__ output, const int x, const int y0, const int height, const float4 value) {
+    const int idx = (x * height) + y0;
+    if ((height & 3) == 0) {
+        if (y0 < height)
+            *reinterpret_cast<float4*>(output + idx) = value;
+        return;
+    }
+    const float v[4] = {value.x, value.y, value.z, value.w};
+#pragma unroll
+    for (int r = 0; r < 4; r++)
+        if (y0 + r < height)
+            output[idx + r] = v[r];
+}
+
+// Stores 4 half values packed into an 8-byte structure
+struct alignas(8) Half4 {
+    __half2 lo, hi;
+};
+__device__ __forceinline__ float4 toFloat4(const Half4 v) {
+    const float2 lo = __half22float2(v.lo);
+    const float2 hi = __half22float2(v.hi);
+    return make_float4(lo.x, lo.y, hi.x, hi.y);
+}
+__device__ __forceinline__ float roundToHalf(const float value) { return __half2float(__float2half_rn(value)); }
+__device__ __forceinline__ float4 loadRows4(const __half* __restrict__ input, const int x, const int y0, const int height) {
+    const int idx = (x * height) + y0;
+    if ((height & 3) == 0)
+        return y0 < height ? toFloat4(*reinterpret_cast<const Half4*>(input + idx)) : make_float4(0.0f, 0.0f, 0.0f, 0.0f);
+    return make_float4(y0 < height ? __half2float(input[idx]) : 0.0f, y0 + 1 < height ? __half2float(input[idx + 1]) : 0.0f, y0 + 2 < height ? __half2float(input[idx + 2]) : 0.0f,
+        y0 + 3 < height ? __half2float(input[idx + 3]) : 0.0f);
+}
+__device__ __forceinline__ void storeRows4(__half* __restrict__ output, const int x, const int y0, const int height, const float4 value) {
+    const int idx = (x * height) + y0;
+    if ((height & 3) == 0) {
+        if (y0 < height)
+            *reinterpret_cast<Half4*>(output + idx) = {__floats2half2_rn(value.x, value.y), __floats2half2_rn(value.z, value.w)};
+        return;
+    }
+    const float v[4] = {value.x, value.y, value.z, value.w};
+#pragma unroll
+    for (int r = 0; r < 4; r++)
+        if (y0 + r < height)
+            output[idx + r] = __float2half_rn(v[r]);
+}
+
+// Prepares shared memory tile and coefficients, returning thread start coordinates
+template <int p, bool FUSED, bool ABS_A = false>
+__device__ __forceinline__ int2 setupErrorTile(const float* __restrict__ inputA, const __half* __restrict__ inputB, const float* __restrict__ coeffs, float* __restrict__ region,
+    float (&coef)[ErrorTile<p>::coeffsSize], const int width, const int height) {
+    using T = ErrorTile<p>;
+    const int tileSlow0 = blockIdx.y * T::tileSlow;
+    const int tileFast0 = blockIdx.x * T::tileFast;
+    fillBlock<FUSED, p, T::shFast, T::shSlow, T::threads, ABS_A>(inputA, inputB, region, tileSlow0, tileFast0, width, height);
+    loadCoefficients<p>(coeffs, coef);
+    __syncthreads();
+    return make_int2(tileSlow0 + ((threadIdx.x / 32) * T::cols), tileFast0 + ((threadIdx.x % 32) * T::rows));
+}
+
+// Computes prediction error across the image for detection
+template <int p>
+__global__ void __launch_bounds__(ErrorTile<p>::threads)
+    calculate_error_sequence(const float* __restrict__ input, float* __restrict__ errorOut, const float* __restrict__ coeffs, const int width, const int height, const int* __restrict__ stopFlag) {
+    using T = ErrorTile<p>;
+    __shared__ alignas(16) float region[T::shSlow * T::shFast];
+    float coef[T::coeffsSize];
+    const int2 origin = setupErrorTile<p, false>(input, nullptr, coeffs, region, coef, width, height);
+
+    float error[T::cols][T::rows] = {};
+    if (!(*stopFlag))
+        predictionErrorTile<p>(region, coef, (threadIdx.x / 32) * T::cols, (threadIdx.x % 32) * T::rows, error);
+#pragma unroll
+    for (int c = 0; c < T::cols; c++)
+        if (origin.x + c < width)
+            storeRows4(errorOut, origin.x + c, origin.y, height, make_float4(error[c][0], error[c][1], error[c][2], error[c][3]));
+}
+
+// Computes prediction error, creates u = (|e| / 255) * w, and tracks energy sums
+template <int p>
+__global__ void __launch_bounds__(ErrorTile<p>::threads) me_error_sequence_u_sumsq_fused(const float* __restrict__ input, const __half* __restrict__ w, __half* __restrict__ u,
+    const float* __restrict__ coeffs, uint64_t* __restrict__ globalSumSqMax, const int width, const int height, const int* __restrict__ stopFlag) {
+    using T = ErrorTile<p>;
+    using BlockReduceT = cub::BlockReduce<float, T::threads, cub::BLOCK_REDUCE_WARP_REDUCTIONS>;
+    __shared__ typename BlockReduceT::TempStorage sumStorage;
+    __shared__ typename BlockReduceT::TempStorage maxStorage;
+    __shared__ alignas(16) float region[T::shSlow * T::shFast];
+    float coef[T::coeffsSize];
+    const int2 origin = setupErrorTile<p, false>(input, nullptr, coeffs, region, coef, width, height);
+
+    float error[T::cols][T::rows] = {};
+    if (!(*stopFlag)) // Skip computation if system solve failed
+        predictionErrorTile<p>(region, coef, (threadIdx.x / 32) * T::cols, (threadIdx.x % 32) * T::rows, error);
+    // Outputs outside image bounds contribute zero
+    float threadSumSq = 0.0f;
+    float threadMax = 0.0f;
+#pragma unroll
+    for (int c = 0; c < T::cols; c++) {
+        if (origin.x + c >= width)
+            continue;
+        const float4 wv = loadRows4(w, origin.x + c, origin.y, height);
+        const float wr[4] = {wv.x, wv.y, wv.z, wv.w};
+        float uv[4];
+#pragma unroll
+        for (int r = 0; r < T::rows; r++) {
+            const float absError = origin.y + r < height ? fabsf(error[c][r]) : 0.0f;
+            uv[r] = roundToHalf(absError * kMeMaskPrescale * wr[r]);
+            threadSumSq += uv[r] * uv[r];
+            threadMax = fmaxf(threadMax, absError);
+        }
+        storeRows4(u, origin.x + c, origin.y, height, make_float4(uv[0], uv[1], uv[2], uv[3]));
     }
 
-    // CUB block reduce, thread 0 writes the partials for this block
+    // Block reductions for sum and maximum, followed by atomic updates
+    const float blockTotalSq = BlockReduceT(sumStorage).Sum(threadSumSq);
+    const float blockMax = BlockReduceT(maxStorage).Reduce(threadMax, MaxOp{});
+    if (threadIdx.x == 0) {
+        atomicAdd(globalSumSqMax, toScaledUint64(blockTotalSq));
+        atomicMax(reinterpret_cast<unsigned long long*>(globalSumSqMax + 1), static_cast<unsigned long long>(__float_as_uint(blockMax)));
+    }
+}
+
+// Computes partial correlation sums and writes final result from the last finished block
+template <int p, bool ABS_MASK>
+__global__ void __launch_bounds__(ErrorTile<p>::threads) calculate_error_sequence_and_partial_corr_fused(const float* __restrict__ mask, const __half* __restrict__ w, const float* __restrict__ e_u,
+    const float* __restrict__ coeffs, float* __restrict__ partialDots, float* __restrict__ partialNormU, float* __restrict__ partialNormZ, unsigned int* __restrict__ blockCounter,
+    float* __restrict__ correlation, const int width, const int height, const int* __restrict__ stopFlag) {
+    using T = ErrorTile<p>;
+    using BlockReduceT = cub::BlockReduce<CorrelationData, T::threads, cub::BLOCK_REDUCE_WARP_REDUCTIONS>;
+    __shared__ typename BlockReduceT::TempStorage temp_storage;
+    __shared__ alignas(16) float region[T::shSlow * T::shFast];
+    float coef[T::coeffsSize];
+    const int2 origin = setupErrorTile<p, true, ABS_MASK>(mask, w, coeffs, region, coef, width, height);
+
+    // Out-of-bounds pixels or failed solves contribute zero
+    CorrelationData threadData = {0.0f, 0.0f, 0.0f};
+    if (!(*stopFlag)) {
+        float ez[T::cols][T::rows];
+        predictionErrorTile<p>(region, coef, (threadIdx.x / 32) * T::cols, (threadIdx.x % 32) * T::rows, ez);
+#pragma unroll
+        for (int c = 0; c < T::cols; c++) {
+            if (origin.x + c >= width)
+                continue;
+            // e_u reads zero outside image bounds
+            const float4 euv = loadRows4(e_u, origin.x + c, origin.y, height);
+            const float eu[4] = {euv.x, euv.y, euv.z, euv.w};
+#pragma unroll
+            for (int r = 0; r < T::rows; r++) {
+                const float z = origin.y + r < height ? ez[c][r] : 0.0f;
+                threadData.dot += eu[r] * z;
+                threadData.normU += eu[r] * eu[r];
+                threadData.normZ += z * z;
+            }
+        }
+    }
+
+    // Thread 0 writes block reduction totals
+    __shared__ bool isLastBlock;
+    const int numBlocks = gridDim.x * gridDim.y;
     const CorrelationData blockSum = BlockReduceT(temp_storage).Sum(threadData);
-    if (linearTid == 0) {
+    if (threadIdx.x == 0) {
         const int blockIdxFlat = blockIdx.y * gridDim.x + blockIdx.x;
         partialDots[blockIdxFlat] = blockSum.dot;
         partialNormU[blockIdxFlat] = blockSum.normU;
         partialNormZ[blockIdxFlat] = blockSum.normZ;
-    }
-}
-
-// helper method used to accumulate "rx" vector values in the ME kernel, we template the outer loop to fully unroll it and gain maximum performance
-template <int N>
-__device__ __forceinline__ void accumulateRxVec(const half8* __restrict__ localVec8, float* __restrict__ rxVals, const float center) {
-#pragma unroll
-    for (int i = 0; i < N; i++) {
-        const half2* inPtr = reinterpret_cast<const half2*>(&localVec8[i]);
-        float2* rxPtr = reinterpret_cast<float2*>(&rxVals[i * 8]);
-#pragma unroll
-        for (int j = 0; j < 4; j++) {
-            const float2 in_f2 = __half22float2(inPtr[j]);
-            rxPtr[j].x = fmaf(in_f2.x, center, rxPtr[j].x);
-            rxPtr[j].y = fmaf(in_f2.y, center, rxPtr[j].y);
-        }
-    }
-}
-
-// Reduce "rx" values within each warp, merge the warp partials in shared memory,
-// THEN issue one global atomic per coefficient for the whole block
-template <int SIZE, int WARPS, int STAGING_STRIDE, typename StorageT>
-__device__ __forceinline__ void writeRxVec(uint64_t* __restrict__ rx, const rxVecData<SIZE>& rxData, StorageT& temp_storage, float* __restrict__ blockStaging) {
-    {
-        const rxVecData<SIZE> warpSum = cub::WarpReduce<rxVecData<SIZE>>(temp_storage).Sum(rxData);
-        if ((threadIdx.x & 31) == 0) {
-            float* const warpStaging = blockStaging + ((threadIdx.x >> 5) * STAGING_STRIDE);
-#pragma unroll
-            for (int i = 0; i < SIZE; i++)
-                warpStaging[i] = warpSum.vals[i];
-        }
+        // Ensure block results are visible before atomic counter increment
+        __threadfence();
+        isLastBlock = atomicAdd(blockCounter, 1u) == static_cast<unsigned int>(numBlocks - 1);
     }
     __syncthreads();
+    if (!isLastBlock)
+        return;
 
-    for (int i = threadIdx.x; i < SIZE; i += blockDim.x) {
-        float blockSum = 0.0f;
-#pragma unroll
-        for (int warp = 0; warp < WARPS; warp++)
-            blockSum += blockStaging[warp * STAGING_STRIDE + i];
-        atomicAdd(rx + i, toScaledUint64(blockSum));
+    // Final block sums all block outputs and writes normalized correlation
+    CorrelationData total = {0.0f, 0.0f, 0.0f};
+    for (int i = threadIdx.x; i < numBlocks; i += T::threads) {
+        total.dot += __ldcg(partialDots + i);
+        total.normU += __ldcg(partialNormU + i);
+        total.normZ += __ldcg(partialNormZ + i);
+    }
+    const CorrelationData sum = BlockReduceT(temp_storage).Sum(total);
+    if (threadIdx.x == 0) {
+        const float normU = sqrtf(sum.normU);
+        const float normZ = sqrtf(sum.normZ);
+        *correlation = (normU > 1e-12f && normZ > 1e-12f) ? (sum.dot / (normU * normZ)) : 0.0f;
+        *blockCounter = 0; // Reset counter for next launch
     }
 }
 
-// this function reverts the transpose introduced by the ME kernel. To achieve coalesced VRAM reads the image was loaded as column-major, this transposed
-// the resulting system of equations. Because the Rx matrix is symmetric, the cholesky solver solves this transposed system, but outputs the
-// coefficients in column-major order. Here we re-map this to row-major (we skip the center because it is not part of the predictor!)
+// Converts solver variable index to row-major coefficient index
 template <int p>
-__device__ __forceinline__ int getMappedVarIndex(const int k) {
+__device__ __forceinline__ int coefficientIndex(const int k) {
     constexpr int center = (p * p) / 2;
     constexpr int p2_minus_1 = ((p * p) - 1);
 
@@ -457,347 +451,633 @@ __device__ __forceinline__ int getMappedVarIndex(const int k) {
     return originalPixel - (originalPixel > center);
 }
 
-// naive 1-thread Cholesky solver used for its very low latency versus cuSOLVER but useful only for very small systems, p = 3 (N = 8) or p = 5 (N = 24)
-template <int p>
-__global__ void cholesky_solver(const uint64_t* __restrict__ A, const uint64_t* __restrict__ B, float* __restrict__ X, int* __restrict__ stopFlag) {
-    static_assert(p <= 5, "Simple 1-thread cholesky solver kernel should NEVER be instantiated for p > 5");
-    constexpr int N = (p * p) - 1;
+// Emulated double precision using two floats (hi + lo) for roughly 48 bits of precision
+struct FloatFloat {
+    float hi, lo;
 
-    auto IDX = [](const int r, const int c) { return (r * (r + 1)) / 2 + c; };
+    FloatFloat() = default;
+    __device__ __forceinline__ FloatFloat(const float value) : hi(value), lo(0.0f) {}
+    __device__ __forceinline__ FloatFloat(const float h, const float l) : hi(h), lo(l) {}
 
-    if (threadIdx.x > 0 || blockIdx.x > 0)
-        return;
-
-    // packed format: N*(N+1)/2 elements
-    // p=3 (N=8) -> 36 floats
-    // p=5 (N=24) -> 300 floats
-    constexpr int SIZE = (N * (N + 1)) / 2;
-    float alignas(16) packed[SIZE];
-    float alignas(16) localB[N];
-
-    // check if A, B, and X are 16byte aligned for vectorized loads
-    const bool isAligned = (((reinterpret_cast<uintptr_t>(A) | reinterpret_cast<uintptr_t>(B) | reinterpret_cast<uintptr_t>(X)) & 0xF) == 0);
-    if (isAligned) {
-        constexpr int vecLimitA = SIZE / 2;
-        constexpr int vecLimitB = N / 2;
-        const ulonglong2* vecA = reinterpret_cast<const ulonglong2*>(A);
-        const ulonglong2* vecB = reinterpret_cast<const ulonglong2*>(B);
-#pragma unroll
-        for (int k = 0; k < vecLimitA; k++) {
-            const ulonglong2 v = vecA[k];
-            packed[k * 2 + 0] = toUnscaledFloat(v.x);
-            packed[k * 2 + 1] = toUnscaledFloat(v.y);
-        }
-        for (int k = vecLimitA << 1; k < SIZE; k++)
-            packed[k] = toUnscaledFloat(A[k]);
-
-#pragma unroll
-        for (int i = 0; i < vecLimitB; i++) {
-            const ulonglong2 v = vecB[i];
-            localB[i * 2 + 0] = toUnscaledFloat(v.x);
-            localB[i * 2 + 1] = toUnscaledFloat(v.y);
-        }
-        for (int i = vecLimitB << 1; i < N; i++)
-            localB[i] = toUnscaledFloat(B[i]);
-    } else {
-        // scalar path
-#pragma unroll
-        for (int k = 0; k < SIZE; k++)
-            packed[k] = toUnscaledFloat(A[k]);
-#pragma unroll
-        for (int i = 0; i < N; i++)
-            localB[i] = toUnscaledFloat(B[i]);
+    // Exact sum of two floats using Dekker addition
+    __device__ static __forceinline__ FloatFloat twoSum(const float a, const float b) {
+        const float s = a + b;
+        const float v = s - a;
+        return {s, (a - (s - v)) + (b - v)};
+    }
+    // Fast exact sum when magnitude of a is greater than or equal to b
+    __device__ static __forceinline__ FloatFloat quickTwoSum(const float a, const float b) {
+        const float s = a + b;
+        return {s, b - (s - a)};
+    }
+    // Exact product of two floats using FMA
+    __device__ static __forceinline__ FloatFloat twoProd(const float a, const float b) {
+        const float p = a * b;
+        return {p, fmaf(a, b, -p)};
+    }
+    // Exact conversion from uint64 to float-float
+    __device__ static __forceinline__ FloatFloat fromUint64(const uint64_t value) {
+        const float h = __ull2float_rn(value);
+        return quickTwoSum(h, static_cast<float>(static_cast<long long>(value) - static_cast<long long>(h)));
     }
 
-    // in-place Cholesky Decomposition
-    // overwrite packed (which holds A) with L
+    __device__ __forceinline__ explicit operator float() const { return hi + lo; }
+    __device__ __forceinline__ friend FloatFloat operator*(const FloatFloat a, const FloatFloat b) {
+        FloatFloat p = twoProd(a.hi, b.hi);
+        p.lo += (a.hi * b.lo) + (a.lo * b.hi);
+        return quickTwoSum(p.hi, p.lo);
+    }
+    // Computes c - a * b with fast error compensation for Cholesky updates
+    __device__ __forceinline__ friend FloatFloat fnma(const FloatFloat a, const FloatFloat b, const FloatFloat c) {
+        const float ph = a.hi * b.hi;
+        const float pl = fmaf(a.hi, b.lo, fmaf(a.lo, b.hi, fmaf(a.hi, b.hi, -ph)));
+        const FloatFloat s = twoSum(c.hi, -ph);
+        return quickTwoSum(s.hi, s.lo + (c.lo - pl));
+    }
+    // Fast reciprocal square root refined with one float-float Newton step
+    __device__ __forceinline__ friend FloatFloat rsqrt(const FloatFloat v) {
+        const float h = rsqrtf(v.hi);
+        const FloatFloat vh2 = v * twoProd(h, h);
+        const float r = (1.0f - vh2.hi) - vh2.lo;
+        return quickTwoSum(h, 0.5f * h * r);
+    }
+    __device__ __forceinline__ friend FloatFloat shfl(const FloatFloat v, const int srcLane) { return {__shfl_sync(0xffffffffu, v.hi, srcLane), __shfl_sync(0xffffffffu, v.lo, srcLane)}; }
+};
+
+// Autocorrelation shift layout for fast prediction system assembly
+// Sums unique spatial shifts over the inner area, then adds border lines and corners
+template <int p>
+struct MeShiftLayout {
+    static constexpr int pad = p / 2;
+    static constexpr int windowSize = p * p;
+    static constexpr int windowCenter = windowSize / 2;
+    static constexpr int maxShift = p - 1;
+    static constexpr int shiftSpan = (2 * maxShift) + 1;
+    // Keep only unique shift directions (dc > 0 or dc == 0 with dr >= 0)
+    static constexpr int numShifts = ((shiftSpan * shiftSpan) + 1) / 2;
+    // Border rows and columns outside the inner image area
+    static constexpr int borderSize = 4 * pad;
+    // Layout of fixed point sums for inner area, border rows, and border columns
+    static constexpr int borderRowsOffset = numShifts;
+    static constexpr int borderColsOffset = numShifts + (numShifts * borderSize);
+    static constexpr int shiftSumsSize = numShifts * (1 + (2 * borderSize));
+    // Scale products by 1 / 255^2 so fixed point sums do not overflow
+    static constexpr float productScale = 1.0f / (255.0f * 255.0f);
+
+    __host__ __device__ static constexpr int shiftIndex(const int dr, const int dc) { return dc == 0 ? dr : (maxShift + 1) + ((dc - 1) * shiftSpan) + (dr + maxShift); }
+    // First shift index for column offset dc
+    __host__ __device__ static constexpr int firstShift(const int dc) { return dc == 0 ? 0 : shiftIndex(-maxShift, dc); }
+    // Number of column shift groups to keep register usage in check
+    static constexpr int shiftGroups = p >= 9 ? 3 : (p >= 7 ? 2 : 1);
+    // Number of neighboring inner columns processed per task
+    static constexpr int interiorCols = p >= 7 ? 2 : 1;
+    // Number of rows processed per task
+    static constexpr int interiorRun = 8;
+    __host__ __device__ static constexpr int groupFirstDc(const int group) { return (group * (maxShift + 1)) / shiftGroups; }
+    // One past the last shift index before column offset dc
+    __host__ __device__ static constexpr int shiftEnd(const int dc) { return dc > maxShift ? numShifts : firstShift(dc); }
+    // Maps a border index to the unclamped row or column coordinate
+    __device__ static int borderToCoord(const int border, const int size) { return border < 2 * pad ? border - pad : size - (3 * pad) + border; }
+    // Copy border rows to row-major format for p >= 7 to speed up memory access
+    static constexpr bool copyBorderRows = p >= 7;
+    static constexpr int borderCopyRows = 6 * pad;
+    __device__ static int borderCopyRow(const int row, const int height) { return row < borderCopyRows / 2 ? row : row - height + borderCopyRows; }
+};
+
+// Reads an image pixel with edge clamping
+__device__ __forceinline__ float clampedPixel(const float* __restrict__ input, const int r, const int c, const int width, const int height) {
+    return input[(static_cast<size_t>(clamp(c, 0, width - 1)) * height) + clamp(r, 0, height - 1)];
+}
+
+// Reduces thread sums in the block and updates global output with atomic adds
+template <int NUM>
+__device__ __forceinline__ void reduceShiftSums(const float (&sums)[NUM], uint64_t* __restrict__ output, const int stride, float* __restrict__ warpSums) {
+    const int lane = threadIdx.x & 31;
+    const int warp = threadIdx.x >> 5;
 #pragma unroll
-    for (int i = 0; i < N; i++) {
+    for (int i = 0; i < NUM; i++) {
+        float v = sums[i];
 #pragma unroll
-        for (int j = 0; j <= i; j++) {
+        for (int offset = 16; offset > 0; offset >>= 1)
+            v += __shfl_xor_sync(0xFFFFFFFF, v, offset);
+        if (lane == 0)
+            warpSums[(warp * NUM) + i] = v;
+    }
+    __syncthreads();
+    for (int i = threadIdx.x; i < NUM; i += blockDim.x) {
+        float v = 0.0f;
+#pragma unroll
+        for (int w = 0; w < 8; w++)
+            v += warpSums[(w * NUM) + i];
+        atomicAdd(output + (i * stride), toScaledUint64(v));
+    }
+}
+
+// Accumulates shift sums for RUN rows across COLS neighboring columns
+template <int p, int RUN, int DC0, int DC1, int NUM, int COLS = 1>
+__device__ __forceinline__ void sumColumnRun(const float* __restrict__ input, const int c, const int r0, const int width, const int height, float (&sums)[NUM], const int validCols = COLS) {
+    using L = MeShiftLayout<p>;
+    constexpr int HALO = 8; // >= maxShift, a multiple of 4 for aligned float4 loads
+    constexpr int WINDOW = RUN + (2 * HALO);
+    static_assert(HALO >= L::maxShift, "the halo must cover the largest shift");
+    const bool alignedColumns = (height & 3) == 0;
+    const bool interiorRun = alignedColumns && r0 >= L::pad && r0 + RUN <= height - L::pad;
+
+    // Scale task values while zeroing pixels outside inner image rows
+    float a[COLS][RUN];
+#pragma unroll
+    for (int j = 0; j < COLS; j++) {
+        const float* colA = input + (static_cast<size_t>(clamp(c + j, 0, width - 1)) * height);
+        const float scale = j < validCols ? L::productScale : 0.0f;
+        if (interiorRun) {
+#pragma unroll
+            for (int v = 0; v < RUN; v += 4) {
+                const float4 f = *reinterpret_cast<const float4*>(colA + r0 + v);
+                a[j][v + 0] = f.x * scale;
+                a[j][v + 1] = f.y * scale;
+                a[j][v + 2] = f.z * scale;
+                a[j][v + 3] = f.w * scale;
+            }
+        } else {
+#pragma unroll
+            for (int t = 0; t < RUN; t++) {
+                const int r = r0 + t;
+                a[j][t] = (r >= L::pad && r < height - L::pad) ? colA[r] * scale : 0.0f;
+            }
+        }
+    }
+
+    const bool fastWindow = alignedColumns && r0 - HALO >= 0 && r0 + RUN + HALO <= height;
+#pragma unroll
+    for (int k = DC0; k < DC1 + COLS - 1; k++) {
+        const float* colB = input + (static_cast<size_t>(clamp(c + k, 0, width - 1)) * height);
+        float w[WINDOW];
+        if (fastWindow) {
+#pragma unroll
+            for (int v = 0; v < WINDOW; v += 4) {
+                const float4 f = *reinterpret_cast<const float4*>(colB + r0 - HALO + v);
+                w[v + 0] = f.x;
+                w[v + 1] = f.y;
+                w[v + 2] = f.z;
+                w[v + 3] = f.w;
+            }
+        } else {
+#pragma unroll
+            for (int v = 0; v < WINDOW; v++)
+                w[v] = colB[clamp(r0 - HALO + v, 0, height - 1)];
+        }
+#pragma unroll
+        for (int j = 0; j < COLS; j++) {
+            const int dc = k - j;
+            if (dc < DC0 || dc >= DC1)
+                continue; // Resolved at compile time
+#pragma unroll
+            for (int dr = (dc == 0 ? 0 : -L::maxShift); dr <= L::maxShift; dr++) {
+                float sum = 0.0f;
+#pragma unroll
+                for (int t = 0; t < RUN; t++)
+                    sum = fmaf(a[j][t], w[t + HALO + dr], sum);
+                sums[L::shiftIndex(dr, dc) - L::firstShift(DC0)] += sum;
+            }
+        }
+    }
+}
+
+// Accumulates shift sums along a border row for columns in range
+template <int p, int RUN, int DC0, int DC1, int NUM>
+__device__ __forceinline__ void sumRowRun(const float* __restrict__ source, const int r, const int c0, const int width, const int height, float (&sums)[NUM]) {
+    using L = MeShiftLayout<p>;
+    constexpr int WINDOW = RUN + (DC1 - 1 - DC0);
+    const size_t columnStride = L::copyBorderRows ? 1 : height;
+    const auto row = [&](const int imageRow) {
+        const int clamped = clamp(imageRow, 0, height - 1);
+        return L::copyBorderRows ? source + (static_cast<size_t>(L::borderCopyRow(clamped, height)) * width) : source + clamped;
+    };
+    const float* rowA = row(r);
+    float a[RUN];
+#pragma unroll
+    for (int t = 0; t < RUN; t++) {
+        const int c = c0 + t;
+        a[t] = (c >= L::pad && c < width - L::pad) ? rowA[c * columnStride] * L::productScale : 0.0f;
+    }
+#pragma unroll
+    for (int dr = -L::maxShift; dr <= L::maxShift; dr++) {
+        const float* rowB = row(r + dr);
+        float w[WINDOW];
+#pragma unroll
+        for (int v = 0; v < WINDOW; v++)
+            w[v] = rowB[clamp(c0 + DC0 + v, 0, width - 1) * columnStride];
+#pragma unroll
+        for (int dc = DC0; dc < DC1; dc++) {
+            if (dc == 0 && dr < 0)
+                continue; // Skip opposite shift already covered
             float sum = 0.0f;
-            // dot product of previous L rows
 #pragma unroll
-            for (int k = 0; k < j; k++)
-                sum += packed[IDX(i, k)] * packed[IDX(j, k)];
-            if (i == j) {
-                const float val = packed[IDX(i, i)] - sum;
-                if (val <= 1e-12f) {
-                    *stopFlag = 1;
-                    goto exit;
-                }
-                packed[IDX(i, i)] = sqrtf(val);
-            } else {
-                // off-diagonal, packed[IDX(j, j)] was updated in previous iteration of j loop
-                packed[IDX(i, j)] = (packed[IDX(i, j)] - sum) * __frcp_rn(packed[IDX(j, j)]);
+            for (int t = 0; t < RUN; t++)
+                sum = fmaf(a[t], w[t + dc - DC0], sum);
+            sums[L::shiftIndex(dr, dc) - L::firstShift(DC0)] += sum;
+        }
+    }
+}
+
+// Copies top and bottom border rows into a contiguous row-major buffer
+template <int p>
+__global__ void me_copy_border_rows(const float* __restrict__ input, float* __restrict__ borderCopy, const int width, const int height) {
+    using L = MeShiftLayout<p>;
+    const int total = L::borderCopyRows * width;
+    for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < total; i += gridDim.x * blockDim.x) {
+        const int row = i % L::borderCopyRows;
+        const int col = i / L::borderCopyRows;
+        const int imageRow = row < L::borderCopyRows / 2 ? row : height - L::borderCopyRows + row;
+        borderCopy[(static_cast<size_t>(row) * width) + col] = input[(static_cast<size_t>(col) * height) + imageRow];
+    }
+}
+
+template <int V>
+using IntConstant = std::integral_constant<int, V>;
+
+// Dispatches the column shift range for the block's assigned group at compile time
+template <int p, int G = 0, typename Work>
+__device__ __forceinline__ void forColumnShiftGroup(const int group, Work&& work) {
+    using L = MeShiftLayout<p>;
+    if constexpr (G + 1 == L::shiftGroups)
+        work(IntConstant<L::groupFirstDc(G)>{}, IntConstant<L::groupFirstDc(G + 1)>{});
+    else if (group == G)
+        work(IntConstant<L::groupFirstDc(G)>{}, IntConstant<L::groupFirstDc(G + 1)>{});
+    else
+        forColumnShiftGroup<p, G + 1>(group, work);
+}
+
+// Single-launch kernel computing all inner and border shift sums
+template <int p>
+__global__ void __launch_bounds__(256, 2) me_shift_sums(const float* __restrict__ input, const float* __restrict__ borderRowsCopy, uint64_t* __restrict__ shiftSums, const int width, const int height,
+    const int interiorBlocks, const int borderBlocksPerLine) {
+    using L = MeShiftLayout<p>;
+    constexpr int RUN = L::interiorRun;
+    constexpr int G = L::shiftGroups;
+    __shared__ float warpSums[8 * L::numShifts];
+
+    const bool isBorder = blockIdx.x >= interiorBlocks;
+    const int localBlock = isBorder ? blockIdx.x - interiorBlocks : blockIdx.x;
+    const int group = localBlock % G;
+    const int groupBlock = localBlock / G;
+    forColumnShiftGroup<p>(group, [&](auto dc0, auto dc1) {
+        constexpr int DC0 = decltype(dc0)::value;
+        constexpr int DC1 = decltype(dc1)::value;
+        constexpr int SHIFT0 = L::firstShift(DC0);
+        constexpr int NUM = L::shiftEnd(DC1) - SHIFT0;
+        float sums[NUM];
+#pragma unroll
+        for (int i = 0; i < NUM; i++)
+            sums[i] = 0.0f;
+        if (!isBorder) {
+            const int runsPerColumn = (height + RUN - 1) / RUN;
+            const int interiorColumns = width - (2 * L::pad);
+            constexpr int COLS = L::interiorCols;
+            const int totalTasks = runsPerColumn * ((interiorColumns + COLS - 1) / COLS);
+            const int stride = (interiorBlocks / G) * blockDim.x;
+            for (int task = groupBlock * blockDim.x + threadIdx.x; task < totalTasks; task += stride) {
+                const int c = COLS * (task / runsPerColumn);
+                sumColumnRun<p, RUN, DC0, DC1, NUM, COLS>(input, L::pad + c, (task % runsPerColumn) * RUN, width, height, sums, min(COLS, interiorColumns - c));
+            }
+            reduceShiftSums<NUM>(sums, shiftSums + SHIFT0, 1, warpSums);
+        } else {
+            const int line = groupBlock / borderBlocksPerLine;
+            const int lineBlock = groupBlock % borderBlocksPerLine;
+            const bool isBorderRow = line < L::borderSize;
+            const int border = isBorderRow ? line : line - L::borderSize;
+            const int fixedCoord = L::borderToCoord(border, isBorderRow ? height : width);
+            const int runs = ((isBorderRow ? width : height) + RUN - 1) / RUN;
+            for (int run = lineBlock * blockDim.x + threadIdx.x; run < runs; run += borderBlocksPerLine * blockDim.x) {
+                if (isBorderRow)
+                    sumRowRun<p, RUN, DC0, DC1>(L::copyBorderRows ? borderRowsCopy : input, fixedCoord, run * RUN, width, height, sums);
+                else
+                    sumColumnRun<p, RUN, DC0, DC1>(input, fixedCoord, run * RUN, width, height, sums);
+            }
+            uint64_t* output = shiftSums + (isBorderRow ? L::borderRowsOffset : L::borderColsOffset) + (SHIFT0 * L::borderSize) + border;
+            reduceShiftSums<NUM>(sums, output, L::borderSize, warpSums);
+        }
+    });
+}
+
+// Builds one entry of the solver system from inner shift sums, borders, and corners
+template <int p>
+__device__ uint64_t buildSystemEntry(const float* __restrict__ input, const uint64_t* __restrict__ shiftSums, const int entry, const int width, const int height) {
+    using L = MeShiftLayout<p>;
+    constexpr int N = L::windowSize - 1;
+    constexpr int RxSize = (N * (N + 1)) / 2;
+    // Maps solver variable to window pixel index
+    auto toWindow = [](const int k) {
+        const int e = coefficientIndex<p>(k);
+        return e + (e >= L::windowCenter);
+    };
+    int wa, wb;
+    if (entry < RxSize) {
+        const int2 coords = packedToRowCol(entry);
+        wa = toWindow(coords.x);
+        wb = toWindow(coords.y);
+    } else {
+        wa = toWindow(entry - RxSize);
+        wb = L::windowCenter;
+    }
+    // Map window coordinates to shift offset, swapping direction if needed
+    int baseRow = (wa % p) - L::pad, baseCol = (wa / p) - L::pad;
+    int dr = (wb % p) - (wa % p), dc = (wb / p) - (wa / p);
+    if (dc < 0 || (dc == 0 && dr < 0)) {
+        baseRow += dr;
+        baseCol += dc;
+        dr = -dr;
+        dc = -dc;
+    }
+    const int shift = L::shiftIndex(dr, dc);
+    // Accumulate border sums across the contiguous window range
+    const int rowLo = baseRow + L::pad;
+    const int colLo = baseCol + L::pad;
+    uint64_t fixedSum = shiftSums[shift];
+#pragma unroll
+    for (int i = 0; i < 2 * L::pad; i++)
+        fixedSum += shiftSums[L::borderRowsOffset + (shift * L::borderSize) + rowLo + i] + shiftSums[L::borderColsOffset + (shift * L::borderSize) + colLo + i];
+    float corners = 0.0f;
+#pragma unroll
+    for (int i = 0; i < 2 * L::pad; i++) {
+        const int r = L::borderToCoord(rowLo + i, height);
+#pragma unroll
+        for (int j = 0; j < 2 * L::pad; j++) {
+            const int c = L::borderToCoord(colLo + j, width);
+            corners += clampedPixel(input, r, c, width, height) * clampedPixel(input, r + dr, c + dc, width, height);
+        }
+    }
+    return fixedSum + toScaledUint64(corners * L::productScale);
+}
+
+// Blocked Cholesky solver in float-float arithmetic using panel updates
+// Panels factor 8 columns at a time with warp shuffles, followed by a trailing submatrix update
+template <int N>
+struct CholeskyLayout {
+    static constexpr int NB = 8;
+    static_assert(N % NB == 0, "N = p^2 - 1 is a multiple of 8 for odd p");
+    static constexpr int packedSize = (N * (N + 1)) / 2;
+    // Rows below the diagonal block assigned per warp
+    static constexpr int panelRowsPerWarp = 32 - NB;
+    // Dense panel buffer for trailing submatrix update
+    static constexpr int panelStride = (2 * NB) + 4;
+    static constexpr int panelSize = (N - NB) * panelStride;
+    // Packed index for lower triangular element (r >= c)
+    __device__ static __forceinline__ int idx(const int r, const int c) { return ((r * (r + 1)) / 2) + c; }
+};
+
+// Factors an 8-column panel and updates the right-hand side using warp shuffles
+template <int N>
+__device__ __forceinline__ void choleskyPanel(FloatFloat* __restrict__ sA, FloatFloat* __restrict__ sB, FloatFloat* __restrict__ sInv, float* __restrict__ sPanel, const int k0, int& sAbort) {
+    using C = CholeskyLayout<N>;
+    constexpr int NB = C::NB;
+    const int lane = threadIdx.x & 31;
+    const int warp = threadIdx.x >> 5;
+    const bool diagonal = lane < NB;
+    const int row = diagonal ? k0 + lane : k0 + NB + (warp * C::panelRowsPerWarp) + (lane - NB);
+    const bool valid = row < N;
+
+    FloatFloat a[NB];
+    FloatFloat b = valid ? sB[row] : FloatFloat(0.0f);
+#pragma unroll
+    for (int j = 0; j < NB; j++)
+        a[j] = valid && (!diagonal || j <= lane) ? sA[C::idx(row, k0 + j)] : FloatFloat(0.0f);
+
+    bool positiveDefinite = true;
+    FloatFloat pivot = shfl(a[0], 0);
+#pragma unroll
+    for (int k = 0; k < NB; k++) {
+        positiveDefinite &= pivot.hi > 1e-3f; // Check positive definiteness threshold
+        const FloatFloat inv = rsqrt(pivot);
+        const FloatFloat l = a[k] * inv; // Scale panel entries by inverse pivot square root
+        // Compute next pivot along the critical path
+        if (k + 1 < NB)
+            pivot = shfl(fnma(l, l, a[k + 1]), k + 1);
+        const FloatFloat y = shfl(b, k) * inv;
+        // Update panel rows using warp shuffles without branching
+#pragma unroll
+        for (int j = k + 1; j < NB; j++)
+            a[j] = fnma(l, shfl(l, j), a[j]);
+        a[k] = l;
+        const FloatFloat updatedB = fnma(l, y, b);
+        b = lane == k ? y : (!diagonal || lane > k ? updatedB : b);
+        if (warp == 0 && lane == k)
+            sInv[k0 + k] = inv;
+    }
+
+    if (valid && (warp == 0 || !diagonal)) {
+#pragma unroll
+        for (int j = 0; j < NB; j++)
+            if (!diagonal || j <= lane)
+                sA[C::idx(row, k0 + j)] = a[j];
+        sB[row] = b;
+        if (!diagonal) {
+            float* panelRow = sPanel + ((row - k0 - NB) * C::panelStride);
+#pragma unroll
+            for (int j = 0; j < NB; j++) {
+                panelRow[j] = a[j].hi;
+                panelRow[NB + j] = a[j].lo;
             }
         }
     }
-
-    // forward Substitution (solve L * y = b)
-    // use packed[IDX(i, k)] which now holds L_ik
-#pragma unroll
-    for (int i = 0; i < N; i++) {
-        float sum = 0.0f;
-#pragma unroll
-        for (int k = 0; k < i; k++)
-            sum += packed[IDX(i, k)] * localB[k];
-        localB[i] = (localB[i] - sum) * __frcp_rn(packed[IDX(i, i)]);
-    }
-
-    // backward Substitution (solve L^T * x = y)
-    // solving U * x = y where U = L^T
-    // U_ik = L_ki, we need L_ki, since k > i in the logic (upper tri), we access packed[IDX(k, i)] because we stored lower
-#pragma unroll
-    for (int i = N - 1; i >= 0; i--) {
-        float sum = 0.0f;
-#pragma unroll
-        for (int k = i + 1; k < N; k++)
-            sum += packed[IDX(k, i)] * localB[k];
-        localB[i] = (localB[i] - sum) * __frcp_rn(packed[IDX(i, i)]);
-    }
-    *stopFlag = 0;
-exit:
-    // write Result
-#pragma unroll
-    for (int i = 0; i < N; i++)
-        X[getMappedVarIndex<p>(i)] = localB[i];
+    if (warp == 0 && lane == 0 && !positiveDefinite)
+        sAbort = 1;
 }
 
-// parallel cholesky solver for p = 7 (N = 48) and p = 9 (N = 80), using one warp (32 threads)
+// Updates trailing submatrix A22 -= L21 * L21^T
+template <int N, int BLOCK>
+__device__ __forceinline__ void choleskyTrailingUpdate(FloatFloat* __restrict__ sA, const float* __restrict__ sPanel, const int k0) {
+    using C = CholeskyLayout<N>;
+    constexpr int NB = C::NB;
+    const int first = k0 + NB;
+    const int rows = N - first;
+    const int trailing = (rows * (rows + 1)) / 2;
+    for (int e = threadIdx.x; e < trailing; e += BLOCK) {
+        const int2 coords = packedToRowCol(e);
+        float pi[2 * NB], pj[2 * NB];
+#pragma unroll
+        for (int v = 0; v < (2 * NB) / 4; v++) {
+            reinterpret_cast<float4*>(pi)[v] = reinterpret_cast<const float4*>(sPanel + (coords.x * C::panelStride))[v];
+            reinterpret_cast<float4*>(pj)[v] = reinterpret_cast<const float4*>(sPanel + (coords.y * C::panelStride))[v];
+        }
+        const int index = C::idx(first + coords.x, first + coords.y);
+        // Accumulate low parts first and normalize once at the end
+        const FloatFloat acc = sA[index];
+        float hi = acc.hi, lo = acc.lo;
+#pragma unroll
+        for (int m = 0; m < NB; m++) {
+            const float ph = pi[m] * pj[m];
+            const float pl = fmaf(pi[m], pj[NB + m], fmaf(pi[NB + m], pj[m], fmaf(pi[m], pj[m], -ph)));
+            const FloatFloat sum = FloatFloat::twoSum(hi, -ph);
+            hi = sum.hi;
+            lo += sum.lo - pl;
+        }
+        sA[index] = FloatFloat::quickTwoSum(hi, lo);
+    }
+}
+
+// Backward substitution L^T * x = y within a single warp using shuffles
 template <int p>
-__global__ void cholesky_solver_parallel(const uint64_t* __restrict__ A, const uint64_t* __restrict__ B, float* __restrict__ X, int* __restrict__ stopFlag) {
-    static_assert(p > 5, "Parallel cholesky solver kernel should NEVER be instantiated for p <= 5");
+__device__ __forceinline__ void choleskyBackSubstitution(const FloatFloat* __restrict__ sA, const FloatFloat* __restrict__ sB, const FloatFloat* __restrict__ sInv, float* __restrict__ X) {
     constexpr int N = (p * p) - 1;
-    constexpr int packedSize = (N * (N + 1)) / 2;
-
-    const int laneId = threadIdx.x;
-
-    __shared__ alignas(16) float sA[N][N + 1]; // +1 to avoid bank conflicts
-    __shared__ alignas(16) float sB[N];
-
-    // cooperative load (packedSize elements -> NxN Shared)
-    // check if A, B, and X are 16-byte aligned for vectorized loads
-    const bool isAligned = ((reinterpret_cast<uintptr_t>(A) | reinterpret_cast<uintptr_t>(B) | reinterpret_cast<uintptr_t>(X)) & 0xF) == 0;
-    // Rx
-    if (isAligned) {
-        constexpr int vecPackedLimit = packedSize / 2;
-        const ulonglong2* vecA = reinterpret_cast<const ulonglong2*>(A);
-        // vectorized path
-        for (int k = laneId; k < vecPackedLimit; k += 32) {
-            ulonglong2 v = vecA[k];
-            const int baseIdx = k * 2;
-            const int2 c0 = getPackedCoords(baseIdx + 0);
-            sA[c0.x][c0.y] = toUnscaledFloat(v.x);
-            const int2 c1 = getPackedCoords(baseIdx + 1);
-            sA[c1.x][c1.y] = toUnscaledFloat(v.y);
-        }
-        // scalar path
-    } else {
-        for (int k = laneId; k < packedSize; k += 32) {
-            const int2 c = getPackedCoords(k);
-            sA[c.x][c.y] = toUnscaledFloat(A[k]);
-        }
-    }
-    // rx
-    if (isAligned) {
-        constexpr int vecBlimit = N / 2;
-        const ulonglong2* vecB = reinterpret_cast<const ulonglong2*>(B);
-        // vectorized path
-        for (int k = laneId; k < vecBlimit; k += 32) {
-            const ulonglong2 v = vecB[k];
-            sB[k * 2 + 0] = toUnscaledFloat(v.x);
-            sB[k * 2 + 1] = toUnscaledFloat(v.y);
-        }
-        // scalar path
-    } else {
-        for (int k = laneId; k < N; k += 32)
-            sB[k] = toUnscaledFloat(B[k]);
-    }
-
-    // initialize stop flag
-    if (laneId == 0)
-        *stopFlag = 0;
-    __syncwarp();
-
-    // in-place Cholesky Decomposition
-    for (int k = 0; k < N; k++) {
-        // check diagonal and calculate sqrt
-        const float diag = sA[k][k];
-        int abortFlag = 0;
-        float invDiag = 0.0f;
-        if (laneId == 0) {
-            if (diag <= 1e-12f) {
-                *stopFlag = 1; // write by 1 thread only
-                abortFlag = 1;
-            } else {
-                invDiag = rsqrtf(diag);
-                sA[k][k] = invDiag;
-            }
-        }
-
-        // broadcast abort
-        const int abortWarp = __shfl_sync(0xFFFFFFFF, abortFlag, 0);
-        if (abortWarp)
-            return;
-
-        // broadcast L_kk
-        const float L_kk_inv = __shfl_sync(0xFFFFFFFF, invDiag, 0);
-
-        for (int i = k + 1 + laneId; i < N; i += 32)
-            sA[i][k] = sA[i][k] * L_kk_inv;
-        __syncwarp();
-
-        // update trailing matrix
-        for (int j = k + 1; j < N; j += 2) {
-            const float L_jk0 = sA[j][k];
-            const float L_jk1 = (j + 1 < N) ? sA[j + 1][k] : 0.0f;
-            for (int i = j + laneId; i < N; i += 32) {
-                const float Lik = sA[i][k];
-                sA[i][j] = sA[i][j] - (Lik * L_jk0);
-                if (j + 1 < N && i >= j + 1)
-                    sA[i][j + 1] = sA[i][j + 1] - (Lik * L_jk1);
-            }
-        }
-        __syncwarp();
-    }
-
-    // forward Substitution (solve L * y = b)
-    for (int k = 0; k < N; k++) {
-        float val = sB[k];
-        if (laneId == 0) {
-            val *= sA[k][k];
-            sB[k] = val;
-        }
-        const float y_k = __shfl_sync(0xFFFFFFFF, val, 0);
-        for (int i = k + 1 + laneId; i < N; i += 32)
-            sB[i] = sB[i] - (sA[i][k] * y_k);
-        __syncwarp();
-    }
-
-    // backward Substitution (solve L^T * x = y)
-    // solving U * x = y where U = L^T
-    for (int k = N - 1; k >= 0; k--) {
-        float val = sB[k];
-        if (laneId == 0) {
-            val *= sA[k][k];
-            sB[k] = val;
-        }
-        const float x_k = __shfl_sync(0xFFFFFFFF, val, 0);
-        for (int i = laneId; i < k; i += 32)
-            sB[i] = sB[i] - (sA[k][i] * x_k);
-        __syncwarp();
-    }
-
-    // write Result
-    for (int k = laneId; k < N; k += 32)
-        X[getMappedVarIndex<p>(k)] = sB[k];
-}
-
-// helper method to perform a streaming reduction of Rx values from shared window to global memory
-template <int startIdx, int endIdx, int rowOffset>
-__device__ void RxStreamPass(const int tid, float (*__restrict__ RxLocal)[92], uint64_t* __restrict__ Rx) {
-    for (int k = startIdx + tid; k < endIdx; k += 128) {
-        const int2 coords = getPackedCoords(k);
-        const int rowInWindow = coords.x - rowOffset;
-        float sum = 0.0f;
+    constexpr int SLOTS = (N + 31) / 32;
+    using C = CholeskyLayout<N>;
+    const int lane = threadIdx.x & 31;
+    FloatFloat y[SLOTS];
 #pragma unroll
-        for (int w = 0; w < 4; w++)
-            sum += RxLocal[w * 32 + rowInWindow][coords.y];
-        atomicAdd(Rx + k, toScaledUint64(sum));
+    for (int s = 0; s < SLOTS; s++)
+        y[s] = lane + (32 * s) < N ? sB[lane + (32 * s)] : FloatFloat(0.0f);
+#pragma unroll
+    for (int s = SLOTS - 1; s >= 0; s--) {
+        for (int k = min(N, 32 * (s + 1)) - 1; k >= 32 * s; k--) {
+            const FloatFloat x = shfl(y[s], k - (32 * s)) * sInv[k];
+            if (lane == k - (32 * s))
+                y[s] = x;
+#pragma unroll
+            for (int t = 0; t <= s; t++) {
+                const int i = lane + (32 * t);
+                const FloatFloat updated = fnma(sA[C::idx(k, min(i, k))], x, y[t]);
+                y[t] = i < k ? updated : y[t];
+            }
+        }
     }
+#pragma unroll
+    for (int s = 0; s < SLOTS; s++)
+        if (lane + (32 * s) < N)
+            X[coefficientIndex<p>(lane + (32 * s))] = static_cast<float>(y[s]);
 }
 
-// helper funnel shift functions, used to load neighbors ("patches") by shifting half values with funnel shift
+// Assembles the solver matrix entries in parallel across grid blocks
 template <int p>
-__device__ void load_neighbor_row_funnel(half* dst, const half* rowBase, const int col) {
-    // if our starting column is odd, the data we want starts "halfway" in a 32-bit chunk, we must shift right by 16 bits
-    const uint32_t shift = (col & 1) * 16;
-    // force the pointer to the nearest 32-bit aligned place, by masking the lowest bit (of the column index)
-    const uint32_t* ptr = reinterpret_cast<const uint32_t*>(&rowBase[col & ~1]);
-    // window extract, we read two 32-bit chunks, concat them into 64-bits and funnel shift right to get the 32-bit (half2) window we want
-#pragma unroll
-    for (int i = 0; i < p / 2; i++) {
-        uint32_t pair = __funnelshift_r(ptr[i], ptr[i + 1], shift);
-        reinterpret_cast<half2*>(dst)[i] = reinterpret_cast<half2&>(pair);
-    }
-    // p is always odd -> we will always have one dangling half left over at the end of the row, We shift it and extract the lowest 16 bits
-    uint32_t lastChunk = ptr[p / 2] >> shift;
-    dst[p - 1] = reinterpret_cast<half2&>(lastChunk).x;
+__global__ void me_build_system(const float* __restrict__ input, const uint64_t* __restrict__ shiftSums, uint64_t* __restrict__ system, const int width, const int height) {
+    constexpr int N = (p * p) - 1;
+    const int entry = blockIdx.x * blockDim.x + threadIdx.x;
+    if (entry < ((N * (N + 1)) / 2) + N)
+        system[entry] = buildSystemEntry<p>(input, shiftSums, entry, width, height);
 }
 
-template <int p, int RowStride>
-__device__ void load_neighbor_vec(half8* dst, const half blockValues[p][RowStride], half& center, const int col) {
-    constexpr int centerIdx = p / 2;
+// Solves Rx * x = rx using blocked Cholesky decomposition in shared memory
+template <int p, int BLOCK>
+__global__ void __launch_bounds__(BLOCK)
+    me_solve_system(const uint64_t* __restrict__ system, uint64_t* __restrict__ shiftSums, uint64_t* __restrict__ embedSums, float* __restrict__ X, int* __restrict__ stopFlag) {
+    constexpr int N = (p * p) - 1;
+    using C = CholeskyLayout<N>;
+    static_assert(BLOCK >= 32 * ((N - C::NB + C::panelRowsPerWarp - 1) / C::panelRowsPerWarp), "not enough warps for the first panel");
+    // Packed Rx followed by rx vector
+    constexpr int systemSize = C::packedSize + N;
+    __shared__ FloatFloat sSystem[systemSize];
+    FloatFloat* sA = sSystem;
+    FloatFloat* sB = sSystem + C::packedSize;
+    __shared__ FloatFloat sInv[N];
+    __shared__ __align__(16) float sPanel[C::panelSize > 0 ? C::panelSize : 1];
+    __shared__ int sAbort;
+    // Load all system values into registers before converting
+    constexpr int loadsPerThread = (systemSize + BLOCK - 1) / BLOCK;
+    uint64_t values[loadsPerThread];
+#pragma unroll
+    for (int i = 0; i < loadsPerThread; i++)
+        values[i] = (i * BLOCK) + threadIdx.x < systemSize ? system[(i * BLOCK) + threadIdx.x] : 0;
+#pragma unroll
+    for (int i = 0; i < loadsPerThread; i++)
+        if ((i * BLOCK) + threadIdx.x < systemSize)
+            sSystem[(i * BLOCK) + threadIdx.x] = FloatFloat::fromUint64(values[i]);
+    for (int i = threadIdx.x; i < MeShiftLayout<p>::shiftSumsSize; i += BLOCK)
+        shiftSums[i] = 0;
+    if (threadIdx.x < 2)
+        embedSums[threadIdx.x] = 0;
+    if (threadIdx.x == 0)
+        sAbort = 0;
+    __syncthreads();
 
-    // pad the row width to p + 1 (forcing an even number of elements), combined with alignas(4) this guarantees every row starts on 4-byte boundary,
-    // ensuring the reinterpret_cast<half2*> in the funnel function never throws misaligned access error
-    alignas(4) half rows[p][p + 1];
-#pragma unroll
-    for (int i = 0; i < p; i++)
-        load_neighbor_row_funnel<p>(rows[i], blockValues[i], col);
-    // extract the center pixel
-    center = rows[centerIdx][centerIdx];
-    // flatten the remaining PxP window into a 1D vector array
-    half* d = reinterpret_cast<half*>(dst);
-    int idx = 0;
-#pragma unroll
-    for (int r = 0; r < p; r++) {
-#pragma unroll
-        for (int c = 0; c < p; c++) {
-            if (r == centerIdx && c == centerIdx)
-                continue;
-            d[idx++] = rows[r][c];
+    for (int k0 = 0; k0 < N; k0 += C::NB) {
+        // Only activate warps needed for the current panel rows
+        if ((threadIdx.x >> 5) * C::panelRowsPerWarp < max(N - k0 - C::NB, 1))
+            choleskyPanel<N>(sA, sB, sInv, sPanel, k0, sAbort);
+        __syncthreads();
+        if (sAbort) { // Exit early if matrix is not positive definite
+            if (threadIdx.x == 0)
+                *stopFlag = 1;
+            return;
+        }
+        if (k0 + C::NB < N) {
+            choleskyTrailingUpdate<N, BLOCK>(sA, sPanel, k0);
+            __syncthreads();
         }
     }
-    // for p=5 only clear the last vec (last 8 halfs) for the WMMA path later
-    if constexpr (p == 5)
-        dst[3] = {};
+    if (threadIdx.x < 32) {
+        choleskyBackSubstitution<p>(sA, sB, sInv, X);
+        if (threadIdx.x == 0)
+            *stopFlag = 0;
+    }
 }
 
-// Prediction Error kernels (ME) for p = 3, p = 5, p = 7 and p = 9
-__global__ void me_p3(const float* __restrict__ input, uint64_t* __restrict__ Rx, uint64_t* __restrict__ rx, const int width, const int height, const int totalBlocksY, const int taskTotal);
-__global__ void me_p5(const float* __restrict__ input, uint64_t* __restrict__ Rx, uint64_t* __restrict__ rx, const int width, const int height, const int totalBlocksY, const int taskTotal);
-__global__ void me_p7(const float* __restrict__ input, uint64_t* __restrict__ Rx, uint64_t* __restrict__ rx, const int width, const int height, const int totalBlocksY, const int taskTotal);
-__global__ void me_p9(const float* __restrict__ input, uint64_t* __restrict__ Rx, uint64_t* __restrict__ rx, const int width, const int height, const int totalBlocksY, const int taskTotal);
+// Computes embedding strength and checks whether the image is flat
+__device__ __forceinline__ float embedStrength(const uint64_t* __restrict__ sumSqPtr, const uint64_t* __restrict__ maxAbsBits, const float strengthNumerator) {
+    const float uSumSquared = toUnscaledFloat(*sumSqPtr);
+    float normalizedSumSquared = uSumSquared;
+    if (maxAbsBits) {
+        const float normFactor = 1.0f / ((__uint_as_float(static_cast<unsigned int>(*maxAbsBits)) + 1.0e-6f) * kMeMaskPrescale);
+        normalizedSumSquared *= normFactor * normFactor;
+    }
+    return normalizedSumSquared > 1e-3f ? strengthNumerator * rsqrtf(uSumSquared) : 0.0f;
+}
 
-// fused calculation of ME mask, u, and sum of squares
-__global__ void me_u_and_sumsq_fused(
-    const float* __restrict__ errorSeq, const float* __restrict__ w, float* __restrict__ u, uint64_t* __restrict__ globalSumSq, const float* __restrict__ maxVal, const int N);
+// Rounds and clamps a floating point value to an 8-bit pixel
+__device__ __forceinline__ uint8_t toPixel(const float value) { return static_cast<uint8_t>(clamp(value + 0.5f, 0.0f, 255.0f)); }
 
-// fused application of watermark: applies the watermark and calculates the output in one pass, using the precomputed u and sum of squares for normalization
-__global__ void apply_watermark_fused(const float* __restrict__ input, const float* __restrict__ u, const uint64_t* __restrict__ sumSqPtr, uint8_t* __restrict__ output, const float strengthNumerator,
-    const int planeElements, const int numChannels);
+// Loads 4 consecutive pixels as float4
+__device__ __forceinline__ float4 loadPixels4(const uint8_t* __restrict__ input, const int vectorIndex) {
+    const uchar4 bytes = reinterpret_cast<const uchar4*>(input)[vectorIndex];
+    return make_float4(bytes.x, bytes.y, bytes.z, bytes.w);
+}
+__device__ __forceinline__ float4 loadPixels4(const float* __restrict__ input, const int vectorIndex) { return reinterpret_cast<const float4*>(input)[vectorIndex]; }
 
-// calculation of the absolute value of the error sequence normalized by its max value, used in detection of ME mask
-__global__ void compute_abs_normalized_mask(const float* __restrict__ errorSeq, float* __restrict__ mask, const float* __restrict__ maxVal, const int N);
+// Adds watermark to image channels: output = input + strength * u
+template <typename T>
+__global__ void apply_watermark_fused(const T* __restrict__ input, const __half* __restrict__ u, const uint64_t* __restrict__ sumSqPtr, const uint64_t* __restrict__ maxAbsBits,
+    uint8_t* __restrict__ output, const float strengthNumerator, const int planeElements, const int numChannels) {
+    const float strength = embedStrength(sumSqPtr, maxAbsBits, strengthNumerator);
+    const int stride = blockDim.x * gridDim.x;
+    const int first = blockIdx.x * blockDim.x + threadIdx.x;
+    const int planeVectors = planeElements % 4 == 0 ? planeElements / 4 : 0;
+    for (int v = first; v < planeVectors; v += stride) {
+        const float4 uv = toFloat4(reinterpret_cast<const Half4*>(u)[v]);
+        const float4 us = make_float4(uv.x * strength, uv.y * strength, uv.z * strength, uv.w * strength);
+        for (int c = 0; c < numChannels; c++) {
+            const int vectorIndex = v + c * planeVectors;
+            const float4 in = loadPixels4(input, vectorIndex);
+            reinterpret_cast<uchar4*>(output)[vectorIndex] = make_uchar4(toPixel(in.x + us.x), toPixel(in.y + us.y), toPixel(in.z + us.z), toPixel(in.w + us.w));
+        }
+    }
+    for (int i = planeVectors * 4 + first; i < planeElements; i += stride) {
+        const float us = __half2float(u[i]) * strength;
+        for (int c = 0; c < numChannels; c++) {
+            const int pixelIdx = i + c * planeElements;
+            output[pixelIdx] = toPixel(static_cast<float>(input[pixelIdx]) + us);
+        }
+    }
+}
 
-// main kernel for correlation calculation, used in detection
-__global__ void calculate_final_correlation(
-    const float* __restrict__ partialDots, const float* __restrict__ partialNormU, const float* __restrict__ partialNormZ, float* __restrict__ result, const int numBlocks);
+// Grayscale embedding transposing column-major input to row-major output via shared memory
+__global__ void apply_watermark_row_major(const float* __restrict__ input, const __half* __restrict__ u, const uint64_t* __restrict__ sumSqPtr, const uint64_t* __restrict__ maxAbsBits,
+    uint8_t* __restrict__ output, const float strengthNumerator, const int width, const int height);
 
-// used for converting NV12 to YUV420p format, used in HW accelerated video decoding
+// Converts NV12 to YUV420p format for video decoding
 __global__ void nV12ToYUV420p(const uint8_t* __restrict__ uvSrc, const int uvPitch, uint8_t* __restrict__ uvDst, const int uvWidth, const int uvHeight);
 
-// used for converting uint8 pitched memory to non pitched float, used in HW accelerated video decoding
+// Converts pitched uint8 memory to non-pitched float buffer
 __global__ void pitchedToFloat(const uint8_t* __restrict__ input, float* __restrict__ output, const int width, const int height, const int pitch);
 
-// uint8 col-major (1 or 3 channel) to float col-major grayscale, with optional RGB weighting
+// Converts column-major uint8 input to float grayscale
 __global__ void u8ToFloatGray(const uint8_t* __restrict__ input, float* __restrict__ output, const int planeSize, const int numChannels);
 
-// used for converting column-major uint8 GPU array back to row-major uint8, multichannel via z-dimension
+// Transposes column-major uint8 image back to row-major format
 __global__ void colMajorToRowMajorU8(const uint8_t* __restrict__ src, uint8_t* __restrict__ dst, const int width, const int height);
 
-// used for converting row-major float (CImg) to column-major float (CudaArray), coalesced tiled transpose
-__global__ void rowMajorToColMajorFloat(const float* __restrict__ src, float* __restrict__ dst, const int width, const int height);
+// Converts row-major planar RGB to column-major RGB and float luma
+__global__ void rowMajorRgbToColMajor(const uint8_t* __restrict__ src, uint8_t* __restrict__ rgbDst, float* __restrict__ grayDst, const int width, const int height);
 
-// fused row-major 3-channel RGB to col-major grayscale with ITU-R 601 luma weights
-__global__ void rowMajorRGBToColMajorGray(const float* __restrict__ src, float* __restrict__ dst, const int width, const int height);
-
-// HDR (P010LE, BT.2020 PQ) to SDR (BT.709) helpers
-
-// offline generated 1024 entry LUTs for PQ EOTF and BT.1886 gamma, always accessed via __ldg
-// main reason to use them is to avoid many powf() per thread which is very slow
+// Precomputed lookup tables for PQ EOTF and BT.1886 gamma to avoid costly powf calls
 static __device__ const float pqEotfLUT[1024] = {0.00000000e+00f, 4.04227176e-07f, 1.31113719e-06f, 2.62368259e-06f, 4.31514955e-06f, 6.37468853e-06f, 8.79823827e-06f, 1.15853619e-05f,
     1.47378191e-05f, 1.82588184e-05f, 2.21525860e-05f, 2.64240984e-05f, 3.10789073e-05f, 3.61230211e-05f, 4.15628212e-05f, 4.74050009e-05f, 5.36565210e-05f, 6.03245762e-05f, 6.74165685e-05f,
     7.49400881e-05f, 8.29028967e-05f, 9.13129157e-05f, 1.00178216e-04f, 1.09507010e-04f, 1.19307645e-04f, 1.29588598e-04f, 1.40358472e-04f, 1.51625993e-04f, 1.63400004e-04f, 1.75689469e-04f,
@@ -1020,18 +1300,18 @@ __device__ __forceinline__ float3 hdrPixelToSdrRgb(const uint16_t yRaw, const ui
     const float Rp = fmaf(1.4746f, Cr2020, Y2020);
     const float Gp = fmaf(-0.16455f, Cb2020, fmaf(-0.57135f, Cr2020, Y2020));
     const float Bp = fmaf(1.8814f, Cb2020, Y2020);
-    // PQ EOTF -> linear RGB (BT.2020), npl=100 is premultiplied in the LUT (we save 3 MULs per thread)
+    // PQ EOTF to linear RGB with peak luminance scaled inside the lookup table
     float R = lutLerp1024(pqEotfLUT, Rp);
     float G = lutLerp1024(pqEotfLUT, Gp);
     float B = lutLerp1024(pqEotfLUT, Bp);
-    // highlight desaturation
+    // Highlight desaturation
     constexpr float desat = 2.0f;
     const float luma2020 = fmaf(0.2627f, R, fmaf(0.6780f, G, 0.0593f * B));
-    const float overbright = fmaxf(luma2020 - desat, 1e-6f) * __frcp_rn(fmaxf(luma2020, 1e-6f)); // fast reciprocal too
+    const float overbright = fmaxf(luma2020 - desat, 1e-6f) * __frcp_rn(fmaxf(luma2020, 1e-6f)); // Fast reciprocal
     R = fmaf(overbright, luma2020 - R, R);
     G = fmaf(overbright, luma2020 - G, G);
     B = fmaf(overbright, luma2020 - B, B);
-    // hue preserving Mobius, tonemap MAX channel, then scale ALL 3 uniformly to preserve hue
+    // Hue-preserving Mobius tone mapping applied uniformly across channels
     const float sig = fmaxf(fmaxf(R, G), B);
     if (sig > 1e-6f) {
         const float scale = __saturatef(mobiusTonemap(sig, mobA, mobB, mobK)) * __frcp_rn(sig);
@@ -1041,29 +1321,28 @@ __device__ __forceinline__ float3 hdrPixelToSdrRgb(const uint16_t yRaw, const ui
     } else {
         R = G = B = 0.0f;
     }
-    // BT.2020 -> BT.709 gamut matrix (lutLerp1024 clamps to [0,1] internally)
+    // Convert BT.2020 color gamut to BT.709
     const float R7 = fmaf(1.6605f, R, fmaf(-0.5876f, G, -0.0728f * B));
     const float G7 = fmaf(-0.1246f, R, fmaf(1.1329f, G, -0.0083f * B));
     const float B7 = fmaf(-0.0182f, R, fmaf(-0.1006f, G, 1.1187f * B));
-    // BT.1886 gamma (gamma 2.4) -> display referred [0,1]
+    // Apply BT.1886 display gamma curve
     return make_float3(lutLerp1024(bt1886LUT, R7), lutLerp1024(bt1886LUT, G7), lutLerp1024(bt1886LUT, B7));
 }
 
-// BT.709 RGB [0,1] -> Y limited range [16, 235] (encoder expects limited range Y for SDR yuv420p)
+// Convert BT.709 RGB to limited range Y [16, 235]
 __device__ __forceinline__ float rgbToYLimited(const float3 rgb) {
     const float Y = fmaf(0.2126f, rgb.x, fmaf(0.7152f, rgb.y, 0.0722f * rgb.z));
     return clamp(fmaf(Y, 219.0f, 16.0f), 16.0f, 235.0f);
 }
 
-// HDR Y: P010LE pitched + UV -> col-major float [16,235] limited range (equivalent to pitchedToFloat for HDR frames)
-// Needs UV for per pixel hue preserving tonemap
+// Converts HDR P010LE luma to column-major limited-range float with tone mapping
 __global__ void p010HdrYToSdrFloat(const uint16_t* __restrict__ ySrc, const int yPitchBytes, const uint16_t* __restrict__ uvSrc, const int uvPitchBytes, float* __restrict__ output, const int width,
     const int height, const float mobA, const float mobB, const float mobK);
 
-// HDR UV: P010LE interleaved UV + Y -> uint8_t interleaved NV12 UV with hue preserving BT.2020->BT.709 tonemap
+// Converts HDR P010LE chroma to SDR NV12 format with tone mapping
 __global__ void p010HdrUVToSdrNV12(const uint16_t* __restrict__ ySrc, const int yPitchBytes, const uint16_t* __restrict__ uvSrc, const int uvPitchBytes, uint8_t* __restrict__ uvDst, const int width,
     const int height, const float mobA, const float mobB, const float mobK);
 
-// HDR Y: P010LE pitched + UV -> uint8_t row-major limited range [16,235] (passthrough encoding without watermarking)
+// Converts HDR P010LE luma to SDR uint8 without watermarking
 __global__ void p010HdrYToSdrU8(const uint16_t* __restrict__ ySrc, const int yPitchBytes, const uint16_t* __restrict__ uvSrc, const int uvPitchBytes, uint8_t* __restrict__ output, const int width,
     const int height, const float mobA, const float mobB, const float mobK);

@@ -3,6 +3,7 @@
 #include "buffer.hpp"
 #include "include/WatermarkTypes.hpp"
 #include <cmath>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -12,7 +13,8 @@
  */
 class WatermarkBase {
   protected:
-    using WatermarkLoader = ImageBuffer (*)(const std::vector<float>&, const int, const int);
+    // creates the backend watermark buffer from the half precision bits of the generated watermark
+    using WatermarkLoader = WatermarkBuffer (*)(std::span<const uint16_t>, const int, const int);
 
     template <int ALIGNMENT>
     static constexpr int alignUp(const int x) {
@@ -20,7 +22,7 @@ class WatermarkBase {
         return (x + (ALIGNMENT - 1)) & ~(ALIGNMENT - 1);
     }
     int baseRows, baseCols, totalPixels;
-    ImageBuffer randomMatrix;
+    WatermarkBuffer randomMatrix;
     float strengthFactor;
     float strengthNumerator;
 
@@ -37,10 +39,16 @@ class WatermarkBase {
 
     virtual ~WatermarkBase() = default;
 
-    // main watermark embedding method
-    // it embeds the watermark computed from "inputGrayImage" (always grayscale, 2D)
-    // into a new array "output" based on "inputImage" (RGB or grayscale always u8)
-    virtual void makeWatermark(const ImageBuffer& inputGrayImage, const ImageBuffer& inputImage, ImageOutputBuffer& output, const MaskMethod maskType) = 0;
+    // layout of the 8-bit embedding output, column-major like every image plane of the backends, or row-major (the layout of video frames)
+    enum class Layout { ColMajor, RowMajor };
+
+    // RGB embedding: the watermark computed from the luma "inputGrayImage" is added to each channel of the 8-bit column-major planar
+    // "inputImage", the output is column-major planar
+    virtual void makeWatermark(const ImageBuffer& inputGrayImage, const ImageOutputBuffer& inputImage, ImageOutputBuffer& output, const MaskMethod maskType) = 0;
+
+    // grayscale embedding (grayscale images, video luma): the watermark is added to "inputGrayImage", the output is written in
+    // "outputLayout" (row-major video frames do NOT transpose later)
+    virtual void makeWatermark(const ImageBuffer& inputGrayImage, ImageOutputBuffer& output, const MaskMethod maskType, const Layout outputLayout) = 0;
 
     // the main mask detector function
     virtual float detectWatermark(const ImageBuffer& inputImage, const MaskMethod maskType) = 0;
@@ -58,5 +66,5 @@ class WatermarkBase {
     // helper method to generate the watermark based on the given seed, using a parallelized approach with OpenMP for very fast generation
     // it generates secure random values based on ChaCha20 and uses Box-Muller transform to conver to gaussian random
     // NOTE: keep the implementation in .cpp file, NVCC (cuda) hangs when it reads this code in the header
-    ImageBuffer generateRandomMatrix(const std::string& watermarkPassword, WatermarkLoader loader) const;
+    WatermarkBuffer generateRandomMatrix(const std::string& watermarkPassword, WatermarkLoader loader) const;
 };

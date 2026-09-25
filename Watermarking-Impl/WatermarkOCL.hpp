@@ -6,191 +6,237 @@
 #include "opencl_init.h"
 #include "opencl_utils.hpp"
 #include "WatermarkBase.hpp"
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <span>
 #include <string>
-#include <utility>
 #include <vector>
 
 /*!
- *  \brief  Functions for watermark computation and detection, OpenCL implementation.
- *          Local OclArray allocations are pool-backed (OclMemPool), no OpenCL driver allocation overhead
+ *  \brief  Watermark embedding and detection, OpenCL implementation (the same steps as the CUDA one)
  *  \author Dimitris Karatzas
  */
 template <int p>
 class WatermarkOCL final : public WatermarkBase {
   public:
     WatermarkOCL<p>(const int rows, const int cols, const std::string& watermarkPassword, const float psnr)
-        : WatermarkBase(rows, cols, watermarkPassword, psnr, initializeRandomMatrix), coefficients(localSize, OclQueueManager::getInstance().getQueueRaw()),
-          stopFlag(FlagBuffer::zeros(1, OclQueueManager::getInstance().getQueueRaw())), queue(OclQueueManager::getInstance().getQueue()), device(OclQueueManager::getInstance().getDevice()),
-          texKernelDims{alignUp<windowLocalSize.first>(rows), alignUp<windowLocalSize.second>(cols)}, meKernelDims{rows, alignUp<optimalLocalSize>(cols)},
-          corrFinalLocalSize(cl_utils::maxPow2WorkGroupSize(device)), programs(cl_utils::OpenCLKernelCache<p>::getProgram()),
-          nvfScratchBytes(cl_utils::reductionScratchBytes(programs, "nvf_u_and_sumsq_fused", cl::NDRange(windowLocalSize.first, windowLocalSize.second), 1)),
-          meScratchBytes(cl_utils::reductionScratchBytes(programs, "me_u_and_sumsq_fused", cl::NDRange(optimalLocalSize), 1)),
-          partialMaxScratchBytes(cl_utils::reductionScratchBytes(programs, "partial_max_reduce", cl::NDRange(optimalLocalSize), 1)),
-          absMaxScratchBytes(cl_utils::reductionScratchBytes(programs, "reduce_abs_max_partials", cl::NDRange(optimalLocalSize), 1)),
-          finalMaxScratchBytes(cl_utils::reductionScratchBytes(programs, "final_max_reduce", cl::NDRange(optimalLocalSize), 1)),
-          partialCorrScratchBytes(cl_utils::reductionScratchBytes(programs, "calculate_error_sequence_and_partial_corr_fused", cl::NDRange(windowLocalSize.first, windowLocalSize.second), 3)),
-          finalCorrScratchBytes(cl_utils::reductionScratchBytes(programs, "calculate_final_correlation", cl::NDRange(corrFinalLocalSize), 3)) {}
-
-    // Embed: compute strengthened watermark u (via NVF or ME mask), then apply to all channels of inputImage
-    void makeWatermark(const ImageBuffer& inputGrayImage, const ImageBuffer& inputImage, ImageOutputBuffer& output, const MaskMethod maskType) override {
+        : WatermarkBase(rows, cols, watermarkPassword, psnr, initializeRandomMatrix), queue(OclQueueManager::getInstance().getQueue()), program(cl_utils::OpenCLKernelCache<p>::getProgram()),
+          groupSize(cl_utils::workGroupSize(program)) {
         using namespace cl_utils;
-        const int maxWorkGroups = calculateLocalGroupsNumber(this->totalPixels, optimalLocalSize);
-        const int maxGlobalSize = maxWorkGroups * optimalLocalSize;
-        const OclArray<float> u(this->baseRows, this->baseCols, this->queue.get());
-        const OclArray<uint64_t> sumSq = OclArray<uint64_t>::zeros(1, this->queue.get());
-        // reuse output buffer, only (re)allocate when dimensions or channel count change
-        if (output.empty() || output.getRows() != this->baseRows || output.getCols() != this->baseCols || output.getChannels() != inputImage.getChannels())
-            output = ImageOutputBuffer(inputImage.getRows(), inputImage.getCols(), inputImage.getChannels(), this->queue.get());
+        const cl_command_queue rawQueue = queue.get();
+        const cl::Device& device = OclQueueManager::getInstance().getDevice();
+        coefficients = ImageBuffer(localSize, rawQueue);
+        stopFlag = FlagBuffer::zeros(1, rawQueue);
 
-        executeKernel(
-            [&]() {
-                if (maskType == MaskMethod::NVF) {
-                    // fused NVF: local variance mask x watermark -> strengthened watermark u + sum(u^2)
-                    queue.enqueueNDRangeKernel(
-                        KernelBuilder(programs, "nvf_u_and_sumsq_fused")
-                            .args(inputGrayImage.clBuffer(), this->randomMatrix.clBuffer(), u.clBuffer(), sumSq.clBuffer(), this->baseCols, this->baseRows, cl::Local(nvfScratchBytes))
-                            .build(),
-                        cl::NDRange(), cl::NDRange(texKernelDims.first, texKernelDims.second), cl::NDRange(windowLocalSize.first, windowLocalSize.second));
-                } else {
-                    // ME path: solve prediction error model, compute error sequence, normalize, fuse with watermark
-                    const OclArray<uint64_t> Rx = OclArray<uint64_t>::zeros(RxSize, this->queue.get());
-                    const OclArray<uint64_t> rx = OclArray<uint64_t>::zeros(rxSize, this->queue.get());
-                    launchMeKernel(inputGrayImage.clBuffer(), Rx.clBuffer(), rx.clBuffer());
-                    launchCholeskySolver(Rx.clBuffer(), rx.clBuffer());
-                    const OclArray<float> errorSeq(this->baseRows, this->baseCols, this->queue.get());
-                    queue.enqueueNDRangeKernel(
-                        KernelBuilder(programs, "error_sequence")
-                            .args(inputGrayImage.clBuffer(), errorSeq.clBuffer(), this->coefficients.clBuffer(), this->baseCols, this->baseRows, static_cast<int>(true), this->stopFlag.clBuffer())
-                            .build(),
-                        cl::NDRange(), cl::NDRange(texKernelDims.first, texKernelDims.second), cl::NDRange(windowLocalSize.first, windowLocalSize.second));
-                    // two-pass max-reduce for normalization
-                    const OclArray<float> errorSeqMax(1, this->queue.get());
-                    const OclArray<float> maxPartials(maxWorkGroups, this->queue.get());
-                    queue.enqueueNDRangeKernel(
-                        KernelBuilder(programs, "partial_max_reduce").args(errorSeq.clBuffer(), maxPartials.clBuffer(), this->totalPixels, cl::Local(partialMaxScratchBytes)).build(), cl::NDRange(),
-                        cl::NDRange(maxGlobalSize), cl::NDRange(optimalLocalSize));
-                    queue.enqueueNDRangeKernel(KernelBuilder(programs, "final_max_reduce").args(maxPartials.clBuffer(), errorSeqMax.clBuffer(), maxWorkGroups, cl::Local(finalMaxScratchBytes)).build(),
-                        cl::NDRange(), cl::NDRange(optimalLocalSize), cl::NDRange(optimalLocalSize));
-                    // fused ME: normalized error x watermark -> strengthened watermark u + sum(u^2)
-                    queue.enqueueNDRangeKernel(
-                        KernelBuilder(programs, "me_u_and_sumsq_fused")
-                            .args(errorSeq.clBuffer(), this->randomMatrix.clBuffer(), u.clBuffer(), sumSq.clBuffer(), errorSeqMax.clBuffer(), this->totalPixels, cl::Local(meScratchBytes))
-                            .build(),
-                        cl::NDRange(), cl::NDRange(maxGlobalSize), cl::NDRange(optimalLocalSize));
-                }
-                // scale u by strength factor and add to each channel of the input image
-                queue.enqueueNDRangeKernel(KernelBuilder(programs, "apply_watermark_fused")
-                                               .args(inputImage.clBuffer(), u.clBuffer(), sumSq.clBuffer(), output.clBuffer(), this->strengthNumerator, this->totalPixels, inputImage.getChannels())
-                                               .build(),
-                    cl::NDRange(), cl::NDRange(maxGlobalSize), cl::NDRange(optimalLocalSize));
-            },
-            "makeWatermark");
+        // shift sums grid: border lines are summed in runs, one run per workitem (borderBlocksPerLine groups per line and column shift
+        // group) and the inner sums use as many workgroups at once (of course NEVER more than tasks), one set per
+        // column shift group. When there are few border groups, room is left for them to run together with the inner groups
+        borderBlocksPerLine = (((std::max(this->baseRows, this->baseCols) + interiorRun - 1) / interiorRun) + groupSize - 1) / groupSize;
+        const int residentGroups = static_cast<int>(device.getInfo<CL_DEVICE_MAX_COMPUTE_UNITS>()) * residentGroupsPerUnit;
+        const int borderBlocks = borderBlocksPerLine * 2 * borderSize * shiftGroups;
+        const int interiorSlots = 4 * borderBlocks <= residentGroups ? residentGroups - borderBlocks : residentGroups;
+        const int interiorTasks = ((this->baseRows + interiorRun - 1) / interiorRun) * ((this->baseCols - 2 * pad + interiorCols - 1) / interiorCols);
+        const int blocksPerGroup = std::min(interiorSlots / shiftGroups, (interiorTasks + groupSize - 1) / groupSize);
+        const int shiftInteriorBlocks = std::max(blocksPerGroup, 1) * shiftGroups;
+        shiftSumsGlobal = cl::NDRange(static_cast<size_t>(shiftInteriorBlocks + borderBlocks) * groupSize);
+
+        // prediction error tiles: 32 x 4 rows x (groupSize / 32) x 2 columns per workgroup
+        const int tilesFast = (this->baseRows + 127) / 128;
+        const int tilesSlow = (this->baseCols + (groupSize / 16) - 1) / (groupSize / 16);
+        errorGlobal = cl::NDRange(static_cast<size_t>(tilesFast) * groupSize, tilesSlow);
+        const int corrGroups = tilesFast * tilesSlow;
+
+        // buffers: the shift sums (zeroed once), the border rows copy, the solver system, u, [0] = sum(u^2) and [1] = max|e| float bits (ME only),
+        // the detection prediction error, the per group correlation sums, the last group ticket counter and the result
+        shiftSums = OclArray<uint64_t>::zeros(shiftSumsSize, rawQueue);
+        if constexpr (copyBorderRows)
+            borderRowsCopy = OclArray<float>(borderCopyRows * this->baseCols, rawQueue);
+        solverSystem = OclArray<uint64_t>(solverSystemSize, rawQueue);
+        u = OclArray<cl_half>(this->baseRows, this->baseCols, rawQueue);
+        sumSq = OclArray<uint64_t>::zeros(2, rawQueue);
+        errorSeq = ImageBuffer(this->baseRows, this->baseCols, rawQueue);
+        dotPartial = ImageBuffer(corrGroups, rawQueue);
+        uNormPartial = ImageBuffer(corrGroups, rawQueue);
+        zNormPartial = ImageBuffer(corrGroups, rawQueue);
+        corrGroupCounter = OclArray<uint32_t>::zeros(1, rawQueue);
+        correlation = ImageBuffer(1, rawQueue);
+
+        // kernels, the input / output buffers are set per call
+        const cl::Buffer borderCopy = copyBorderRows ? borderRowsCopy.clBuffer() : cl::Buffer();
+        copyBorderRowsKernel = cl::Kernel(program, "me_copy_border_rows");
+        shiftSumsKernel = cl::Kernel(program, "me_shift_sums");
+        setArgs(shiftSumsKernel, cl::Buffer(), borderCopy, shiftSums.clBuffer(), this->baseCols, this->baseRows, shiftInteriorBlocks, borderBlocksPerLine);
+        buildSystemKernel = cl::Kernel(program, "me_build_system");
+        setArgs(buildSystemKernel, cl::Buffer(), shiftSums.clBuffer(), solverSystem.clBuffer(), this->baseCols, this->baseRows);
+        solveSystemKernel = cl::Kernel(program, "me_solve_system");
+        setArgs(solveSystemKernel, solverSystem.clBuffer(), shiftSums.clBuffer(), sumSq.clBuffer(), coefficients.clBuffer(), stopFlag.clBuffer());
+        if constexpr (copyBorderRows)
+            setArgs(copyBorderRowsKernel, cl::Buffer(), borderCopy, this->baseCols, this->baseRows);
+
+        const cl::NDRange errorLocal(groupSize);
+        errorSequenceKernel = cl::Kernel(program, "calculate_error_sequence");
+        setArgs(errorSequenceKernel, cl::Buffer(), errorSeq.clBuffer(), coefficients.clBuffer(), this->baseCols, this->baseRows, stopFlag.clBuffer());
+        meErrorKernel = cl::Kernel(program, "me_error_sequence_u_sumsq_fused");
+        setArgs(meErrorKernel, cl::Buffer(), this->randomMatrix.clBuffer(), u.clBuffer(), coefficients.clBuffer(), sumSq.clBuffer(), this->baseCols, this->baseRows, stopFlag.clBuffer(),
+            cl::Local(reductionScratchBytes(program, "me_error_sequence_u_sumsq_fused", errorLocal, 1)));
+        corrKernel = cl::Kernel(program, "calculate_error_sequence_and_partial_corr_fused");
+        setArgs(corrKernel, cl::Buffer(), this->randomMatrix.clBuffer(), errorSeq.clBuffer(), coefficients.clBuffer(), dotPartial.clBuffer(), uNormPartial.clBuffer(), zNormPartial.clBuffer(),
+            corrGroupCounter.clBuffer(), correlation.clBuffer(), this->baseCols, this->baseRows, stopFlag.clBuffer(), 1,
+            cl::Local(reductionScratchBytes(program, "calculate_error_sequence_and_partial_corr_fused", errorLocal, 3)));
+
+        nvfLocal = cl::NDRange(32, groupSize / 32);
+        nvfGlobal = cl::NDRange(roundUp(this->baseRows, 32), roundUp(this->baseCols, groupSize / 32));
+        nvfKernel = cl::Kernel(program, "nvf");
+        nvfEmbedKernel = cl::Kernel(program, "nvf_u_and_sumsq_fused");
+        setArgs(nvfEmbedKernel, cl::Buffer(), this->randomMatrix.clBuffer(), u.clBuffer(), sumSq.clBuffer(), this->baseCols, this->baseRows,
+            cl::Local(reductionScratchBytes(program, "nvf_u_and_sumsq_fused", nvfLocal, 1)));
+
+        applyGlobal = cl::NDRange(static_cast<size_t>(calculateLocalGroupsNumber((this->totalPixels + 3) / 4, groupSize)) * groupSize);
+        applyRgbKernel = cl::Kernel(program, "apply_watermark_rgb");
+        applyGrayKernel = cl::Kernel(program, "apply_watermark_gray");
+        applyRowMajorKernel = cl::Kernel(program, "apply_watermark_row_major");
     }
 
-    // Detect: compute prediction error, detection mask, then correlate with watermark
+    // RGB embedding: computes the strengthened watermark u from the luma (NVF or ME mask), then adds it to all channels of the 8-bit image
+    void makeWatermark(const ImageBuffer& inputGrayImage, const ImageOutputBuffer& inputImage, ImageOutputBuffer& output, const MaskMethod maskType) override {
+        embed(inputGrayImage, &inputImage, output, maskType, Layout::ColMajor);
+    }
+
+    // grayscale embedding: computes the strengthened watermark u (NVF or ME mask), then adds it to the luma itself
+    void makeWatermark(const ImageBuffer& inputGrayImage, ImageOutputBuffer& output, const MaskMethod maskType, const Layout outputLayout) override {
+        embed(inputGrayImage, nullptr, output, maskType, outputLayout);
+    }
+
+    // detection: correlation between the prediction error of the image and the prediction error of (mask * watermark)
     float detectWatermark(const ImageBuffer& inputImage, const MaskMethod maskType) override {
-        using namespace cl_utils;
-        const int maxWorkGroups = calculateLocalGroupsNumber(this->totalPixels, optimalLocalSize);
-        const int maxGlobalSize = maxWorkGroups * optimalLocalSize;
-        const int corrWorkGroups = static_cast<int>((texKernelDims.first / windowLocalSize.first) * (texKernelDims.second / windowLocalSize.second));
-
-        OclArray<float> corrResult(1, this->queue.get());
-
-        executeKernel(
+        const bool isME = maskType == MaskMethod::ME;
+        if (!isME && nvfMask.empty())
+            nvfMask = ImageBuffer(this->baseRows, this->baseCols, queue.get());
+        cl_utils::executeKernel(
             [&]() {
-                // solve prediction error model (Rx, rx -> coefficients via Cholesky)
-                const OclArray<uint64_t> Rx = OclArray<uint64_t>::zeros(RxSize, this->queue.get());
-                const OclArray<uint64_t> rx = OclArray<uint64_t>::zeros(rxSize, this->queue.get());
-                launchMeKernel(inputImage.clBuffer(), Rx.clBuffer(), rx.clBuffer());
-                launchCholeskySolver(Rx.clBuffer(), rx.clBuffer());
-
-                // compute prediction error sequence (non-abs, needed for correlation sign)
-                const OclArray<float> errorSeq(this->baseRows, this->baseCols, this->queue.get());
-                queue.enqueueNDRangeKernel(
-                    KernelBuilder(programs, "error_sequence")
-                        .args(inputImage.clBuffer(), errorSeq.clBuffer(), this->coefficients.clBuffer(), this->baseCols, this->baseRows, static_cast<int>(false), this->stopFlag.clBuffer())
-                        .build(),
-                    cl::NDRange(), cl::NDRange(texKernelDims.first, texKernelDims.second), cl::NDRange(windowLocalSize.first, windowLocalSize.second));
-
-                // compute detection mask (ME: abs-normalized error, NVF: local variance)
-                OclArray<float> mask(this->baseRows, this->baseCols, this->queue.get());
-                if (maskType == MaskMethod::ME) {
-                    const OclArray<float> partialMax(maxWorkGroups, this->queue.get());
-                    const OclArray<float> maxVal(1, this->queue.get());
-                    queue.enqueueNDRangeKernel(
-                        KernelBuilder(programs, "reduce_abs_max_partials").args(errorSeq.clBuffer(), partialMax.clBuffer(), this->totalPixels, cl::Local(absMaxScratchBytes)).build(), cl::NDRange(),
-                        cl::NDRange(maxGlobalSize), cl::NDRange(optimalLocalSize));
-                    queue.enqueueNDRangeKernel(KernelBuilder(programs, "final_max_reduce").args(partialMax.clBuffer(), maxVal.clBuffer(), maxWorkGroups, cl::Local(finalMaxScratchBytes)).build(),
-                        cl::NDRange(), cl::NDRange(optimalLocalSize), cl::NDRange(optimalLocalSize));
-                    queue.enqueueNDRangeKernel(KernelBuilder(programs, "compute_abs_normalized_mask").args(errorSeq.clBuffer(), mask.clBuffer(), maxVal.clBuffer(), this->totalPixels).build(),
-                        cl::NDRange(), cl::NDRange(maxGlobalSize), cl::NDRange(optimalLocalSize));
-                } else {
-                    queue.enqueueNDRangeKernel(KernelBuilder(programs, "nvf").args(inputImage.clBuffer(), mask.clBuffer(), this->baseCols, this->baseRows).build(), cl::NDRange(),
-                        cl::NDRange(texKernelDims.first, texKernelDims.second), cl::NDRange(windowLocalSize.first, windowLocalSize.second));
+                const cl::Buffer input = inputImage.clBuffer();
+                solvePredictionCoefficients(input);
+                // prediction error of the image (with its sign, the correlation needs it)
+                errorSequenceKernel.setArg(0, input);
+                enqueue(errorSequenceKernel, errorGlobal, cl::NDRange(groupSize));
+                // prediction error of (mask x watermark), correlated with the image's prediction error, the last workgroup writes the result
+                // ME: the mask |e| is formed while loading, NVF: the mask is computed first by its own kernel
+                if (!isME) {
+                    cl_utils::setArgs(nvfKernel, input, nvfMask.clBuffer(), this->baseCols, this->baseRows);
+                    enqueue(nvfKernel, nvfGlobal, nvfLocal);
                 }
-
-                // fused: recompute error sequence from (mask * watermark), accumulate partial dot / normU / normZ
-                const OclArray<float> dotPartial(corrWorkGroups, this->queue.get());
-                const OclArray<float> uNormPartial(corrWorkGroups, this->queue.get());
-                const OclArray<float> zNormPartial(corrWorkGroups, this->queue.get());
-                queue.enqueueNDRangeKernel(KernelBuilder(programs, "calculate_error_sequence_and_partial_corr_fused")
-                                               .args(mask.clBuffer(), this->randomMatrix.clBuffer(), errorSeq.clBuffer(), this->coefficients.clBuffer(), dotPartial.clBuffer(), uNormPartial.clBuffer(),
-                                                   zNormPartial.clBuffer(), this->baseCols, this->baseRows, this->stopFlag.clBuffer(), cl::Local(partialCorrScratchBytes))
-                                               .build(),
-                    cl::NDRange(), cl::NDRange(texKernelDims.first, texKernelDims.second), cl::NDRange(windowLocalSize.first, windowLocalSize.second));
-                // reduce partials -> final normalized correlation
-                queue.enqueueNDRangeKernel(KernelBuilder(programs, "calculate_final_correlation")
-                                               .args(dotPartial.clBuffer(), uNormPartial.clBuffer(), zNormPartial.clBuffer(), corrResult.clBuffer(), corrWorkGroups, cl::Local(finalCorrScratchBytes))
-                                               .build(),
-                    cl::NDRange(), cl::NDRange(corrFinalLocalSize), cl::NDRange(corrFinalLocalSize));
+                corrKernel.setArg(0, isME ? errorSeq.clBuffer() : nvfMask.clBuffer());
+                corrKernel.setArg(12, static_cast<int>(isME));
+                enqueue(corrKernel, errorGlobal, cl::NDRange(groupSize));
             },
             "detectWatermark");
-
-        const float correlation = corrResult.scalar();
-        return std::isfinite(correlation) ? correlation : 0.0f;
+        const float result = correlation.scalar();
+        return std::isfinite(result) ? result : 0.0f;
     }
 
   private:
     using WatermarkBase::alignUp;
 
     static constexpr int localSize = (p * p) - 1;
-    static constexpr unsigned int optimalLocalSize = 256;
-    static constexpr std::pair windowLocalSize = {32, 8};
-    static constexpr unsigned int choleskyLocalSize = p < 7 ? 1 : 64;
-    static constexpr int RxSize = (localSize * (localSize + 1)) / 2;
-    static constexpr int rxSize = localSize;
+    // shift sums layout, must match the kernel defines (kernels.hpp)
+    static constexpr int pad = p / 2;
+    static constexpr int maxShift = p - 1;
+    static constexpr int numShifts = ((((2 * maxShift) + 1) * ((2 * maxShift) + 1)) + 1) / 2;
+    static constexpr int borderSize = 4 * pad;
+    static constexpr int shiftSumsSize = numShifts * (1 + (2 * borderSize));
+    static constexpr int shiftGroups = p >= 9 ? 3 : (p >= 7 ? 2 : 1);
+    static constexpr int interiorCols = p >= 7 ? 2 : 1;
+    static constexpr int interiorRun = 8;
+    static constexpr bool copyBorderRows = p >= 7;
+    static constexpr int borderCopyRows = 6 * pad;
+    // the ME solver system (Rx packed lower triangular, then rx), exact ulong fixed point
+    static constexpr int solverSystemSize = ((localSize * (localSize + 1)) / 2) + localSize;
+    // inner shift sums work-groups per compute unit
+    static constexpr int residentGroupsPerUnit = 2;
 
+    cl::CommandQueue queue;
+    cl::Program program;
+    int groupSize;
     ImageBuffer coefficients;
     FlagBuffer stopFlag;
 
-    cl::CommandQueue queue;
-    cl::Device device;
-    std::pair<int, int> texKernelDims, meKernelDims;
-    unsigned int corrFinalLocalSize;
-    cl::Program programs;
-    std::size_t nvfScratchBytes;
-    std::size_t meScratchBytes;
-    std::size_t partialMaxScratchBytes;
-    std::size_t absMaxScratchBytes;
-    std::size_t finalMaxScratchBytes;
-    std::size_t partialCorrScratchBytes;
-    std::size_t finalCorrScratchBytes;
+    int borderBlocksPerLine;
+    cl::NDRange shiftSumsGlobal, errorGlobal, applyGlobal, nvfGlobal, nvfLocal;
+    OclArray<uint64_t> shiftSums;
+    OclArray<float> borderRowsCopy;
+    OclArray<uint64_t> solverSystem;
+    OclArray<cl_half> u;
+    OclArray<uint64_t> sumSq;
+    ImageBuffer errorSeq;
+    ImageBuffer nvfMask;
+    ImageBuffer dotPartial;
+    ImageBuffer uNormPartial;
+    ImageBuffer zNormPartial;
+    OclArray<uint32_t> corrGroupCounter;
+    ImageBuffer correlation;
 
-    static ImageBuffer initializeRandomMatrix(const std::vector<float>& watermarkVec, const int rows, const int cols) {
-        return ImageBuffer(rows, cols, watermarkVec.data(), OclQueueManager::getInstance().getQueueRaw());
+    cl::Kernel copyBorderRowsKernel, shiftSumsKernel, buildSystemKernel, solveSystemKernel;
+    cl::Kernel errorSequenceKernel, meErrorKernel, corrKernel, nvfKernel, nvfEmbedKernel;
+    cl::Kernel applyRgbKernel, applyGrayKernel, applyRowMajorKernel;
+
+    // enqueues a kernel on the in-order queue
+    void enqueue(const cl::Kernel& kernel, const cl::NDRange& global, const cl::NDRange& local) { queue.enqueueNDRangeKernel(kernel, cl::NullRange, global, local); }
+
+    static WatermarkBuffer initializeRandomMatrix(const std::span<const uint16_t> watermarkHalfBits, const int rows, const int cols) {
+        return WatermarkBuffer(rows, cols, watermarkHalfBits.data(), OclQueueManager::getInstance().getQueueRaw());
     }
 
-    // dispatch the ME kernel for the given prediction order p
-    void launchMeKernel(const cl::Buffer& image, const cl::Buffer& RxBuf, const cl::Buffer& rxBuf) const {
-        queue.enqueueNDRangeKernel(cl_utils::KernelBuilder(programs, "me").args(image, RxBuf, rxBuf, this->baseCols, this->baseRows).build(), cl::NDRange(),
-            cl::NDRange(meKernelDims.second, meKernelDims.first), cl::NDRange(optimalLocalSize));
+    // embedding: the watermark is added to the 8-bit "inputImage" (RGB), or to the luma when inputImage is null
+    void embed(const ImageBuffer& inputGrayImage, const ImageOutputBuffer* inputImage, ImageOutputBuffer& output, const MaskMethod maskType, const Layout outputLayout) {
+        using namespace cl_utils;
+        const bool isME = maskType == MaskMethod::ME;
+        const int channels = inputImage ? inputImage->getChannels() : 1;
+        // the output buffer is reused, allocated again only when its size or channel count changes
+        if (output.empty() || output.getRows() != this->baseRows || output.getCols() != this->baseCols || output.getChannels() != channels)
+            output = ImageOutputBuffer(this->baseRows, this->baseCols, channels, queue.get());
+        executeKernel(
+            [&]() {
+                const cl::Buffer gray = inputGrayImage.clBuffer();
+                if (!isME) {
+                    // NVF: mask (local variance) x watermark -> u and sum(u^2)
+                    sumSq.fillZero();
+                    nvfEmbedKernel.setArg(0, gray);
+                    enqueue(nvfEmbedKernel, nvfGlobal, nvfLocal);
+                } else {
+                    // ME: solve the prediction coefficients (this also zeroes the sums), then prediction error x watermark -> u, sum(u^2)
+                    // and max|e|
+                    solvePredictionCoefficients(gray);
+                    meErrorKernel.setArg(0, gray);
+                    enqueue(meErrorKernel, errorGlobal, cl::NDRange(groupSize));
+                }
+                // scale u by the strength and add it to each channel of the 8-bit image, or to the luma
+                cl::Kernel& apply = inputImage ? applyRgbKernel : (outputLayout == Layout::ColMajor ? applyGrayKernel : applyRowMajorKernel);
+                const cl::Buffer source = inputImage ? inputImage->clBuffer() : gray;
+                if (&apply == &applyRowMajorKernel) {
+                    setArgs(apply, source, u.clBuffer(), sumSq.clBuffer(), output.clBuffer(), this->strengthNumerator, this->baseCols, this->baseRows, static_cast<int>(isME));
+                    const int tileRows = groupSize / 16;
+                    enqueue(apply, cl::NDRange(roundUp(this->baseRows, 16), ((this->baseCols + 15) / 16) * tileRows), cl::NDRange(16, tileRows));
+                } else {
+                    setArgs(apply, source, u.clBuffer(), sumSq.clBuffer(), output.clBuffer(), this->strengthNumerator, this->totalPixels, static_cast<int>(isME));
+                    enqueue(apply, applyGlobal, cl::NDRange(groupSize));
+                }
+            },
+            "makeWatermark");
     }
 
-    // solve Rx*a = rx via Cholesky decomposition to get prediction coefficients
-    void launchCholeskySolver(const cl::Buffer& RxBuf, const cl::Buffer& rxBuf) const {
-        queue.enqueueNDRangeKernel(cl_utils::KernelBuilder(programs, "cholesky_solver").args(RxBuf, rxBuf, this->coefficients.clBuffer(), this->stopFlag.clBuffer()).build(), cl::NDRange(),
-            cl::NDRange(choleskyLocalSize), cl::NDRange(choleskyLocalSize));
+    // prediction coefficients (+ stopFlag): all shift sums, build the system, solve it + zero the shift sums and the embedding sums
+    // For p >= 7 the border rows are copied first
+    void solvePredictionCoefficients(const cl::Buffer& image) {
+        const cl::NDRange local(groupSize);
+        if constexpr (copyBorderRows) {
+            copyBorderRowsKernel.setArg(0, image);
+            enqueue(copyBorderRowsKernel, cl::NDRange(cl_utils::roundUp(borderCopyRows * this->baseCols, groupSize)), local);
+        }
+        shiftSumsKernel.setArg(0, image);
+        enqueue(shiftSumsKernel, shiftSumsGlobal, local);
+        buildSystemKernel.setArg(0, image);
+        enqueue(buildSystemKernel, cl::NDRange(cl_utils::roundUp(solverSystemSize, groupSize)), local);
+        enqueue(solveSystemKernel, local, local);
     }
 };

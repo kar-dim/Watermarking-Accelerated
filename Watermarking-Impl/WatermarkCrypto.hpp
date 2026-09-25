@@ -1,4 +1,5 @@
 #pragma once
+#include "simd.hpp"
 #include <array>
 #include <bit>
 #include <cmath>
@@ -8,31 +9,26 @@
 #include <string>
 #include <utility>
 #include <vector>
-#if defined(__AVX2__)
-#include <immintrin.h>
-#endif
 
 /*!
- *  \brief  Functions for watermark secure watermark generation (ChaCha20, Box-Muller transform and SHA-256)
+ *  \brief  Secure watermark generation: SHA-256 (password -> key), ChaCha20 random bits and the Box-Muller transform (normal values)
  *  \author Dimitris Karatzas
  */
 namespace WatermarkCrypto {
 
-// convert a 64-bit int to a float strictly in the range (0, 1].
-// only the top 24 bits are used, the result is always a multiple of 2^-24 in [2^-24, 1]
+// 64-bit random value -> float in (0, 1]: only the top 24 bits are used, the result is a multiple of 2^-24 in [2^-24, 1]
 inline float toUniformFloat(const uint64_t x) { return (x >> 40) * 0x1.0p-24f + 0x1.0p-24f; }
 
-// 2*pi for Box-Muller transform
+// 2 * pi for the Box-Muller transform
 inline constexpr float kTwoPi = 2.0f * std::numbers::pi_v<float>;
 
-// convert 64-bit int to float strictly in the range (0, 1] and then convert it to Box-Muller normal distribution pair
+// two 64-bit random values -> two normally distributed values (Box-Muller transform)
 inline std::pair<float, float> generateBoxMullerNormalPair(const uint64_t x1, const uint64_t x2) {
     const float radius = std::sqrt(-2.0f * std::log(toUniformFloat(x1)));
     const float theta = kTwoPi * toUniformFloat(x2);
     return {radius * std::cos(theta), radius * std::sin(theta)};
 }
 
-#if defined(__AVX2__)
 namespace detail {
 
 // AVX2 natural logarithm
@@ -107,7 +103,7 @@ inline __m128i unpackTop24(const __m256i v) { return _mm256_castsi256_si128(_mm2
 
 } // namespace detail
 
-// vectorized Box-Muller over two ChaCha20 blocks (16 uint64 = 8 pairs), writing 16 floats.
+// vectorized Box-Muller transform of two ChaCha20 blocks (16 uint64 = 8 pairs), writes 16 floats
 inline void generateBoxMullerNormalBlockPair(const std::array<uint64_t, 8>& block0, const std::array<uint64_t, 8>& block1, float* dst) {
     // top 24 bits of every uint64, as int32, four per register
     const __m128i k0 = detail::unpackTop24(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(block0.data())));
@@ -138,7 +134,97 @@ inline void generateBoxMullerNormalBlockPair(const std::array<uint64_t, 8>& bloc
     _mm256_storeu_ps(dst, _mm256_permute2f128_ps(lo, hi, 0x20));
     _mm256_storeu_ps(dst + 8, _mm256_permute2f128_ps(lo, hi, 0x31));
 }
-#endif // __AVX2__
+
+#if defined(__AVX512F__)
+namespace detail {
+inline __m512 andPs(const __m512 a, const __m512 b) { return _mm512_castsi512_ps(_mm512_and_si512(_mm512_castps_si512(a), _mm512_castps_si512(b))); }
+inline __m512 orPs(const __m512 a, const __m512 b) { return _mm512_castsi512_ps(_mm512_or_si512(_mm512_castps_si512(a), _mm512_castps_si512(b))); }
+inline __m512 xorPs(const __m512 a, const __m512 b) { return _mm512_castsi512_ps(_mm512_xor_si512(_mm512_castps_si512(a), _mm512_castps_si512(b))); }
+
+// AVX-512 natural logarithm
+inline __m512 logAvx512(const __m512 x) {
+    const __m512i bits = _mm512_castps_si512(x);
+    __m512 m = orPs(andPs(x, _mm512_castsi512_ps(_mm512_set1_epi32(0x807FFFFF))), _mm512_castsi512_ps(_mm512_set1_epi32(0x3F000000)));
+    __m512 e = _mm512_cvtepi32_ps(_mm512_sub_epi32(_mm512_srli_epi32(_mm512_and_si512(bits, _mm512_set1_epi32(0x7F800000)), 23), _mm512_set1_epi32(126)));
+
+    // keep the mantissa near 1: if (m < sqrt(0.5)) { e -= 1; m = 2m - 1; } else { m -= 1; }
+    const __mmask16 belowSqrtHalf = _mm512_cmp_ps_mask(m, _mm512_set1_ps(0.707106781186547524f), _CMP_LT_OQ);
+    e = _mm512_sub_ps(e, _mm512_maskz_mov_ps(belowSqrtHalf, _mm512_set1_ps(1.0f)));
+    m = _mm512_sub_ps(_mm512_add_ps(m, _mm512_maskz_mov_ps(belowSqrtHalf, m)), _mm512_set1_ps(1.0f));
+
+    const __m512 z = _mm512_mul_ps(m, m);
+    __m512 y = _mm512_set1_ps(7.0376836292E-2f);
+    y = _mm512_fmadd_ps(y, m, _mm512_set1_ps(-1.1514610310E-1f));
+    y = _mm512_fmadd_ps(y, m, _mm512_set1_ps(1.1676998740E-1f));
+    y = _mm512_fmadd_ps(y, m, _mm512_set1_ps(-1.2420140846E-1f));
+    y = _mm512_fmadd_ps(y, m, _mm512_set1_ps(1.4249322787E-1f));
+    y = _mm512_fmadd_ps(y, m, _mm512_set1_ps(-1.6668057665E-1f));
+    y = _mm512_fmadd_ps(y, m, _mm512_set1_ps(2.0000714765E-1f));
+    y = _mm512_fmadd_ps(y, m, _mm512_set1_ps(-2.4999993993E-1f));
+    y = _mm512_fmadd_ps(y, m, _mm512_set1_ps(3.3333331174E-1f));
+    y = _mm512_mul_ps(_mm512_mul_ps(y, m), z);
+    y = _mm512_fmadd_ps(e, _mm512_set1_ps(-2.12194440e-4f), y);
+    y = _mm512_fmadd_ps(z, _mm512_set1_ps(-0.5f), y);
+    return _mm512_fmadd_ps(e, _mm512_set1_ps(0.693359375f), _mm512_add_ps(m, y));
+}
+
+// AVX-512 sin/cos
+inline void sinCosAvx512(const __m512 x, __m512& sinOut, __m512& cosOut) {
+    __m512 y = _mm512_mul_ps(x, _mm512_set1_ps(1.27323954473516f));
+    const __m512i j = _mm512_and_si512(_mm512_add_epi32(_mm512_cvttps_epi32(y), _mm512_set1_epi32(1)), _mm512_set1_epi32(~1));
+    y = _mm512_cvtepi32_ps(j);
+
+    __m512 r = _mm512_fmadd_ps(y, _mm512_set1_ps(-0.78515625f), x);
+    r = _mm512_fmadd_ps(y, _mm512_set1_ps(-2.4187564849853515625e-4f), r);
+    r = _mm512_fmadd_ps(y, _mm512_set1_ps(-3.77489497744594108e-8f), r);
+
+    const __m512 swapSinSign = _mm512_castsi512_ps(_mm512_slli_epi32(_mm512_and_si512(j, _mm512_set1_epi32(4)), 29));
+    const __mmask16 polyMask = _mm512_cmpeq_epi32_mask(_mm512_and_si512(j, _mm512_set1_epi32(2)), _mm512_setzero_si512());
+    const __m512 cosSign = _mm512_castsi512_ps(_mm512_slli_epi32(_mm512_andnot_si512(_mm512_sub_epi32(j, _mm512_set1_epi32(2)), _mm512_set1_epi32(4)), 29));
+
+    const __m512 z = _mm512_mul_ps(r, r);
+    __m512 cosPoly = _mm512_set1_ps(2.443315711809948E-005f);
+    cosPoly = _mm512_fmadd_ps(cosPoly, z, _mm512_set1_ps(-1.388731625493765E-003f));
+    cosPoly = _mm512_fmadd_ps(cosPoly, z, _mm512_set1_ps(4.166664568298827E-002f));
+    cosPoly = _mm512_mul_ps(_mm512_mul_ps(cosPoly, z), z);
+    cosPoly = _mm512_fmadd_ps(z, _mm512_set1_ps(-0.5f), cosPoly);
+    cosPoly = _mm512_add_ps(cosPoly, _mm512_set1_ps(1.0f));
+
+    __m512 sinPoly = _mm512_set1_ps(-1.9515295891E-4f);
+    sinPoly = _mm512_fmadd_ps(sinPoly, z, _mm512_set1_ps(8.3321608736E-3f));
+    sinPoly = _mm512_fmadd_ps(sinPoly, z, _mm512_set1_ps(-1.6666654611E-1f));
+    sinPoly = _mm512_fmadd_ps(_mm512_mul_ps(sinPoly, z), r, r);
+
+    sinOut = xorPs(_mm512_mask_blend_ps(polyMask, cosPoly, sinPoly), swapSinSign);
+    cosOut = xorPs(_mm512_mask_blend_ps(polyMask, sinPoly, cosPoly), cosSign);
+}
+} // namespace detail
+
+// vectorized Box-Muller transform of four ChaCha20 blocks (32 uint64 = 16 pairs), writes 32 floats
+// exactly equivalent as two generateBoxMullerNormalBlockPair calls
+inline void generateBoxMullerNormalBlockQuad(const std::array<uint64_t, 8>* blocks, float* dst) {
+    // top 24 bits of every uint64 as int32, one block per register (x1, x2 of its 4 pairs interleaved)
+    const auto top24 = [&](const int b) { return _mm512_cvtepi64_epi32(_mm512_srli_epi64(_mm512_loadu_si512(blocks[b].data()), 40)); };
+    const __m512i first = _mm512_inserti64x4(_mm512_castsi256_si512(top24(0)), top24(1), 1);
+    const __m512i second = _mm512_inserti64x4(_mm512_castsi256_si512(top24(2)), top24(3), 1);
+    // deinterleave into the x1 (even) and x2 (odd) member of every pair, pair order kept
+    const __m512i evenIndex = _mm512_setr_epi32(0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30);
+    const __m512i oddIndex = _mm512_setr_epi32(1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31);
+    const __m512 scale = _mm512_set1_ps(0x1.0p-24f);
+    const __m512 u1 = _mm512_fmadd_ps(_mm512_cvtepi32_ps(_mm512_permutex2var_epi32(first, evenIndex, second)), scale, scale);
+    const __m512 u2 = _mm512_fmadd_ps(_mm512_cvtepi32_ps(_mm512_permutex2var_epi32(first, oddIndex, second)), scale, scale);
+
+    const __m512 radius = _mm512_sqrt_ps(_mm512_mul_ps(_mm512_set1_ps(-2.0f), detail::logAvx512(u1)));
+    __m512 sinTheta, cosTheta;
+    detail::sinCosAvx512(_mm512_mul_ps(_mm512_set1_ps(kTwoPi), u2), sinTheta, cosTheta);
+    const __m512 z0 = _mm512_mul_ps(radius, cosTheta);
+    const __m512 z1 = _mm512_mul_ps(radius, sinTheta);
+
+    // interleave back into (z0, z1) pairs
+    _mm512_storeu_ps(dst, _mm512_permutex2var_ps(z0, _mm512_setr_epi32(0, 16, 1, 17, 2, 18, 3, 19, 4, 20, 5, 21, 6, 22, 7, 23), z1));
+    _mm512_storeu_ps(dst + 16, _mm512_permutex2var_ps(z0, _mm512_setr_epi32(8, 24, 9, 25, 10, 26, 11, 27, 12, 28, 13, 29, 14, 30, 15, 31), z1));
+}
+#endif // __AVX512F__
 
 // clang-format off
 // SHA-256 hash reference implementation
@@ -200,18 +286,18 @@ inline std::array<uint8_t, 32> sha256(const std::string& input) {
 }
 // clang-format on
 
-// constructs the immutable base state (64 bytes) for ChaCha20 once (optimization)
+// the ChaCha20 start state (64 bytes), computed once per password
 inline std::array<uint32_t, 16> computeBaseState(const std::string& watermarkPassword) {
     // ChaCha20 constants (first 16 bytes)
     std::array<uint32_t, 16> state = {0x61707865, 0x3320646e, 0x79622d32, 0x6b206574};
     // hash the password with SHA-256 and copy the 32 bytes into the "key slot" (indices 4-11)
     std::memcpy(&state[4], sha256(watermarkPassword).data(), 32);
-    // block counter (indices 12-13) and nonce (indices 14-15) remain 0 for now (injected per block), last 16 bytes
+    // the block counter (indices 12-13) is set per block, the nonce (indices 14-15) stays 0
     return state;
 }
 
 // clang-format off
-// ChaCha20 QR helper function, performs ARX (Add, Rotate, XOR)
+// ChaCha20 quarter round: add, rotate, xor
 inline void QR(uint32_t& a, uint32_t& b, uint32_t& c, uint32_t& d) {
     a += b; d ^= a; d = std::rotl(d, 16);
     c += d; b ^= c; b = std::rotl(b, 12);
@@ -220,14 +306,14 @@ inline void QR(uint32_t& a, uint32_t& b, uint32_t& c, uint32_t& d) {
 }
 // clang-format on
 
-// 256-bit ChaCha20 block function, generates 64 bytes (eight 64-bit ints) of cryptographically secure noise based on a key string and a counter
-// note: this implements the original DJB ChaCha20 specification (64-bit counter, 64-bit nonce)
+// one ChaCha20 block: 64 bytes (eight 64-bit values) of secure random bits for the given key and block counter
+// (the original DJB ChaCha20: 64-bit counter, 64-bit nonce)
 inline std::array<uint64_t, 8> chacha20Block(const std::array<uint32_t, 16>& baseState, const uint64_t blockCounter) {
     std::array<uint32_t, 16> workingState;
     // copy the initial state
     std::memcpy(workingState.data(), baseState.data(), 64);
 
-    // inject the block counter for this specific OpenMP thread
+    // the block counter
     const uint32_t c0 = static_cast<uint32_t>(blockCounter & 0xFFFFFFFF);
     const uint32_t c1 = static_cast<uint32_t>(blockCounter >> 32);
     workingState[12] = c0;
@@ -255,4 +341,131 @@ inline std::array<uint64_t, 8> chacha20Block(const std::array<uint32_t, 16>& bas
     // output
     return std::bit_cast<std::array<uint64_t, 8>>(workingState);
 }
+
+namespace detail {
+// 32-bit rotate left of every lane (byte shuffles for rotations by 8 and 16)
+template <int N>
+inline __m256i rotl32(const __m256i v) {
+    if constexpr (N == 16)
+        return _mm256_shuffle_epi8(v, _mm256_setr_epi8(2, 3, 0, 1, 6, 7, 4, 5, 10, 11, 8, 9, 14, 15, 12, 13, 2, 3, 0, 1, 6, 7, 4, 5, 10, 11, 8, 9, 14, 15, 12, 13));
+    else if constexpr (N == 8)
+        return _mm256_shuffle_epi8(v, _mm256_setr_epi8(3, 0, 1, 2, 7, 4, 5, 6, 11, 8, 9, 10, 15, 12, 13, 14, 3, 0, 1, 2, 7, 4, 5, 6, 11, 8, 9, 10, 15, 12, 13, 14));
+    else
+        return _mm256_or_si256(_mm256_slli_epi32(v, N), _mm256_srli_epi32(v, 32 - N));
+}
+
+// quarter round on 8 independent states (one per lane)
+inline void QR8(__m256i& a, __m256i& b, __m256i& c, __m256i& d) {
+    a = _mm256_add_epi32(a, b);
+    d = rotl32<16>(_mm256_xor_si256(d, a));
+    c = _mm256_add_epi32(c, d);
+    b = rotl32<12>(_mm256_xor_si256(b, c));
+    a = _mm256_add_epi32(a, b);
+    d = rotl32<8>(_mm256_xor_si256(d, a));
+    c = _mm256_add_epi32(c, d);
+    b = rotl32<7>(_mm256_xor_si256(b, c));
+}
+} // namespace detail
+
+// 8 consecutive ChaCha20 blocks (firstBlock ... firstBlock + 7) at once, one block per 32-bit lane, bit identical to chacha20Block
+inline std::array<std::array<uint64_t, 8>, 8> chacha20Blocks8(const std::array<uint32_t, 16>& baseState, const uint64_t firstBlock) {
+    std::array<__m256i, 16> x;
+    for (int i = 0; i < 16; i++)
+        x[i] = _mm256_set1_epi32(static_cast<int>(baseState[i]));
+    // per lane 64-bit block counter: the low words firstBlock + lane, a wrapped low word carries into the high word
+    // (unsigned compare: both sides biased by the sign bit)
+    const __m256i firstLow = _mm256_set1_epi32(static_cast<int>(static_cast<uint32_t>(firstBlock)));
+    const __m256i c0 = _mm256_add_epi32(firstLow, _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7));
+    const __m256i signBit = _mm256_set1_epi32(static_cast<int>(0x80000000u));
+    const __m256i carry = _mm256_cmpgt_epi32(_mm256_xor_si256(firstLow, signBit), _mm256_xor_si256(c0, signBit));
+    const __m256i c1 = _mm256_sub_epi32(_mm256_set1_epi32(static_cast<int>(static_cast<uint32_t>(firstBlock >> 32))), carry);
+    x[12] = c0;
+    x[13] = c1;
+
+    // 20 rounds
+    for (int i = 0; i < 10; i++) {
+        detail::QR8(x[0], x[4], x[8], x[12]);
+        detail::QR8(x[1], x[5], x[9], x[13]);
+        detail::QR8(x[2], x[6], x[10], x[14]);
+        detail::QR8(x[3], x[7], x[11], x[15]);
+        detail::QR8(x[0], x[5], x[10], x[15]);
+        detail::QR8(x[1], x[6], x[11], x[12]);
+        detail::QR8(x[2], x[7], x[8], x[13]);
+        detail::QR8(x[3], x[4], x[9], x[14]);
+    }
+    // ChaCha final addition
+    for (int i = 0; i < 16; i++)
+        x[i] = _mm256_add_epi32(x[i], i == 12 ? c0 : (i == 13 ? c1 : _mm256_set1_epi32(static_cast<int>(baseState[i]))));
+
+    // output: word i of block (lane) b
+    alignas(32) std::array<std::array<uint32_t, 8>, 16> words;
+    for (int i = 0; i < 16; i++)
+        _mm256_store_si256(reinterpret_cast<__m256i*>(words[i].data()), x[i]);
+    std::array<std::array<uint64_t, 8>, 8> blocks;
+    for (int b = 0; b < 8; b++) {
+        std::array<uint32_t, 16> block;
+        for (int i = 0; i < 16; i++)
+            block[i] = words[i][b];
+        blocks[b] = std::bit_cast<std::array<uint64_t, 8>>(block);
+    }
+    return blocks;
+}
+
+#if defined(__AVX512F__)
+namespace detail {
+// quarter round on 16 independent states (one per lane), AVX-512 has a rotate instruction
+inline void QR16(__m512i& a, __m512i& b, __m512i& c, __m512i& d) {
+    a = _mm512_add_epi32(a, b);
+    d = _mm512_rol_epi32(_mm512_xor_si512(d, a), 16);
+    c = _mm512_add_epi32(c, d);
+    b = _mm512_rol_epi32(_mm512_xor_si512(b, c), 12);
+    a = _mm512_add_epi32(a, b);
+    d = _mm512_rol_epi32(_mm512_xor_si512(d, a), 8);
+    c = _mm512_add_epi32(c, d);
+    b = _mm512_rol_epi32(_mm512_xor_si512(b, c), 7);
+}
+} // namespace detail
+
+// 16 consecutive ChaCha20 blocks (firstBlock ... firstBlock + 15) at once, one block per 32-bit lane, bit identical to chacha20Block
+inline std::array<std::array<uint64_t, 8>, 16> chacha20Blocks16(const std::array<uint32_t, 16>& baseState, const uint64_t firstBlock) {
+    std::array<__m512i, 16> x;
+    for (int i = 0; i < 16; i++)
+        x[i] = _mm512_set1_epi32(static_cast<int>(baseState[i]));
+    // per lane 64-bit block counter: the low words firstBlock + lane, a wrapped low word carries into the high word
+    const __m512i firstLow = _mm512_set1_epi32(static_cast<int>(static_cast<uint32_t>(firstBlock)));
+    const __m512i c0 = _mm512_add_epi32(firstLow, _mm512_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15));
+    const __m512i firstHigh = _mm512_set1_epi32(static_cast<int>(static_cast<uint32_t>(firstBlock >> 32)));
+    const __m512i c1 = _mm512_mask_add_epi32(firstHigh, _mm512_cmplt_epu32_mask(c0, firstLow), firstHigh, _mm512_set1_epi32(1));
+    x[12] = c0;
+    x[13] = c1;
+
+    // 20 rounds
+    for (int i = 0; i < 10; i++) {
+        detail::QR16(x[0], x[4], x[8], x[12]);
+        detail::QR16(x[1], x[5], x[9], x[13]);
+        detail::QR16(x[2], x[6], x[10], x[14]);
+        detail::QR16(x[3], x[7], x[11], x[15]);
+        detail::QR16(x[0], x[5], x[10], x[15]);
+        detail::QR16(x[1], x[6], x[11], x[12]);
+        detail::QR16(x[2], x[7], x[8], x[13]);
+        detail::QR16(x[3], x[4], x[9], x[14]);
+    }
+    // ChaCha final addition
+    for (int i = 0; i < 16; i++)
+        x[i] = _mm512_add_epi32(x[i], i == 12 ? c0 : (i == 13 ? c1 : _mm512_set1_epi32(static_cast<int>(baseState[i]))));
+
+    // output: word i of block (lane) b
+    alignas(64) std::array<std::array<uint32_t, 16>, 16> words;
+    for (int i = 0; i < 16; i++)
+        _mm512_store_si512(words[i].data(), x[i]);
+    std::array<std::array<uint64_t, 8>, 16> blocks;
+    for (int b = 0; b < 16; b++) {
+        std::array<uint32_t, 16> block;
+        for (int i = 0; i < 16; i++)
+            block[i] = words[i][b];
+        blocks[b] = std::bit_cast<std::array<uint64_t, 8>>(block);
+    }
+    return blocks;
+}
+#endif // __AVX512F__
 } // namespace WatermarkCrypto

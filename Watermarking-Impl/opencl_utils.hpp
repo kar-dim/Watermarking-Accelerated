@@ -32,8 +32,19 @@ class KernelBuilder {
     cl::Kernel build() const;
 };
 
-// helper method to build watermark opencl kernels from source (requires WINDOW_SIZE=p)
+// sets all arguments of a (cached) kernel in order
+template <typename... T>
+void setArgs(cl::Kernel& kernel, const T&... values) {
+    cl_uint index = 0;
+    (kernel.setArg(index++, values), ...);
+}
+
+// helper method to build watermark opencl kernels from source (WINDOW_SIZE=p), workgroup size (WG_SIZE) is probed: the largest power of
+// 2 <= 256 the device supports for which every kernel of the program fits (register / local memory limits), halved to 64
 cl::Program buildKernels(const int p);
+
+// probed workgroup size
+int workGroupSize(const cl::Program& program);
 
 // helper method to build utility opencl kernels from source (no WINDOW_SIZE dependency)
 cl::Program buildUtilityKernels();
@@ -92,11 +103,8 @@ unsigned int maxPow2WorkGroupSize(const cl::Device& device);
 // (one slot per subgroup on the optimized path, one per work-item on the fallback)
 std::size_t reductionScratchBytes(const cl::Program& program, const char* kernelName, const cl::NDRange& localRange, std::size_t valuesPerReduction);
 
-// coalesced tiled transpose: row-major float -> column-major float on GPU, supports multi-channel via 3D grid
-void launchRowMajorToColMajorFloat(const cl::Buffer& src, const cl::Buffer& dst, const int width, const int height, const int channels, cl::CommandQueue& queue);
-
-// fused row-major 3-channel RGB -> col-major grayscale with ITU-R 601 luma weights
-void launchRowMajorRGBToColMajorGray(const cl::Buffer& src, const cl::Buffer& dst, const int width, const int height, cl::CommandQueue& queue);
+// row-major planar uchar RGB -> column-major planar uchar RGB + column-major float luma, one tiled transpose
+void launchRowMajorRgbToColMajor(const cl::Buffer& src, const cl::Buffer& rgbDst, const cl::Buffer& grayDst, const int width, const int height, cl::CommandQueue& queue);
 
 // uint8 col-major to float col-major grayscale on GPU, with optional RGB weighting
 void launchU8ToFloatGray(const cl::Buffer& input, const cl::Buffer& output, const int planeSize, const int numChannels, cl::CommandQueue& queue);

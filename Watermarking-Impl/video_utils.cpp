@@ -313,6 +313,21 @@ void filterFrame(AVFramePtr& frame, AVFramePtr& filteredFrame, const VideoSessio
     av_frame_move_ref(frame.get(), filteredFrame.get());
 }
 
+#if defined(_USE_GPU_)
+// one GPU buffer for the whole session because a new buffer per frame would re-capture the CUDA graphs every frame
+ImageBuffer& lumaBuffer(VideoSession* s) {
+    if (s->inputFrame.empty()) {
+        const auto [height, width] = s->videoDims();
+#if defined(_USE_CUDA_)
+        s->inputFrame = CudaArray<float>(height, width, CudaStreamManager::getInstance().getComputeStream());
+#else
+        s->inputFrame = OclArray<float>(height, width, OclQueueManager::getInstance().getQueueRaw());
+#endif
+    }
+    return s->inputFrame;
+}
+#endif
+
 // upload a CPU uint8 Y plane into the GPU / Eigen input buffer.
 void loadInputFrame(VideoSession* s, const uint8_t* hostPtr, const int srcPitch) {
     const auto [height, width] = s->videoDims();
@@ -324,8 +339,7 @@ void loadInputFrame(VideoSession* s, const uint8_t* hostPtr, const int srcPitch)
         CUDA_CHECK(cudaMemcpyAsync(hostGpu.data(), hostPtr, static_cast<size_t>(width) * height, cudaMemcpyHostToDevice, stream));
     else // strided upload
         CUDA_CHECK(cudaMemcpy2DAsync(hostGpu.data(), width, hostPtr, srcPitch, width, height, cudaMemcpyHostToDevice, stream));
-    s->inputFrame = CudaArray<float>(height, width, stream);
-    cuda_utils::launchPitchedToFloatKernel(hostGpu.data(), s->inputFrame.data(), width, height, width, stream);
+    cuda_utils::launchPitchedToFloatKernel(hostGpu.data(), lumaBuffer(s).data(), width, height, width, stream);
 #elif defined(_USE_OPENCL_)
     auto& mgr = OclQueueManager::getInstance();
     auto queue = mgr.getQueueRaw();
@@ -341,44 +355,45 @@ void loadInputFrame(VideoSession* s, const uint8_t* hostPtr, const int srcPitch)
     }
     if (uploadStatus != CL_SUCCESS)
         throw std::runtime_error("Failed to upload video frame to OpenCL buffer: " + std::to_string(uploadStatus));
-    s->inputFrame = OclArray<float>(height, width, queue);
-    cl_utils::launchPitchedToFloat(hostGpu.clBuffer(), s->inputFrame.clBuffer(), width, height, width, mgr.getQueue());
+    cl_utils::launchPitchedToFloat(hostGpu.clBuffer(), lumaBuffer(s).clBuffer(), width, height, width, mgr.getQueue());
 #else
-    if (srcPitch == width)
-        s->inputFrame = Map<const Gray8Buffer>(hostPtr, width, height).transpose().template cast<float>();
-    else // map the padded plane in place through an outer stride
-        s->inputFrame = Map<const Gray8Buffer, 0, OuterStride<>>(hostPtr, width, height, OuterStride<>(srcPitch)).transpose().template cast<float>();
+    // row-major 8-bit Y plane (row pitch srcPitch) -> column-major float luma in the session buffer, transposed
+    auto& luma = s->inputFrame.getGray();
+    luma.resize(height, width);
+    const int lumaRows = height;
+    const int lumaCols = width;
+    constexpr int tile = 64;
+    const int rowTiles = (lumaRows + tile - 1) / tile;
+    const int colTiles = (lumaCols + tile - 1) / tile;
+#pragma omp parallel for collapse(2) schedule(static)
+    for (int rowTile = 0; rowTile < rowTiles; rowTile++) {
+        for (int colTile = 0; colTile < colTiles; colTile++) {
+            const int row = rowTile * tile;
+            const int col = colTile * tile;
+            const int rows = std::min(tile, lumaRows - row);
+            const int cols = std::min(tile, lumaCols - col);
+            const Map<const Gray8Buffer, 0, OuterStride<>> source(hostPtr + (static_cast<size_t>(row) * srcPitch) + col, cols, rows, OuterStride<>(srcPitch));
+            luma.block(row, col, rows, cols) = source.transpose().template cast<float>();
+        }
+    }
 #endif
 }
 
-// watermark the frame and fill the processed Y plane
+// watermark the frame and fill the processed Y plane, the embedding writes the row-major Y plane directly (no transposition pass)
 void embedAndFillYPlane(VideoSession* s, const ImageBuffer& buffer, AVFrame* encFrame = nullptr) {
-    s->watermarkObj->makeWatermark(buffer, buffer, s->watermarkedFrame, MaskMethod::ME);
-#if defined(_USE_CUDA_)
-    {
-        const auto stream = CudaStreamManager::getInstance().getComputeStream();
-        CudaArray<uint8_t> rowMajorOut(s->watermarkedFrame.getRows(), s->watermarkedFrame.getCols(), stream);
-        cuda_utils::launchColMajorToRowMajorU8Kernel(
-            s->watermarkedFrame.data(), rowMajorOut.data(), static_cast<int>(s->watermarkedFrame.getCols()), static_cast<int>(s->watermarkedFrame.getRows()), 1, stream);
-        rowMajorOut.toHost(s->hostFrame->get());
-    }
-#elif defined(_USE_OPENCL_)
-    {
-        const auto [height, width] = s->videoDims();
-        auto& mgr = OclQueueManager::getInstance();
-        OclArray<uint8_t> rowMajorOut(height, width, mgr.getQueueRaw());
-        cl_utils::launchColMajorToRowMajorU8(s->watermarkedFrame.clBuffer(), rowMajorOut.clBuffer(), width, height, 1, mgr.getQueue());
-        rowMajorOut.toHost(s->hostFrame->get());
-    }
-#elif defined(_USE_EIGEN_)
-    {
-        checkError(!encFrame, "CPU video output frame is missing");
-        const auto [height, width] = s->videoDims();
-        using RowMajorGray8 = Eigen::Array<uint8_t, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
-        // use FFmpeg's row pitch (we allow unaligned SIMD stores though)
-        Eigen::Map<RowMajorGray8, Eigen::Unaligned, Eigen::OuterStride<>> yPlane(encFrame->data[0], height, width, Eigen::OuterStride<>(encFrame->linesize[0]));
-        yPlane = s->watermarkedFrame.getGray();
-    }
+    s->watermarkObj->makeWatermark(buffer, s->watermarkedFrame, MaskMethod::ME, WatermarkBase::Layout::RowMajor);
+#if defined(_USE_GPU_)
+    s->watermarkedFrame.toHost(s->hostFrame->get());
+#else
+    checkError(!encFrame, "CPU video output frame is missing");
+    const auto [height, width] = s->videoDims();
+    // the row-major Y plane is the transposed array copied with FFmpeg's row pitch
+    const uint8_t* yPlane = s->watermarkedFrame.getGray().data();
+    if (encFrame->linesize[0] == width)
+        std::memcpy(encFrame->data[0], yPlane, static_cast<size_t>(width) * height);
+    else
+        for (int y = 0; y < height; y++)
+            std::memcpy(encFrame->data[0] + static_cast<size_t>(y) * encFrame->linesize[0], yPlane + static_cast<size_t>(y) * width, width);
 #endif
 }
 
@@ -439,9 +454,9 @@ void encodeWorker(VideoSession* s, EncodeQueue& queue, std::exception_ptr& encEr
 }
 
 #if defined(_USE_CUDA_)
-// NVDEC+NVENC zero-copy: wrap CUDA Y+UV buffers in a hw AVFrame and give it to the encode thread
+// NVDEC+NVENC zero-copy: copy the CUDA Y (row-major, ySrc with yPitch) + UV planes into a hw AVFrame and give it to the encode thread
 // uvOverride: when not null, use this preconverted uint8_t NV12 UV (HDR path) instead of srcFrame->data[1]
-void encodeFrameGPU(VideoSession* s, const CudaArray<uint8_t>& yRowMajor, const AVFrame* srcFrame, const int64_t pts, EncodeQueue& queue, const uint8_t* uvOverride = nullptr) {
+void encodeFrameGPU(VideoSession* s, const uint8_t* ySrc, const int yPitch, const AVFrame* srcFrame, const int64_t pts, EncodeQueue& queue, const uint8_t* uvOverride = nullptr) {
     const auto [height, width] = s->videoDims();
     const auto stream = CudaStreamManager::getInstance().getComputeStream();
     AVFramePtr encFrame(av_frame_alloc());
@@ -452,7 +467,7 @@ void encodeFrameGPU(VideoSession* s, const CudaArray<uint8_t>& yRowMajor, const 
     encFrame->pts = pts;
     encFrame->duration = srcFrame->duration;
     checkError(av_hwframe_get_buffer(s->outputEncoderCtx->hw_frames_ctx, encFrame.get(), 0) < 0, "Failed to get NVENC hw frame buffer");
-    CUDA_CHECK(cudaMemcpy2DAsync(encFrame->data[0], encFrame->linesize[0], yRowMajor.data(), width, width, height, cudaMemcpyDeviceToDevice, stream));
+    CUDA_CHECK(cudaMemcpy2DAsync(encFrame->data[0], encFrame->linesize[0], ySrc, yPitch, width, height, cudaMemcpyDeviceToDevice, stream));
     // HDR path passes preconverted uint8_t NV12 UV (stride=width) -> SDR path copies directly from decoded frame
     const uint8_t* uvSrc = uvOverride ? uvOverride : static_cast<const uint8_t*>(srcFrame->data[1]);
     const int uvPitch = uvOverride ? width : srcFrame->linesize[1];
@@ -588,28 +603,31 @@ void embedWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* fra
         cout << std::format(" [Embedding frame {}]\n", framesCount + 1);
 
     if (s->outputEncoderCtx->hw_frames_ctx) {
-        // NVDEC + NVENC
-        CudaArray<uint8_t> yRowMajor(height, width, stream);
+        // NVDEC + NVENC, the Y plane is copied once into the NVENC frame
+        const uint8_t* ySrc = frame->data[0];
+        int yPitch = frame->linesize[0];
+        CudaArray<uint8_t> hdrY;
         if (doEmbed) {
-            CudaArray<float> lumaFloat(height, width, stream);
+            ImageBuffer& luma = lumaBuffer(s);
             if (isHdr)
-                loadHdrLuma(s, frame, lumaFloat, mobius, stream);
+                loadHdrLuma(s, frame, luma, mobius, stream);
             else
-                cuda_utils::launchPitchedToFloatKernel(frame->data[0], lumaFloat.data(), width, height, frame->linesize[0], stream);
-            s->watermarkObj->makeWatermark(lumaFloat, lumaFloat, s->watermarkedFrame, MaskMethod::ME);
-            cuda_utils::launchColMajorToRowMajorU8Kernel(s->watermarkedFrame.data(), yRowMajor.data(), width, height, 1, stream);
-        } else {
-            if (isHdr)
-                cuda_utils::launchP010HdrYToSdrU8Kernel(reinterpret_cast<const uint16_t*>(frame->data[0]), frame->linesize[0], reinterpret_cast<const uint16_t*>(frame->data[1]), frame->linesize[1],
-                    yRowMajor.data(), width, height, mobius, stream);
-            else
-                CUDA_CHECK(cudaMemcpy2DAsync(yRowMajor.data(), width, frame->data[0], frame->linesize[0], width, height, cudaMemcpyDeviceToDevice, stream));
+                cuda_utils::launchPitchedToFloatKernel(frame->data[0], luma.data(), width, height, frame->linesize[0], stream);
+            s->watermarkObj->makeWatermark(luma, s->watermarkedFrame, MaskMethod::ME, WatermarkBase::Layout::RowMajor);
+            ySrc = s->watermarkedFrame.data();
+            yPitch = width;
+        } else if (isHdr) {
+            hdrY = CudaArray<uint8_t>(height, width, stream);
+            cuda_utils::launchP010HdrYToSdrU8Kernel(reinterpret_cast<const uint16_t*>(frame->data[0]), frame->linesize[0], reinterpret_cast<const uint16_t*>(frame->data[1]), frame->linesize[1],
+                hdrY.data(), width, height, mobius, stream);
+            ySrc = hdrY.data();
+            yPitch = width;
         }
         if (isHdr) {
             CudaArray<uint8_t> uvNV12 = convertHdrUV(s, frame, mobius, stream);
-            encodeFrameGPU(s, yRowMajor, frame, framePts(frame), queue, uvNV12.data());
+            encodeFrameGPU(s, ySrc, yPitch, frame, framePts(frame), queue, uvNV12.data());
         } else {
-            encodeFrameGPU(s, yRowMajor, frame, framePts(frame), queue);
+            encodeFrameGPU(s, ySrc, yPitch, frame, framePts(frame), queue);
         }
     } else {
         // NVDEC + SW encoder
@@ -620,9 +638,8 @@ void embedWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* fra
             cuda_utils::launchNV12ToYUV420pKernel(uvNV12.data(), width, chromaBuffer.data(), width / 2, height / 2, stream);
             chromaBuffer.toHostAsync(s->hostFrame->get() + width * height);
             if (doEmbed) {
-                CudaArray<float> lumaFloat(height, width, stream);
-                loadHdrLuma(s, frame, lumaFloat, mobius, stream);
-                embedAndFillYPlane(s, lumaFloat);
+                loadHdrLuma(s, frame, lumaBuffer(s), mobius, stream);
+                embedAndFillYPlane(s, s->inputFrame);
             } else {
                 cuda_utils::launchP010HdrYToSdrU8Kernel(reinterpret_cast<const uint16_t*>(frame->data[0]), frame->linesize[0], reinterpret_cast<const uint16_t*>(frame->data[1]), frame->linesize[1],
                     s->hostFrame->get(), width, height, mobius, stream);
@@ -633,9 +650,8 @@ void embedWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* fra
             cuda_utils::launchNV12ToYUV420pKernel(frame->data[1], frame->linesize[1], chromaBuffer.data(), width / 2, height / 2, stream);
             chromaBuffer.toHostAsync(s->hostFrame->get() + width * height);
             if (doEmbed) {
-                CudaArray<float> lumaBuffer(height, width, stream);
-                cuda_utils::launchPitchedToFloatKernel(frame->data[0], lumaBuffer.data(), width, height, frame->linesize[0], stream);
-                embedAndFillYPlane(s, lumaBuffer);
+                cuda_utils::launchPitchedToFloatKernel(frame->data[0], lumaBuffer(s).data(), width, height, frame->linesize[0], stream);
+                embedAndFillYPlane(s, s->inputFrame);
             } else {
                 CUDA_CHECK(cudaMemcpy2DAsync(s->hostFrame->get(), width, frame->data[0], frame->linesize[0], width, height, cudaMemcpyDeviceToHost, stream));
                 CUDA_CHECK(cudaStreamSynchronize(stream));
@@ -653,13 +669,13 @@ void detectWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* fr
     }
     const auto [height, width] = s->videoDims();
     const auto stream = CudaStreamManager::getInstance().getComputeStream();
-    CudaArray<float> lumaBuffer(height, width, stream);
+    ImageBuffer& luma = lumaBuffer(s);
     if (s->isHdr) {
-        loadHdrLuma(s, frame, lumaBuffer, s->mobius, stream);
+        loadHdrLuma(s, frame, luma, s->mobius, stream);
     } else {
-        cuda_utils::launchPitchedToFloatKernel(frame->data[0], lumaBuffer.data(), width, height, frame->linesize[0], stream);
+        cuda_utils::launchPitchedToFloatKernel(frame->data[0], luma.data(), width, height, frame->linesize[0], stream);
     }
-    const float correlation = s->watermarkObj->detectWatermark(lumaBuffer, MaskMethod::ME);
+    const float correlation = s->watermarkObj->detectWatermark(luma, MaskMethod::ME);
     cout << "Correlation for frame: " << (framesCount + 1) << ": " << correlation << "\n";
     framesCount++;
 }

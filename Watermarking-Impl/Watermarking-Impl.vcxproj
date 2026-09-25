@@ -107,7 +107,7 @@
       <AdditionalIncludeDirectories>$(WatermarkingImageIncludeDirectories);$(AF_PATH)\include;$(ProjectDir)libs\ffmpeg\include;$(WatermarkingUtilDir)include;$(ProjectDir)..\Watermarking-Util\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <OpenMPSupport>true</OpenMPSupport>
-      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
+      <EnableEnhancedInstructionSet>$(WatermarkingInstructionSet)</EnableEnhancedInstructionSet>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
@@ -120,7 +120,7 @@
     <CudaCompile>
       <TargetMachinePlatform>64</TargetMachinePlatform>
       <CodeGeneration>compute_89,sm_89</CodeGeneration>
-      <AdditionalCompilerOptions>/wd4275 /arch:AVX2 /Zc:__cplusplus /Zc:preprocessor</AdditionalCompilerOptions>
+      <AdditionalCompilerOptions>/wd4275 $(WatermarkingArch) /Zc:__cplusplus /Zc:preprocessor</AdditionalCompilerOptions>
       <AdditionalOptions>-diag-suppress 1388 -diag-suppress 221 --std c++20 %(AdditionalOptions)</AdditionalOptions>
     </CudaCompile>
   </ItemDefinitionGroup>
@@ -133,7 +133,7 @@
       <AdditionalIncludeDirectories>$(WatermarkingImageIncludeDirectories);$(CUDA_PATH)\include;$(ProjectDir)libs\ffmpeg\include;$(WatermarkingUtilDir)include;$(ProjectDir)..\Watermarking-Util\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <OpenMPSupport>true</OpenMPSupport>
-      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
+      <EnableEnhancedInstructionSet>$(WatermarkingInstructionSet)</EnableEnhancedInstructionSet>
       <DebugInformationFormat>None</DebugInformationFormat>
     </ClCompile>
     <Link>
@@ -148,7 +148,7 @@
     <CudaCompile>
       <TargetMachinePlatform>64</TargetMachinePlatform>
       <CodeGeneration>compute_89,sm_89</CodeGeneration>
-      <AdditionalCompilerOptions>/wd4275 /arch:AVX2 /Zc:__cplusplus /Zc:preprocessor</AdditionalCompilerOptions>
+      <AdditionalCompilerOptions>/wd4275 $(WatermarkingArch) /Zc:__cplusplus /Zc:preprocessor</AdditionalCompilerOptions>
       <AdditionalOptions>-diag-suppress 1388 -diag-suppress 221 --std c++20 %(AdditionalOptions)</AdditionalOptions>
       <GenerateDebugInformation>false</GenerateDebugInformation>
       <HostDebugInfo>false</HostDebugInfo>
@@ -164,7 +164,7 @@
       <AdditionalIncludeDirectories>$(WatermarkingImageIncludeDirectories);$(CUDA_PATH)\include;$(ProjectDir)libs\ffmpeg\include;$(WatermarkingUtilDir)include;$(ProjectDir)..\Watermarking-Util\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <OpenMPSupport>true</OpenMPSupport>
-      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
+      <EnableEnhancedInstructionSet>$(WatermarkingInstructionSet)</EnableEnhancedInstructionSet>
       <DebugInformationFormat>None</DebugInformationFormat>
     </ClCompile>
     <Link>
@@ -179,7 +179,7 @@
     <CudaCompile>
       <TargetMachinePlatform>64</TargetMachinePlatform>
       <CodeGeneration>compute_75,sm_75;compute_86,sm_86;compute_89,sm_89;compute_120,sm_120;compute_120,compute_120</CodeGeneration>
-      <AdditionalCompilerOptions>/wd4275 /arch:AVX2 /Zc:__cplusplus /Zc:preprocessor</AdditionalCompilerOptions>
+      <AdditionalCompilerOptions>/wd4275 $(WatermarkingArch) /Zc:__cplusplus /Zc:preprocessor</AdditionalCompilerOptions>
       <AdditionalOptions>-diag-suppress 1388 -diag-suppress 221 --std c++20 %(AdditionalOptions)</AdditionalOptions>
       <GenerateDebugInformation>false</GenerateDebugInformation>
       <HostDebugInfo>false</HostDebugInfo>
@@ -210,7 +210,7 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <OpenMPSupport>true</OpenMPSupport>
-      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
+      <EnableEnhancedInstructionSet>$(WatermarkingInstructionSet)</EnableEnhancedInstructionSet>
       <DebugInformationFormat>None</DebugInformationFormat>
     </ClCompile>
     <CudaCompile>
@@ -233,7 +233,7 @@
       <PreprocessorDefinitions>WIN32;WIN64;NOMINMAX;_DEBUG;_CONSOLE;_USE_OPENCL_;_USE_GPU_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <OpenMPSupport>true</OpenMPSupport>
-      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
+      <EnableEnhancedInstructionSet>$(WatermarkingInstructionSet)</EnableEnhancedInstructionSet>
     </ClCompile>
     <CudaCompile>
       <CodeGeneration>
@@ -258,7 +258,7 @@
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <OpenMPSupport>true</OpenMPSupport>
-      <AdditionalOptions>-openmp -mavx2 -mfma /clang:-O3 /Zc:__cplusplus -flto=thin %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>-openmp $(WatermarkingClangSimdFlags) /clang:-O3 /Zc:__cplusplus -flto=thin %(AdditionalOptions)</AdditionalOptions>
       <DebugInformationFormat>None</DebugInformationFormat>
     </ClCompile>
     <CudaCompile>
@@ -283,7 +283,7 @@
       <IntrinsicFunctions>false</IntrinsicFunctions>
       <FunctionLevelLinking>false</FunctionLevelLinking>
       <OpenMPSupport>true</OpenMPSupport>
-      <AdditionalOptions>-openmp -mavx2 -mfma /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>-openmp $(WatermarkingClangSimdFlags) /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <Optimization>Disabled</Optimization>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
     </ClCompile>
@@ -387,6 +387,8 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='EIGEN_Release|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='EIGEN_Debug|x64'">true</ExcludedFromBuild>
     </ClInclude>
+    <ClInclude Include="half_float.hpp" />
+    <ClInclude Include="simd.hpp" />
     <ClInclude Include="HdrTonemap.hpp" />
     <ClInclude Include="ImageEigenBuffer.hpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='CUDA_Debug|x64'">true</ExcludedFromBuild>

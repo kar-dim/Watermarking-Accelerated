@@ -13,6 +13,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <vector>
 
 using std::cout;
 using std::string;
@@ -125,41 +126,56 @@ ReductionMode reductionMode(const cl::Program& program) {
     return ReductionMode::Portable;
 }
 
+// every kernel of the program can run workgroups of groupSize workitems on the device
+bool kernelsFit(cl::Program program, const cl::Device& device, const int groupSize) {
+    std::vector<cl::Kernel> programKernels;
+    program.createKernels(&programKernels);
+    for (const auto& kernel : programKernels)
+        if (kernel.getWorkGroupInfo<CL_KERNEL_WORK_GROUP_SIZE>(device) < static_cast<size_t>(groupSize))
+            return false;
+    return true;
+}
+
 cl::Program buildKernels(const int p) {
     auto& mgr = OclQueueManager::getInstance();
     cl::Context context = mgr.getContext();
     cl::Device device = mgr.getDevice();
-    cl::Program program;
     try {
-        const string baseOptions = openClStdOption(device) + " -cl-unsafe-math-optimizations -DWINDOW_SIZE=" + std::to_string(p);
         const bool forcePortable = forcePortableReductionsRequested();
         const bool useWorkGroupCollectives = !forcePortable && supportsWorkGroupCollectives(device);
         const SubgroupDialect dialect = (forcePortable || useWorkGroupCollectives) ? SubgroupDialect::None : subgroupDialect(device);
-        string subgroupLog;
-
-        program = cl::Program(context, kernels);
         const string reductionOptions = forcePortable ? " -DWM_DISABLE_SUBGROUPS=1" : useWorkGroupCollectives ? " -DWM_WORK_GROUP_REDUCTIONS=1" : subgroupBuildDefine(dialect);
-        if (tryBuildProgram(program, device, baseOptions + reductionOptions, subgroupLog)) {
-            const char* description = forcePortable ? "forced portable local-memory reductions" : useWorkGroupCollectives ? "work-group collective reductions" : subgroupDescription(dialect);
-            cout << "OpenCL kernel p=" << p << ": " << description << " (" << openClStdOption(device) << ")\n";
-            return program;
-        }
-
-        if (useWorkGroupCollectives || dialect != SubgroupDialect::None) {
-            cout << "NOTE: OpenCL optimized reduction kernel build failed for p=" << p << ", using portable local-memory reductions.\n";
-            if (!subgroupLog.empty())
-                cout << subgroupLog << "\n";
-            program = cl::Program(context, kernels);
-            string fallbackLog;
-            if (tryBuildProgram(program, device, baseOptions + " -DWM_DISABLE_SUBGROUPS=1", fallbackLog))
-                return program;
-            if (!fallbackLog.empty())
-                cout << fallbackLog << "\n";
-        } else if (!subgroupLog.empty()) {
-            cout << subgroupLog << "\n";
+        const char* description = forcePortable ? "forced portable local-memory reductions" : useWorkGroupCollectives ? "work-group collective reductions" : subgroupDescription(dialect);
+        for (int groupSize = static_cast<int>(std::min(256u, maxPow2WorkGroupSize(device))); groupSize >= 64; groupSize /= 2) {
+            const string baseOptions = openClStdOption(device) + " -DWINDOW_SIZE=" + std::to_string(p) + " -DWG_SIZE=" + std::to_string(groupSize);
+            string buildLog;
+            cl::Program program(context, kernels);
+            if (tryBuildProgram(program, device, baseOptions + reductionOptions, buildLog)) {
+                if (kernelsFit(program, device, groupSize)) {
+                    cout << "OpenCL kernel p=" << p << ": " << description << ", work-group size " << groupSize << " (" << openClStdOption(device) << ")\n";
+                    return program;
+                }
+                continue;
+            }
+            if (useWorkGroupCollectives || dialect != SubgroupDialect::None) {
+                cout << "NOTE: OpenCL optimized reduction kernel build failed for p=" << p << ", using portable local-memory reductions.\n";
+                if (!buildLog.empty())
+                    cout << buildLog << "\n";
+                program = cl::Program(context, kernels);
+                buildLog.clear();
+                if (tryBuildProgram(program, device, baseOptions + " -DWM_DISABLE_SUBGROUPS=1", buildLog) && kernelsFit(program, device, groupSize))
+                    return program;
+            }
+            if (!buildLog.empty())
+                cout << buildLog << "\n";
         }
     } catch (const std::exception& ex) { cout << ex.what() << "\n"; }
     throw std::runtime_error("Failed to build OpenCL kernels. Check the error messages above for details.");
+}
+
+int workGroupSize(const cl::Program& program) {
+    const cl::Kernel kernel(program, "me_shift_sums");
+    return static_cast<int>(kernel.getWorkGroupInfo<CL_KERNEL_COMPILE_WORK_GROUP_SIZE>(OclQueueManager::getInstance().getDevice())[0]);
 }
 
 cl::Program buildUtilityKernels() {
@@ -213,15 +229,9 @@ std::size_t reductionScratchBytes(const cl::Program& program, const char* kernel
     return scratchSlots * valuesPerReduction * sizeof(float);
 }
 
-void launchRowMajorToColMajorFloat(const cl::Buffer& src, const cl::Buffer& dst, const int width, const int height, const int channels, cl::CommandQueue& queue) {
+void launchRowMajorRgbToColMajor(const cl::Buffer& src, const cl::Buffer& rgbDst, const cl::Buffer& grayDst, const int width, const int height, cl::CommandQueue& queue) {
     constexpr int blockSize = 16;
-    queue.enqueueNDRangeKernel(KernelBuilder(UtilityKernelCache::getProgram(), "row_major_to_col_major_float").args(src, dst, width, height).build(), cl::NullRange,
-        cl::NDRange(roundUp(width, blockSize), roundUp(height, blockSize), channels), cl::NDRange(blockSize, blockSize));
-}
-
-void launchRowMajorRGBToColMajorGray(const cl::Buffer& src, const cl::Buffer& dst, const int width, const int height, cl::CommandQueue& queue) {
-    constexpr int blockSize = 16;
-    queue.enqueueNDRangeKernel(KernelBuilder(UtilityKernelCache::getProgram(), "row_major_rgb_to_col_major_gray").args(src, dst, width, height).build(), cl::NullRange,
+    queue.enqueueNDRangeKernel(KernelBuilder(UtilityKernelCache::getProgram(), "row_major_rgb_to_col_major").args(src, rgbDst, grayDst, width, height).build(), cl::NullRange,
         cl::NDRange(roundUp(width, blockSize), roundUp(height, blockSize)), cl::NDRange(blockSize, blockSize));
 }
 

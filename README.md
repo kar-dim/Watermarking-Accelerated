@@ -28,14 +28,16 @@ The repository contains all required source code and dependencies needed to repr
 Implementations are optimized for maximum performance:
 - CPU implementation: Uses the ```Eigen``` library for linear algebra operations combined with efficient use of ```OpenMP``` multithreading (reductions, parallel loops). The application utilizes all available logical (or physical, specifically on video embedding) CPU cores for maximum performance. The project is configured to use ```clang``` compiler (clang-cl toolset) instead of MSVC, because it optimizes much better the heavily templated Eigen code.
 - GPU implementation: Provides both OpenCL and CUDA backends. All CUDA/OpenCL kernels are 100% custom-built for maximum hardware utilization.
-  - CUDA: Warp shuffle techniques, CUB, Tensor Cores and Grid-Stride reduction loops are used in order improve performance wherever applicable.
+  - CUDA: Warp shuffle techniques, CUB block reductions, shared memory tiling and CUDA Graphs (one launch per frame instead of 6-8) are used in order to improve performance wherever applicable.
   - OpenCL: A custom kernel caching mechanism is implemented (because OpenCL kernels are compiled at runtime), and need special care to reduce extra re-compilations. 
-  - All: In order to optimize VRAM usage, custom memory pools are implemented for both backends.
+  - All: In order to optimize VRAM usage, custom memory pools are implemented for both backends. The watermark and the strengthened watermark are stored as 16-bit floats (half) to save memory bandwidth, all math is done in 32-bit floats.
 
-<p align="center">
-  <img src="https://github.com/user-attachments/assets/c1a3acea-3e4b-4584-9f96-500167f78368" width="33%" />
-  <img alt="ffmpeg nvidia" src="https://github.com/user-attachments/assets/6204c67e-6262-4f35-9518-e78d891efd26" width="33%" />
-</p>
+### How the prediction error (ME) mask is computed fast
+
+The ME mask predicts every pixel from its p x p - 1 neighbors. The prediction coefficients come from solving a small linear system ```Rx * a = rx```, where every entry of ```Rx``` and ```rx``` is a sum over the whole image of one neighbor pixel multiplied by another neighbor pixel. The direct way builds a big matrix with one row per pixel and multiplies it by its transpose: for p=9 that is 3,320 different sums over all the pixels.
+
+The trick: the sum for neighbors ```a``` and ```b``` only depends on how far apart they are (the shift ```b - a```), not on where they are in the window. The image multiplied by a copy of itself shifted by the same amount gives the same sum, only the few border rows and columns covered by each pair are different. So we compute **one sum per distinct shift** (13, 41, 85 and 145 sums for p=3, 5, 7, 9) over the inner image area, add the small border corrections, and build the whole system from these sums. For p=9 this is about 23x less math, and no matrix multiplication is needed. The system is then solved with a Cholesky decomposition (the sums are exact fixed point integers on the GPU, so the result is the same on every run), and the prediction error of each pixel is computed from the coefficients in shared memory tiles.
+
 
 # Run the pre-built binaries
 
@@ -59,11 +61,11 @@ $$\text{Score} = C \cdot \sqrt{\text{FPS}_{\text{embed}} \cdot \text{FPS}_{\text
 
 **NOTE**:
 1. The CLI uses the proposed mask for single images, batches, video, and its `--bench` mode.
-2. All implementations are built with ```AVX2``` support:
-     - clang (CPU builds): ```-mavx2 -mfma```
+2. All implementations are built with ```AVX2``` support, set once for every project in ```Directory.Build.props```:
+     - clang (CPU builds): ```-mavx2 -mfma -mf16c```
      - MSVC (GPU builds): ```/arch:AVX2```
 
-To enable ```AVX-512``` replace the previous with: ```-march=native``` (clang) or ```/arch:AVX512``` (MSVC). The performance gains are minimal, and for much broader compatibility we use AVX2 by default.
+To build with ```AVX-512```, pass ```-p:WatermarkingSimd=AVX512``` to MSBuild (for example ```msbuild Watermarking-Thesis.sln -p:Configuration=EIGEN_Release -p:Platform=x64 -p:WatermarkingSimd=AVX512```). The output goes to separate folders (```x64\EIGEN_Release_AVX512\```), next to the AVX2 build. The AVX-512 build only runs on CPUs with AVX-512 and the gains are small, AVX2 stays the default.
 
 The CLI application can be parameterized from the corresponding ```settings.ini``` file or with command-line arguments. Command-line values override the INI file, use the INI key as the option name (for example, ```--p 5```, ```--psnr=42```, or ```--gpu_device_id 1```). Because both image and video settings contain ```mode``` and ```path```, those options must include their section: ```--image.mode single```, ```--image.path samples/images/720p.png```, ```--video.mode detect```, etc. Run ```Watermarking-CLI.exe --help``` for the complete list. Here is a detailed explanation for each parameter:
 
@@ -171,7 +173,7 @@ We bundle all necessary DLLs with the prebuilt binaries so the application runs 
 
 **NOTES:**
 - OpenCL implementation: The [OpenCL Headers](https://github.com/KhronosGroup/OpenCL-Headers), [OpenCL C++ Bindings](https://github.com/KhronosGroup/OpenCL-CLHPP) and [OpenCL Library file](https://github.com/KhronosGroup/OpenCL-SDK) are already included and configured for this project.
-- CUDA implementation: NVIDIA CUDA Toolkit is required for building. Minimum supported GPUs with Compute Capability 7.0 (sm_75) or newer, CUDA Toolkit 12.4 or newer preferred.
+- CUDA implementation: NVIDIA CUDA Toolkit is required for building. Minimum supported GPUs with Compute Capability 7.5 (sm_75) or newer, CUDA Toolkit 12.4 or newer preferred.
 - Image libraries ([libjpeg-turbo](https://github.com/libjpeg-turbo/libjpeg-turbo), [libpng](https://github.com/pnggroup/libpng), [zlib-ng compat](https://github.com/zlib-ng/zlib-ng), [libtiff](https://gitlab.com/libtiff/libtiff) and [libwebp](https://github.com/webmproject/libwebp)) are included and utilized internally by CImg for loading and saving of images for all backends.
 - FFmpeg DLLs are copied automatically after build. Pre-built binaries already include them.
 
@@ -185,15 +187,6 @@ We bundle all necessary DLLs with the prebuilt binaries so the application runs 
 - [Intel VTune Profiler](https://www.intel.com/content/www/us/en/develop/tools/vtune-profiler.html) and [AMD uProf](https://developer.amd.com/amd-uprof/): Used to profile CPU performance.
 - [NVIDIA Nsight Systems](https://developer.nvidia.com/nsight-systems) and [NVIDIA Compute](https://developer.nvidia.com/nsight-compute): Used to profile overall system-wide CUDA performance, and to individually profile specific CUDA kernels with detailed performance metrics.
 
-# Comparisons
-
-Below we include some comparisons of the original image (left) versus the final watermarked images based on the NVF mask (middle) and the proposed Prediction error mask (right). Images are zoomed for comparison purposes. <br><br>
-<p>Resolution: 512x152, p=5, PSNR=40dB</p>
-<img width="1536" height="512" alt="512__512W_NVF__512W_ME" src="https://github.com/user-attachments/assets/24fd8825-734f-4a9b-8439-dbc06068f197" /> <br><br><br>
-<p>Resolution: 1280x720, p=5, PSNR=45dB</p>
-<img width="3840" height="720" alt="720p__720pW_NVF__720pW_ME" src="https://github.com/user-attachments/assets/c7d25bcf-7ff4-4a7f-ba19-0d774550917f" /> <br><br><br>
-<p>Resolution: 3840x2160, p=5, PSNR=40dB</p>
-<img width="11520" height="2160" alt="4k__4kW_NVF__4kW_ME" src="https://github.com/user-attachments/assets/9e2ab520-6710-4cbc-9e6e-95805089222b" />
 
 # Benchmarks
 
@@ -212,7 +205,7 @@ The CLI benchmark sweep can be reproduced automatically from the repository root
 python benchmark.py --run
 ```
 
-This runs the CUDA and OpenCL Release CLIs with 1000 loops per measurement and the Eigen/CPU Release CLI with 100 loops. Pass `--loops N` to `benchmark.py --run` to set the same positive loop count for all three backends. Each CLI's ```--bench``` mode benchmarks ME embedding and detection for p=3,5,7,9 using the 480p, 720p, 1080p, and 4K sample images. Raw results are written to ```readme_pictures/cuda.csv```, ```readme_pictures/opencl.csv```, and ```readme_pictures/eigen.csv```, after which figures 1–4 are regenerated. To redraw the figures without rerunning the benchmarks, use ```python benchmark.py --figures```. An OpenCL device can be selected with ```--opencl-device-id N``` when using ```--run```.
+This runs the CUDA and OpenCL Release CLIs with 1000 loops per measurement and the Eigen/CPU Release CLI with 100 loops. Pass `--loops N` to `benchmark.py --run` to set the same positive loop count for all three backends. Each CLI's ```--bench``` mode benchmarks ME embedding and detection for p=3,5,7,9 using the 480p, 720p, 1080p, and 4K sample images. Raw results are written to ```readme_pictures/cuda.csv```, ```readme_pictures/opencl.csv```, and ```readme_pictures/eigen.csv```, after which figures 1–4 are regenerated. To redraw the figures without rerunning the benchmarks, use ```python benchmark.py --figures```. A GPU can be selected with ```--cuda-device-id N``` and ```--opencl-device-id N``` when using ```--run``` (separate options because CUDA and OpenCL number the devices differently, OpenCL also lists integrated GPUs and CPUs).
 
 p = 3            |  p = 5
 :-------------------------:|:-------------------------:

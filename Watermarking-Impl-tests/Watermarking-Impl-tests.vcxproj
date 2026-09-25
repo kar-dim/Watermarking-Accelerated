@@ -67,7 +67,7 @@
       <DebugInformationFormat>None</DebugInformationFormat>
       <AdditionalIncludeDirectories>$(WatermarkingImplDir)include;$(WatermarkingImplDir)libs\inih;$(ProjectDir)libs\googletest-1.17.0\include;$(WatermarkingMediaIncludeDirectory);$(CUDA_PATH)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
-      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
+      <EnableEnhancedInstructionSet>$(WatermarkingInstructionSet)</EnableEnhancedInstructionSet>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>false</GenerateDebugInformation>
@@ -80,7 +80,7 @@
     </Link>
     <CudaCompile>
       <AdditionalOptions>-diag-suppress 1388 --std c++20 %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalCompilerOptions>/wd4275 /arch:AVX2 /Zc:__cplusplus</AdditionalCompilerOptions>
+      <AdditionalCompilerOptions>/wd4275 $(WatermarkingArch) /Zc:__cplusplus</AdditionalCompilerOptions>
       <CodeGeneration>compute_86,sm_86</CodeGeneration>
       <GenerateDebugInformation>false</GenerateDebugInformation>
       <HostDebugInfo>false</HostDebugInfo>
@@ -96,7 +96,7 @@
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <DebugInformationFormat>None</DebugInformationFormat>
       <AdditionalIncludeDirectories>$(WatermarkingImplDir)include;$(WatermarkingImplDir)libs\Eigen;$(WatermarkingImplDir)libs\CImg;$(WatermarkingImplDir)libs\zlib\include;$(WatermarkingImplDir)libs\inih;$(WatermarkingImplDir)libs\libpng\include;$(WatermarkingImplDir)libs\libjpeg\include;$(WatermarkingImplDir)libs\libwebp\include;$(WatermarkingImplDir)libs\libtiff\include;$(ProjectDir)libs\googletest-1.17.0\include;$(WatermarkingMediaIncludeDirectory);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <AdditionalOptions>-openmp -mavx2 -mfma /clang:-O3 /Zc:__cplusplus -flto=thin %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalOptions>-openmp $(WatermarkingClangSimdFlags) /clang:-O3 /Zc:__cplusplus -flto=thin %(AdditionalOptions)</AdditionalOptions>
       <FunctionLevelLinking>true</FunctionLevelLinking>
     </ClCompile>
     <Link>
@@ -118,7 +118,7 @@
       <DebugInformationFormat>None</DebugInformationFormat>
       <AdditionalIncludeDirectories>$(WatermarkingImplDir)include;$(WatermarkingImplDir)libs\opencl\include;$(WatermarkingImplDir)libs\inih;$(ProjectDir)libs\googletest-1.17.0\include;$(WatermarkingMediaIncludeDirectory);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
-      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
+      <EnableEnhancedInstructionSet>$(WatermarkingInstructionSet)</EnableEnhancedInstructionSet>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>false</GenerateDebugInformation>

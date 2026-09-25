@@ -106,6 +106,12 @@
     <ClInclude Include="WatermarkOCL.hpp">
       <Filter>Header Files\opencl</Filter>
     </ClInclude>
+    <ClInclude Include="simd.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="half_float.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="WatermarkBase.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
