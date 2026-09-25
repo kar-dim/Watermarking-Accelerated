@@ -1,0 +1,9 @@
+backend,device,score
+CPU,Intel Core i7-11800H,7310
+CPU,AMD Ryzen 7800X3D,19198
+OpenCL,Intel UHD 11th Gen (32 EU),5977
+OpenCL,gfx1036,8109
+OpenCL,T600 Laptop,16817
+OpenCL,RTX 4070 Super,84156
+CUDA,T600 Laptop,28461
+CUDA,RTX 4070 Super,147421

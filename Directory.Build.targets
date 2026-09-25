@@ -4,6 +4,8 @@
     <WatermarkingRuntimeDestination>$(TargetDir)</WatermarkingRuntimeDestination>
     <WatermarkingRuntimeDestination Condition="'$(MSBuildProjectName)' == 'Watermarking-UI'">$(OutDir)Watermarking-UI\</WatermarkingRuntimeDestination>
     <WatermarkingFormatOnBuild Condition="'$(WatermarkingFormatOnBuild)' == ''">true</WatermarkingFormatOnBuild>
+    <WatermarkingCrtSubDir Condition="$(Configuration.Contains('Debug'))">debug_nonredist\x64\Microsoft.VC143.DebugCRT</WatermarkingCrtSubDir>
+    <WatermarkingCrtSubDir Condition="!$(Configuration.Contains('Debug'))">x64\Microsoft.VC143.CRT</WatermarkingCrtSubDir>
   </PropertyGroup>
 
   <Target Name="FormatWatermarkingSources"
@@ -18,16 +20,18 @@
     <WatermarkingRuntimeFile Include="$(WatermarkingImplDir)libs\zlib\bin\zlib1.dll" />
     <WatermarkingRuntimeFile Include="$(WatermarkingImplDir)libs\libjpeg\bin\jpeg62.dll" />
     <WatermarkingRuntimeFile Include="$(WatermarkingImplDir)libs\libtiff\bin\tiff.dll" />
-    <WatermarkingRuntimeFile Include="$(WatermarkingImplDir)libs\libpng\bin\libpng16d.dll" Condition="$(Configuration.Contains('_Debug'))" />
-    <WatermarkingRuntimeFile Include="$(WatermarkingImplDir)libs\libpng\bin\libpng16.dll" Condition="!$(Configuration.Contains('_Debug'))" />
+    <WatermarkingRuntimeFile Include="$(WatermarkingImplDir)libs\libpng\bin\libpng16d.dll" Condition="$(Configuration.Contains('Debug'))" />
+    <WatermarkingRuntimeFile Include="$(WatermarkingImplDir)libs\libpng\bin\libpng16.dll" Condition="!$(Configuration.Contains('Debug'))" />
     <WatermarkingRuntimeFile Include="$(LLVMInstallDir)\x64\bin\libomp.dll" Condition="$(Configuration.StartsWith('EIGEN_')) and Exists('$(LLVMInstallDir)\x64\bin\libomp.dll')" />
     <WatermarkingRuntimeFile Include="$(LLVMInstallDir)\bin\libomp.dll" Condition="$(Configuration.StartsWith('EIGEN_')) and !Exists('$(LLVMInstallDir)\x64\bin\libomp.dll') and Exists('$(LLVMInstallDir)\bin\libomp.dll')" />
+    <WatermarkingRuntimeFile Include="$(VCInstallDir)Redist\MSVC\$(VCToolsRedistVersion)\$(WatermarkingCrtSubDir)\*.dll" Condition="Exists('$(VCInstallDir)Redist\MSVC\$(VCToolsRedistVersion)\$(WatermarkingCrtSubDir)')" />
     <WatermarkingSampleFile Include="$(WatermarkingRoot)samples\**\*" Condition="'$(MSBuildProjectName)' == 'Watermarking-CLI' or '$(MSBuildProjectName)' == 'Watermarking-Impl-tests'" />
   </ItemGroup>
 
   <Target Name="CopyWatermarkingRuntimeFiles" AfterTargets="Build" Condition="'$(ConfigurationType)' == 'Application'">
     <MakeDir Directories="$(WatermarkingRuntimeDestination)" />
     <Copy SourceFiles="@(WatermarkingRuntimeFile)" DestinationFolder="$(WatermarkingRuntimeDestination)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(WatermarkingRuntimeFile)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" Condition="'$(WatermarkingRuntimeDestination)' != '$(TargetDir)'" />
     <Copy SourceFiles="@(WatermarkingSampleFile)"
           DestinationFiles="@(WatermarkingSampleFile->'$(TargetDir)samples\%(RecursiveDir)%(Filename)%(Extension)')"
           SkipUnchangedFiles="true"

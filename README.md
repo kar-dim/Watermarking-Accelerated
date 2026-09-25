@@ -162,11 +162,11 @@ The solution provides multiple build configurations, each targeting a specific b
 4. In the **Solution Configurations** dropdown (top toolbar), select your configuration (e.g. `CUDA_Release`) or select `Batch Build` and select what configurations you want to build.
 5. Build the solution via **Build > Build Solution**.
 
-We bundle all necessary DLLs with the prebuilt binaries so the application runs out-of-the-box.
+We bundle all necessary DLLs with the prebuilt binaries so the application runs out-of-the-box as a fully self-contained bundle with no need to install the Visual C++ Redistributable.
 
 | Backend | Dependencies |
 |---------|--------------|
-| **All** |	`FFmpeg (all libav*.dll)`, `zlib1.dll`, `libpng16.dll`, `jpeg62.dll`, `tiff.dll`, `libwebp.lib` (static lib) |
+| **All** |	`Microsoft Visual C++ CRT (msvcp140*.dll, vcruntime140*.dll, concrt140*.dll, etc.)`, `FFmpeg (all libav*.dll)`, `zlib1.dll`, `libpng16.dll`, `jpeg62.dll`, `tiff.dll`, `libwebp.lib` (static lib) |
 | **CUDA** |  `cudart_static.lib`, `cuda.lib` (from CUDA toolkit) |
 | **OpenCL** | `OpenCL.lib` |
 | **Eigen** | `libomp.dll` (clang's OpenMP) |
@@ -175,7 +175,7 @@ We bundle all necessary DLLs with the prebuilt binaries so the application runs 
 - OpenCL implementation: The [OpenCL Headers](https://github.com/KhronosGroup/OpenCL-Headers), [OpenCL C++ Bindings](https://github.com/KhronosGroup/OpenCL-CLHPP) and [OpenCL Library file](https://github.com/KhronosGroup/OpenCL-SDK) are already included and configured for this project.
 - CUDA implementation: NVIDIA CUDA Toolkit is required for building. Minimum supported GPUs with Compute Capability 7.5 (sm_75) or newer, CUDA Toolkit 12.4 or newer preferred.
 - Image libraries ([libjpeg-turbo](https://github.com/libjpeg-turbo/libjpeg-turbo), [libpng](https://github.com/pnggroup/libpng), [zlib-ng compat](https://github.com/zlib-ng/zlib-ng), [libtiff](https://gitlab.com/libtiff/libtiff) and [libwebp](https://github.com/webmproject/libwebp)) are included and utilized internally by CImg for loading and saving of images for all backends.
-- FFmpeg DLLs are copied automatically after build. Pre-built binaries already include them.
+- FFmpeg and Microsoft Visual C++ runtime DLLs are copied automatically after build. Pre-built binaries already include them, making the application fully self-contained without requiring `vc_redist.x64.exe`.
 
 # Libraries/Tools Used
 

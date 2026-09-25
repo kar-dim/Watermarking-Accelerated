@@ -367,4 +367,6 @@ FodyWeavers.xsd
 *.avi
 
 # skip local CLI benchmark results
-/readme_pictures/*.csv
+/readme_pictures/cuda.csv
+/readme_pictures/eigen.csv
+/readme_pictures/opencl.csv
