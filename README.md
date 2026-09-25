@@ -215,19 +215,15 @@ p = 7            |  p = 9
 
 ## GUI Benchmark Results
 
-CUDA            |  OpenCL
-:-------------------------:|:-------------------------:
-![Benchmark 5](readme_pictures/5.png) | ![Benchmark 6](readme_pictures/6.png)
-CPU/Eigen            | 
-![Benchmark 7](readme_pictures/7.png) |
+![GUI Benchmark Results](readme_pictures/5.png)
 
 
 ## GUI Screens
 
 Preview | Detail
 :-------------------------:|:-------------------------:
-**Single image comparison**<br>![Single image comparison](readme_pictures/8.png) | **Zoomed comparison**<br>![Zoomed single image comparison](readme_pictures/9.png)
-**Batch in progress**<br>![Batch image queue in progress](readme_pictures/10.png) | **Batch complete**<br>![Completed batch and summary](readme_pictures/11.png)
-**Benchmark in progress**<br>![Benchmark in progress](readme_pictures/12.png) | **Benchmark score**<br>![Completed benchmark score](readme_pictures/13.png)
+**Single image comparison**<br>![Single image comparison](readme_pictures/6.png) | **Zoomed comparison**<br>![Zoomed single image comparison](readme_pictures/7.png)
+**Batch in progress**<br>![Batch image queue in progress](readme_pictures/8.png) | **Batch complete**<br>![Completed batch and summary](readme_pictures/9.png)
+**Benchmark in progress**<br>![Benchmark in progress](readme_pictures/10.png) | **Benchmark score**<br>![Completed benchmark score](readme_pictures/11.png)
 
  
