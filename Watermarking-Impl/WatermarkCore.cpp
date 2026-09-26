@@ -7,11 +7,12 @@
 #include "utils.hpp"
 #include "video_utils.hpp"
 #include "VideoProcessingContext.hpp"
+#include "simd.hpp"
 #include "WatermarkBase.hpp"
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <format>
-#include <immintrin.h>
 #include <iostream>
 #include <memory>
 #include <omp.h>
@@ -101,6 +102,12 @@ void flushToDiskAsync(ExportedImage* handle, const string& outPath, MaskMethod m
 
 // INTERNAL HELPERS
 namespace {
+// NaN and infinity would reach the pixels through the watermark strength
+void checkPsnr(const float psnr) {
+    if (!std::isfinite(psnr) || psnr <= 0.0f)
+        throw std::invalid_argument("PSNR must be a finite number greater than 0");
+}
+
 #if defined(_USE_OPENCL_)
 string getOCLDeviceName(int deviceIndex = -1) {
     const auto devices = OclQueueManager::enumerateDevices();
@@ -388,6 +395,7 @@ void buildOpenCLKernels() {
 }
 
 void updateSessionParams(ImageSession* s, const int p, const float psnr) {
+    checkPsnr(psnr);
     if (s->p == p && s->psnr == psnr)
         return;
     const bool pChanged = s->p != p;
@@ -403,6 +411,7 @@ void updateSessionParams(ImageSession* s, const int p, const float psnr) {
 
 // creates a new session for image processing, initialized with the given parameters (no memory allocations yet)
 ImageHandle createImageSession(const string& watermarkPassword, const int p, const float psnr) {
+    checkPsnr(psnr);
     ImageHandle session(new ImageSession());
     session->watermarkPassword = watermarkPassword;
     session->p = p;
@@ -501,6 +510,9 @@ void VideoSessionDeleter::operator()(VideoSession* s) const { delete s; }
 
 // initializes the video session by opening the video file, finding the video stream, opening the decoder, and initializing the watermark object and processing buffers based on the video dimensions
 VideoHandle initVideo(const VideoSettings& settings) {
+    checkPsnr(settings.psnr);
+    if (settings.watermarkInterval < 1)
+        throw std::invalid_argument("Video watermark interval must be at least 1");
     av_log_set_level(AV_LOG_INFO);
     VideoHandle session(new VideoSession());
     session->settings = settings;
@@ -515,6 +527,9 @@ VideoHandle initVideo(const VideoSettings& settings) {
     session->useHwDecoder = false;
     session->inputDecoderCtx = openDecoder(session->videoStream->codecpar, settings.useHwDecoder, session->useHwDecoder, session->videoStream->time_base);
     checkError(!session->inputDecoderCtx.get(), "Could not open video decoder");
+    session->decodedFormat = session->useHwDecoder ? session->inputDecoderCtx->sw_pix_fmt : session->inputDecoderCtx->pix_fmt;
+    session->frameRate = av_guess_frame_rate(session->inputFormatCtx.get(), session->inputFormatCtx->streams[session->videoStreamIndex], nullptr);
+    session->nominalFrameDuration = nominalFrameDuration(session->frameRate, session->videoStream->time_base);
     const int height = session->videoStream->codecpar->height;
     const int width = session->videoStream->codecpar->width;
     checkError((width & 1) != 0 || (height & 1) != 0, std::format("YUV 4:2:0 video requires even dimensions; input is {}x{}.", width, height));
@@ -528,12 +543,18 @@ VideoHandle initVideo(const VideoSettings& settings) {
 // embed the watermark into the video using libav encoding
 // initializes the filter graph if needed (10-bit / HDR), opens the encoder and muxer,
 // processes all frames (video watermarked, audio/subtitles remuxed), then finalises the container
+// a failed embed deletes its partial output file
 int embedVideo(VideoSession* s) {
-    const bool needsFilter = initFilterGraph(s);
-    video_utils::initOutputEncoder(s);
-    const int framesProcessed = videoDispatcher(s, VideoMode::EMBED, needsFilter);
-    video_utils::flushAndFinalize(s);
-    return framesProcessed;
+    try {
+        const bool needsFilter = initFilterGraph(s);
+        video_utils::initOutputEncoder(s);
+        const int framesProcessed = videoDispatcher(s, VideoMode::EMBED, needsFilter);
+        video_utils::flushAndFinalize(s);
+        return framesProcessed;
+    } catch (...) {
+        video_utils::discardOutput(s);
+        throw;
+    }
 }
 
 // main function to detect the watermark from the video

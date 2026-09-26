@@ -54,11 +54,13 @@ class AuxiliaryMux {
         AVCodecContextPtr decoder;
         AVCodecContextPtr encoder;
         std::vector<std::uint8_t> encodeScratch;
+        std::uint64_t dropped = 0; // events that could not be decoded, timed or encoded
     };
 
     bool copyStream(const AVStream* inputStream, unsigned inputIndex, std::string& error);
     bool addSubtitle(const AVStream* inputStream, unsigned inputIndex, const std::string& outputPath, int videoWidth, int videoHeight, std::string& error);
     bool transcodeSubtitle(SubtitleTranscode& transcode, AVPacket* packet, std::string& error);
+    void reportDroppedEvent(SubtitleTranscode& transcode, const std::string& reason);
     bool emit(AVPacket* packet, std::string& error);
 
     AVFormatContext* input_ = nullptr;

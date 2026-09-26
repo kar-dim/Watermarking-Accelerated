@@ -28,6 +28,12 @@
     <WatermarkingSampleFile Include="$(WatermarkingRoot)samples\**\*" Condition="'$(MSBuildProjectName)' == 'Watermarking-CLI' or '$(MSBuildProjectName)' == 'Watermarking-Impl-tests'" />
   </ItemGroup>
 
+  <ItemDefinitionGroup Condition="'$(ConfigurationType)' == 'Application'">
+    <Manifest>
+      <AdditionalManifestFiles>$(WatermarkingRoot)utf8.manifest;%(AdditionalManifestFiles)</AdditionalManifestFiles>
+    </Manifest>
+  </ItemDefinitionGroup>
+
   <Target Name="CopyWatermarkingRuntimeFiles" AfterTargets="Build" Condition="'$(ConfigurationType)' == 'Application'">
     <MakeDir Directories="$(WatermarkingRuntimeDestination)" />
     <Copy SourceFiles="@(WatermarkingRuntimeFile)" DestinationFolder="$(WatermarkingRuntimeDestination)" SkipUnchangedFiles="true" />

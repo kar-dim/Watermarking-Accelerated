@@ -680,7 +680,9 @@ __device__ __forceinline__ void sumRowRun(const float* __restrict__ source, cons
     }
 }
 
-// Copies top and bottom border rows into a contiguous row-major buffer
+// Copies top and bottom border rows into a contiguous row-major buffer: slots [0, 3 * pad) hold the top image rows and slots
+// [3 * pad, 6 * pad) the bottom ones (borderCopyRow maps an image row to its slot). For small images (height < 6 * pad) the two parts
+// overlap, some slots are then never read and their source row is clamped so it stays inside the image
 template <int p>
 __global__ void me_copy_border_rows(const float* __restrict__ input, float* __restrict__ borderCopy, const int width, const int height) {
     using L = MeShiftLayout<p>;
@@ -688,7 +690,7 @@ __global__ void me_copy_border_rows(const float* __restrict__ input, float* __re
     for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < total; i += gridDim.x * blockDim.x) {
         const int row = i % L::borderCopyRows;
         const int col = i / L::borderCopyRows;
-        const int imageRow = row < L::borderCopyRows / 2 ? row : height - L::borderCopyRows + row;
+        const int imageRow = clamp(row < L::borderCopyRows / 2 ? row : height - L::borderCopyRows + row, 0, height - 1);
         borderCopy[(static_cast<size_t>(row) * width) + col] = input[(static_cast<size_t>(col) * height) + imageRow];
     }
 }

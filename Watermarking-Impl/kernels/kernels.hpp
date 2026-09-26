@@ -822,13 +822,15 @@ WM_INLINE void sumRowRun(const __global float* restrict source, const int r, con
     }
 }
 
-// Copies top and bottom border rows into a contiguous row-major buffer
+// Copies top and bottom border rows into a contiguous row-major buffer: slots [0, 3 * PAD) hold the top image rows and slots
+// [3 * PAD, 6 * PAD) the bottom ones (borderCopyRow maps an image row to its slot). For small images (height < 6 * PAD) the two parts
+// overlap, some slots are then never read and their source row is clamped so it stays inside the image
 __kernel void me_copy_border_rows(__global const float* restrict input, __global float* restrict borderCopy, const int width, const int height) {
     const int total = BORDER_COPY_ROWS * width;
     for (int i = get_global_id(0); i < total; i += get_global_size(0)) {
         const int row = i % BORDER_COPY_ROWS;
         const int col = i / BORDER_COPY_ROWS;
-        const int imageRow = row < BORDER_COPY_ROWS / 2 ? row : height - BORDER_COPY_ROWS + row;
+        const int imageRow = clamp(row < BORDER_COPY_ROWS / 2 ? row : height - BORDER_COPY_ROWS + row, 0, height - 1);
         borderCopy[((size_t)row * width) + col] = input[((size_t)col * height) + imageRow];
     }
 }

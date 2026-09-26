@@ -38,4 +38,6 @@ bool initFilterGraph(WatermarkCore::VideoSession* s);
 int videoDispatcher(WatermarkCore::VideoSession* s, VideoMode op, bool needsFilter = false);
 void initOutputEncoder(WatermarkCore::VideoSession* s);
 void flushAndFinalize(WatermarkCore::VideoSession* s);
+// after a failed embed close and delete the output file, only when this session created it
+void discardOutput(WatermarkCore::VideoSession* s) noexcept;
 } // namespace video_utils

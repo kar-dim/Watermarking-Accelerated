@@ -7,17 +7,20 @@
 #include <cstdlib>
 #include <optional>
 #endif
+#include "../Watermarking-Util/include/common_utils.hpp"
 #include "WatermarkCore.hpp"
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <future>
 #include <gtest/gtest.h>
 #include <iomanip>
 #include <iterator>
+#include <limits>
 #include <regex>
 #include <sstream>
 #include <stdexcept>
@@ -60,6 +63,34 @@ SessionPixelData embedAndRead(ImageSession* session, const MaskMethod method) {
     embedImage(session, method);
     finish();
     return getSessionPixelData(session);
+}
+
+// writes a 24-bit BMP filled with deterministic noise
+void writeNoiseBmp(const fs::path& path, const int width, const int height) {
+    const int rowBytes = ((width * 3) + 3) & ~3;
+    const uint32_t pixelBytes = static_cast<uint32_t>(rowBytes) * height;
+    std::vector<uint8_t> bmp(54 + pixelBytes);
+    const auto put32 = [&bmp](const size_t offset, const uint32_t value) {
+        for (int i = 0; i < 4; ++i)
+            bmp[offset + i] = static_cast<uint8_t>(value >> (8 * i));
+    };
+    bmp[0] = 'B';
+    bmp[1] = 'M';
+    put32(2, static_cast<uint32_t>(bmp.size()));
+    put32(10, 54);
+    put32(14, 40);
+    put32(18, static_cast<uint32_t>(width));
+    put32(22, static_cast<uint32_t>(height));
+    bmp[26] = 1;
+    bmp[28] = 24;
+    put32(34, pixelBytes);
+    uint32_t state = 12345;
+    for (size_t i = 54; i < bmp.size(); ++i) {
+        state = (state * 1664525u) + 1013904223u;
+        bmp[i] = static_cast<uint8_t>(state >> 24);
+    }
+    std::ofstream output(path, std::ios::binary);
+    ASSERT_TRUE(output.write(reinterpret_cast<const char*>(bmp.data()), static_cast<std::streamsize>(bmp.size())));
 }
 
 // look up one key in a parsed option dictionary, empty when absent
@@ -386,6 +417,93 @@ TEST_F(WatermarkTest, RejectsUndocumentedPredictionOrder) {
     EXPECT_THROW(loadImage(badSession.get(), colorImage.string()), std::invalid_argument);
 }
 
+// for p >= 7 the GPU builds copy 3 * pad rows from the top and 3 * pad rows from the bottom of the image. Below 6 * pad rows the two parts
+// overlap, and below 3 * pad rows the copy used to read outside the image (for CUDA: run with compute-sanitizer to check the reads)
+TEST_F(WatermarkTest, EmbedsAndDetectsTheSmallestImagesForLargeWindows) {
+    for (const int order : {7, 9}) {
+        const int pad = order / 2;
+        for (int height = order; height < 6 * pad; ++height) {
+            for (const int width : {order, order + 3}) {
+                const std::string size = std::to_string(width) + "x" + std::to_string(height);
+                const fs::path input = tempDir / ("small_" + size + ".bmp");
+                writeNoiseBmp(input, width, height);
+                ImageHandle small = createImageSession(defaultPassword, order, defaultPsnr);
+                loadImage(small.get(), input.string());
+                const SessionPixelData output = embedAndRead(small.get(), MaskMethod::ME);
+                EXPECT_EQ(output.width, width) << "p=" << order << " " << size;
+                EXPECT_EQ(output.height, height) << "p=" << order << " " << size;
+                prepareDetectionImage(small.get(), MaskMethod::ME);
+                const float correlation = detectEmbeddedBuffer(small.get(), MaskMethod::ME);
+                EXPECT_TRUE(std::isfinite(correlation)) << "p=" << order << " " << size;
+            }
+        }
+    }
+}
+
+TEST(ParameterValidationTest, RejectsNonFiniteAndNonPositivePsnr) {
+    constexpr float nan = std::numeric_limits<float>::quiet_NaN();
+    constexpr float infinity = std::numeric_limits<float>::infinity();
+    for (const float psnr : {nan, infinity, -infinity, 0.0f, -5.0f})
+        EXPECT_THROW(createImageSession(defaultPassword, defaultP, psnr), std::invalid_argument) << psnr;
+    ImageHandle session = createImageSession(defaultPassword, defaultP, defaultPsnr);
+    EXPECT_THROW(updateSessionParams(session.get(), defaultP, nan), std::invalid_argument);
+    EXPECT_THROW(updateSessionParams(session.get(), defaultP, infinity), std::invalid_argument);
+    EXPECT_NO_THROW(updateSessionParams(session.get(), defaultP, 42.0f));
+}
+
+TEST(ParameterValidationTest, RejectsInvalidVideoSettingsBeforeOpeningTheFile) {
+    // the file does not exist: invalid settings must fail first (invalid_argument), valid ones then fail to open it (runtime_error)
+    VideoSettings settings = makeVideoSettings("missing-video-file.mkv");
+    for (const int interval : {0, -1}) {
+        settings.watermarkInterval = interval;
+        EXPECT_THROW(initVideo(settings), std::invalid_argument) << "interval " << interval;
+    }
+    settings.watermarkInterval = 1;
+    settings.psnr = std::numeric_limits<float>::quiet_NaN();
+    EXPECT_THROW(initVideo(settings), std::invalid_argument);
+    settings.psnr = 30.0f;
+    EXPECT_THROW(initVideo(settings), std::runtime_error);
+}
+
+// the Qt UI passes the core UTF-8 paths (QString::toStdString) and builds std::filesystem paths from them, this works only with the
+// UTF-8 process code page (utf8.manifest, the test executable has it too). Same steps as the single image and batch workers
+TEST_F(WatermarkTest, HandlesNonAsciiPathsLikeTheUi) {
+    const auto utf8 = [](const fs::path& path) {
+        const std::u8string text = path.u8string();
+        return std::string(text.begin(), text.end());
+    };
+    const fs::path folder = tempDir / u8"\u0392\u03af\u03bd\u03c4\u03b5\u03bf \u03b4\u03bf\u03ba\u03b9\u03bc\u03ae";
+    fs::create_directories(folder);
+    fs::copy_file(colorImage, folder / u8"\u03b5\u03b9\u03ba\u03cc\u03bd\u03b1.png");
+    fs::copy_file(grayImage, folder / u8"\u03b3\u03ba\u03c1\u03af\u03b6\u03b1.jpg");
+
+    // single image: load, embed and save through UTF-8 strings
+    ImageHandle single = createImageSession(defaultPassword, defaultP, defaultPsnr);
+    loadImage(single.get(), utf8(folder / u8"\u03b5\u03b9\u03ba\u03cc\u03bd\u03b1.png"), true);
+    embedImage(single.get(), MaskMethod::ME);
+    finish();
+    const fs::path saved = folder / u8"\u03b1\u03c0\u03bf\u03c4\u03ad\u03bb\u03b5\u03c3\u03bc\u03b1.png";
+    saveImageExact(single.get(), utf8(saved));
+    EXPECT_TRUE(fs::exists(saved));
+
+    // batch: the folder comes back from its UTF-8 text, then list, preload, embed and save
+    const fs::path batchFolder(utf8(folder));
+    ASSERT_TRUE(fs::is_directory(batchFolder));
+    const std::vector<fs::path> files = CommonUtils::getValidImageFiles(batchFolder);
+    ASSERT_EQ(files.size(), 3u);
+    const fs::path outputDir = batchFolder / "watermark_output";
+    fs::create_directories(outputDir);
+    ImageHandle batch = createImageSession(defaultPassword, defaultP, defaultPsnr);
+    ExportHandle exportBuffer = createReusableExportBuffer();
+    for (const fs::path& file : files) {
+        bindPreloadedImage(batch.get(), preloadImageFromDisk(file.string()));
+        embedImage(batch.get(), MaskMethod::ME);
+        exportForSave(batch.get(), exportBuffer.get(), MaskMethod::ME);
+        flushToDiskAsync(exportBuffer.get(), (outputDir / file.filename()).string(), MaskMethod::ME);
+    }
+    EXPECT_EQ(std::distance(fs::directory_iterator(outputDir), fs::directory_iterator{}), 3);
+}
+
 TEST_F(WatermarkTest, PreservesTheAlphaChannelWhenSaving) {
     ASSERT_TRUE(fs::exists(alphaImage)) << alphaImage;
     ImageHandle alphaSession = createImageSession(defaultPassword, defaultP, defaultPsnr);
@@ -646,6 +764,70 @@ TEST(VideoMuxTest, CopiesMatroskaAttachmentsAndDropsThemForMp4) {
             EXPECT_EQ(output->nb_streams, 0u);
         }
     }
+}
+
+// MP4 cannot store SubRip, the events are converted to mov_text. Events that cannot be converted
+// are dropped with one log line per stream and the others go on
+TEST(VideoMuxTest, ConvertsTextSubtitlesAndDropsEventsItCannotConvert) {
+    auto input = std::unique_ptr<AVFormatContext, decltype(&avformat_free_context)>(avformat_alloc_context(), avformat_free_context);
+    ASSERT_NE(input, nullptr);
+    AVStream* subtitles = avformat_new_stream(input.get(), nullptr);
+    ASSERT_NE(subtitles, nullptr);
+    subtitles->codecpar->codec_type = AVMEDIA_TYPE_SUBTITLE;
+    subtitles->codecpar->codec_id = AV_CODEC_ID_SUBRIP;
+    subtitles->time_base = AVRational{1, 1000};
+
+    AVFormatContext* rawOutput = nullptr;
+    ASSERT_EQ(avformat_alloc_output_context2(&rawOutput, nullptr, nullptr, "test.mp4"), 0);
+    auto output = std::unique_ptr<AVFormatContext, decltype(&avformat_free_context)>(rawOutput, avformat_free_context);
+    std::vector<int> emittedSizes;
+    std::vector<std::string> logLines;
+    video_utils::AuxiliaryMux mux;
+    video_utils::AuxiliaryMuxSetup setup;
+    setup.input = input.get();
+    setup.output = output.get();
+    setup.outputPath = "test.mp4";
+    setup.videoWidth = 1280;
+    setup.videoHeight = 720;
+    setup.log = [&logLines](const std::string& line) { logLines.push_back(line); };
+    setup.sink = [&emittedSizes](AVPacket* packet) {
+        emittedSizes.push_back(packet->size);
+        return true;
+    };
+    std::string error;
+    ASSERT_TRUE(mux.configure(setup, error)) << error;
+    ASSERT_EQ(output->nb_streams, 1u);
+    EXPECT_EQ(output->streams[0]->codecpar->codec_id, AV_CODEC_ID_MOV_TEXT);
+
+    const auto route = [&mux, &error](const std::string& text, const int64_t pts) {
+        video_utils::AVPacketPtr packet(av_packet_alloc());
+        if (!packet || av_new_packet(packet.get(), static_cast<int>(text.size())) < 0)
+            return false;
+        std::memcpy(packet->data, text.data(), text.size());
+        packet->stream_index = 0;
+        packet->pts = pts;
+        packet->dts = pts;
+        packet->duration = 1000;
+        error.clear();
+        return mux.routePacket(packet.get(), error);
+    };
+    ASSERT_TRUE(route("Hello subtitles", 0)) << error;
+    ASSERT_EQ(emittedSizes.size(), 1u);
+    const size_t setupLogLines = logLines.size();
+
+    // mov_text stores at most 64 KiB per event: bigger events are dropped, logged once, and the next event still converts
+    EXPECT_TRUE(route(std::string(100000, 'x'), 2000)) << error;
+    EXPECT_TRUE(route(std::string(100000, 'y'), 3000)) << error;
+    EXPECT_EQ(emittedSizes.size(), 1u);
+    ASSERT_EQ(logLines.size(), setupLogLines + 1);
+    EXPECT_NE(logLines.back().find("dropped"), std::string::npos) << logLines.back();
+    ASSERT_TRUE(route("After the dropped events", 3500)) << error;
+    EXPECT_EQ(emittedSizes.size(), 2u);
+
+    // a failing output (sink) must fail the call
+    mux.setSink([](AVPacket*) { return false; });
+    EXPECT_FALSE(route("Another event", 4000));
+    EXPECT_FALSE(error.empty());
 }
 
 TEST(EncodeOptionsTest, ExtractsTheEncoderAndForwardsTheRest) {

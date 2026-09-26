@@ -9,8 +9,8 @@
 #include <cstdint>
 #include <filesystem>
 #include <functional>
-#include <map>
 #include <limits>
+#include <map>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -22,7 +22,9 @@ extern "C" {
 #include "libavutil/dict.h"
 #include "libavutil/error.h"
 #include "libavutil/frame.h"
+#include "libavutil/mathematics.h"
 #include "libavutil/pixfmt.h"
+#include "libavutil/rational.h"
 }
 
 namespace video_utils {
@@ -45,6 +47,19 @@ inline void checkAv(const int avRet, const std::string& what) {
 // retrieve PTS for a decoded frame (falls back to best_effort_timestamp if pts is missing)
 inline int64_t framePts(const AVFrame* f) { return (f->pts != AV_NOPTS_VALUE) ? f->pts : f->best_effort_timestamp; }
 
+// presentation timestamp and duration of one frame, in the stream time base
+struct FrameTiming {
+    int64_t pts = 0;
+    int64_t duration = 0;
+};
+
+// one frame at the nominal frame rate, in the stream time base (0 when the stream declares no rate)
+inline int64_t nominalFrameDuration(const AVRational frameRate, const AVRational timeBase) {
+    if (frameRate.num <= 0 || frameRate.den <= 0)
+        return 0;
+    return av_rescale_q(1, av_inv_q(frameRate), timeBase);
+}
+
 inline bool enforceMonotonicDts(AVPacket* packet, int64_t& lastWrittenDts) {
     if (packet->dts == AV_NOPTS_VALUE)
         return false;
@@ -66,6 +81,7 @@ inline bool enforceMonotonicDts(AVPacket* packet, int64_t& lastWrittenDts) {
     return repaired;
 }
 
+// libavcodec does not always carry AVFrame::duration into the packet, keyed by pts because encoders emit packets out of order
 class PacketDurations {
   public:
     void remember(const AVFrame* frame) {
@@ -74,12 +90,12 @@ class PacketDurations {
         if (byPts_.size() > 4096)
             byPts_.erase(byPts_.begin());
     }
+    // our duration always wins: an encoder with B-frames fills in one nominal frame interval and loses the hold of the last frame
     void restore(AVPacket* packet) {
         const auto found = byPts_.find(packet->pts);
         if (found == byPts_.end())
             return;
-        if (packet->duration <= 0)
-            packet->duration = found->second;
+        packet->duration = found->second;
         byPts_.erase(found);
     }
 
@@ -114,6 +130,9 @@ class OptionDict {
   private:
     AVDictionary* m_dict = nullptr;
 };
+
+// libav reads paths as UTF-8, std::filesystem must read the same bytes as UTF-8 too
+inline std::filesystem::path pathFromUtf8(const std::string& path) { return std::filesystem::path(std::u8string(path.begin(), path.end())); }
 
 // checks if both paths point to the same physical file on disk to prevent overwriting
 inline bool sameFileOnDisk(const std::filesystem::path& left, const std::filesystem::path& right) {

@@ -129,7 +129,7 @@ ffmpeg -y -f rawvideo
 - `-max_interleave_delta 0`: Avoids interleaving delay issues in the output container.
 - `<output_file>`: **USER SUPPLIED** — destination path set via ```encode_output_path```.
 
-**NOTE:** 10-bit video is supported: 10-bit SDR is converted to 8-bit losslessly before watermarking. HDR 10-bit is tonemapped with the Mobius algorithm to SDR. If CPU decoder is used, then we use the FFmpeg's `tonemap=mobius` filter. For Hardware-accelerated decoder (NVDEC) a custom Mobius kernel pipeline is implemented, because currently it is impossible to do the tonemapping by FFmpeg provided filters. Encoding output is always 8-bit SDR.
+**NOTE:** 10-bit video is supported: 10-bit SDR is converted to 8-bit before watermarking (`format=yuv420p` on the CPU decoder, `scale_cuda=format=nv12` on NVDEC), so each sample loses precision (10 to 8 bits). HDR 10-bit is tonemapped with the Mobius algorithm to SDR. If CPU decoder is used, then we use the FFmpeg's `tonemap=mobius` filter. For Hardware-accelerated decoder (NVDEC) a custom Mobius kernel pipeline is implemented, because currently it is impossible to do the tonemapping by FFmpeg provided filters. Encoding output is always 8-bit SDR.
 
 # How to Build
 
@@ -176,6 +176,7 @@ We bundle all necessary DLLs with the prebuilt binaries so the application runs 
 - CUDA implementation: NVIDIA CUDA Toolkit is required for building. Minimum supported GPUs with Compute Capability 7.5 (sm_75) or newer, CUDA Toolkit 12.4 or newer preferred.
 - Image libraries ([libjpeg-turbo](https://github.com/libjpeg-turbo/libjpeg-turbo), [libpng](https://github.com/pnggroup/libpng), [zlib-ng compat](https://github.com/zlib-ng/zlib-ng), [libtiff](https://gitlab.com/libtiff/libtiff) and [libwebp](https://github.com/webmproject/libwebp)) are included and utilized internally by CImg for loading and saving of images for all backends.
 - FFmpeg and Microsoft Visual C++ runtime DLLs are copied automatically after build. Pre-built binaries already include them, making the application fully self-contained without requiring `vc_redist.x64.exe`.
+- File and folder names with non-ASCII characters (for example Greek) work in the CLI and the Qt application: every executable runs with the UTF-8 process code page (```utf8.manifest```, Windows 10 version 1903 or newer).
 
 # Libraries/Tools Used
 

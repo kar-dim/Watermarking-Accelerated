@@ -289,43 +289,75 @@ bool AuxiliaryMux::routePacket(AVPacket* packet, std::string& error) {
     return emit(packet, error);
 }
 
-// decode, re-encode and timestamp (align) subtitle packet
+// decode, re-encode and timestamp (align) subtitle packet, events that cannot be converted are dropped
+// with one log line per stream, the rest of the subtitles and the video go on
 bool AuxiliaryMux::transcodeSubtitle(SubtitleTranscode& transcode, AVPacket* packet, std::string& error) {
     AVSubtitle subtitle{};
+    // frees the decoded subtitle on every return path (safe on an empty subtitle too)
+    const struct SubtitleFree {
+        AVSubtitle& subtitle;
+        ~SubtitleFree() { avsubtitle_free(&subtitle); }
+    } freeSubtitle{subtitle};
     int decoded = 0;
-    if (avcodec_decode_subtitle2(transcode.decoder.get(), &subtitle, &decoded, packet) < 0 || decoded == 0) {
+    if (const int status = avcodec_decode_subtitle2(transcode.decoder.get(), &subtitle, &decoded, packet); status < 0) {
+        reportDroppedEvent(transcode, "decode failed: " + avErrorText(status));
         return true;
     }
+    // no subtitle event in this packet
+    if (decoded == 0) {
+        return true;
+    }
+    const AVRational inputTimeBase = input_->streams[transcode.inputStreamIndex]->time_base;
     if (subtitle.pts == AV_NOPTS_VALUE) {
         const int64_t packetTs = (packet->pts != AV_NOPTS_VALUE) ? packet->pts : packet->dts;
         if (packetTs != AV_NOPTS_VALUE)
-            subtitle.pts = av_rescale_q(packetTs, input_->streams[transcode.inputStreamIndex]->time_base, AV_TIME_BASE_Q);
+            subtitle.pts = av_rescale_q(packetTs, inputTimeBase, AV_TIME_BASE_Q);
     }
-    bool success = true;
-    if (subtitle.pts != AV_NOPTS_VALUE) {
-        subtitle.pts += av_rescale_q(subtitle.start_display_time, AVRational{1, 1000}, AV_TIME_BASE_Q);
-        subtitle.end_display_time -= subtitle.start_display_time;
-        subtitle.start_display_time = 0;
-        constexpr size_t kSubtitleScratchCapacity = 1 << 20;
-        if (transcode.encodeScratch.empty()) {
-            transcode.encodeScratch.resize(kSubtitleScratchCapacity);
-        }
-        // encode into the reused scratch first, then allocate a packet of exactly the produced size
-        const int bytes = avcodec_encode_subtitle(transcode.encoder.get(), transcode.encodeScratch.data(), static_cast<int>(transcode.encodeScratch.size()), &subtitle);
-        AVPacketPtr outputPacket(av_packet_alloc());
-        if (bytes > 0 && outputPacket && av_new_packet(outputPacket.get(), bytes) == 0) {
-            std::memcpy(outputPacket->data, transcode.encodeScratch.data(), static_cast<size_t>(bytes));
-            const AVRational outputTimeBase = output_->streams[transcode.outputStreamIndex]->time_base;
-            outputPacket->stream_index = transcode.outputStreamIndex;
-            outputPacket->pts = av_rescale_q(subtitle.pts, AV_TIME_BASE_Q, outputTimeBase);
-            outputPacket->dts = outputPacket->pts;
-            outputPacket->duration = av_rescale_q(subtitle.end_display_time, AVRational{1, 1000}, outputTimeBase);
-            outputPacket->pos = -1;
-            success = emit(outputPacket.get(), error);
-        }
+    if (subtitle.pts == AV_NOPTS_VALUE) {
+        reportDroppedEvent(transcode, "it has no timestamp");
+        return true;
     }
-    avsubtitle_free(&subtitle);
-    return success;
+    subtitle.pts += av_rescale_q(subtitle.start_display_time, AVRational{1, 1000}, AV_TIME_BASE_Q);
+    // the display times are unsigned
+    subtitle.end_display_time = subtitle.end_display_time > subtitle.start_display_time ? subtitle.end_display_time - subtitle.start_display_time : 0;
+    subtitle.start_display_time = 0;
+    // encode into the reused scratch buffer first, then copy into a packet of exactly the produced size. 1 MiB is far more than one text
+    // event needs (mov_text stores at most 64 KiB per event)
+    constexpr size_t scratchSize = 1 << 20;
+    if (transcode.encodeScratch.empty()) {
+        transcode.encodeScratch.resize(scratchSize);
+    }
+    const int bytes = avcodec_encode_subtitle(transcode.encoder.get(), transcode.encodeScratch.data(), static_cast<int>(transcode.encodeScratch.size()), &subtitle);
+    if (bytes < 0) {
+        reportDroppedEvent(transcode, "encode failed: " + avErrorText(bytes));
+        return true;
+    }
+    // the encoder produced nothing for this event (for example, an empty event)
+    if (bytes == 0) {
+        return true;
+    }
+    AVPacketPtr outputPacket(av_packet_alloc());
+    if (!outputPacket || av_new_packet(outputPacket.get(), bytes) < 0) {
+        reportDroppedEvent(transcode, "out of memory");
+        return true;
+    }
+    std::memcpy(outputPacket->data, transcode.encodeScratch.data(), static_cast<size_t>(bytes));
+    const AVRational outputTimeBase = output_->streams[transcode.outputStreamIndex]->time_base;
+    outputPacket->stream_index = transcode.outputStreamIndex;
+    outputPacket->pts = av_rescale_q(subtitle.pts, AV_TIME_BASE_Q, outputTimeBase);
+    outputPacket->dts = outputPacket->pts;
+    // some decoders report an unknown end as a huge display time, the input packet duration caps it
+    const int64_t displayed = av_rescale_q(subtitle.end_display_time, AVRational{1, 1000}, outputTimeBase);
+    outputPacket->duration = packet->duration > 0 ? std::min(displayed, av_rescale_q(packet->duration, inputTimeBase, outputTimeBase)) : displayed;
+    outputPacket->pos = -1;
+    return emit(outputPacket.get(), error);
+}
+
+// one line per stream, the first reason is usually the reason for all of them
+void AuxiliaryMux::reportDroppedEvent(SubtitleTranscode& transcode, const std::string& reason) {
+    if (transcode.dropped++ == 0 && log_) {
+        log_(std::format("subtitle stream #{}: an event was dropped ({}), more may follow", transcode.inputStreamIndex, reason));
+    }
 }
 
 // give the packet to sink (or write directly if no sink specified)

@@ -6,6 +6,7 @@
 #include <cctype>
 #include <cerrno>
 #include <chrono>
+#include <cmath>
 #include <cstdlib>
 #include <exception>
 #include <filesystem>
@@ -24,6 +25,7 @@
 #include <utility>
 #include <vector>
 #include <WatermarkTypes.hpp>
+#include <windows.h>
 
 using namespace WatermarkCore;
 using namespace CommonUtils;
@@ -425,7 +427,7 @@ static int testForVideo(const Settings& inir, const string& videoFile, const int
     checkError(settings.watermarkPassword.empty(), "No valid watermark password specified!");
     settings.p = p;
     settings.psnr = psnr;
-    settings.watermarkInterval = std::max(1, static_cast<int>(inir.GetInteger("video", "watermark_interval", 1)));
+    settings.watermarkInterval = static_cast<int>(inir.GetInteger("video", "watermark_interval", 1));
     settings.useHwDecoder = inir.GetBoolean("compute", "cuda_hw_decoder", true);
     settings.useHwEncoder = inir.GetBoolean("compute", "cuda_hw_encoder", false);
     settings.encodeOptions = settings.useHwEncoder ? inir.Get("video", "hw_encode_options", "-c:v hevc_nvenc -preset p6 -tune hq -cq 26 -b:v 0")
@@ -547,6 +549,8 @@ static int runCliBenchmark(const Settings& settings, const float psnr, const boo
  *  \author Dimitris Karatzas
  */
 int main(const int argc, char* argv[]) {
+    // the process code page is UTF-8 (utf8.manifest), the console must print the same bytes
+    SetConsoleOutputCP(CP_UTF8);
     int exitCode = EXIT_SUCCESS;
     // Supplying any argument implies non-interactive use
     bool pauseBeforeExit = argc == 1;
@@ -568,8 +572,8 @@ int main(const int argc, char* argv[]) {
         // the generic key takes precedence while old INI files remain valid
         initializeEnvironment(inir.GetInteger("compute", "gpu_device_id", inir.GetInteger("compute", "opencl_device_id", 0)));
         const float psnr = inir.GetFloat("global", "psnr", -1.0f);
-        if (psnr <= 0)
-            throw std::runtime_error("PSNR must be a positive number");
+        if (!std::isfinite(psnr) || psnr <= 0)
+            throw std::runtime_error("PSNR must be a finite number greater than 0");
         // Run standalone benchmark if requested
         if (commandLine.benchmark)
             return runCliBenchmark(inir, psnr, commandLine.benchmarkSave);

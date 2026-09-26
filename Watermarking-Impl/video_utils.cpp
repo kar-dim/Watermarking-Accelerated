@@ -19,12 +19,16 @@
 #include <format>
 #include <functional>
 #include <iostream>
+#include <iterator>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <queue>
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <system_error>
 #include <thread>
 #include <utility>
 #include <variant>
@@ -144,6 +148,116 @@ struct EncodeQueue {
     }
 };
 
+std::string pixelFormatName(const AVPixelFormat format) {
+    const char* name = av_get_pix_fmt_name(format);
+    return name != nullptr ? name : "?";
+}
+
+std::string resolutionChangeMessage(const int expectedWidth, const int expectedHeight, const int width, const int height) {
+    return std::format("Video dimensions changed during decode (expected {}x{}, got {}x{}). Split or re-encode the source before watermarking.", expectedWidth, expectedHeight, width, height);
+}
+
+std::string pixelFormatChangeMessage(const AVPixelFormat expected, const AVPixelFormat actual) {
+    return std::format("Video pixel format changed during decode (expected {}, got {}). Split or re-encode the source before watermarking.", pixelFormatName(expected), pixelFormatName(actual));
+}
+
+// the full range (J) formats have the same layout, the parsers never report them
+AVPixelFormat withoutFullRangeAlias(const AVPixelFormat format) {
+    switch (format) {
+    case AV_PIX_FMT_YUVJ420P: return AV_PIX_FMT_YUV420P;
+    case AV_PIX_FMT_YUVJ422P: return AV_PIX_FMT_YUV422P;
+    case AV_PIX_FMT_YUVJ444P: return AV_PIX_FMT_YUV444P;
+    case AV_PIX_FMT_YUVJ440P: return AV_PIX_FMT_YUV440P;
+    case AV_PIX_FMT_YUVJ411P: return AV_PIX_FMT_YUV411P;
+    default: return format;
+    }
+}
+
+// the layout of a decoded frame, the software format for a hardware frame
+AVPixelFormat decodedPixelFormat(const AVFrame* frame) {
+    if (frame->hw_frames_ctx == nullptr)
+        return static_cast<AVPixelFormat>(frame->format);
+    return reinterpret_cast<const AVHWFramesContext*>(frame->hw_frames_ctx->data)->sw_format;
+}
+
+// reads the frame size and pixel format from the bitstream: a hardware decoder can hide a mid-stream change and keep returning
+// frames at the size it was opened with
+class StreamShapeWatch {
+  public:
+    explicit StreamShapeWatch(const AVCodecParameters* params)
+        : declaredWidth_(params->width), declaredHeight_(params->height), declaredFormat_(static_cast<AVPixelFormat>(params->format)), parser_(av_parser_init(params->codec_id)) {
+        if (!parser_)
+            return;
+        parserContext_.reset(avcodec_alloc_context3(nullptr));
+        if (!parserContext_ || avcodec_parameters_to_context(parserContext_.get(), params) < 0) {
+            parser_.reset();
+            return;
+        }
+        // only whole demuxed packets are fed
+        parser_->flags |= PARSER_FLAG_COMPLETE_FRAMES;
+    }
+
+    // empty when nothing changed, else the error message
+    std::string inspect(const AVPacket* packet) { return parse(packet->data, packet->size, packet->pts, packet->dts, packet->pos); }
+    // call once at the end of the input
+    std::string flush() { return parse(nullptr, 0, AV_NOPTS_VALUE, AV_NOPTS_VALUE, -1); }
+
+  private:
+    struct ParserDeleter {
+        void operator()(AVCodecParserContext* parser) const noexcept { av_parser_close(parser); }
+    };
+
+    std::string parse(const uint8_t* data, int size, const int64_t pts, const int64_t dts, const int64_t pos) {
+        if (!parser_)
+            return {};
+        do {
+            uint8_t* parsedData = nullptr;
+            int parsedSize = 0;
+            const int consumed = av_parser_parse2(parser_.get(), parserContext_.get(), &parsedData, &parsedSize, data, size, pts, dts, pos);
+            if (consumed < 0)
+                return {};
+            data += consumed;
+            size -= consumed;
+            if (std::string change = shapeChange(); !change.empty())
+                return change;
+            if (consumed == 0) // the parser wants more than this packet holds
+                break;
+        } while (size > 0);
+        return {};
+    }
+
+    std::string shapeChange() const {
+        if (parser_->width > 0 && parser_->height > 0 && (parser_->width != declaredWidth_ || parser_->height != declaredHeight_))
+            return resolutionChangeMessage(declaredWidth_, declaredHeight_, parser_->width, parser_->height);
+        const auto parsedFormat = static_cast<AVPixelFormat>(parser_->format);
+        if (parsedFormat != AV_PIX_FMT_NONE && declaredFormat_ != AV_PIX_FMT_NONE && withoutFullRangeAlias(parsedFormat) != withoutFullRangeAlias(declaredFormat_))
+            return pixelFormatChangeMessage(declaredFormat_, parsedFormat);
+        return {};
+    }
+
+    int declaredWidth_ = 0;
+    int declaredHeight_ = 0;
+    AVPixelFormat declaredFormat_ = AV_PIX_FMT_NONE;
+    std::unique_ptr<AVCodecParserContext, ParserDeleter> parser_;
+    AVCodecContextPtr parserContext_;
+};
+
+// pts and duration of a decoded frame: NVDEC frames have no duration and some streams have no pts, both fall back to the nominal frame rate
+FrameTiming frameTiming(VideoSession* s, const AVFrame* frame) {
+    const int64_t duration = frame->duration > 0 ? frame->duration : s->nominalFrameDuration;
+    const int64_t sourcePts = framePts(frame);
+    const int64_t pts = sourcePts != AV_NOPTS_VALUE ? sourcePts : s->nextFramePts;
+    s->nextFramePts = pts + std::max<int64_t>(1, duration);
+    return {pts, duration};
+}
+
+// the mov family times each sample by the next decode timestamp, only the last packet stores its own duration
+bool durationsFollowDecodeOrder(const AVOutputFormat* format) {
+    constexpr std::string_view movFamily[] = {"mov", "mp4", "3gp", "3g2", "psp", "ipod", "ismv", "f4v"};
+    const std::string_view name = format->name != nullptr ? format->name : "";
+    return std::ranges::find(movFamily, name) != std::end(movFamily);
+}
+
 // give an item to the encode thread, abandoning the decode loop if that thread has already failed
 void pushToEncoder(EncodeQueue& queue, EncodeQueue::Item item) { checkError(!queue.push(std::move(item)), "Encode thread stopped, aborting the decode loop"); }
 
@@ -184,6 +298,14 @@ bool nvdecUnsupportedFormat(const AVCodecParameters* codecParams) {
     return format != nullptr && (format->log2_chroma_w != 1 || format->log2_chroma_h != 1 || format->comp[0].depth > 10);
 }
 
+// the CUDA HDR -> SDR kernels decode limited range BT.2020 (non-constant luminance) PQ only, the software path (zscale) reads the
+// transfer and matrix of the source, HLG and other matrices and full range HDR go there
+bool nvdecTonemapUnsupported(const AVCodecParameters* codecParams) {
+    const bool hdr = codecParams->color_trc == AVCOL_TRC_SMPTE2084 || codecParams->color_trc == AVCOL_TRC_ARIB_STD_B67;
+    const bool bt2020 = codecParams->color_space == AVCOL_SPC_BT2020_NCL || codecParams->color_space == AVCOL_SPC_UNSPECIFIED;
+    return hdr && (codecParams->color_trc != AVCOL_TRC_SMPTE2084 || !bt2020 || codecParams->color_range == AVCOL_RANGE_JPEG);
+}
+
 const char* cuvidNameFor(const AVCodecID codecId) {
     switch (codecId) {
     case AV_CODEC_ID_H264: return "h264_cuvid";
@@ -214,6 +336,13 @@ AVCodecContextPtr openDecoderHWAccel(const AVCodecParameters* inputCodecParams, 
     }
     if (nvdecUnsupportedFormat(inputCodecParams)) {
         cout << info("NVDEC cannot use this source chroma format or bit depth; falling back to software decoder (CPU).\n");
+        return openSoftwareDecoder(inputCodecParams, pktTimebase);
+    }
+    if (nvdecTonemapUnsupported(inputCodecParams)) {
+        const char* transfer = av_color_transfer_name(inputCodecParams->color_trc);
+        const char* matrix = av_color_space_name(inputCodecParams->color_space);
+        cout << info(std::format("NVDEC HDR tonemapping supports limited range BT.2020 PQ only (input: {}, {}, {} range), falling back to software decoder (CPU).\n", transfer ? transfer : "?",
+            matrix ? matrix : "?", inputCodecParams->color_range == AVCOL_RANGE_JPEG ? "full" : "limited"));
         return openSoftwareDecoder(inputCodecParams, pktTimebase);
     }
     const AVCodec* inputDecoder = avcodec_find_decoder_by_name(decoderName);
@@ -279,7 +408,7 @@ AVCodecContextPtr openDecoderHWAccel(const AVCodecParameters* inputCodecParams, 
 
 // Decide the filter graph based on input depth, HDR status, and decoder type:
 // 8-bit SDR (any decoder) -> "" (no filter needed)
-// 10-bit SDR + NVDEC -> scale_cuda=format=nv12 (GPU 10->8-bit downscale)
+// 10-bit SDR + NVDEC -> scale_cuda=format=nv12 (GPU 10-bit to 8-bit conversion)
 // 10-bit SDR + SW decoder -> format=yuv420p (CPU 10->8-bit)
 // HDR + NVDEC -> "" (tonemapped by custom CUDA kernels in embedWatermarkHWAccel)
 // HDR + SW decoder -> zscale+tonemap (CPU tonemap)
@@ -287,7 +416,7 @@ string getFilterGraphString(const VideoSession* s) {
     if (!is10bit(s->inputDecoderCtx.get(), s->videoStream))
         return ""; // 8-bit SDR, no filtering (save processing time)
     if (!isHDR(s->inputDecoderCtx.get()))
-        return s->useHwDecoder ? "scale_cuda=format=nv12" : "format=yuv420p"; // 10-bit SDR, fast downscale to 8-bit
+        return s->useHwDecoder ? "scale_cuda=format=nv12" : "format=yuv420p"; // 10-bit SDR, fast conversion to 8-bit
     // NVDEC + HDR: conversion is done by CUDA kernels, no filter graph needed
     if (s->useHwDecoder)
         return "";
@@ -402,7 +531,17 @@ void fillYPlane(const AVFrame* frame, VideoSession* s, AVFrame* encFrame = nullp
     embedAndFillYPlane(s, s->inputFrame, encFrame);
 }
 
-// pull all ready packets from the encoder and write them to the output container (non-blocking)
+// writes the held packet to the output container
+void writeHeldPacket(VideoSession* s) {
+    if (!s->holdingPacket)
+        return;
+    s->holdingPacket = false;
+    const int writeStatus = av_interleaved_write_frame(s->outputFormatCtx.get(), s->heldPacket.get());
+    av_packet_unref(s->heldPacket.get());
+    checkAv(writeStatus, "Failed to write encoded video packet");
+}
+
+// pull all ready packets from the encoder and write them to the output container (non-blocking), the newest one is held back
 void drainEncoderPackets(VideoSession* s) {
     const AVPacketPtr pkt(av_packet_alloc());
     checkError(!pkt, "Failed to allocate encoder output packet");
@@ -421,9 +560,28 @@ void drainEncoderPackets(VideoSession* s) {
             cout << info("Encoder emitted invalid or non-monotonic video DTS, repairing output timestamps.\n");
             s->reportedDtsRepair = true;
         }
-        checkAv(av_interleaved_write_frame(s->outputFormatCtx.get(), pkt.get()), "Failed to write encoded video packet");
-        av_packet_unref(pkt.get());
+        if (s->encodedPackets == 0 && pkt->pts != AV_NOPTS_VALUE && pkt->dts != AV_NOPTS_VALUE)
+            s->firstReorderDelay = pkt->pts - pkt->dts;
+        if (pkt->pts != AV_NOPTS_VALUE && pkt->duration > 0) {
+            const int64_t packetEnd = pkt->pts + pkt->duration;
+            s->presentationEnd = s->presentationEnd == AV_NOPTS_VALUE ? packetEnd : std::max(s->presentationEnd, packetEnd);
+        }
+        writeHeldPacket(s);
+        av_packet_move_ref(s->heldPacket.get(), pkt.get());
+        s->holdingPacket = true;
+        s->encodedPackets++;
     }
+}
+
+// closes the output file and reports write errors, also the ones the final flush hits (for example, a full disk)
+void closeOutputFile(VideoSession* s) {
+    AVFormatContext* output = s->outputFormatCtx.get();
+    if (output->pb == nullptr || (output->oformat->flags & AVFMT_NOFILE))
+        return;
+    avio_flush(output->pb);
+    const int writeStatus = output->pb->error;
+    const int closeStatus = avio_closep(&output->pb);
+    checkAv(writeStatus < 0 ? writeStatus : closeStatus, "Failed to write the output file");
 }
 
 // encode thread: pops items, encodes frames OR writes passthrough packets, it is the
@@ -456,7 +614,7 @@ void encodeWorker(VideoSession* s, EncodeQueue& queue, std::exception_ptr& encEr
 #if defined(_USE_CUDA_)
 // NVDEC+NVENC zero-copy: copy the CUDA Y (row-major, ySrc with yPitch) + UV planes into a hw AVFrame and give it to the encode thread
 // uvOverride: when not null, use this preconverted uint8_t NV12 UV (HDR path) instead of srcFrame->data[1]
-void encodeFrameGPU(VideoSession* s, const uint8_t* ySrc, const int yPitch, const AVFrame* srcFrame, const int64_t pts, EncodeQueue& queue, const uint8_t* uvOverride = nullptr) {
+void encodeFrameGPU(VideoSession* s, const uint8_t* ySrc, const int yPitch, const AVFrame* srcFrame, const FrameTiming& timing, EncodeQueue& queue, const uint8_t* uvOverride = nullptr) {
     const auto [height, width] = s->videoDims();
     const auto stream = CudaStreamManager::getInstance().getComputeStream();
     AVFramePtr encFrame(av_frame_alloc());
@@ -464,8 +622,8 @@ void encodeFrameGPU(VideoSession* s, const uint8_t* ySrc, const int yPitch, cons
     encFrame->format = AV_PIX_FMT_CUDA;
     encFrame->width = width;
     encFrame->height = height;
-    encFrame->pts = pts;
-    encFrame->duration = srcFrame->duration;
+    encFrame->pts = timing.pts;
+    encFrame->duration = timing.duration;
     checkError(av_hwframe_get_buffer(s->outputEncoderCtx->hw_frames_ctx, encFrame.get(), 0) < 0, "Failed to get NVENC hw frame buffer");
     CUDA_CHECK(cudaMemcpy2DAsync(encFrame->data[0], encFrame->linesize[0], ySrc, yPitch, width, height, cudaMemcpyDeviceToDevice, stream));
     // HDR path passes preconverted uint8_t NV12 UV (stride=width) -> SDR path copies directly from decoded frame
@@ -479,7 +637,7 @@ void encodeFrameGPU(VideoSession* s, const uint8_t* ySrc, const int yPitch, cons
 
 // CPU embedding writes Y directly into this frame, GPU output comes from hostFrame
 // chroma comes from the decoded frame when available, otherwise from hostFrame
-AVFramePtr buildEncFrame(VideoSession* s, const int64_t pts, const AVFrame* srcChromaFrame = nullptr, const int64_t duration = 0, const bool copyHostY = true) {
+AVFramePtr buildEncFrame(VideoSession* s, const FrameTiming& timing, const AVFrame* srcChromaFrame = nullptr, const bool copyHostY = true) {
     const auto [height, width] = s->videoDims();
     const uint8_t* src = nullptr;
     if (copyHostY || !srcChromaFrame) {
@@ -491,8 +649,8 @@ AVFramePtr buildEncFrame(VideoSession* s, const int64_t pts, const AVFrame* srcC
     encFrame->format = AV_PIX_FMT_YUV420P;
     encFrame->width = width;
     encFrame->height = height;
-    encFrame->pts = pts;
-    encFrame->duration = duration;
+    encFrame->pts = timing.pts;
+    encFrame->duration = timing.duration;
     checkError(av_frame_get_buffer(encFrame.get(), 0) < 0, "Failed to allocate encoder frame buffer");
     if (copyHostY) {
         if (encFrame->linesize[0] == width)
@@ -522,18 +680,19 @@ AVFramePtr buildEncFrame(VideoSession* s, const int64_t pts, const AVFrame* srcC
 
 // SW-decode embed: always runs on the async encode thread path.
 void embedWatermark(VideoSession* s, int& framesCount, const AVFrame* frame, EncodeQueue& queue) {
+    const FrameTiming timing = frameTiming(s, frame);
     const bool doEmbed = framesCount % s->settings.watermarkInterval == 0;
     if (doEmbed) {
         cout << std::format(" [Embedding frame {}]\n", framesCount + 1);
 #if defined(_USE_EIGEN_)
         // the encoder frame owns the destination while the encode thread processes earlier frames
-        auto encFrame = buildEncFrame(s, framePts(frame), frame, frame->duration, false);
+        auto encFrame = buildEncFrame(s, timing, frame, false);
         fillYPlane(frame, s, encFrame.get());
         pushToEncoder(queue, std::move(encFrame));
 #else
         fillYPlane(frame, s);
         // chroma goes decoded frame → encFrame directly inside buildEncFrame (no hostFrame hop)
-        pushToEncoder(queue, buildEncFrame(s, framePts(frame), frame, frame->duration));
+        pushToEncoder(queue, buildEncFrame(s, timing, frame));
 #endif
     } else {
         // passthrough: take a refcounted reference to the decoded frame (zero data copy)
@@ -543,7 +702,8 @@ void embedWatermark(VideoSession* s, int& framesCount, const AVFrame* frame, Enc
         // encoder context already carries color_range=AVCOL_RANGE_JPEG, so players can understand it's full range
         if (ref->format == AV_PIX_FMT_YUVJ420P)
             ref->format = AV_PIX_FMT_YUV420P;
-        ref->pts = framePts(frame);
+        ref->pts = timing.pts;
+        ref->duration = timing.duration;
         pushToEncoder(queue, std::move(ref));
     }
     framesCount++;
@@ -561,18 +721,22 @@ void detectWatermark(VideoSession* s, int& framesCount, const AVFrame* frame) {
 }
 
 #if defined(_USE_CUDA_)
-// read HDR peak luminance from stream MaxCLL side data, normalized to 100 units (nits / 100)
-// falls back to 10.0 (1000 nits) which is the most common
+// HDR peak luminance in units of 100 nits: the mastering display peak, else MaxCLL, else 1000 nits (the HDR10 reference)
 static float getHdrPeak(const VideoSession* s) {
-    for (int i = 0; i < s->videoStream->codecpar->nb_coded_side_data; i++) {
-        const AVPacketSideData& sd = s->videoStream->codecpar->coded_side_data[i];
-        if (sd.type == AV_PKT_DATA_CONTENT_LIGHT_LEVEL) {
-            const auto* cll = reinterpret_cast<const AVContentLightMetadata*>(sd.data);
-            if (cll->MaxCLL > 0)
-                return static_cast<float>(cll->MaxCLL) / 100.0f;
-        }
+    const AVCodecParameters* params = s->videoStream->codecpar;
+    const AVPacketSideData* mastering = av_packet_side_data_get(params->coded_side_data, params->nb_coded_side_data, AV_PKT_DATA_MASTERING_DISPLAY_METADATA);
+    if (mastering != nullptr && mastering->size >= sizeof(AVMasteringDisplayMetadata)) {
+        const auto* display = reinterpret_cast<const AVMasteringDisplayMetadata*>(mastering->data);
+        if (display->has_luminance != 0 && display->max_luminance.num > 0 && display->max_luminance.den != 0)
+            return static_cast<float>(av_q2d(display->max_luminance) / 100.0);
     }
-    return 10.0f; // 1000 nits default
+    const AVPacketSideData* light = av_packet_side_data_get(params->coded_side_data, params->nb_coded_side_data, AV_PKT_DATA_CONTENT_LIGHT_LEVEL);
+    if (light != nullptr && light->size >= sizeof(AVContentLightMetadata)) {
+        const auto* contentLight = reinterpret_cast<const AVContentLightMetadata*>(light->data);
+        if (contentLight->MaxCLL > 0)
+            return static_cast<float>(contentLight->MaxCLL) / 100.0f;
+    }
+    return 10.0f;
 }
 
 // HDR helpers: convert P010LE CUDA planes to SDR format
@@ -598,6 +762,7 @@ void embedWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* fra
     const bool doEmbed = framesCount % s->settings.watermarkInterval == 0;
     const bool isHdr = s->isHdr;
     const MobiusParams& mobius = s->mobius;
+    const FrameTiming timing = frameTiming(s, frame);
 
     if (doEmbed)
         cout << std::format(" [Embedding frame {}]\n", framesCount + 1);
@@ -625,9 +790,9 @@ void embedWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* fra
         }
         if (isHdr) {
             CudaArray<uint8_t> uvNV12 = convertHdrUV(s, frame, mobius, stream);
-            encodeFrameGPU(s, ySrc, yPitch, frame, framePts(frame), queue, uvNV12.data());
+            encodeFrameGPU(s, ySrc, yPitch, frame, timing, queue, uvNV12.data());
         } else {
-            encodeFrameGPU(s, ySrc, yPitch, frame, framePts(frame), queue);
+            encodeFrameGPU(s, ySrc, yPitch, frame, timing, queue);
         }
     } else {
         // NVDEC + SW encoder
@@ -657,7 +822,7 @@ void embedWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* fra
                 CUDA_CHECK(cudaStreamSynchronize(stream));
             }
         }
-        pushToEncoder(queue, buildEncFrame(s, framePts(frame), nullptr, frame->duration));
+        pushToEncoder(queue, buildEncFrame(s, timing));
     }
     framesCount++;
 }
@@ -694,6 +859,7 @@ int processFrames(VideoSession* s, const bool needsFilter, Func&& processFrameAr
         filteredFrame.reset(av_frame_alloc());
     int framesCount = 0;
     long long droppedPackets = 0;
+    StreamShapeWatch shapeWatch(s->videoStream->codecpar);
 
     auto drainDecodedFrames = [&] {
         while (true) {
@@ -702,9 +868,9 @@ int processFrames(VideoSession* s, const bool needsFilter, Func&& processFrameAr
                 break;
             checkAv(ret, "FFmpeg decoding error");
             const auto [expectedHeight, expectedWidth] = s->videoDims();
-            checkError(frame->width != expectedWidth || frame->height != expectedHeight,
-                std::format("Video dimensions changed during decode (expected {}x{}, got {}x{}). Split or re-encode the source before watermarking.", expectedWidth, expectedHeight, frame->width,
-                    frame->height));
+            checkError(frame->width != expectedWidth || frame->height != expectedHeight, resolutionChangeMessage(expectedWidth, expectedHeight, frame->width, frame->height));
+            const AVPixelFormat frameFormat = decodedPixelFormat(frame.get());
+            checkError(frameFormat != s->decodedFormat, pixelFormatChangeMessage(s->decodedFormat, frameFormat));
             if (needsFilter)
                 filterFrame(frame, filteredFrame, s);
             processFrame(frame.get(), framesCount);
@@ -715,9 +881,13 @@ int processFrames(VideoSession* s, const bool needsFilter, Func&& processFrameAr
         const int readRet = av_read_frame(s->inputFormatCtx.get(), packet.get());
         if (readRet < 0) {
             checkError(readRet != AVERROR_EOF, std::format("Reading input video failed after {} frames: {}", framesCount, avErrorText(readRet)));
+            const std::string change = shapeWatch.flush();
+            checkError(!change.empty(), change);
             break;
         }
         if (packet->stream_index == s->videoStreamIndex) {
+            const std::string change = shapeWatch.inspect(packet.get());
+            checkError(!change.empty(), change);
             int sendRet = avcodec_send_packet(s->inputDecoderCtx.get(), packet.get());
             while (sendRet == AVERROR(EAGAIN)) {
                 drainDecodedFrames();
@@ -787,12 +957,15 @@ bool initFilterGraph(VideoSession* s) {
     AVFilterContext* srcCtx = avfilter_graph_alloc_filter(graphPtr.get(), bufferSrc, "in");
     checkError(!srcCtx, exceptionMessage + "avfilter_graph_alloc_filter");
 
+    AVBufferSrcParametersPtr par(av_buffersrc_parameters_alloc());
+    checkError(!par, exceptionMessage + "av_buffersrc_parameters_alloc");
+    // the frames carry the source colorspace and range, the graph must start with the same values or it warns on the first frame
+    par->color_space = s->inputDecoderCtx->colorspace;
+    par->color_range = s->inputDecoderCtx->color_range;
+    AVBufferRefPtr hwFramesRef;
     if (s->useHwDecoder) {
-        AVBufferSrcParametersPtr par(av_buffersrc_parameters_alloc());
-        checkError(!par, exceptionMessage + "av_buffersrc_parameters_alloc");
         par->format = s->inputDecoderCtx->pix_fmt;
         par->time_base = timeBase;
-        AVBufferRefPtr hwFramesRef;
         if (s->inputDecoderCtx->hw_frames_ctx)
             hwFramesRef.reset(av_buffer_ref(s->inputDecoderCtx->hw_frames_ctx));
         else if (s->inputDecoderCtx->hw_device_ctx) {
@@ -810,8 +983,8 @@ bool initFilterGraph(VideoSession* s) {
         }
         if (hwFramesRef)
             par->hw_frames_ctx = hwFramesRef.get();
-        checkError(av_buffersrc_parameters_set(srcCtx, par.get()) < 0, exceptionMessage + "av_buffersrc_parameters_set");
     }
+    checkError(av_buffersrc_parameters_set(srcCtx, par.get()) < 0, exceptionMessage + "av_buffersrc_parameters_set");
     checkError(avfilter_init_str(srcCtx, args.c_str()) < 0, exceptionMessage + "avfilter_init_str");
 
     AVFilterContext* sinkCtx = avfilter_graph_alloc_filter(graphPtr.get(), bufferSink, "out");
@@ -899,7 +1072,7 @@ int videoDispatcher(VideoSession* s, VideoMode op, const bool needsFilter) {
 
 void initOutputEncoder(VideoSession* s) {
     checkError(s->settings.encodeOutputPath.empty(), "No output path specified for video encode");
-    checkError(sameFileOnDisk(s->settings.videoFile, s->settings.encodeOutputPath),
+    checkError(sameFileOnDisk(pathFromUtf8(s->settings.videoFile), pathFromUtf8(s->settings.encodeOutputPath)),
         "Output path points to the same physical file as the input file (" + s->settings.encodeOutputPath + "). Overwriting the input video is forbidden.");
 
     ParsedEncodeOptions parsed = parseEncodeOptions(s->settings.encodeOptions);
@@ -952,7 +1125,7 @@ void initOutputEncoder(VideoSession* s) {
     const bool useGpuPipeline = s->useHwDecoder && s->settings.useHwEncoder;
     encCtx->pix_fmt = useGpuPipeline ? AV_PIX_FMT_CUDA : AV_PIX_FMT_YUV420P;
     encCtx->time_base = s->videoStream->time_base;
-    encCtx->framerate = s->videoStream->avg_frame_rate;
+    encCtx->framerate = s->frameRate;
     encCtx->sample_aspect_ratio = s->videoStream->codecpar->sample_aspect_ratio;
 
     // if we tonemapped HDR->SDR write SDR metadata, not the original HDR flags
@@ -960,7 +1133,10 @@ void initOutputEncoder(VideoSession* s) {
     encCtx->color_range = s->videoStream->codecpar->color_range;
     encCtx->color_primaries = inputIsHDR ? AVCOL_PRI_BT709 : s->inputDecoderCtx->color_primaries;
     encCtx->color_trc = inputIsHDR ? AVCOL_TRC_BT709 : s->inputDecoderCtx->color_trc;
-    encCtx->colorspace = inputIsHDR ? AVCOL_SPC_BT709 : s->inputDecoderCtx->colorspace;
+    const AVColorSpace sourceMatrix = s->inputDecoderCtx->colorspace == AVCOL_SPC_RESERVED ? AVCOL_SPC_UNSPECIFIED : s->inputDecoderCtx->colorspace;
+    encCtx->colorspace = inputIsHDR ? AVCOL_SPC_BT709 : sourceMatrix;
+    // the chroma planes are passed through, they keep the source sample position
+    encCtx->chroma_sample_location = s->inputDecoderCtx->chroma_sample_location;
     if (s->outputFormatCtx->oformat->flags & AVFMT_GLOBALHEADER)
         encCtx->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
 
@@ -994,25 +1170,29 @@ void initOutputEncoder(VideoSession* s) {
     checkError(!outVideoStream, "Failed to create output video stream");
     checkAv(avcodec_parameters_from_context(outVideoStream->codecpar, encCtx.get()), "Failed to copy encoder parameters to output video stream");
     outVideoStream->time_base = encCtx->time_base;
+    // matroska derives its default duration from this and without it the packet durations are dropped
+    outVideoStream->avg_frame_rate = encCtx->framerate;
     if (useGpuPipeline)
         outVideoStream->codecpar->format = AV_PIX_FMT_YUV420P;
     if (!parsed.codecTag.empty())
         outVideoStream->codecpar->codec_tag = codecTagFromString(parsed.codecTag);
 
-    // copy side data (rotation, display matrix) -> skip HDR metadata when tonemapped to SDR
-    for (int i = 0; i < s->videoStream->codecpar->nb_coded_side_data; i++) {
-        const AVPacketSideData& sd = s->videoStream->codecpar->coded_side_data[i];
-        if (inputIsHDR && (sd.type == AV_PKT_DATA_MASTERING_DISPLAY_METADATA || sd.type == AV_PKT_DATA_CONTENT_LIGHT_LEVEL))
-            continue;
-        AVPacketSideData* dst = av_packet_side_data_new(&outVideoStream->codecpar->coded_side_data, &outVideoStream->codecpar->nb_coded_side_data, sd.type, sd.size, 0);
-        if (dst)
-            std::memcpy(dst->data, sd.data, sd.size);
+    // only the display matrix (rotation) is copied, the other side data describes the source bitstream (and HDR is tonemapped to SDR)
+    const AVCodecParameters* inputParams = s->videoStream->codecpar;
+    if (const AVPacketSideData* displayMatrix = av_packet_side_data_get(inputParams->coded_side_data, inputParams->nb_coded_side_data, AV_PKT_DATA_DISPLAYMATRIX)) {
+        AVPacketSideData* copied =
+            av_packet_side_data_new(&outVideoStream->codecpar->coded_side_data, &outVideoStream->codecpar->nb_coded_side_data, AV_PKT_DATA_DISPLAYMATRIX, displayMatrix->size, 0);
+        if (copied)
+            std::memcpy(copied->data, displayMatrix->data, displayMatrix->size);
     }
     // carry the video stream's tags and disposition, rotate is dropped
     av_dict_copy(&outVideoStream->metadata, s->videoStream->metadata, 0);
     av_dict_set(&outVideoStream->metadata, "rotate", nullptr, 0);
     outVideoStream->disposition = s->videoStream->disposition;
     s->outputVideoStreamIndex = outVideoStream->index;
+    s->stretchLastPacket = durationsFollowDecodeOrder(s->outputFormatCtx->oformat);
+    s->heldPacket.reset(av_packet_alloc());
+    checkError(!s->heldPacket, "Failed to allocate encoder output packet");
 
     // remux audio tracks and transcode subtitles via AuxiliaryMux
     AuxiliaryMuxSetup auxSetup;
@@ -1028,8 +1208,10 @@ void initOutputEncoder(VideoSession* s) {
     checkError(!auxConfigured, auxError);
 
     // open the output file and write the container header
-    if (!(s->outputFormatCtx->oformat->flags & AVFMT_NOFILE))
+    if (!(s->outputFormatCtx->oformat->flags & AVFMT_NOFILE)) {
         checkAv(avio_open(&s->outputFormatCtx->pb, s->settings.encodeOutputPath.c_str(), AVIO_FLAG_WRITE), "Failed to open output file: " + s->settings.encodeOutputPath);
+        s->outputFileCreated = true;
+    }
     s->outputFormatCtx->max_interleave_delta = 0;
 
     // leftover unconsumed options (like -movflags +faststart) go to the container muxer
@@ -1053,7 +1235,24 @@ void flushAndFinalize(VideoSession* s) {
     }
     checkError(sendRet < 0 && sendRet != AVERROR_EOF, "Failed to flush encoder: " + avErrorText(sendRet));
     drainEncoderPackets(s);
+    checkError(s->encodedPackets == 0, "The encoder produced no video packets. No valid output was written.");
+    // the reader ends the track at the last decode timestamp plus its duration, shifted by the first reorder delay
+    if (s->holdingPacket && s->stretchLastPacket && s->presentationEnd != AV_NOPTS_VALUE && s->heldPacket->dts != AV_NOPTS_VALUE) {
+        const int64_t decodeEnd = s->heldPacket->dts + s->firstReorderDelay;
+        s->heldPacket->duration = std::max(s->heldPacket->duration, s->presentationEnd - decodeEnd);
+    }
+    writeHeldPacket(s);
     checkAv(av_write_trailer(s->outputFormatCtx.get()), "Failed to write container trailer (output file may be truncated)");
+    closeOutputFile(s);
+}
+
+void discardOutput(VideoSession* s) noexcept {
+    if (!s->outputFileCreated)
+        return;
+    s->outputFormatCtx.reset(); // closes the file
+    s->outputFileCreated = false;
+    std::error_code ignored;
+    std::filesystem::remove(pathFromUtf8(s->settings.encodeOutputPath), ignored);
 }
 
 } // namespace video_utils
