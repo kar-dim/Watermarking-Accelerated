@@ -86,8 +86,19 @@ void cimgAlphaZero(Gray8BufferIO& rgb, const Gray8BufferIO& alpha) {
     uint8_t* G = R + planeSize;
     uint8_t* B = G + planeSize;
     const uint8_t* A = alpha.data();
+    // 32 pixels per step (clang does not vectorize the scalar loop!)
+    constexpr int lanes = 32;
+    const int blocks = planeSize / lanes;
 #pragma omp parallel for schedule(static)
-    for (int i = 0; i < planeSize; i++) {
+    for (int block = 0; block < blocks; block++) {
+        const size_t offset = static_cast<size_t>(block) * lanes;
+        const __m256i transparent = _mm256_cmpeq_epi8(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(A + offset)), _mm256_setzero_si256());
+        for (uint8_t* plane : {R, G, B}) {
+            __m256i* pixels = reinterpret_cast<__m256i*>(plane + offset);
+            _mm256_storeu_si256(pixels, _mm256_andnot_si256(transparent, _mm256_loadu_si256(pixels)));
+        }
+    }
+    for (int i = blocks * lanes; i < planeSize; i++) {
         const uint8_t mask = A[i] ? 0xFF : 0;
         R[i] &= mask;
         G[i] &= mask;
