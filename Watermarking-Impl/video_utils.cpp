@@ -1,6 +1,7 @@
 #include "AuxiliaryMux.hpp"
 #include "AvUtil.hpp"
 #include "buffer.hpp"
+#include "common_utils.hpp"
 #include "EncodeOptions.hpp"
 #include "include/WatermarkCore.hpp"
 #include "utils.hpp"

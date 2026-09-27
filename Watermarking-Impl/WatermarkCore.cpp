@@ -1,11 +1,11 @@
+#include "AvUtil.hpp"
 #include "buffer.hpp"
-#include "HostMemory.hpp"
+#include "common_utils.hpp"
 #include "ImageFileBuffer.hpp"
 #include "include/WatermarkCore.hpp"
 #include "utils.hpp"
 #include "video_utils.hpp"
 #include "VideoProcessingContext.hpp"
-#include "simd.hpp"
 #include "WatermarkBase.hpp"
 #include <algorithm>
 #include <array>
@@ -28,9 +28,11 @@
 #include "CudaCheck.hpp"
 #include "CudaStreamManager.hpp"
 #include "CudaArray.hpp"
+#include "HostMemory.hpp"
 #include "cuda_utils.hpp"
 #include <cuda_runtime.h>
 #elif defined(_USE_OPENCL_)
+#include "HostMemory.hpp"
 #include "OclQueueManager.hpp"
 #include "opencl_utils.hpp"
 #elif defined(_USE_EIGEN_)

@@ -1,7 +1,6 @@
 #pragma once
 
 #include "buffer.hpp"
-#include "common_utils.hpp"
 #include "ImageFileBuffer.hpp"
 #include "WatermarkBase.hpp"
 #include <memory>

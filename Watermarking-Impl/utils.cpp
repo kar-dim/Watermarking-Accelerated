@@ -1,4 +1,5 @@
 #include "buffer.hpp"
+#include "common_utils.hpp"
 #include "ImageFileBuffer.hpp"
 #include "TinyEXIF.h"
 #include "utils.hpp"
@@ -14,6 +15,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+
 #if defined(_USE_OPENCL_)
 #include "OclQueueManager.hpp"
 #include "OclArray.hpp"

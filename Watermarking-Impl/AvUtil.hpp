@@ -18,6 +18,7 @@
 extern "C" {
 #include "libavcodec/avcodec.h"
 #include "libavcodec/codec.h"
+#include "libavcodec/packet.h"
 #include "libavutil/avutil.h"
 #include "libavutil/dict.h"
 #include "libavutil/error.h"
