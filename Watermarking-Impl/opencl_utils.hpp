@@ -2,6 +2,7 @@
 #include "OclQueueManager.hpp"
 #include "opencl_init.h"
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <stdexcept>
@@ -49,6 +50,9 @@ int workGroupSize(const cl::Program& program);
 // helper method to build utility opencl kernels from source (no WINDOW_SIZE dependency)
 cl::Program buildUtilityKernels();
 
+// builds the watermark generation kernels (exact arithmetic: not in the utility program, it is built with unsafe math)
+cl::Program buildGenerationKernels();
+
 // WATERMARK_OPENCL_FORCE_PORTABLE_REDUCTIONS=1 disables optimized reductions
 bool forcePortableReductionsRequested();
 
@@ -78,8 +82,9 @@ struct OpenCLKernelCache {
     }
 };
 
-// cache for utility kernels (transpose, etc) it is per device, not per p
-struct UtilityKernelCache {
+// cache for a program that does not depend on p (utility kernels, watermark generation), one per device
+template <cl::Program (*build)()>
+struct DeviceProgramCache {
     static cl::Program getProgram() {
         static std::unordered_map<int, cl::Program> programs;
         static uint32_t cachedGeneration = 0;
@@ -91,10 +96,18 @@ struct UtilityKernelCache {
         }
         const int deviceId = mgr.getDeviceIndex();
         if (programs.find(deviceId) == programs.end())
-            programs[deviceId] = buildUtilityKernels();
+            programs[deviceId] = build();
         return programs[deviceId];
     }
 };
+using UtilityKernelCache = DeviceProgramCache<buildUtilityKernels>;
+using GenerationKernelCache = DeviceProgramCache<buildGenerationKernels>;
+
+// watermark generation (ChaCha20 + Box-Muller): "numElements" half values from the ChaCha20 start state
+void launchGenerateWatermarkKernel(const std::array<uint32_t, 16>& baseState, const cl::Buffer& watermark, const int64_t numElements, cl::CommandQueue& queue);
+
+// TEST ONLY kernel: the Box-Muller transform of the generation kernel on (x1, x2) pairs of 24-bit random values, writes (z0, z1) pairs
+void launchBoxMullerKernel(const cl::Buffer& randomPairs, const cl::Buffer& normals, const int pairs, cl::CommandQueue& queue);
 
 // calculate the maximum power of two work group size for a device
 unsigned int maxPow2WorkGroupSize(const cl::Device& device);
@@ -103,14 +116,18 @@ unsigned int maxPow2WorkGroupSize(const cl::Device& device);
 // (one slot per subgroup on the optimized path, one per work-item on the fallback)
 std::size_t reductionScratchBytes(const cl::Program& program, const char* kernelName, const cl::NDRange& localRange, std::size_t valuesPerReduction);
 
-// row-major planar uchar RGB -> column-major planar uchar RGB + column-major float luma, one tiled transpose
-void launchRowMajorRgbToColMajor(const cl::Buffer& src, const cl::Buffer& rgbDst, const cl::Buffer& grayDst, const int width, const int height, cl::CommandQueue& queue);
+// row-major planar uchar image (1 or 3 channels) -> the displayed (EXIF oriented) column-major planar uchar RGB + column-major float luma, and the optional display copy
+void launchOrientRowMajorToColMajor(const cl::Buffer& src, const cl::Buffer& rgbDst, const cl::Buffer& grayDst, const cl::Buffer& display, const int srcWidth, const int srcHeight, const int channels,
+    const int orientation, cl::CommandQueue& queue);
 
 // uint8 col-major to float col-major grayscale on GPU, with optional RGB weighting
 void launchU8ToFloatGray(const cl::Buffer& input, const cl::Buffer& output, const int planeSize, const int numChannels, cl::CommandQueue& queue);
 
 // coalesced tiled transpose: column-major uchar -> row-major uchar on GPU, multichannel via z-dimension
 void launchColMajorToRowMajorU8(const cl::Buffer& src, const cl::Buffer& dst, const int width, const int height, const int channels, cl::CommandQueue& queue);
+
+// coalesced tiled transpose: column-major planar uchar -> row-major interleaved uchar (RGBRGB..., the display layout) on GPU
+void launchColMajorToInterleavedU8(const cl::Buffer& src, const cl::Buffer& dst, const int width, const int height, const int channels, cl::CommandQueue& queue);
 
 // coalesced tiled transpose: row-major uchar (with pitch) -> column-major float on GPU (port of CUDA pitchedToFloat kernel)
 void launchPitchedToFloat(const cl::Buffer& src, const cl::Buffer& dst, const int width, const int height, const int pitch, cl::CommandQueue& queue);

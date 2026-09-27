@@ -132,6 +132,16 @@ class CudaArray {
         }
     }
 
+    // if the destination needs a pitch, we can use cudaMemcpy2DAsync to copy the data row by row, with the specified pitch for the destination
+    void toHostPitched(T* dst, const int rowElements, const size_t dstPitchBytes) const {
+        if (ptr_) {
+            const size_t rowBytes = static_cast<size_t>(rowElements) * sizeof(T);
+            CUDA_CHECK(selectOwnDevice());
+            CUDA_CHECK(cudaMemcpy2DAsync(dst, dstPitchBytes, ptr_, rowBytes, rowBytes, size() / rowElements, cudaMemcpyDeviceToHost, stream));
+            CUDA_CHECK(cudaStreamSynchronize(stream));
+        }
+    }
+
     static CudaArray zeros(const int count, cudaStream_t stream) {
         CudaArray arr(count, stream);
         arr.fillZero();

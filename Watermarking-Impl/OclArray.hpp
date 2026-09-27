@@ -131,6 +131,16 @@ class OclArray {
             checkCl(clEnqueueReadBuffer(queue, mem, CL_FALSE, 0, bytes(), dst, 0, nullptr, nullptr), "clEnqueueReadBuffer");
     }
 
+    // if the destination needs a pitch, we can use cudaMemcpy2DAsync to copy the data row by row, with the specified pitch for the destination
+    void toHostPitched(T* dst, const int rowElements, const size_t dstPitchBytes) const {
+        if (mem) {
+            const size_t rowBytes = static_cast<size_t>(rowElements) * sizeof(T);
+            const size_t origin[3] = {0, 0, 0};
+            const size_t region[3] = {rowBytes, static_cast<size_t>(size() / rowElements), 1};
+            checkCl(clEnqueueReadBufferRect(queue, mem, CL_TRUE, origin, origin, region, rowBytes, 0, dstPitchBytes, 0, dst, 0, nullptr, nullptr), "clEnqueueReadBufferRect");
+        }
+    }
+
     static OclArray zeros(const int count, cl_command_queue queue) {
         OclArray arr(count, queue);
         arr.fillZero();

@@ -31,10 +31,10 @@ void SingleImageWorker::run() {
         // The core supplies oriented display pixels only when embedding
         loadImage(session.get(), inputPath_.toStdString(), !detect_);
         if (detect_) {
-            correlation_ = detectLoadedImage(session.get(), MaskMethod::ME);
+            correlation_ = detectLoadedImage(session.get());
             return;
         }
-        embedImage(session.get(), MaskMethod::ME);
+        embedImage(session.get());
         finish();
         // Copy the embedded pixels once, saving later uses the same session output
         preview_ = imagePreviewFromSession(session.get());
@@ -107,16 +107,16 @@ void BatchImageWorker::run() {
                 }
                 bindPreloadedImage(session.get(), std::move(image));
                 if (embed_) {
-                    embedImage(session.get(), MaskMethod::ME);
+                    embedImage(session.get());
                     if (saves.size() == exportBuffers.size())
                         completeOldestSave();
                     ExportedImage* buffer = exportBuffers[nextBuffer].get();
-                    exportForSave(session.get(), buffer, MaskMethod::ME);
+                    exportForSave(session.get(), buffer);
                     const fs::path outputPath = outputDir_ / files_[index].filename();
-                    saves.push(PendingSave{static_cast<int>(index), std::async(std::launch::async, flushToDiskAsync, buffer, outputPath.string(), MaskMethod::ME)});
+                    saves.push(PendingSave{static_cast<int>(index), std::async(std::launch::async, flushToDiskAsync, buffer, outputPath.string())});
                     nextBuffer = (nextBuffer + 1) % exportBuffers.size();
                 } else {
-                    const float correlation = detectLoadedImage(session.get(), MaskMethod::ME);
+                    const float correlation = detectLoadedImage(session.get());
                     ++succeeded;
                     emit itemState(static_cast<int>(index), "Done", QString("Correlation: %1").arg(correlation, 0, 'f', 4));
                 }

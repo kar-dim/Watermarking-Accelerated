@@ -1,6 +1,5 @@
 #pragma once
 #include "buffer.hpp"
-#include "include/WatermarkTypes.hpp"
 #include "OclArray.hpp"
 #include "OclQueueManager.hpp"
 #include "opencl_init.h"
@@ -9,8 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-#include <span>
-#include <string>
+#include <utility>
 #include <vector>
 
 /*!
@@ -20,8 +18,8 @@
 template <int p>
 class WatermarkOCL final : public WatermarkBase {
   public:
-    WatermarkOCL<p>(const int rows, const int cols, const std::string& watermarkPassword, const float psnr)
-        : WatermarkBase(rows, cols, watermarkPassword, psnr, initializeRandomMatrix), queue(OclQueueManager::getInstance().getQueue()), program(cl_utils::OpenCLKernelCache<p>::getProgram()),
+    WatermarkOCL<p>(const int rows, const int cols, WatermarkBuffer watermark, const float psnr)
+        : WatermarkBase(rows, cols, std::move(watermark), psnr), queue(OclQueueManager::getInstance().getQueue()), program(cl_utils::OpenCLKernelCache<p>::getProgram()),
           groupSize(cl_utils::workGroupSize(program)) {
         using namespace cl_utils;
         const cl_command_queue rawQueue = queue.get();
@@ -81,16 +79,9 @@ class WatermarkOCL final : public WatermarkBase {
         setArgs(meErrorKernel, cl::Buffer(), this->randomMatrix.clBuffer(), u.clBuffer(), coefficients.clBuffer(), sumSq.clBuffer(), this->baseCols, this->baseRows, stopFlag.clBuffer(),
             cl::Local(reductionScratchBytes(program, "me_error_sequence_u_sumsq_fused", errorLocal, 1)));
         corrKernel = cl::Kernel(program, "calculate_error_sequence_and_partial_corr_fused");
-        setArgs(corrKernel, cl::Buffer(), this->randomMatrix.clBuffer(), errorSeq.clBuffer(), coefficients.clBuffer(), dotPartial.clBuffer(), uNormPartial.clBuffer(), zNormPartial.clBuffer(),
-            corrGroupCounter.clBuffer(), correlation.clBuffer(), this->baseCols, this->baseRows, stopFlag.clBuffer(), 1,
+        setArgs(corrKernel, errorSeq.clBuffer(), this->randomMatrix.clBuffer(), coefficients.clBuffer(), dotPartial.clBuffer(), uNormPartial.clBuffer(), zNormPartial.clBuffer(),
+            corrGroupCounter.clBuffer(), correlation.clBuffer(), this->baseCols, this->baseRows, stopFlag.clBuffer(),
             cl::Local(reductionScratchBytes(program, "calculate_error_sequence_and_partial_corr_fused", errorLocal, 3)));
-
-        nvfLocal = cl::NDRange(32, groupSize / 32);
-        nvfGlobal = cl::NDRange(roundUp(this->baseRows, 32), roundUp(this->baseCols, groupSize / 32));
-        nvfKernel = cl::Kernel(program, "nvf");
-        nvfEmbedKernel = cl::Kernel(program, "nvf_u_and_sumsq_fused");
-        setArgs(nvfEmbedKernel, cl::Buffer(), this->randomMatrix.clBuffer(), u.clBuffer(), sumSq.clBuffer(), this->baseCols, this->baseRows,
-            cl::Local(reductionScratchBytes(program, "nvf_u_and_sumsq_fused", nvfLocal, 1)));
 
         applyGlobal = cl::NDRange(static_cast<size_t>(calculateLocalGroupsNumber((this->totalPixels + 3) / 4, groupSize)) * groupSize);
         applyRgbKernel = cl::Kernel(program, "apply_watermark_rgb");
@@ -98,21 +89,14 @@ class WatermarkOCL final : public WatermarkBase {
         applyRowMajorKernel = cl::Kernel(program, "apply_watermark_row_major");
     }
 
-    // RGB embedding: computes the strengthened watermark u from the luma (NVF or ME mask), then adds it to all channels of the 8-bit image
-    void makeWatermark(const ImageBuffer& inputGrayImage, const ImageOutputBuffer& inputImage, ImageOutputBuffer& output, const MaskMethod maskType) override {
-        embed(inputGrayImage, &inputImage, output, maskType, Layout::ColMajor);
-    }
+    // RGB embedding: computes the strengthened watermark u from the luma (ME mask), then adds it to all channels of the 8-bit image
+    void makeWatermark(const ImageBuffer& inputGrayImage, const ImageOutputBuffer& inputImage, ImageOutputBuffer& output) override { embed(inputGrayImage, &inputImage, output, Layout::ColMajor); }
 
-    // grayscale embedding: computes the strengthened watermark u (NVF or ME mask), then adds it to the luma itself
-    void makeWatermark(const ImageBuffer& inputGrayImage, ImageOutputBuffer& output, const MaskMethod maskType, const Layout outputLayout) override {
-        embed(inputGrayImage, nullptr, output, maskType, outputLayout);
-    }
+    // grayscale embedding: computes the strengthened watermark u (ME mask), then adds it to the luma itself
+    void makeWatermark(const ImageBuffer& inputGrayImage, ImageOutputBuffer& output, const Layout outputLayout) override { embed(inputGrayImage, nullptr, output, outputLayout); }
 
     // detection: correlation between the prediction error of the image and the prediction error of (mask * watermark)
-    float detectWatermark(const ImageBuffer& inputImage, const MaskMethod maskType) override {
-        const bool isME = maskType == MaskMethod::ME;
-        if (!isME && nvfMask.empty())
-            nvfMask = ImageBuffer(this->baseRows, this->baseCols, queue.get());
+    float detectWatermark(const ImageBuffer& inputImage) override {
         cl_utils::executeKernel(
             [&]() {
                 const cl::Buffer input = inputImage.clBuffer();
@@ -120,14 +104,8 @@ class WatermarkOCL final : public WatermarkBase {
                 // prediction error of the image (with its sign, the correlation needs it)
                 errorSequenceKernel.setArg(0, input);
                 enqueue(errorSequenceKernel, errorGlobal, cl::NDRange(groupSize));
-                // prediction error of (mask x watermark), correlated with the image's prediction error, the last workgroup writes the result
-                // ME: the mask |e| is formed while loading, NVF: the mask is computed first by its own kernel
-                if (!isME) {
-                    cl_utils::setArgs(nvfKernel, input, nvfMask.clBuffer(), this->baseCols, this->baseRows);
-                    enqueue(nvfKernel, nvfGlobal, nvfLocal);
-                }
-                corrKernel.setArg(0, isME ? errorSeq.clBuffer() : nvfMask.clBuffer());
-                corrKernel.setArg(12, static_cast<int>(isME));
+                // prediction error of (mask x watermark), correlated with the image's prediction error, the last workgroup writes the result.
+                // The mask |e| is formed while loading, not divided by max|e| (the correlation does not depend on the scale)
                 enqueue(corrKernel, errorGlobal, cl::NDRange(groupSize));
             },
             "detectWatermark");
@@ -162,14 +140,13 @@ class WatermarkOCL final : public WatermarkBase {
     FlagBuffer stopFlag;
 
     int borderBlocksPerLine;
-    cl::NDRange shiftSumsGlobal, errorGlobal, applyGlobal, nvfGlobal, nvfLocal;
+    cl::NDRange shiftSumsGlobal, errorGlobal, applyGlobal;
     OclArray<uint64_t> shiftSums;
     OclArray<float> borderRowsCopy;
     OclArray<uint64_t> solverSystem;
     OclArray<cl_half> u;
     OclArray<uint64_t> sumSq;
     ImageBuffer errorSeq;
-    ImageBuffer nvfMask;
     ImageBuffer dotPartial;
     ImageBuffer uNormPartial;
     ImageBuffer zNormPartial;
@@ -177,20 +154,15 @@ class WatermarkOCL final : public WatermarkBase {
     ImageBuffer correlation;
 
     cl::Kernel copyBorderRowsKernel, shiftSumsKernel, buildSystemKernel, solveSystemKernel;
-    cl::Kernel errorSequenceKernel, meErrorKernel, corrKernel, nvfKernel, nvfEmbedKernel;
+    cl::Kernel errorSequenceKernel, meErrorKernel, corrKernel;
     cl::Kernel applyRgbKernel, applyGrayKernel, applyRowMajorKernel;
 
     // enqueues a kernel on the in-order queue
     void enqueue(const cl::Kernel& kernel, const cl::NDRange& global, const cl::NDRange& local) { queue.enqueueNDRangeKernel(kernel, cl::NullRange, global, local); }
 
-    static WatermarkBuffer initializeRandomMatrix(const std::span<const uint16_t> watermarkHalfBits, const int rows, const int cols) {
-        return WatermarkBuffer(rows, cols, watermarkHalfBits.data(), OclQueueManager::getInstance().getQueueRaw());
-    }
-
     // embedding: the watermark is added to the 8-bit "inputImage" (RGB), or to the luma when inputImage is null
-    void embed(const ImageBuffer& inputGrayImage, const ImageOutputBuffer* inputImage, ImageOutputBuffer& output, const MaskMethod maskType, const Layout outputLayout) {
+    void embed(const ImageBuffer& inputGrayImage, const ImageOutputBuffer* inputImage, ImageOutputBuffer& output, const Layout outputLayout) {
         using namespace cl_utils;
-        const bool isME = maskType == MaskMethod::ME;
         const int channels = inputImage ? inputImage->getChannels() : 1;
         // the output buffer is reused, allocated again only when its size or channel count changes
         if (output.empty() || output.getRows() != this->baseRows || output.getCols() != this->baseCols || output.getChannels() != channels)
@@ -198,27 +170,19 @@ class WatermarkOCL final : public WatermarkBase {
         executeKernel(
             [&]() {
                 const cl::Buffer gray = inputGrayImage.clBuffer();
-                if (!isME) {
-                    // NVF: mask (local variance) x watermark -> u and sum(u^2)
-                    sumSq.fillZero();
-                    nvfEmbedKernel.setArg(0, gray);
-                    enqueue(nvfEmbedKernel, nvfGlobal, nvfLocal);
-                } else {
-                    // ME: solve the prediction coefficients (this also zeroes the sums), then prediction error x watermark -> u, sum(u^2)
-                    // and max|e|
-                    solvePredictionCoefficients(gray);
-                    meErrorKernel.setArg(0, gray);
-                    enqueue(meErrorKernel, errorGlobal, cl::NDRange(groupSize));
-                }
+                // solve the prediction coefficients (this also zeroes the sums), then prediction error x watermark -> u, sum(u^2) and max|e|
+                solvePredictionCoefficients(gray);
+                meErrorKernel.setArg(0, gray);
+                enqueue(meErrorKernel, errorGlobal, cl::NDRange(groupSize));
                 // scale u by the strength and add it to each channel of the 8-bit image, or to the luma
                 cl::Kernel& apply = inputImage ? applyRgbKernel : (outputLayout == Layout::ColMajor ? applyGrayKernel : applyRowMajorKernel);
                 const cl::Buffer source = inputImage ? inputImage->clBuffer() : gray;
                 if (&apply == &applyRowMajorKernel) {
-                    setArgs(apply, source, u.clBuffer(), sumSq.clBuffer(), output.clBuffer(), this->strengthNumerator, this->baseCols, this->baseRows, static_cast<int>(isME));
+                    setArgs(apply, source, u.clBuffer(), sumSq.clBuffer(), output.clBuffer(), this->strengthNumerator, this->baseCols, this->baseRows);
                     const int tileRows = groupSize / 16;
                     enqueue(apply, cl::NDRange(roundUp(this->baseRows, 16), ((this->baseCols + 15) / 16) * tileRows), cl::NDRange(16, tileRows));
                 } else {
-                    setArgs(apply, source, u.clBuffer(), sumSq.clBuffer(), output.clBuffer(), this->strengthNumerator, this->totalPixels, static_cast<int>(isME));
+                    setArgs(apply, source, u.clBuffer(), sumSq.clBuffer(), output.clBuffer(), this->strengthNumerator, this->totalPixels);
                     enqueue(apply, applyGlobal, cl::NDRange(groupSize));
                 }
             },

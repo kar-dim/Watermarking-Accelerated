@@ -1,17 +1,18 @@
 #include "buffer.hpp"
-#include "common_utils.hpp"
 #include "HostMemory.hpp"
 #include "ImageFileBuffer.hpp"
 #include "include/WatermarkCore.hpp"
-#include "include/WatermarkTypes.hpp"
 #include "utils.hpp"
 #include "video_utils.hpp"
 #include "VideoProcessingContext.hpp"
 #include "simd.hpp"
 #include "WatermarkBase.hpp"
 #include <algorithm>
+#include <array>
+#include <cctype>
 #include <cmath>
 #include <cstdint>
+#include <filesystem>
 #include <format>
 #include <iostream>
 #include <memory>
@@ -19,6 +20,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -26,6 +28,7 @@
 #include "CudaCheck.hpp"
 #include "CudaStreamManager.hpp"
 #include "CudaArray.hpp"
+#include "cuda_utils.hpp"
 #include <cuda_runtime.h>
 #elif defined(_USE_OPENCL_)
 #include "OclQueueManager.hpp"
@@ -82,7 +85,7 @@ void ExportedImageDeleter::operator()(ExportedImage* p) const { delete p; }
 ExportHandle createReusableExportBuffer() { return ExportHandle(new ExportedImage()); }
 
 // Move the CPU output into an idle export buffer, GPU builds clone device data
-void exportForSave(ImageSession* s, ExportedImage* p, MaskMethod method) {
+void exportForSave(ImageSession* s, ExportedImage* p) {
 #if defined(_USE_GPU_)
     p->finalPixels = s->watermarkBuffer.clone();
 #else
@@ -94,14 +97,11 @@ void exportForSave(ImageSession* s, ExportedImage* p, MaskMethod method) {
     p->alpha = std::move(s->imgBuffer.alphaChannel);
 }
 
-// same as saveImage, but used as a separate step to allow for asynchronous saving (in batched mode)
-void flushToDiskAsync(ExportedImage* handle, const string& outPath, MaskMethod method) {
-    const string suffix = method == MaskMethod::NVF ? "W_NVF" : "W_ME";
-    InternalUtils::saveImage(outPath, suffix, handle->finalPixels, handle->alpha);
-}
-
 // INTERNAL HELPERS
 namespace {
+// saveImage and flushToDiskAsync add it to the file name (before the extension)
+constexpr const char* kWatermarkedSuffix = "W_ME";
+
 // NaN and infinity would reach the pixels through the watermark strength
 void checkPsnr(const float psnr) {
     if (!std::isfinite(psnr) || psnr <= 0.0f)
@@ -163,6 +163,7 @@ SessionPixelData extractPixelData(const ImageOutputBuffer& buffer) {
 // main function to get the data from the image session buffer (column-wise) directly, it also fills the width, height and channels parameters for the caller
 SessionPixelData getSessionPixelData(const ImageSession* session) { return extractPixelData(session->watermarkBuffer); }
 
+#if defined(_USE_EIGEN_)
 namespace {
 // transpose 8 column-major byte columns into eight row vectors
 void transposePreviewBlock(const uint8_t* source, const size_t columnStride, __m128i rows[8]) {
@@ -195,22 +196,11 @@ void transposePreviewBlock(const uint8_t* source, const size_t columnStride, __m
     rows[6] = r67;
     rows[7] = _mm_srli_si128(r67, 8);
 }
-} // namespace
 
-void copySessionPixelsForPreview(const SessionPixelData& source, uint8_t* destination, const size_t bytesPerLine) {
-    const int rows = source.height;
-    const int cols = source.width;
-    const int channels = source.channels;
-    if (rows <= 0 || cols <= 0 || (channels != 1 && channels != 3) || !destination || bytesPerLine < static_cast<size_t>(cols) * channels ||
-        source.pixels.size() < static_cast<size_t>(rows) * cols * channels)
-        throw std::invalid_argument("Invalid session pixels for preview");
-
+// column-major planes (1 or 3) into a row-major interleaved display buffer
+void interleavePlanes(const uint8_t* red, const uint8_t* green, const uint8_t* blue, const int rows, const int cols, const int channels, uint8_t* destination, const size_t bytesPerLine) {
     // small row tiles keeps cache lines HOT (while we read each planar column in order)
     constexpr int tileRows = 32;
-    const size_t planeSize = static_cast<size_t>(rows) * cols;
-    const uint8_t* red = source.pixels.data();
-    const uint8_t* green = channels == 3 ? red + planeSize : nullptr;
-    const uint8_t* blue = channels == 3 ? green + planeSize : nullptr;
     const __m128i zero = _mm_setzero_si128();
     const __m128i rgbMask = _mm_setr_epi8(0, 1, 2, 4, 5, 6, 8, 9, 10, 12, 13, 14, -1, -1, -1, -1);
 #pragma omp parallel for schedule(static)
@@ -268,6 +258,46 @@ void copySessionPixelsForPreview(const SessionPixelData& source, uint8_t* destin
                 }
             }
     }
+}
+} // namespace
+#endif
+
+PreviewFormat getSessionPreviewFormat(const ImageSession* session) {
+    const ImageOutputBuffer& buffer = session->watermarkBuffer;
+#if defined(_USE_GPU_)
+    return {buffer.getCols(), buffer.getRows(), buffer.getChannels()};
+#else
+    if (buffer.isRGB())
+        return {static_cast<int>(buffer.getRGB()[0].cols()), static_cast<int>(buffer.getRGB()[0].rows()), 3};
+    return {static_cast<int>(buffer.getGray().cols()), static_cast<int>(buffer.getGray().rows()), 1};
+#endif
+}
+
+// the GPU backends convert on the device (the session output lives there) and download the display buffer directly, the CPU never touches the pixels
+void copySessionPreview(const ImageSession* session, uint8_t* destination, const size_t bytesPerLine) {
+    const auto [width, height, channels] = getSessionPreviewFormat(session);
+    if (width <= 0 || height <= 0 || (channels != 1 && channels != 3) || !destination || bytesPerLine < static_cast<size_t>(width) * channels)
+        throw std::invalid_argument("Invalid session pixels for preview");
+    const ImageOutputBuffer& buffer = session->watermarkBuffer;
+#if defined(_USE_CUDA_)
+    CUDA_CHECK(cudaSetDevice(buffer.getDeviceIndex()));
+    const cudaStream_t stream = CudaStreamManager::getInstance().getComputeStream();
+    CudaArray<uint8_t> interleaved(height, width, channels, stream);
+    cuda_utils::launchColMajorToInterleavedU8Kernel(buffer.data(), interleaved.data(), width, height, channels, stream);
+    interleaved.toHostPitched(destination, width * channels, bytesPerLine);
+#elif defined(_USE_OPENCL_)
+    auto& mgr = OclQueueManager::getInstance();
+    OclArray<uint8_t> interleaved(height, width, channels, mgr.getQueueRaw());
+    cl_utils::launchColMajorToInterleavedU8(buffer.clBuffer(), interleaved.clBuffer(), width, height, channels, mgr.getQueue());
+    interleaved.toHostPitched(destination, width * channels, bytesPerLine);
+#else
+    if (channels == 3) {
+        const auto& rgb = buffer.getRGB();
+        interleavePlanes(rgb[0].data(), rgb[1].data(), rgb[2].data(), height, width, channels, destination, bytesPerLine);
+    } else {
+        interleavePlanes(buffer.getGray().data(), nullptr, nullptr, height, width, channels, destination, bytesPerLine);
+    }
+#endif
 }
 
 // initialization, including device setup, info display, and OpenMP thread pool initialization
@@ -404,7 +434,7 @@ void updateSessionParams(ImageSession* s, const int p, const float psnr) {
     if (!s->watermarkObj)
         return;
     if (pChanged)
-        s->watermarkObj = createWatermarkObject(s->currentRows, s->currentCols, s->watermarkPassword, s->p, s->psnr);
+        s->watermarkObj = createWatermarkObject(s->currentRows, s->currentCols, s->watermarkPassword, s->p, s->psnr, std::move(s->watermarkObj));
     else
         s->watermarkObj->updatePsnr(psnr);
 }
@@ -446,7 +476,7 @@ void bindPreloadedImage(ImageSession* s, PreloadedHandle preloadedData) {
     const auto isRGB = s->imgBuffer.isRGB;
     // lazy initialization of the watermark object and buffers, only if dimensions change or not initialized yet
     if (!s->watermarkObj || s->currentRows != rows || s->currentCols != cols || s->currentIsRGB != isRGB) {
-        s->watermarkObj = createWatermarkObject(rows, cols, s->watermarkPassword, s->p, s->psnr);
+        s->watermarkObj = createWatermarkObject(rows, cols, s->watermarkPassword, s->p, s->psnr, std::move(s->watermarkObj));
         s->currentRows = rows;
         s->currentCols = cols;
         s->currentIsRGB = isRGB;
@@ -460,12 +490,12 @@ void bindPreloadedImage(ImageSession* s, PreloadedHandle preloadedData) {
 void loadImage(ImageSession* session, const string& imagePath, const bool captureOriginal) { bindPreloadedImage(session, preloadImageFromDisk(imagePath, -1, captureOriginal)); }
 
 // main function to embed the watermark into the loaded image, it calls the makeWatermark method of the watermark object,
-// which implements the actual embedding algorithm based on the specified mask method (NVF or ME)
-void embedImage(ImageSession* s, MaskMethod method) {
+// which implements the actual embedding algorithm (ME mask)
+void embedImage(ImageSession* s) {
     if (s->imgBuffer.isRGB)
-        s->watermarkObj->makeWatermark(s->imgBuffer.image, s->imgBuffer.rgbImage, s->watermarkBuffer, method);
+        s->watermarkObj->makeWatermark(s->imgBuffer.image, s->imgBuffer.rgbImage, s->watermarkBuffer);
     else
-        s->watermarkObj->makeWatermark(s->imgBuffer.image, s->watermarkBuffer, method, WatermarkBase::Layout::ColMajor);
+        s->watermarkObj->makeWatermark(s->imgBuffer.image, s->watermarkBuffer, WatermarkBase::Layout::ColMajor);
 }
 
 void finish() {
@@ -479,7 +509,7 @@ void finish() {
 // used as an intermediate step before detection, it prepares the image buffer in the correct format for the detection algorithm,
 // which is always a float buffer (grayscale), regardless of the original image format (RGB or grayscale)
 // used only when the input isn't already a float buffer, otherwise it is redundant
-void prepareDetectionImage(ImageSession* s, MaskMethod method) {
+void prepareDetectionImage(ImageSession* s) {
     s->detectGrayBuffer = InternalUtils::castToFloatGray(s->watermarkBuffer, s->imgBuffer.isRGB);
     // sync so benchmarks measure completion, not just the async upload
 #if defined(_USE_CUDA_)
@@ -490,18 +520,18 @@ void prepareDetectionImage(ImageSession* s, MaskMethod method) {
 }
 
 // main function to detect the watermark from the loaded image, it calls the detectWatermark method of the watermark object,
-// which implements the actual detection algorithm based on the specified mask method (NVF or ME)
-float detectLoadedImage(const ImageSession* s, MaskMethod method) { return s->watermarkObj->detectWatermark(s->imgBuffer.image, method); }
+// which implements the actual detection algorithm (ME mask)
+float detectLoadedImage(const ImageSession* s) { return s->watermarkObj->detectWatermark(s->imgBuffer.image); }
 
 // main function to detect the watermark from the embedded buffer. This is useful only when we for example embed and then directly detect (benchmark)
 // not used when we want to detect from the original loaded image, as in that case we need to prepare the detection buffer first (convert to float grayscale), which is done in prepareDetectionImage
-float detectEmbeddedBuffer(const ImageSession* s, MaskMethod method) { return s->watermarkObj->detectWatermark(s->detectGrayBuffer, method); }
+float detectEmbeddedBuffer(const ImageSession* s) { return s->watermarkObj->detectWatermark(s->detectGrayBuffer); }
 
 // saves the image to disk
-void saveImage(const ImageSession* s, const string& outPath, MaskMethod method) {
-    const string suffix = method == MaskMethod::NVF ? "W_NVF" : "W_ME";
-    InternalUtils::saveImage(outPath, suffix, s->watermarkBuffer, s->imgBuffer.alphaChannel);
-}
+void saveImage(const ImageSession* s, const string& outPath) { InternalUtils::saveImage(outPath, kWatermarkedSuffix, s->watermarkBuffer, s->imgBuffer.alphaChannel); }
+
+// same as saveImage, but used as a separate step to allow for asynchronous saving (in batched mode)
+void flushToDiskAsync(ExportedImage* handle, const string& outPath) { InternalUtils::saveImage(outPath, kWatermarkedSuffix, handle->finalPixels, handle->alpha); }
 
 void saveImageExact(const ImageSession* s, const string& outPath) { InternalUtils::saveImage(outPath, "", s->watermarkBuffer, s->imgBuffer.alphaChannel); }
 
@@ -568,6 +598,27 @@ void optimizeThreadsForVideoEmbedding() {
 #if defined(_USE_EIGEN_)
     eigen_utils::setThreadsToPhysicalCores();
 #endif
+}
+
+bool hasSupportedImageExtension(const std::filesystem::path& path) {
+    static constexpr std::array<std::string_view, 7> validExts{".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"};
+    std::string ext = path.extension().string();
+    std::ranges::transform(ext, ext.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return std::ranges::find(validExts, ext) != validExts.end();
+}
+
+std::vector<std::filesystem::path> getValidImageFiles(const std::filesystem::path& inputDir) {
+    std::vector<std::filesystem::path> validFiles;
+    if (!std::filesystem::exists(inputDir) || !std::filesystem::is_directory(inputDir))
+        return validFiles;
+    for (const auto& entry : std::filesystem::directory_iterator(inputDir)) {
+        if (!entry.is_regular_file())
+            continue;
+        if (hasSupportedImageExtension(entry.path()))
+            validFiles.push_back(entry.path());
+    }
+    std::sort(validFiles.begin(), validFiles.end());
+    return validFiles;
 }
 
 } // namespace WatermarkCore

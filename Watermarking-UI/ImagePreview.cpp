@@ -22,12 +22,21 @@ QImage originalPreviewFromSession(WatermarkCore::ImageSession* session) {
     return preview;
 }
 
-// Let the core convert its planar session pixels into Qt's display buffer
+// Let the core write its session pixels straight into Qt's display buffer (converted on the GPU for the GPU backends)
 QImage imagePreviewFromSession(const WatermarkCore::ImageSession* session) {
-    const WatermarkCore::SessionPixelData pixelData = WatermarkCore::getSessionPixelData(session);
-    QImage preview(pixelData.width, pixelData.height, pixelData.channels == 3 ? QImage::Format_RGB888 : QImage::Format_Grayscale8);
-    if (preview.isNull())
-        return preview;
-    WatermarkCore::copySessionPixelsForPreview(pixelData, preview.bits(), static_cast<size_t>(preview.bytesPerLine()));
+    QImage preview;
+    updatePreviewFromSession(session, preview);
     return preview;
+}
+
+// reused buffer skips the allocation and the first touch page faults of a new one
+void updatePreviewFromSession(const WatermarkCore::ImageSession* session, QImage& preview) {
+    const auto [width, height, channels] = WatermarkCore::getSessionPreviewFormat(session);
+    const QImage::Format format = channels == 3 ? QImage::Format_RGB888 : QImage::Format_Grayscale8;
+    // a shared buffer is still displayed elsewhere, writing to it would detach it with a copy of the old pixels first
+    if (!preview.isDetached() || preview.width() != width || preview.height() != height || preview.format() != format)
+        preview = QImage(width, height, format);
+    if (preview.isNull())
+        return;
+    WatermarkCore::copySessionPreview(session, preview.bits(), static_cast<size_t>(preview.bytesPerLine()));
 }

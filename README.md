@@ -19,7 +19,7 @@ This repository provides a high performance implementation designed for real-wor
   <img width="625" height="232" alt="backends" src="https://github.com/user-attachments/assets/4f82798b-d0e1-4ad7-8015-2ba506280575" />
 </p>
 
-This project implements and evaluates the performance (execution speed) of image watermarking algorithms on CPU versus GPU. It provides multiple implementations to enable comparisons between compute backends. Watermarks are generated as standard normal distributed matrices (μ=0, σ=1). For cryptographic robustness, a user password is hashed with ```SHA-256``` and this 256-bit value is used as a 256-bit key for the ```ChaCha20 block cipher```. The CSPRNG produces a deterministic stream of random bits; the floating-point normal transform can differ slightly between builds or hardware. The implementation is highly parallelized with OpenMP. The chosen transform for normal distribution is ```Box-Muller transform```. Two watermark masks are used: The proposed Prediction Error mask, which is the main focus of the Thesis, and the NVF (Noise Visibility Function) mask for comparison purposes. The system supports both embedding and detection of watermarks in disk images and video streams. Video processing is handled via FFmpeg, enabling broad codec and container support, along with advanced features such as GPU-accelerated video decoding and encoding (CUDA only) and 10-bit/HDR (tonemapped) video support.
+This project implements and evaluates the performance (execution speed) of image watermarking algorithms on CPU versus GPU. It provides multiple implementations to enable comparisons between compute backends. Watermarks are generated as standard normal distributed matrices (μ=0, σ=1). For cryptographic robustness, a user password is hashed with ```SHA-256``` and this 256-bit value is used as a 256-bit key for the ```ChaCha20 block cipher```. The CSPRNG produces a deterministic stream of random bits. The chosen transform for normal distribution is ```Box-Muller transform```, computed with fixed polynomial approximations and explicit FMA operations and every backend produces the same watermark bit for bit. The GPU backends generate the watermark on the GPU, while the CPU backend uses AVX2/AVX-512 with OpenMP. The watermark strength follows the proposed Prediction Error (ME) mask, which is the main focus of the Thesis. The system supports both embedding and detection of watermarks in disk images and video streams. Video processing is handled via FFmpeg, enabling broad codec and container support, along with advanced features such as GPU-accelerated video decoding and encoding (CUDA only) and 10-bit/HDR (tonemapped) video support.
 
 The repository contains all required source code and dependencies needed to reproduce the benchmarks and experiments.
 
@@ -54,7 +54,7 @@ The CLI application:
 
 The Qt application:
   - **Single image:** choose Embed or Detect, an image, password, and p. Embed also lets you set PSNR, compare the original and watermarked result with a draggable divider, pan and zoom the preview, then save the result. The comparison respects EXIF orientation. Detect shows the ME correlation in a compact result card without writing a file. Drop supported images into the window to select the first one. Changing embed settings keeps the previous comparison visible until you preview again.
-  - **Batch images:** choose or drop a folder to embed or detect the ME watermark. Supported image files in that folder populate a queue, which shows the state of each image; a completion dialog summarizes the run. PSNR is shown only for embedding. Embedded images go to a `watermark_output` subfolder.
+  - **Batch images:** choose or drop a folder to embed or detect the ME watermark. Supported image files in that folder populate a queue, which shows the state of each image, and a completion dialog summarizes the run. PSNR is shown only for embedding. Embedded images go to a `watermark_output` subfolder.
   - **Benchmark:** runs the predefined image, p, and PSNR sweep, shows the live watermarked image and timings, and can be stopped without a score dialog. A completed run presents the final score in a dialog. The score uses the geometric mean of the two pipelines, scaled by a constant ($C=10$) for readability:
 
 $$\text{Score} = C \cdot \sqrt{\text{FPS}_{\text{embed}} \cdot \text{FPS}_{\text{detect}}}$$
@@ -73,7 +73,7 @@ For a one-shot image embed: `Watermarking-CLI.exe --image.mode single --image.pa
 
 | Parameter                         | Description                                                                                                                 |
 |-----------------------------------|-----------------------------------------------------------------------------------------------------------------------------               |
-| \[image\]/mode                    | ```[single, batch_embed, batch_detect]```: `single` embeds ME once into `[image]/path`, writes `[image]/output_path`, and reports embed time. Batch modes embed or detect all images under the directory in `[image]/path`; embedding writes to its `watermark_output` subdirectory. |
+| \[image\]/mode                    | ```[single, batch_embed, batch_detect]```: `single` embeds ME once into `[image]/path`, writes `[image]/output_path`, and reports embed time. Batch modes embed or detect all images under the directory in `[image]/path`, embedding writes to its `watermark_output` subdirectory. |
 | \[image\]/path                    | Path to the input image (or directory for batched operations) to embed/detect watermark. This will set the sample application to ```image mode``` |
 | \[image\]/output_path             | Required output filename for `single` mode. The input image cannot be overwritten. |
 | watermark_password                | The watermark password. Used to generate a deterministic and secure (as much as possible) watermark. |
@@ -134,10 +134,9 @@ ffmpeg -y -f rawvideo
 # How to Build
 
 This project is built using **Visual Studio** and consists of a **solution with various projects**.
-- Watermarking-Impl: The Core of this project, implements the algorithms for each backend. It also implements a fast, efficient, secure and deterministic watermark generation with OpenMP (CPU-only based). It is built as a **static library**.
+- Watermarking-Impl: The Core of this project, implements the algorithms for each backend. It also implements a fast, efficient, secure and deterministic watermark generation: CUDA/OpenCL kernels on the GPU, AVX2/AVX-512 with OpenMP on the CPU, with identical results. It is built as a **static library**.
 - Watermarking-CLI: The sample command line application that interacts with the Core project to embed and detect watermark in images and video.
 - Watermarking-UI: The Qt image workflow and benchmark application. It uses the Core project for single-image embedding, image batches, and performance measurements.
-- Watermarking-Util: Common utility methods without dependencies, that may be used by any project. It is built as a **static library**.
 - Watermarking-Impl-tests: GoogleTest suite for the Core project. Runs from the build output folder (the samples are copied there at build time).
 
 ### Solution Configurations

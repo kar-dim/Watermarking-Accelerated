@@ -24,17 +24,30 @@
 #include <system_error>
 #include <utility>
 #include <vector>
-#include <WatermarkTypes.hpp>
 #include <windows.h>
 
-using namespace WatermarkCore;
 using namespace CommonUtils;
+using namespace WatermarkCore;
 namespace fs = std::filesystem;
 
 using std::cout;
 using std::string;
 
 namespace {
+
+inline std::string formatExecutionTime(const bool showFps, const double seconds) { return showFps ? std::format("FPS: {:.2f} FPS", 1.0 / seconds) : std::format("{:.6f} seconds", seconds); }
+
+// measures execution time for a passed function
+template <typename F>
+double executionTime(F&& func, int loops = 1, const bool warmup = true) {
+    if (warmup)
+        func(); // warmup one time
+    auto start = std::chrono::high_resolution_clock::now();
+    for (int i = 0; i < loops; i++)
+        func();
+    auto end = std::chrono::high_resolution_clock::now();
+    return std::chrono::duration<double>(end - start).count();
+}
 // Command-line option definition mapping an INI section to its key name
 struct OptionDefinition {
     std::string_view section;
@@ -345,7 +358,7 @@ static int testForImageBatch(const Settings& inir, const int p, const float psnr
             bindPreloadedImage(session.get(), std::move(currentImage));
             // embed
             if (isEmbed) {
-                embedImage(session.get(), MaskMethod::ME);
+                embedImage(session.get());
 
                 // if we have too many active saves, wait for the oldest one to finish
                 const fs::path outFile = outputDir / validFiles[i].filename();
@@ -353,12 +366,12 @@ static int testForImageBatch(const Settings& inir, const int p, const float psnr
                     completeOldestSave();
                 // get the next available buffer from the pool and do a zero copy allocation into it
                 auto* currentBuffer = exportPool[bufferIndex].get();
-                exportForSave(session.get(), currentBuffer, MaskMethod::ME);
+                exportForSave(session.get(), currentBuffer);
                 // launch the heavy save to disk task in the background and cycle to the next buffer
-                saveTasks.push(PendingSave{validFiles[i], std::async(std::launch::async, flushToDiskAsync, currentBuffer, outFile.string(), MaskMethod::ME)});
+                saveTasks.push(PendingSave{validFiles[i], std::async(std::launch::async, flushToDiskAsync, currentBuffer, outFile.string())});
                 bufferIndex = (bufferIndex + 1) % maxParallelSaves;
             } else { // detect
-                corr = detectLoadedImage(session.get(), MaskMethod::ME);
+                corr = detectLoadedImage(session.get());
                 cout << success(std::format(" [OK] Correlation: {:.2f}, {}\n", corr, validFiles[i].filename().string()));
                 ++successCount;
             }
@@ -403,7 +416,7 @@ static int testForImageSingle(const Settings& inir, const int p, const float psn
     loadImage(s.get(), imageFile);
     const auto dims = getImageDims(s.get());
     cout << info("Image size is: " + std::to_string(dims.first) + "x" + std::to_string(dims.second) + " (HxW)\n\n");
-    embedImage(s.get(), MaskMethod::ME);
+    embedImage(s.get());
     finish();
     saveImageExact(s.get(), outputPath);
     const double totalSeconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
@@ -510,7 +523,7 @@ static int runCliBenchmark(const Settings& settings, const float psnr, const boo
 
             // Measure embedding execution time (after warming up clocks, caches and memory pools)
             const auto embedOnce = [&]() {
-                embedImage(session.get(), MaskMethod::ME);
+                embedImage(session.get());
                 finish();
             };
             warmup(embedOnce);
@@ -521,9 +534,9 @@ static int runCliBenchmark(const Settings& settings, const float psnr, const boo
                 saveImageExact(session.get(), (imagesDir / std::format("p{}_{}.png", p, image.resolution)).string());
             }
             // Measure detection execution time and correlation
-            prepareDetectionImage(session.get(), MaskMethod::ME);
+            prepareDetectionImage(session.get());
             float correlation = 0.0f;
-            const auto detectOnce = [&]() { correlation = detectEmbeddedBuffer(session.get(), MaskMethod::ME); };
+            const auto detectOnce = [&]() { correlation = detectEmbeddedBuffer(session.get()); };
             warmup(detectOnce);
             const double detectSeconds = executionTime(detectOnce, loops, false) / loops;
 

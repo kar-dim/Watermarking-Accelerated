@@ -1,12 +1,15 @@
 #pragma once
-#include "simd.hpp"
+#include "common_utils.hpp"
+#include "half_float.hpp"
+#include <algorithm>
 #include <array>
 #include <bit>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
-#include <numbers>
+#include <memory>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -20,13 +23,79 @@ namespace WatermarkCrypto {
 inline float toUniformFloat(const uint64_t x) { return (x >> 40) * 0x1.0p-24f + 0x1.0p-24f; }
 
 // 2 * pi for the Box-Muller transform
-inline constexpr float kTwoPi = 2.0f * std::numbers::pi_v<float>;
+using CommonUtils::kTwoPi;
+
+// The reference Box-Muller transform: the AVX2 / AVX-512 functions below and the CUDA / OpenCL generation kernels repeat exactly these
+// operations (same fma, same rounding, correctly rounded sqrt), every backend generates the same bits
+namespace detail {
+// natural logarithm (Cephes polynomial)
+inline float logReference(const float x) {
+    // frexp: mantissa in [0.5, 1) plus the matching exponent
+    const uint32_t bits = std::bit_cast<uint32_t>(x);
+    float m = std::bit_cast<float>((bits & 0x807FFFFFu) | 0x3F000000u);
+    float e = static_cast<float>(static_cast<int>((bits & 0x7F800000u) >> 23) - 126);
+
+    // keep the mantissa near 1: if (m < sqrt(0.5)) { e -= 1; m = 2m - 1; } else { m -= 1; }
+    const bool belowSqrtHalf = m < 0.707106781186547524f;
+    e = belowSqrtHalf ? e - 1.0f : e;
+    m = (belowSqrtHalf ? m + m : m) - 1.0f;
+
+    const float z = m * m;
+    float y = 7.0376836292E-2f;
+    y = std::fma(y, m, -1.1514610310E-1f);
+    y = std::fma(y, m, 1.1676998740E-1f);
+    y = std::fma(y, m, -1.2420140846E-1f);
+    y = std::fma(y, m, 1.4249322787E-1f);
+    y = std::fma(y, m, -1.6668057665E-1f);
+    y = std::fma(y, m, 2.0000714765E-1f);
+    y = std::fma(y, m, -2.4999993993E-1f);
+    y = std::fma(y, m, 3.3333331174E-1f);
+    y = (y * m) * z;
+    // recombine, using the hi/lo split of ln(2) for the exponent term
+    y = std::fma(e, -2.12194440e-4f, y);
+    y = std::fma(z, -0.5f, y);
+    return std::fma(e, 0.693359375f, m + y);
+}
+
+// sine and cosine (Cephes minimax polynomials)
+inline std::pair<float, float> sinCosReference(const float x) {
+    // reduce into an octant: j = ((int)(x * 4/pi) + 1) & ~1
+    const int j = (static_cast<int>(x * 1.27323954473516f) + 1) & ~1;
+    const float y = static_cast<float>(j);
+
+    // extended precision modular arithmetic: r = ((x - y*DP1) - y*DP2) - y*DP3
+    float r = std::fma(y, -0.78515625f, x);
+    r = std::fma(y, -2.4187564849853515625e-4f, r);
+    r = std::fma(y, -3.77489497744594108e-8f, r);
+
+    // cosine and sine polynomials of the reduced argument
+    const float z = r * r;
+    float cosPoly = 2.443315711809948E-005f;
+    cosPoly = std::fma(cosPoly, z, -1.388731625493765E-003f);
+    cosPoly = std::fma(cosPoly, z, 4.166664568298827E-002f);
+    cosPoly = (cosPoly * z) * z;
+    cosPoly = std::fma(z, -0.5f, cosPoly);
+    cosPoly = cosPoly + 1.0f;
+    float sinPoly = -1.9515295891E-4f;
+    sinPoly = std::fma(sinPoly, z, 8.3321608736E-3f);
+    sinPoly = std::fma(sinPoly, z, -1.6666654611E-1f);
+    sinPoly = std::fma(sinPoly * z, r, r);
+
+    // the octant bits decide which polynomial is sin and which is cos, and the sign of each
+    const bool sinFromSinPoly = (j & 2) == 0;
+    const uint32_t sinSign = static_cast<uint32_t>(j & 4) << 29;
+    const uint32_t cosSign = static_cast<uint32_t>(~(j - 2) & 4) << 29;
+    const float sinValue = std::bit_cast<float>(std::bit_cast<uint32_t>(sinFromSinPoly ? sinPoly : cosPoly) ^ sinSign);
+    const float cosValue = std::bit_cast<float>(std::bit_cast<uint32_t>(sinFromSinPoly ? cosPoly : sinPoly) ^ cosSign);
+    return {sinValue, cosValue};
+}
+} // namespace detail
 
 // two 64-bit random values -> two normally distributed values (Box-Muller transform)
 inline std::pair<float, float> generateBoxMullerNormalPair(const uint64_t x1, const uint64_t x2) {
-    const float radius = std::sqrt(-2.0f * std::log(toUniformFloat(x1)));
-    const float theta = kTwoPi * toUniformFloat(x2);
-    return {radius * std::cos(theta), radius * std::sin(theta)};
+    const float radius = std::sqrt(-2.0f * detail::logReference(toUniformFloat(x1)));
+    const auto [sinTheta, cosTheta] = detail::sinCosReference(kTwoPi * toUniformFloat(x2));
+    return {radius * cosTheta, radius * sinTheta};
 }
 
 namespace detail {
@@ -468,4 +537,57 @@ inline std::array<std::array<uint64_t, 8>, 16> chacha20Blocks16(const std::array
     return blocks;
 }
 #endif // __AVX512F__
+
+// the watermark on the CPU: "numElements" standard normal values rounded to half precision (the bits), value i comes from ChaCha20 block
+// i / 8. The GPU backends run the same generation on the device (the same bits), this is the reference and the fallback
+inline std::unique_ptr<uint16_t[]> generateHalfWatermark(const std::array<uint32_t, 16>& baseState, const int64_t numElements) {
+    // one ChaCha20 block (8 uint64) = 4 Box-Muller pairs = 8 values, the last block may be partial
+    const int64_t fullBlocks = numElements / 8;
+    const int64_t numBlocks = (numElements + 7) / 8;
+    auto halfBits = std::make_unique_for_overwrite<uint16_t[]>(numElements);
+    // stores the (up to) 8 values of a block, full blocks with the F16C conversion (every AVX2 CPU has it)
+    const auto storeBlock = [&](const int64_t block, const float* values) {
+        const int64_t first = block * 8;
+        const int64_t count = std::min<int64_t>(8, numElements - first);
+        if (count == 8) {
+            _mm_storeu_si128(reinterpret_cast<__m128i*>(halfBits.get() + first), _mm256_cvtps_ph(_mm256_loadu_ps(values), _MM_FROUND_TO_NEAREST_INT));
+            return;
+        }
+        for (int64_t i = 0; i < count; i++)
+            halfBits[first + i] = HalfFloat::fromFloat(values[i]);
+    };
+
+    // full blocks in groups: 16 (AVX-512) or 8 ChaCha20 blocks at once, then the vectorized Box-Muller transform (4 or 2 blocks per call)
+#if defined(__AVX512F__)
+    constexpr int groupBlocks = 16;
+#else
+    constexpr int groupBlocks = 8;
+#endif
+    const int64_t numGroups = fullBlocks / groupBlocks;
+#pragma omp parallel for schedule(static)
+    for (int64_t group = 0; group < numGroups; group++) {
+        const int64_t firstBlock = group * groupBlocks;
+        std::array<float, groupBlocks * 8> values;
+#if defined(__AVX512F__)
+        const auto blocks = chacha20Blocks16(baseState, static_cast<uint64_t>(firstBlock));
+        for (int quad = 0; quad < 4; quad++)
+            generateBoxMullerNormalBlockQuad(blocks.data() + (quad * 4), values.data() + (quad * 32));
+#else
+        const auto blocks = chacha20Blocks8(baseState, static_cast<uint64_t>(firstBlock));
+        for (int pair = 0; pair < 4; pair++)
+            generateBoxMullerNormalBlockPair(blocks[pair * 2], blocks[(pair * 2) + 1], values.data() + (pair * 16));
+#endif
+        for (int b = 0; b < groupBlocks; b++)
+            storeBlock(firstBlock + b, values.data() + (b * 8));
+    }
+    // the remaining (at most groupBlocks) blocks one by one, the partial last block included
+    for (int64_t block = numGroups * groupBlocks; block < numBlocks; block++) {
+        const std::array<uint64_t, 8> randomBits = chacha20Block(baseState, static_cast<uint64_t>(block));
+        std::array<float, 8> values;
+        for (int j = 0; j < 4; j++)
+            std::tie(values[j * 2], values[(j * 2) + 1]) = generateBoxMullerNormalPair(randomBits[j * 2], randomBits[(j * 2) + 1]);
+        storeBlock(block, values.data());
+    }
+    return halfBits;
+}
 } // namespace WatermarkCrypto

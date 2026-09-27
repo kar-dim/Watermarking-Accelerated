@@ -16,8 +16,7 @@
     <WatermarkingRoot>$(MSBuildThisFileDirectory)</WatermarkingRoot>
     <WatermarkingLibraryOutputDirectory>$(WatermarkingRoot)$(Platform)\lib\$(Configuration)$(WatermarkingOutputSuffix)\</WatermarkingLibraryOutputDirectory>
     <WatermarkingImplDir>$(WatermarkingRoot)Watermarking-Impl\</WatermarkingImplDir>
-    <WatermarkingUtilDir>$(WatermarkingRoot)Watermarking-Util\</WatermarkingUtilDir>
-    <WatermarkingPublicIncludeDirectories>$(WatermarkingImplDir)include;$(WatermarkingUtilDir)include</WatermarkingPublicIncludeDirectories>
+    <WatermarkingPublicIncludeDirectories>$(WatermarkingImplDir)include</WatermarkingPublicIncludeDirectories>
     <WatermarkingImageIncludeDirectories>$(WatermarkingImplDir)libs\CImg;$(WatermarkingImplDir)libs\zlib\include;$(WatermarkingImplDir)libs\libpng\include;$(WatermarkingImplDir)libs\libjpeg\include;$(WatermarkingImplDir)libs\libwebp\include;$(WatermarkingImplDir)libs\libtiff\include</WatermarkingImageIncludeDirectories>
     <WatermarkingMediaIncludeDirectory>$(WatermarkingImplDir)libs\ffmpeg\include</WatermarkingMediaIncludeDirectory>
     <WatermarkingThirdPartyLibraryDirectories>$(WatermarkingImplDir)libs\zlib\lib;$(WatermarkingImplDir)libs\libpng\lib;$(WatermarkingImplDir)libs\libjpeg\lib;$(WatermarkingImplDir)libs\libwebp\lib;$(WatermarkingImplDir)libs\libtiff\lib;$(WatermarkingImplDir)libs\ffmpeg\lib</WatermarkingThirdPartyLibraryDirectories>

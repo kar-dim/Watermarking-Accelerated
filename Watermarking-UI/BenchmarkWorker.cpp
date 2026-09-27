@@ -1,12 +1,13 @@
 #include "BenchmarkWorker.hpp"
-#include "common_utils.hpp"
 #include "ImagePreview.hpp"
 #include "WatermarkCore.hpp"
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <future>
+#include <numeric>
 #include <QDir>
 #include <QFile>
 #include <QImage>
@@ -16,11 +17,21 @@
 #include <ratio>
 #include <utility>
 #include <vector>
-#include <WatermarkTypes.hpp>
 
-using namespace CommonUtils;
 using namespace WatermarkCore;
 namespace fs = std::filesystem;
+
+namespace {
+double calculateCV(const std::vector<double>& times) {
+    if (times.empty())
+        return 0.0;
+    const double mean = std::accumulate(times.begin(), times.end(), 0.0) / times.size();
+    const double sqSum = std::inner_product(times.begin(), times.end(), times.begin(), 0.0);
+    const double variance = sqSum / times.size() - mean * mean;
+    const double stdev = variance > 0.0 ? std::sqrt(variance) : 0.0;
+    return mean > 0.0 ? stdev / mean : 0.0;
+}
+} // namespace
 
 /*!
  *  \brief  Implementation of the benchmarking background thread
@@ -66,7 +77,7 @@ void BenchmarkWorker::run() {
         }
 
         // get the image files, if no valid image files are found, emit a finish signal with 0 FPS
-        const std::vector<fs::path> validFiles = CommonUtils::getValidImageFiles(inputDir);
+        const std::vector<fs::path> validFiles = WatermarkCore::getValidImageFiles(inputDir);
         if (validFiles.empty()) {
             emit benchmarkFinished(0.0, 0.0, 0);
             return;
@@ -88,6 +99,8 @@ void BenchmarkWorker::run() {
         constexpr int maxIterations = 300;
         std::vector<double> samples;
         samples.reserve(maxIterations);
+        // the GUI keeps the latest preview until the next one arrives, so the step after it can reuse the other buffer
+        std::array<QImage, 2> previews;
 
         // auto-tuned performance lambda
         auto measurePerformance = [&](auto&& task) {
@@ -164,7 +177,7 @@ void BenchmarkWorker::run() {
                         updateSessionParams(session.get(), p, psnr);
                         // EMBED BENCHMARK
                         auto [avgEmbedMs, embedFps, dummy] = measurePerformance([&]() {
-                            embedImage(session.get(), MaskMethod::ME);
+                            embedImage(session.get());
                             finish();
                             return 0.0f;
                         });
@@ -173,9 +186,9 @@ void BenchmarkWorker::run() {
                             return;
                         }
                         // necessary uint8 to float for detection
-                        prepareDetectionImage(session.get(), MaskMethod::ME);
+                        prepareDetectionImage(session.get());
                         // DETECT BENCHMARK
-                        auto [avgDetectMs, detectFps, currentCorrelation] = measurePerformance([&]() { return detectEmbeddedBuffer(session.get(), MaskMethod::ME); });
+                        auto [avgDetectMs, detectFps, currentCorrelation] = measurePerformance([&]() { return detectEmbeddedBuffer(session.get()); });
                         if (isInterruptionRequested()) {
                             emit benchmarkCanceled();
                             return;
@@ -188,7 +201,9 @@ void BenchmarkWorker::run() {
                         }
                         // GUI: convert the current watermarked image to a QImage format (interleaved RGB, transposed row-wise) for display in the GUI
                         // and emit current FPS and time for this specific frame and step completion to the GUI for display
-                        emit resultReady(imagePreviewFromSession(session.get()), p, psnr, avgEmbedMs, avgDetectMs, embedFps, detectFps, currentFileName, currentCorrelation);
+                        QImage& preview = previews[currentStep % previews.size()];
+                        updatePreviewFromSession(session.get(), preview);
+                        emit resultReady(preview, p, psnr, avgEmbedMs, avgDetectMs, embedFps, detectFps, currentFileName, currentCorrelation);
                         emit progressUpdated(++currentStep, totalSteps);
                     }
                 }

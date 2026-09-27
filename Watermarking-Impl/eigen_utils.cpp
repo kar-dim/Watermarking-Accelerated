@@ -1,7 +1,7 @@
 #include "buffer.hpp"
+#include "common_utils.hpp"
 #include "eigen_rgb_array.hpp"
 #include "eigen_utils.hpp"
-#include "luma_coefficients.hpp"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>

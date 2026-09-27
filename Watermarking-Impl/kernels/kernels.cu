@@ -1,12 +1,12 @@
-﻿#include "kernels.cuh"
+#include "kernels.cuh"
 #include <cstdint>
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 
-__global__ void apply_watermark_row_major(const float* __restrict__ input, const __half* __restrict__ u, const uint64_t* __restrict__ sumSqPtr, const uint64_t* __restrict__ maxAbsBits,
-    uint8_t* __restrict__ output, const float strengthNumerator, const int width, const int height) {
+__global__ void apply_watermark_row_major(
+    const float* __restrict__ input, const __half* __restrict__ u, const uint64_t* __restrict__ sumSq, uint8_t* __restrict__ output, const float strengthNumerator, const int width, const int height) {
     __shared__ uint8_t tile[32][36];
-    const float strength = embedStrength(sumSqPtr, maxAbsBits, strengthNumerator);
+    const float strength = embedStrength(sumSq, strengthNumerator);
     const int row = blockIdx.x * 32 + threadIdx.x;
     const int col = blockIdx.y * 32 + threadIdx.y;
 #pragma unroll
@@ -65,6 +65,29 @@ __global__ void colMajorToRowMajorU8(const uint8_t* __restrict__ src, uint8_t* _
     for (int i = 0; i < 32; i += 8) {
         if ((outRow + i) < height && outCol < width)
             dst[planeOffset + (outRow + i) * width + outCol] = tile[threadIdx.y + i][threadIdx.x];
+    }
+}
+
+__global__ void colMajorToInterleavedU8(const uint8_t* __restrict__ src, uint8_t* __restrict__ dst, const int width, const int height, const int channels) {
+    __shared__ uint8_t tile[3][32][33];
+    const int planeSize = width * height;
+    const int tileCol = blockIdx.x * 32;
+    const int tileRow = blockIdx.y * 32;
+    const int col = tileCol + threadIdx.y;
+    const int row = tileRow + threadIdx.x;
+    for (int channel = 0; channel < channels; channel++) {
+#pragma unroll
+        for (int i = 0; i < 32; i += 8) {
+            if ((col + i) < width && row < height)
+                tile[channel][threadIdx.y + i][threadIdx.x] = src[channel * planeSize + (col + i) * height + row];
+        }
+    }
+    __syncthreads();
+    const int rowBytes = min(32, width - tileCol) * channels;
+    for (int i = threadIdx.y; i < 32 && (tileRow + i) < height; i += 8) {
+        uint8_t* output = dst + ((tileRow + i) * width + tileCol) * channels;
+        for (int byte = threadIdx.x; byte < rowBytes; byte += 32)
+            output[byte] = tile[byte % channels][byte / channels][i];
     }
 }
 
@@ -180,34 +203,145 @@ __global__ void p010HdrYToSdrU8(const uint16_t* __restrict__ ySrc, const int yPi
     }
 }
 
-__global__ void rowMajorRgbToColMajor(const uint8_t* __restrict__ src, uint8_t* __restrict__ rgbDst, float* __restrict__ grayDst, const int width, const int height) {
-    __shared__ uint8_t tile[3][32][36];
-    const int planeSize = width * height;
-    const int col = blockIdx.x * 32 + threadIdx.x;
-    const int row = blockIdx.y * 32 + threadIdx.y;
+// // The CUDA watermark generation. For bit-exactness we use fma(), correctly rounded sqrt and explicit fmaf
+namespace {
+__device__ __forceinline__ uint32_t rotl(const uint32_t value, const int shift) { return __funnelshift_l(value, value, shift); }
+
+// ChaCha20 quarter round: add, rotate, xor
+__device__ __forceinline__ void quarterRound(uint32_t& a, uint32_t& b, uint32_t& c, uint32_t& d) {
+    a += b;
+    d = rotl(d ^ a, 16);
+    c += d;
+    b = rotl(b ^ c, 12);
+    a += b;
+    d = rotl(d ^ a, 8);
+    c += d;
+    b = rotl(b ^ c, 7);
+}
+
+// natural logarithm (Cephes polynomial)
+__device__ __forceinline__ float logReference(const float x) {
+    // frexp: mantissa in [0.5, 1) plus the matching exponent
+    const uint32_t bits = __float_as_uint(x);
+    float m = __uint_as_float((bits & 0x807FFFFFu) | 0x3F000000u);
+    float e = static_cast<float>(static_cast<int>((bits & 0x7F800000u) >> 23) - 126);
+
+    // keep the mantissa near 1: if (m < sqrt(0.5)) { e -= 1; m = 2m - 1; } else { m -= 1; }
+    const bool belowSqrtHalf = m < 0.707106781186547524f;
+    e = belowSqrtHalf ? e - 1.0f : e;
+    m = (belowSqrtHalf ? m + m : m) - 1.0f;
+
+    const float z = m * m;
+    float y = 7.0376836292E-2f;
+    y = fmaf(y, m, -1.1514610310E-1f);
+    y = fmaf(y, m, 1.1676998740E-1f);
+    y = fmaf(y, m, -1.2420140846E-1f);
+    y = fmaf(y, m, 1.4249322787E-1f);
+    y = fmaf(y, m, -1.6668057665E-1f);
+    y = fmaf(y, m, 2.0000714765E-1f);
+    y = fmaf(y, m, -2.4999993993E-1f);
+    y = fmaf(y, m, 3.3333331174E-1f);
+    y = (y * m) * z;
+    // recombine, using the hi/lo split of ln(2) for the exponent term
+    y = fmaf(e, -2.12194440e-4f, y);
+    y = fmaf(z, -0.5f, y);
+    return fmaf(e, 0.693359375f, m + y);
+}
+
+// sine and cosine (Cephes minimax polynomials)
+__device__ __forceinline__ void sinCosReference(const float x, float& sinOut, float& cosOut) {
+    // reduce into an octant: j = ((int)(x * 4/pi) + 1) & ~1
+    const int j = (static_cast<int>(x * 1.27323954473516f) + 1) & ~1;
+    const float y = static_cast<float>(j);
+
+    // extended precision modular arithmetic: r = ((x - y*DP1) - y*DP2) - y*DP3
+    float r = fmaf(y, -0.78515625f, x);
+    r = fmaf(y, -2.4187564849853515625e-4f, r);
+    r = fmaf(y, -3.77489497744594108e-8f, r);
+
+    // cosine and sine polynomials of the reduced argument
+    const float z = r * r;
+    float cosPoly = 2.443315711809948E-005f;
+    cosPoly = fmaf(cosPoly, z, -1.388731625493765E-003f);
+    cosPoly = fmaf(cosPoly, z, 4.166664568298827E-002f);
+    cosPoly = (cosPoly * z) * z;
+    cosPoly = fmaf(z, -0.5f, cosPoly);
+    cosPoly = cosPoly + 1.0f;
+    float sinPoly = -1.9515295891E-4f;
+    sinPoly = fmaf(sinPoly, z, 8.3321608736E-3f);
+    sinPoly = fmaf(sinPoly, z, -1.6666654611E-1f);
+    sinPoly = fmaf(sinPoly * z, r, r);
+
+    // the octant bits decide which polynomial is sin and which is cos, and the sign of each
+    const bool sinFromSinPoly = (j & 2) == 0;
+    sinOut = __uint_as_float(__float_as_uint(sinFromSinPoly ? sinPoly : cosPoly) ^ (static_cast<uint32_t>(j & 4) << 29));
+    cosOut = __uint_as_float(__float_as_uint(sinFromSinPoly ? cosPoly : sinPoly) ^ (static_cast<uint32_t>(~(j - 2) & 4) << 29));
+}
+
+// two 24-bit random values -> two normally distributed values (Box-Muller transform)
+__device__ __forceinline__ float2 boxMullerPair(const uint32_t random1, const uint32_t random2) {
+    // uniform in (0, 1]: (random + 1) * 2^-24, exact
+    const float u1 = fmaf(static_cast<float>(random1), 0x1.0p-24f, 0x1.0p-24f);
+    const float u2 = fmaf(static_cast<float>(random2), 0x1.0p-24f, 0x1.0p-24f);
+    const float radius = __fsqrt_rn(-2.0f * logReference(u1));
+    float sinTheta, cosTheta;
+    sinCosReference(CommonUtils::kTwoPi * u2, sinTheta, cosTheta);
+    return make_float2(radius * cosTheta, radius * sinTheta);
+}
+} // namespace
+
+__global__ void generate_watermark(const ChaChaState baseState, __half* __restrict__ watermark, const int64_t numElements) {
+    const int64_t block = static_cast<int64_t>(blockIdx.x) * blockDim.x + threadIdx.x;
+    const int64_t first = block * 8;
+    if (first >= numElements)
+        return;
+    // ChaCha20 block "block": the 64-bit block counter in words 12-13, 20 rounds, then the final addition
+    uint32_t x[16];
 #pragma unroll
-    for (int i = 0; i < 32; i += 8) {
-        if (col < width && (row + i) < height) {
-            const int rmIdx = (row + i) * width + col;
+    for (int i = 0; i < 16; i++)
+        x[i] = baseState.words[i];
+    x[12] = static_cast<uint32_t>(block);
+    x[13] = static_cast<uint32_t>(block >> 32);
 #pragma unroll
-            for (int c = 0; c < 3; c++)
-                tile[c][threadIdx.y + i][threadIdx.x] = src[c * planeSize + rmIdx];
-        }
+    for (int i = 0; i < 10; i++) {
+        quarterRound(x[0], x[4], x[8], x[12]);
+        quarterRound(x[1], x[5], x[9], x[13]);
+        quarterRound(x[2], x[6], x[10], x[14]);
+        quarterRound(x[3], x[7], x[11], x[15]);
+        quarterRound(x[0], x[5], x[10], x[15]);
+        quarterRound(x[1], x[6], x[11], x[12]);
+        quarterRound(x[2], x[7], x[8], x[13]);
+        quarterRound(x[3], x[4], x[9], x[14]);
     }
-    __syncthreads();
-    const int outRow = blockIdx.y * 32 + threadIdx.x;
-    const int outCol = blockIdx.x * 32 + threadIdx.y;
+    const uint32_t counter[2] = {static_cast<uint32_t>(block), static_cast<uint32_t>(block >> 32)};
 #pragma unroll
-    for (int i = 0; i < 32; i += 8) {
-        if (outRow < height && (outCol + i) < width) {
-            const int cmIdx = outRow + (outCol + i) * height;
-            const uint8_t r = tile[0][threadIdx.x][threadIdx.y + i];
-            const uint8_t g = tile[1][threadIdx.x][threadIdx.y + i];
-            const uint8_t b = tile[2][threadIdx.x][threadIdx.y + i];
-            rgbDst[cmIdx] = r;
-            rgbDst[planeSize + cmIdx] = g;
-            rgbDst[2 * planeSize + cmIdx] = b;
-            grayDst[cmIdx] = static_cast<float>(r) * CommonUtils::kLumaR + static_cast<float>(g) * CommonUtils::kLumaG + static_cast<float>(b) * CommonUtils::kLumaB;
-        }
+    for (int i = 0; i < 16; i++)
+        x[i] += (i == 12 || i == 13) ? counter[i - 12] : baseState.words[i];
+
+    // the block is eight 64-bit values (little endian word pairs), pair j uses the top 24 bits of values 2j and 2j + 1: the high words >> 8.
+    // The 8 values as half, two per word (the first one in the low bits, the memory order)
+    uint32_t packed[4];
+#pragma unroll
+    for (int j = 0; j < 4; j++) {
+        const float2 normals = boxMullerPair(x[(4 * j) + 1] >> 8, x[(4 * j) + 3] >> 8);
+        const __half2 pair = __floats2half2_rn(normals.x, normals.y);
+        packed[j] = static_cast<uint32_t>(__half_as_ushort(pair.x)) | (static_cast<uint32_t>(__half_as_ushort(pair.y)) << 16);
     }
+    if (first + 8 <= numElements) {
+        *reinterpret_cast<uint4*>(watermark + first) = make_uint4(packed[0], packed[1], packed[2], packed[3]);
+        return;
+    }
+    // the partial last block (at most 7 values): unrolled, every index is a constant and the values stay in registers
+    const int64_t remaining = numElements - first;
+#pragma unroll
+    for (int i = 0; i < 7; i++) {
+        if (i < remaining)
+            watermark[first + i] = __ushort_as_half(static_cast<unsigned short>(packed[i / 2] >> (16 * (i & 1))));
+    }
+}
+
+__global__ void box_muller_pairs(const uint32_t* __restrict__ randomPairs, float* __restrict__ normals, const int pairs) {
+    const int pair = blockIdx.x * blockDim.x + threadIdx.x;
+    if (pair < pairs)
+        reinterpret_cast<float2*>(normals)[pair] = boxMullerPair(randomPairs[2 * pair], randomPairs[(2 * pair) + 1]);
 }

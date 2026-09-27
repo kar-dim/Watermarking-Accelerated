@@ -1,9 +1,7 @@
 ﻿#pragma once
 
 #include "buffer.hpp"
-#include "half_float.hpp"
 #include "Eigen/Core"
-#include "include/WatermarkTypes.hpp"
 #include "PredictionErrorMatrixData.hpp"
 #include "WatermarkBase.hpp"
 #include <algorithm>
@@ -13,8 +11,6 @@
 #include <cstdlib>
 #include <omp.h>
 #include <optional>
-#include <span>
-#include <string>
 #include <utility>
 #include <vector>
 
@@ -25,8 +21,6 @@
 template <int p>
 class WatermarkEigen final : public WatermarkBase {
   private:
-    enum class Op { ADD, SUB };
-
     static constexpr int pSquared = p * p;
     static constexpr int pad = p / 2;
     static constexpr int localSize = pSquared - 1;
@@ -46,12 +40,12 @@ class WatermarkEigen final : public WatermarkBase {
     using Map = Eigen::Map<T>;
 
   public:
-    WatermarkEigen<p>(const int rows, const int cols, const std::string& watermarkPassword, const float psnr)
-        : WatermarkBase(rows, cols, watermarkPassword, psnr, initializeRandomMatrix), errorSequence(rows, cols), u(rows, cols), predictionData(rows, cols) {}
+    WatermarkEigen<p>(const int rows, const int cols, WatermarkBuffer watermark, const float psnr)
+        : WatermarkBase(rows, cols, std::move(watermark), psnr), errorSequence(rows, cols), u(rows, cols), predictionData(rows, cols) {}
 
     // RGB embedding: the watermark is computed from the luma and added to each channel of the 8-bit image, flat images are copied unchanged
-    void makeWatermark(const ImageBuffer& inputGrayImage, const ImageOutputBuffer& inputImage, ImageOutputBuffer& output, const MaskMethod maskType) override {
-        const auto scale = computeStrengthenedWatermark(inputGrayImage.getGray(), maskType);
+    void makeWatermark(const ImageBuffer& inputGrayImage, const ImageOutputBuffer& inputImage, ImageOutputBuffer& output) override {
+        const auto scale = computeStrengthenedWatermark(inputGrayImage.getGray());
         if (!output.matches(baseRows, baseCols, true))
             output = ImageOutputBuffer(EigenArrayU8RGB{Gray8(baseRows, baseCols), Gray8(baseRows, baseCols), Gray8(baseRows, baseCols)});
         const auto& rgbIn = inputImage.getRGB();
@@ -67,9 +61,9 @@ class WatermarkEigen final : public WatermarkBase {
     }
 
     // grayscale embedding: the watermark is added to the luma itself. The row-major output is the transposed array, written in small tiles (to maximize cache hits)
-    void makeWatermark(const ImageBuffer& inputGrayImage, ImageOutputBuffer& output, const MaskMethod maskType, const Layout outputLayout) override {
+    void makeWatermark(const ImageBuffer& inputGrayImage, ImageOutputBuffer& output, const Layout outputLayout) override {
         const auto& gray = inputGrayImage.getGray();
-        const auto scale = computeStrengthenedWatermark(gray, maskType);
+        const auto scale = computeStrengthenedWatermark(gray);
         const float strength = scale.value_or(0.0f);
         const bool rowMajor = outputLayout == Layout::RowMajor;
         const int outRows = rowMajor ? baseCols : baseRows;
@@ -106,22 +100,14 @@ class WatermarkEigen final : public WatermarkBase {
     }
 
     // detection: correlation between the prediction error of the image and the prediction error of (mask * watermark)
-    float detectWatermark(const ImageBuffer& inputImage, MaskMethod maskType) override {
-        const auto& watermarkedBuffer = inputImage.getGray();
-        if (maskType == MaskMethod::NVF) {
-            if (!computePredictionErrorData<false>(watermarkedBuffer))
-                return 0.0f;
-            // NVF mask and u = mask * w in one pass
-            computeNvfMaskAndU<false>(watermarkedBuffer, u);
-        } else {
-            // ME: u =|e| x w. The mask normally should be divided by max|e|: BUT the correlation does not change when u is scaled, the maximum is not needed!
-            if (!computePredictionErrorData<false>(watermarkedBuffer))
-                return 0.0f;
-            const auto& w = randomMatrix.getGray();
+    float detectWatermark(const ImageBuffer& inputImage) override {
+        // u = |e| x w. The mask normally should be divided by max|e|: BUT the correlation does not change when u is scaled, the maximum is not needed!
+        if (!computePredictionErrorData<false>(inputImage.getGray()))
+            return 0.0f;
+        const auto& w = randomMatrix.getGray();
 #pragma omp parallel for schedule(static)
-            for (int i = 0; i < u.size(); i++)
-                u(i) = std::abs(errorSequence(i)) * w(i);
-        }
+        for (int i = 0; i < u.size(); i++)
+            u(i) = std::abs(errorSequence(i)) * w(i);
         const auto [dot, sqEz, sqEu] = computeDetectionCorrelation(u);
         const float correlation = dot / (std::sqrt(sqEz) * std::sqrt(sqEu));
         return std::isfinite(correlation) ? correlation : 0.0f;
@@ -152,103 +138,8 @@ class WatermarkEigen final : public WatermarkBase {
         }
     }
 
-    // creates the watermark buffer: the half precision watermark values as floats
-    static WatermarkBuffer initializeRandomMatrix(const std::span<const uint16_t> watermarkHalfBits, const int rows, const int cols) {
-        ArrayXXf watermark(rows, cols);
-        float* values = watermark.data();
-#pragma omp parallel for schedule(static)
-        for (int i = 0; i < rows * cols; i++)
-            values[i] = HalfFloat::toFloat(watermarkHalfBits[i]);
-        return WatermarkBuffer(std::move(watermark));
-    }
-
     // pixel value, coords outside the image are clamped to the nearest edge pixel
     inline float clampedValue(const ArrayXXf& img, int r, int c, const int rows, const int cols) { return img(std::clamp(r, 0, rows - 1), std::clamp(c, 0, cols - 1)); }
-
-    // adds (or removes) one pixel to the running window sums of the NVF mask
-    template <Op OP>
-    inline void updateWindowSums(const float pixelValue, double& sum, double& sumSq) {
-        if constexpr (OP == Op::ADD) {
-            sum += pixelValue;
-            sumSq += pixelValue * pixelValue;
-        } else {
-            sum -= pixelValue;
-            sumSq -= pixelValue * pixelValue;
-        }
-    }
-
-    // NVF mask (sliding window variance) and u = mask * w in one pass, optionally returns sum(u^2) for the embedding
-    template <bool accumulate>
-    float computeNvfMaskAndU(const ArrayXXf& image, ArrayXXf& uOut) {
-        float sumSqOut = 0.0f;
-        const auto& w = randomMatrix.getGray();
-        static constexpr double invPSquared = 1.0 / pSquared;
-        auto emitPixel = [&](const double winSum, const double winSumSq, const int i, const int j) -> float {
-            const double mean = winSum * invPSquared;
-            const double variance = (winSumSq * invPSquared) - (mean * mean);
-            const double maskValue = variance / (1.0 + variance);
-            const float m = std::clamp(static_cast<float>(maskValue), 0.0f, 1.0f);
-            const float uVal = m * w(i, j);
-            uOut(i, j) = uVal;
-            if constexpr (accumulate)
-                return uVal * uVal;
-            else
-                return 0.0f;
-        };
-        // the inner region and the border regions in one parallel region
-#pragma omp parallel reduction(+ : sumSqOut)
-        {
-            if (hasInnerRegion) {
-#pragma omp for schedule(static) nowait
-                for (int j = startCol; j < endCol; j++) {
-                    double winSum = 0.0;
-                    double winSumSq = 0.0;
-                    for (int jj = -pad; jj <= pad; jj++)
-                        for (int ii = -pad; ii <= pad; ii++)
-                            updateWindowSums<Op::ADD>(image(pad + ii, j + jj), winSum, winSumSq);
-                    sumSqOut += emitPixel(winSum, winSumSq, pad, j);
-                    // slide the window down the column
-                    for (int i = startRow + 1; i < endRow; i++) {
-                        // remove the top row, add the new bottom row
-                        for (int jj = -pad; jj <= pad; jj++)
-                            updateWindowSums<Op::SUB>(image(i - pad - 1, j + jj), winSum, winSumSq);
-                        for (int jj = -pad; jj <= pad; jj++)
-                            updateWindowSums<Op::ADD>(image(i + pad, j + jj), winSum, winSumSq);
-                        sumSqOut += emitPixel(winSum, winSumSq, i, j);
-                    }
-                }
-            }
-
-            // border regions
-            auto processRect = [&](int rStart, int rEnd, int cStart, int cEnd) {
-#pragma omp for schedule(static) collapse(2) nowait
-                for (int j = cStart; j < cEnd; j++) {
-                    for (int i = rStart; i < rEnd; i++) {
-                        double winSum = 0.0;
-                        double winSumSq = 0.0;
-                        // border pixels sum the whole (clamped) window
-                        for (int jj = -pad; jj <= pad; jj++) {
-                            for (int ii = -pad; ii <= pad; ii++) {
-                                const float val = clampedValue(image, i + ii, j + jj, baseRows, baseCols);
-                                updateWindowSums<Op::ADD>(val, winSum, winSumSq);
-                            }
-                        }
-                        sumSqOut += emitPixel(winSum, winSumSq, i, j);
-                    }
-                }
-            };
-            // the 4 border strips
-            if (startRow > 0)
-                processRect(0, startRow, 0, baseCols);
-            if (endRow < baseRows)
-                processRect(endRow, baseRows, 0, baseCols);
-            if (startCol > 0 && hasInnerRegion)
-                processRect(startRow, endRow, 0, startCol);
-            if (endCol < baseCols && hasInnerRegion)
-                processRect(startRow, endRow, endCol, baseCols);
-        }
-        return sumSqOut;
-    }
 
     // calls processor(i, j, neighbors) for every border pixel, with the (clamped) window neighbors
     // must be called inside an existing omp parallel region (it uses "omp for")
@@ -287,26 +178,20 @@ class WatermarkEigen final : public WatermarkBase {
     }
 
     // computes u = mask * w (not yet scaled) and returns the scale factor, or nothing for flat images. The scale is applied later while
-    // writing the output pixels
-    std::optional<float> computeStrengthenedWatermark(const ArrayXXf& inputImage, MaskMethod maskType) {
+    // writing the output pixels. The mask is |e| / max|e|, u and sum(u^2) are computed directly from the prediction error
+    std::optional<float> computeStrengthenedWatermark(const ArrayXXf& inputImage) {
+        const auto maxAbsOpt = computePredictionErrorData<true>(inputImage);
+        if (!maxAbsOpt || *maxAbsOpt <= 0.0f)
+            return std::nullopt;
+        const auto& w = randomMatrix.getGray();
+        const float invMax = 1.0f / *maxAbsOpt;
+        const float* ePtr = errorSequence.data();
         float sumSq = 0.0f;
-        if (maskType == MaskMethod::NVF) {
-            // NVF mask, u = mask * w and sum(u^2) in one pass
-            sumSq = computeNvfMaskAndU<true>(inputImage, u);
-        } else {
-            // ME: the mask is |e| / max|e|, u and sum(u^2) are computed directly from the prediction error
-            const auto maxAbsOpt = computePredictionErrorData<true>(inputImage);
-            if (!maxAbsOpt || *maxAbsOpt <= 0.0f)
-                return std::nullopt;
-            const auto& w = randomMatrix.getGray();
-            const float invMax = 1.0f / *maxAbsOpt;
-            const float* ePtr = errorSequence.data();
 #pragma omp parallel for schedule(static) reduction(+ : sumSq)
-            for (int i = 0; i < errorSequence.size(); i++) {
-                const float uValue = std::abs(ePtr[i]) * invMax * w(i);
-                u(i) = uValue;
-                sumSq += uValue * uValue;
-            }
+        for (int i = 0; i < errorSequence.size(); i++) {
+            const float uValue = std::abs(ePtr[i]) * invMax * w(i);
+            u(i) = uValue;
+            sumSq += uValue * uValue;
         }
         if (sumSq <= 1e-3f) // flat images / frames
             return std::nullopt;

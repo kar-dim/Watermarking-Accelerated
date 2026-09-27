@@ -1,5 +1,5 @@
 #pragma once
-#include "luma_coefficients.hpp"
+#include "common_utils.hpp"
 #include <cstdint>
 #include <cub/cub.cuh>
 #include <cuda_fp16.h>
@@ -38,11 +38,11 @@ __device__ inline int2 packedToRowCol(const int k) {
 inline __device__ float clamp(float f, float a, float b) { return fmaxf(a, fminf(f, b)); }
 inline __device__ int clamp(int f, int a, int b) { return max(a, min(f, b)); }
 
-// Fills shared memory with the image tile around block outputs with clamped edges
+// Fills shared memory with the image tile around block outputs with clamped edges, MASKED: |input| * w (the ME mask times the watermark)
 // Loads all values into registers first before writing to shared memory
-template <bool FUSED, int p, int shDimFast, int shDimSlow, int THREADS, bool ABS_A = false>
+template <bool MASKED, int p, int shDimFast, int shDimSlow, int THREADS>
 __device__ __forceinline__ void fillBlock(
-    const float* __restrict__ inputA, const __half* __restrict__ inputB, float* __restrict__ sharedMem, const int tileSlow0, const int tileFast0, const int width, const int height) {
+    const float* __restrict__ input, const __half* __restrict__ w, float* __restrict__ sharedMem, const int tileSlow0, const int tileFast0, const int width, const int height) {
     constexpr int pad = p / 2;
     constexpr int totalElements = shDimFast * shDimSlow;
     constexpr int iterations = (totalElements + THREADS - 1) / THREADS;
@@ -60,13 +60,11 @@ __device__ __forceinline__ void fillBlock(
             const int globalX = clamp(baseGlobalX + c, 0, width - 1);
             const int globalY = clamp(baseGlobalY + r, 0, height - 1);
             const int idx = globalX * height + globalY;
-            float val = inputA[idx];
             // Evaluated at compile time to avoid branches
-            if constexpr (ABS_A)
-                val = fabsf(val);
-            if constexpr (FUSED)
-                val *= __half2float(inputB[idx]);
-            values[it] = val;
+            if constexpr (MASKED)
+                values[it] = fabsf(input[idx]) * __half2float(w[idx]);
+            else
+                values[it] = input[idx];
         }
     }
 #pragma unroll
@@ -75,92 +73,6 @@ __device__ __forceinline__ void fillBlock(
         if (i < totalElements)
             sharedMem[i] = values[it];
     }
-}
-
-// Computes the NVF mask for one pixel from its shared memory window
-template <int p, int shDimFast, int shDimSlow>
-__device__ __forceinline__ float compute_nvf_mask(const float (&region)[shDimSlow][shDimFast], const int shSlow, const int shFast) {
-    constexpr int pad = p / 2;
-    constexpr float nPixels = static_cast<float>(p * p);
-    constexpr float nPixelsSq = nPixels * nPixels;
-
-    float sum = 0.0f, sumSq = 0.0f;
-
-#pragma unroll
-    for (int i = -pad; i <= pad; i++) {
-#pragma unroll
-        for (int j = -pad; j <= pad; j++) {
-            const float pixelValue = region[shSlow + i][shFast + j];
-            sum += pixelValue;
-            sumSq += pixelValue * pixelValue;
-        }
-    }
-
-    // NVF formula using variance with a single division
-    const float numerator = (nPixels * sumSq) - (sum * sum);
-    const float output = __fdividef(numerator, nPixelsSq + numerator);
-    return __saturatef(output);
-}
-
-// Computes the NVF mask for every pixel during detection
-template <int p>
-__global__ void nvf(const float* __restrict__ input, float* __restrict__ nvf, const int width, const int height) {
-    constexpr int pad = p / 2;
-    constexpr int shDimFast = 32 + (2 * pad);
-    constexpr int shDimSlow = 8 + (2 * pad);
-
-    const int x = blockIdx.y * blockDim.y + threadIdx.y;
-    const int y = blockIdx.x * blockDim.x + threadIdx.x;
-
-    __shared__ alignas(16) float region[shDimSlow][shDimFast];
-
-    fillBlock<false, p, shDimFast, shDimSlow, 32 * 8>(input, nullptr, &region[0][0], blockIdx.y * blockDim.y, blockIdx.x * blockDim.x, width, height);
-    __syncthreads();
-
-    if (x >= width || y >= height)
-        return;
-
-    const int shSlow = threadIdx.y + pad;
-    const int shFast = threadIdx.x + pad;
-    nvf[x * height + y] = compute_nvf_mask<p, shDimFast, shDimSlow>(region, shSlow, shFast);
-}
-
-// Fused kernel computing NVF mask, u = mask * w, and sum of u squared
-template <int p>
-__global__ void nvf_u_and_sumsq_fused(const float* __restrict__ input, const __half* __restrict__ w, __half* __restrict__ u, uint64_t* __restrict__ globalSumSq, const int width, const int height) {
-    constexpr int pad = p / 2;
-    constexpr int shDimFast = 32 + (2 * pad);
-    constexpr int shDimSlow = 8 + (2 * pad);
-
-    const int x = blockIdx.y * blockDim.y + threadIdx.y;
-    const int y = blockIdx.x * blockDim.x + threadIdx.x;
-    const int linearTid = threadIdx.y * blockDim.x + threadIdx.x;
-
-    using BlockReduceT = cub::BlockReduce<float, 32, cub::BLOCK_REDUCE_WARP_REDUCTIONS, 8>; // Block size is 32 by 8
-    __shared__ alignas(16) float region[shDimSlow][shDimFast];
-    __shared__ typename BlockReduceT::TempStorage temp_storage;
-
-    fillBlock<false, p, shDimFast, shDimSlow, 32 * 8>(input, nullptr, &region[0][0], blockIdx.y * blockDim.y, blockIdx.x * blockDim.x, width, height);
-    __syncthreads();
-
-    // Threads outside image bounds contribute zero
-    float threadSumSq = 0.0f;
-    if (x < width && y < height) {
-        const int shSlow = threadIdx.y + pad;
-        const int shFast = threadIdx.x + pad;
-        // Accumulate squared u values in half precision
-        const float maskVal = compute_nvf_mask<p, shDimFast, shDimSlow>(region, shSlow, shFast);
-        const int idx = x * height + y;
-        const __half uHalf = __float2half_rn(maskVal * __half2float(w[idx]));
-        u[idx] = uHalf;
-        const float uVal = __half2float(uHalf);
-        threadSumSq = uVal * uVal;
-    }
-
-    // Reduce block sum and update global total with atomic addition
-    const float blockTotalSq = BlockReduceT(temp_storage).Sum(threadSumSq);
-    if (linearTid == 0)
-        atomicAdd(globalSumSq, toScaledUint64(blockTotalSq));
 }
 
 // Prediction error tile where each thread processes 4 rows by 2 columns
@@ -297,14 +209,14 @@ __device__ __forceinline__ void storeRows4(__half* __restrict__ output, const in
             output[idx + r] = __float2half_rn(v[r]);
 }
 
-// Prepares shared memory tile and coefficients, returning thread start coordinates
-template <int p, bool FUSED, bool ABS_A = false>
-__device__ __forceinline__ int2 setupErrorTile(const float* __restrict__ inputA, const __half* __restrict__ inputB, const float* __restrict__ coeffs, float* __restrict__ region,
+// Prepares shared memory tile (the input, or |input| * w when MASKED) and coefficients, returning thread start coordinates
+template <int p, bool MASKED>
+__device__ __forceinline__ int2 setupErrorTile(const float* __restrict__ input, const __half* __restrict__ w, const float* __restrict__ coeffs, float* __restrict__ region,
     float (&coef)[ErrorTile<p>::coeffsSize], const int width, const int height) {
     using T = ErrorTile<p>;
     const int tileSlow0 = blockIdx.y * T::tileSlow;
     const int tileFast0 = blockIdx.x * T::tileFast;
-    fillBlock<FUSED, p, T::shFast, T::shSlow, T::threads, ABS_A>(inputA, inputB, region, tileSlow0, tileFast0, width, height);
+    fillBlock<MASKED, p, T::shFast, T::shSlow, T::threads>(input, w, region, tileSlow0, tileFast0, width, height);
     loadCoefficients<p>(coeffs, coef);
     __syncthreads();
     return make_int2(tileSlow0 + ((threadIdx.x / 32) * T::cols), tileFast0 + ((threadIdx.x % 32) * T::rows));
@@ -372,17 +284,18 @@ __global__ void __launch_bounds__(ErrorTile<p>::threads) me_error_sequence_u_sum
     }
 }
 
-// Computes partial correlation sums and writes final result from the last finished block
-template <int p, bool ABS_MASK>
-__global__ void __launch_bounds__(ErrorTile<p>::threads) calculate_error_sequence_and_partial_corr_fused(const float* __restrict__ mask, const __half* __restrict__ w, const float* __restrict__ e_u,
-    const float* __restrict__ coeffs, float* __restrict__ partialDots, float* __restrict__ partialNormU, float* __restrict__ partialNormZ, unsigned int* __restrict__ blockCounter,
-    float* __restrict__ correlation, const int width, const int height, const int* __restrict__ stopFlag) {
+// Correlation of the image prediction error e_u with the prediction error of |e_u| * w (the ME mask times the watermark, not divided by
+// max|e_u|: the correlation does not depend on the scale). Computes partial sums and writes the final result from the last finished block
+template <int p>
+__global__ void __launch_bounds__(ErrorTile<p>::threads) calculate_error_sequence_and_partial_corr_fused(const float* __restrict__ e_u, const __half* __restrict__ w, const float* __restrict__ coeffs,
+    float* __restrict__ partialDots, float* __restrict__ partialNormU, float* __restrict__ partialNormZ, unsigned int* __restrict__ blockCounter, float* __restrict__ correlation, const int width,
+    const int height, const int* __restrict__ stopFlag) {
     using T = ErrorTile<p>;
     using BlockReduceT = cub::BlockReduce<CorrelationData, T::threads, cub::BLOCK_REDUCE_WARP_REDUCTIONS>;
     __shared__ typename BlockReduceT::TempStorage temp_storage;
     __shared__ alignas(16) float region[T::shSlow * T::shFast];
     float coef[T::coeffsSize];
-    const int2 origin = setupErrorTile<p, true, ABS_MASK>(mask, w, coeffs, region, coef, width, height);
+    const int2 origin = setupErrorTile<p, true>(e_u, w, coeffs, region, coef, width, height);
 
     // Out-of-bounds pixels or failed solves contribute zero
     CorrelationData threadData = {0.0f, 0.0f, 0.0f};
@@ -484,12 +397,12 @@ struct FloatFloat {
     __device__ __forceinline__ explicit operator float() const { return hi + lo; }
     __device__ __forceinline__ friend FloatFloat operator*(const FloatFloat a, const FloatFloat b) {
         FloatFloat p = twoProd(a.hi, b.hi);
-        p.lo += (a.hi * b.lo) + (a.lo * b.hi);
+        p.lo = fmaf(a.hi, b.lo, fmaf(a.lo, b.hi, p.lo));
         return quickTwoSum(p.hi, p.lo);
     }
     // Computes c - a * b with fast error compensation for Cholesky updates
     __device__ __forceinline__ friend FloatFloat fnma(const FloatFloat a, const FloatFloat b, const FloatFloat c) {
-        const float ph = a.hi * b.hi;
+        const float ph = __fmul_rn(a.hi, b.hi); // fmul_rn on purpose
         const float pl = fmaf(a.hi, b.lo, fmaf(a.lo, b.hi, fmaf(a.hi, b.hi, -ph)));
         const FloatFloat s = twoSum(c.hi, -ph);
         return quickTwoSum(s.hi, s.lo + (c.lo - pl));
@@ -499,7 +412,7 @@ struct FloatFloat {
         const float h = rsqrtf(v.hi);
         const FloatFloat vh2 = v * twoProd(h, h);
         const float r = (1.0f - vh2.hi) - vh2.lo;
-        return quickTwoSum(h, 0.5f * h * r);
+        return quickTwoSum(h, __fmul_rn(0.5f * h, r)); // fmul_rn on purpose
     }
     __device__ __forceinline__ friend FloatFloat shfl(const FloatFloat v, const int srcLane) { return {__shfl_sync(0xffffffffu, v.hi, srcLane), __shfl_sync(0xffffffffu, v.lo, srcLane)}; }
 };
@@ -908,7 +821,7 @@ __device__ __forceinline__ void choleskyTrailingUpdate(FloatFloat* __restrict__ 
         float hi = acc.hi, lo = acc.lo;
 #pragma unroll
         for (int m = 0; m < NB; m++) {
-            const float ph = pi[m] * pj[m];
+            const float ph = __fmul_rn(pi[m], pj[m]); // fmul_rn on purpose
             const float pl = fmaf(pi[m], pj[NB + m], fmaf(pi[NB + m], pj[m], fmaf(pi[m], pj[m], -ph)));
             const FloatFloat sum = FloatFloat::twoSum(hi, -ph);
             hi = sum.hi;
@@ -1013,14 +926,11 @@ __global__ void __launch_bounds__(BLOCK)
     }
 }
 
-// Computes embedding strength and checks whether the image is flat
-__device__ __forceinline__ float embedStrength(const uint64_t* __restrict__ sumSqPtr, const uint64_t* __restrict__ maxAbsBits, const float strengthNumerator) {
-    const float uSumSquared = toUnscaledFloat(*sumSqPtr);
-    float normalizedSumSquared = uSumSquared;
-    if (maxAbsBits) {
-        const float normFactor = 1.0f / ((__uint_as_float(static_cast<unsigned int>(*maxAbsBits)) + 1.0e-6f) * kMeMaskPrescale);
-        normalizedSumSquared *= normFactor * normFactor;
-    }
+// Computes embedding strength and checks whether the image is flat: sumSq[0] = sum(u^2) (fixed point), sumSq[1] = max|e| (float bits)
+__device__ __forceinline__ float embedStrength(const uint64_t* __restrict__ sumSq, const float strengthNumerator) {
+    const float uSumSquared = toUnscaledFloat(sumSq[0]);
+    const float normFactor = 1.0f / ((__uint_as_float(static_cast<unsigned int>(sumSq[1])) + 1.0e-6f) * kMeMaskPrescale);
+    const float normalizedSumSquared = uSumSquared * (normFactor * normFactor);
     return normalizedSumSquared > 1e-3f ? strengthNumerator * rsqrtf(uSumSquared) : 0.0f;
 }
 
@@ -1036,9 +946,9 @@ __device__ __forceinline__ float4 loadPixels4(const float* __restrict__ input, c
 
 // Adds watermark to image channels: output = input + strength * u
 template <typename T>
-__global__ void apply_watermark_fused(const T* __restrict__ input, const __half* __restrict__ u, const uint64_t* __restrict__ sumSqPtr, const uint64_t* __restrict__ maxAbsBits,
-    uint8_t* __restrict__ output, const float strengthNumerator, const int planeElements, const int numChannels) {
-    const float strength = embedStrength(sumSqPtr, maxAbsBits, strengthNumerator);
+__global__ void apply_watermark_fused(const T* __restrict__ input, const __half* __restrict__ u, const uint64_t* __restrict__ sumSq, uint8_t* __restrict__ output, const float strengthNumerator,
+    const int planeElements, const int numChannels) {
+    const float strength = embedStrength(sumSq, strengthNumerator);
     const int stride = blockDim.x * gridDim.x;
     const int first = blockIdx.x * blockDim.x + threadIdx.x;
     const int planeVectors = planeElements % 4 == 0 ? planeElements / 4 : 0;
@@ -1061,8 +971,8 @@ __global__ void apply_watermark_fused(const T* __restrict__ input, const __half*
 }
 
 // Grayscale embedding transposing column-major input to row-major output via shared memory
-__global__ void apply_watermark_row_major(const float* __restrict__ input, const __half* __restrict__ u, const uint64_t* __restrict__ sumSqPtr, const uint64_t* __restrict__ maxAbsBits,
-    uint8_t* __restrict__ output, const float strengthNumerator, const int width, const int height);
+__global__ void apply_watermark_row_major(
+    const float* __restrict__ input, const __half* __restrict__ u, const uint64_t* __restrict__ sumSq, uint8_t* __restrict__ output, const float strengthNumerator, const int width, const int height);
 
 // Converts NV12 to YUV420p format for video decoding
 __global__ void nV12ToYUV420p(const uint8_t* __restrict__ uvSrc, const int uvPitch, uint8_t* __restrict__ uvDst, const int uvWidth, const int uvHeight);
@@ -1076,8 +986,108 @@ __global__ void u8ToFloatGray(const uint8_t* __restrict__ input, float* __restri
 // Transposes column-major uint8 image back to row-major format
 __global__ void colMajorToRowMajorU8(const uint8_t* __restrict__ src, uint8_t* __restrict__ dst, const int width, const int height);
 
-// Converts row-major planar RGB to column-major RGB and float luma
-__global__ void rowMajorRgbToColMajor(const uint8_t* __restrict__ src, uint8_t* __restrict__ rgbDst, float* __restrict__ grayDst, const int width, const int height);
+// Transposes column-major planar uint8 (1 or 3 channels) to row-major interleaved uint8 (display layout)
+__global__ void colMajorToInterleavedU8(const uint8_t* __restrict__ src, uint8_t* __restrict__ dst, const int width, const int height, const int channels);
+
+// the source pixel (row-major, as stored in the file) of the displayed pixel (x, y) for the EXIF orientations 1-8, the transforms of InternalUtils::rotate
+__device__ __forceinline__ int2 orientedSource(const int x, const int y, const int srcWidth, const int srcHeight, const int orientation) {
+    switch (orientation) {
+    case 2: return make_int2(srcWidth - 1 - x, y);
+    case 3: return make_int2(srcWidth - 1 - x, srcHeight - 1 - y);
+    case 4: return make_int2(x, srcHeight - 1 - y);
+    case 5: return make_int2(y, x);
+    case 6: return make_int2(y, srcHeight - 1 - x);
+    case 7: return make_int2(srcWidth - 1 - y, srcHeight - 1 - x);
+    case 8: return make_int2(srcWidth - 1 - y, x);
+    default: return make_int2(x, y);
+    }
+}
+
+// inside a tile every EXIF orientation is a swap of the axes and/or a mirror of each axis: (x, y) in the displayed tile -> (column, row) in the source tile
+struct TileOrientation {
+    bool swapAxes;
+    int mirrorX;
+    int mirrorY;
+    __device__ explicit TileOrientation(const int orientation)
+        : swapAxes(orientation >= 5), mirrorX(orientation == 2 || orientation == 3 || orientation == 7 || orientation == 8 ? 31 : 0),
+          mirrorY(orientation == 3 || orientation == 4 || orientation == 6 || orientation == 7 ? 31 : 0) {}
+    __device__ int2 operator()(const int x, const int y) const { return make_int2((swapAxes ? y : x) ^ mirrorX, (swapAxes ? x : y) ^ mirrorY); }
+};
+
+// Image upload: row-major planar 8-bit (1 or 3 channels, as stored in the file) to the displayed image (EXIF orientation 1-8): column-major 8-bit planes (RGB only),
+// column-major float luma and optionally the row-major interleaved 8-bit pixels (the original image preview, when display is not null)
+template <int CHANNELS>
+__global__ void orientRowMajorToColMajor(
+    const uint8_t* __restrict__ src, uint8_t* __restrict__ rgbDst, float* __restrict__ grayDst, uint8_t* __restrict__ display, const int srcWidth, const int srcHeight, const int orientation) {
+    __shared__ uint8_t tile[CHANNELS][32][33];
+    const bool swapAxes = orientation >= 5;
+    const int width = swapAxes ? srcHeight : srcWidth;
+    const int height = swapAxes ? srcWidth : srcHeight;
+    const int tileCol = blockIdx.x * 32;
+    const int tileRow = blockIdx.y * 32;
+    // the source pixels of a 32x32 displayed tile are a 32x32 square too, loaded with coalesced reads
+    const int2 first = orientedSource(tileCol, tileRow, srcWidth, srcHeight, orientation);
+    const int2 last = orientedSource(tileCol + 31, tileRow + 31, srcWidth, srcHeight, orientation);
+    const int srcCol0 = min(first.x, last.x);
+    const int srcRow0 = min(first.y, last.y);
+    const int srcCol = srcCol0 + threadIdx.x;
+    const int srcPlaneSize = srcWidth * srcHeight;
+#pragma unroll
+    for (int i = 0; i < 32; i += 8) {
+        const int srcRow = srcRow0 + threadIdx.y + i;
+        if (srcCol >= 0 && srcCol < srcWidth && srcRow >= 0 && srcRow < srcHeight) {
+#pragma unroll
+            for (int c = 0; c < CHANNELS; c++)
+                tile[c][threadIdx.y + i][threadIdx.x] = src[c * srcPlaneSize + srcRow * srcWidth + srcCol];
+        }
+    }
+    __syncthreads();
+    // column-major planes and luma: coalesced writes along the displayed columns
+    const TileOrientation tileOrientation(orientation);
+    const int planeSize = width * height;
+    const int row = tileRow + threadIdx.x;
+#pragma unroll
+    for (int i = 0; i < 32; i += 8) {
+        const int col = tileCol + threadIdx.y + i;
+        if (row < height && col < width) {
+            const int2 source = tileOrientation(threadIdx.y + i, threadIdx.x);
+            const int idx = col * height + row;
+            if constexpr (CHANNELS == 3) {
+                const uint8_t r = tile[0][source.y][source.x];
+                const uint8_t g = tile[1][source.y][source.x];
+                const uint8_t b = tile[2][source.y][source.x];
+                rgbDst[idx] = r;
+                rgbDst[planeSize + idx] = g;
+                rgbDst[2 * planeSize + idx] = b;
+                grayDst[idx] = static_cast<float>(r) * CommonUtils::kLumaR + static_cast<float>(g) * CommonUtils::kLumaG + static_cast<float>(b) * CommonUtils::kLumaB;
+            } else {
+                grayDst[idx] = static_cast<float>(tile[0][source.y][source.x]);
+            }
+        }
+    }
+    // the displayed pixels, row-major interleaved: coalesced writes along the displayed rows
+    if (display) {
+        const int rowBytes = min(32, width - tileCol) * CHANNELS;
+        for (int i = threadIdx.y; i < 32 && (tileRow + i) < height; i += 8) {
+            uint8_t* output = display + ((tileRow + i) * width + tileCol) * CHANNELS;
+            for (int byte = threadIdx.x; byte < rowBytes; byte += 32) {
+                const int2 source = tileOrientation(byte / CHANNELS, i);
+                output[byte] = tile[byte % CHANNELS][source.y][source.x];
+            }
+        }
+    }
+}
+
+// The ChaCha20 start state of the watermark password (kernel argument)
+struct ChaChaState {
+    uint32_t words[16];
+};
+
+// Generates the watermark: one ChaCha20 block per thread, 8 standard normal values (Box-Muller) rounded to half
+__global__ void generate_watermark(const ChaChaState baseState, __half* __restrict__ watermark, const int64_t numElements);
+
+// Box-Muller transform of (x1, x2) pairs of 24-bit random values, the transform of generate_watermark (tested against the CPU)
+__global__ void box_muller_pairs(const uint32_t* __restrict__ randomPairs, float* __restrict__ normals, const int pairs);
 
 // Precomputed lookup tables for PQ EOTF and BT.1886 gamma to avoid costly powf calls
 static __device__ const float pqEotfLUT[1024] = {0.00000000e+00f, 4.04227176e-07f, 1.31113719e-06f, 2.62368259e-06f, 4.31514955e-06f, 6.37468853e-06f, 8.79823827e-06f, 1.15853619e-05f,

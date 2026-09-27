@@ -1,7 +1,6 @@
 #include "WatermarkingUI.h"
 #include "AnimatedButton.hpp"
 #include "ThemePalette.hpp"
-#include "common_utils.hpp"
 #include <algorithm>
 #include <exception>
 #include <filesystem>
@@ -81,7 +80,7 @@ QString supportedDropPath(const QMimeData* data, const bool folder) {
             continue;
         const QString path = url.toLocalFile();
         const QFileInfo info(path);
-        if (folder ? info.isDir() : (info.isFile() && CommonUtils::hasSupportedImageExtension(fs::path(info.fileName().toStdWString()))))
+        if (folder ? info.isDir() : (info.isFile() && WatermarkCore::hasSupportedImageExtension(fs::path(info.fileName().toStdWString()))))
             return path;
     }
     return {};
@@ -521,7 +520,7 @@ void WatermarkingUI::refreshBatchQueue() {
     }
     const fs::path folder(batchFolder->text().trimmed().toStdString());
     try {
-        batchFiles = CommonUtils::getValidImageFiles(folder);
+        batchFiles = WatermarkCore::getValidImageFiles(folder);
     } catch (const std::exception& error) {
         setStatus(batchStatus, QString::fromUtf8(error.what()), "error");
         return;

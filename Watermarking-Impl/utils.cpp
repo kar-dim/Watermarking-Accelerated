@@ -1,8 +1,5 @@
 #include "buffer.hpp"
-#include "common_utils.hpp"
-#include "luma_coefficients.hpp"
 #include "ImageFileBuffer.hpp"
-#include "simd.hpp"
 #include "TinyEXIF.h"
 #include "utils.hpp"
 #include "WatermarkBase.hpp"
@@ -27,6 +24,7 @@
 #elif defined(_USE_CUDA_)
 #include "CudaStreamManager.hpp"
 #include "CudaArray.hpp"
+#include "CudaCheck.hpp"
 #include "WatermarkCuda.cuh"
 #include "cuda_utils.hpp"
 #include <cctype>
@@ -40,8 +38,14 @@
 using std::string;
 using namespace CommonUtils;
 
-// save a CImg image selecting the correct encoder by file extension
 namespace {
+string addSuffixBeforeExtension(const string& file, const string& suffix) {
+    const auto dot = file.find_last_of('.');
+    checkError(dot == string::npos || dot == file.size() - 1, "Filename has no valid extension: " + file);
+    return file.substr(0, dot) + suffix + file.substr(dot);
+}
+
+// save a CImg image selecting the correct encoder by file extension
 void saveCimgByExtension(const Gray8BufferIO& cimgToSave, const string& path) {
     string extension = path.substr(path.find_last_of('.') + 1);
     std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
@@ -155,51 +159,42 @@ std::vector<uint8_t> toBytes(const FloatBufferIO& img) {
     return bytes;
 }
 
+// uploads the 8-bit image (1 or 3 channels) and orients it (EXIF orientation) on the device: column-major 8-bit RGB planes (empty for grayscale) and float luma.
+// With "preview", the displayed row-major interleaved pixels (the original image preview) are downloaded into it
+std::pair<ImageOutputBuffer, ImageBuffer> uploadOriented(const FloatBufferIO& img, const int orientation, std::vector<uint8_t>* preview) {
+    const int channels = img.spectrum();
+    const int srcRows = img.height();
+    const int srcCols = img.width();
+    const bool swapAxes = orientation >= 5;
+    const int rows = swapAxes ? srcCols : srcRows;
+    const int cols = swapAxes ? srcRows : srcCols;
 #if defined(_USE_CUDA_)
-ImageBuffer cimgGrayToGpu(const FloatBufferIO& img, cudaStream_t stream) {
-    const int rows = img.height();
-    const int cols = img.width();
-    const CudaArray<uint8_t> rowMajor(rows, cols, toBytes(img).data(), stream);
+    const cudaStream_t stream = CudaStreamManager::getInstance().getComputeStream();
+    const CudaArray<uint8_t> source(srcRows, srcCols, channels, toBytes(img).data(), stream);
+    CudaArray<uint8_t> rgb = channels == 3 ? CudaArray<uint8_t>(rows, cols, 3, stream) : CudaArray<uint8_t>();
     CudaArray<float> gray(rows, cols, stream);
-    cuda_utils::launchPitchedToFloatKernel(rowMajor.data(), gray.data(), cols, rows, cols, stream);
-    return gray;
-}
-
-std::pair<ImageOutputBuffer, ImageBuffer> cimgRgbToGpuAndGray(const FloatBufferIO& img, cudaStream_t stream) {
-    const int rows = img.height();
-    const int cols = img.width();
-    const CudaArray<uint8_t> rowMajor(rows, cols, 3, toBytes(img).data(), stream);
-    CudaArray<uint8_t> rgb(rows, cols, 3, stream);
-    CudaArray<float> gray(rows, cols, stream);
-    cuda_utils::launchRowMajorRgbToColMajorKernel(rowMajor.data(), rgb.data(), gray.data(), cols, rows, stream);
-    return {std::move(rgb), std::move(gray)};
-}
-
+    CudaArray<uint8_t> display = preview ? CudaArray<uint8_t>(rows, cols, channels, stream) : CudaArray<uint8_t>();
+    cuda_utils::launchOrientRowMajorToColMajorKernel(source.data(), rgb.data(), gray.data(), display.data(), srcCols, srcRows, channels, orientation, stream);
 #elif defined(_USE_OPENCL_)
-ImageBuffer cimgGrayToGpu(const FloatBufferIO& img, cl_command_queue queue) {
-    const int rows = img.height();
-    const int cols = img.width();
-    const OclArray<uint8_t> rowMajor(rows, cols, toBytes(img).data(), queue);
+    auto& mgr = OclQueueManager::getInstance();
+    const cl_command_queue queue = mgr.getQueueRaw();
+    const OclArray<uint8_t> source(srcRows, srcCols, channels, toBytes(img).data(), queue);
+    OclArray<uint8_t> rgb = channels == 3 ? OclArray<uint8_t>(rows, cols, 3, queue) : OclArray<uint8_t>();
     OclArray<float> gray(rows, cols, queue);
-    cl_utils::launchPitchedToFloat(rowMajor.clBuffer(), gray.clBuffer(), cols, rows, cols, OclQueueManager::getInstance().getQueue());
-    return gray;
-}
-
-std::pair<ImageOutputBuffer, ImageBuffer> cimgRgbToGpuAndGray(const FloatBufferIO& img, cl_command_queue queue) {
-    const int rows = img.height();
-    const int cols = img.width();
-    const OclArray<uint8_t> rowMajor(rows, cols, 3, toBytes(img).data(), queue);
-    OclArray<uint8_t> rgb(rows, cols, 3, queue);
-    OclArray<float> gray(rows, cols, queue);
-    cl_utils::launchRowMajorRgbToColMajor(rowMajor.clBuffer(), rgb.clBuffer(), gray.clBuffer(), cols, rows, OclQueueManager::getInstance().getQueue());
+    OclArray<uint8_t> display = preview ? OclArray<uint8_t>(rows, cols, channels, queue) : OclArray<uint8_t>();
+    cl_utils::launchOrientRowMajorToColMajor(source.clBuffer(), rgb.clBuffer(), gray.clBuffer(), display.clBuffer(), srcCols, srcRows, channels, orientation, mgr.getQueue());
+#endif
+    if (preview) {
+        preview->resize(display.bytes());
+        display.toHost(preview->data());
+    }
     return {std::move(rgb), std::move(gray)};
 }
-#endif
 } // namespace
 #endif
 
 void InternalUtils::saveImage(const string& imagePath, const string& suffix, const ImageOutputBuffer& watermark, const std::optional<Gray8BufferIO>& alphaChannel) {
-    const string watermarkedFile = CommonUtils::addSuffixBeforeExtension(imagePath, suffix);
+    const string watermarkedFile = addSuffixBeforeExtension(imagePath, suffix);
 #if defined(_USE_GPU_)
     const int rows = watermark.getRows();
     const int cols = watermark.getCols();
@@ -227,35 +222,45 @@ void InternalUtils::saveImage(const string& imagePath, const string& suffix, con
 #endif
 }
 
-std::unique_ptr<WatermarkBase> InternalUtils::createWatermarkObject(const unsigned int height, const unsigned int width, const string& watermarkPassword, const int p, const float psnr) {
+std::unique_ptr<WatermarkBase> InternalUtils::createWatermarkObject(
+    const unsigned int height, const unsigned int width, const string& watermarkPassword, const int p, const float psnr, std::unique_ptr<WatermarkBase> previous) {
     if (p != 3 && p != 5 && p != 7 && p != 9)
         throw std::invalid_argument("Unsupported value for p. Allowed p values: 3, 5, 7, 9");
     if (height < static_cast<unsigned int>(p) || width < static_cast<unsigned int>(p))
         throw std::invalid_argument("Image dimensions must each be at least p pixels");
+    const int rows = static_cast<int>(height);
+    const int cols = static_cast<int>(width);
+    WatermarkBuffer watermark = [&] {
+        if (previous && previous->hasSize(rows, cols))
+            return previous->releaseWatermark();
+        previous.reset();
+        return WatermarkBase::generateWatermark(watermarkPassword, rows, cols);
+    }();
+    previous.reset();
 #if defined(_USE_OPENCL_)
     switch (p) {
-    case 3: return std::make_unique<WatermarkOCL<3>>(height, width, watermarkPassword, psnr); break;
-    case 5: return std::make_unique<WatermarkOCL<5>>(height, width, watermarkPassword, psnr); break;
-    case 7: return std::make_unique<WatermarkOCL<7>>(height, width, watermarkPassword, psnr); break;
-    case 9: return std::make_unique<WatermarkOCL<9>>(height, width, watermarkPassword, psnr); break;
+    case 3: return std::make_unique<WatermarkOCL<3>>(rows, cols, std::move(watermark), psnr); break;
+    case 5: return std::make_unique<WatermarkOCL<5>>(rows, cols, std::move(watermark), psnr); break;
+    case 7: return std::make_unique<WatermarkOCL<7>>(rows, cols, std::move(watermark), psnr); break;
+    case 9: return std::make_unique<WatermarkOCL<9>>(rows, cols, std::move(watermark), psnr); break;
 #elif defined(_USE_CUDA_)
     switch (p) {
-    case 3: return std::make_unique<WatermarkCuda<3>>(height, width, watermarkPassword, psnr); break;
-    case 5: return std::make_unique<WatermarkCuda<5>>(height, width, watermarkPassword, psnr); break;
-    case 7: return std::make_unique<WatermarkCuda<7>>(height, width, watermarkPassword, psnr); break;
-    case 9: return std::make_unique<WatermarkCuda<9>>(height, width, watermarkPassword, psnr); break;
+    case 3: return std::make_unique<WatermarkCuda<3>>(rows, cols, std::move(watermark), psnr); break;
+    case 5: return std::make_unique<WatermarkCuda<5>>(rows, cols, std::move(watermark), psnr); break;
+    case 7: return std::make_unique<WatermarkCuda<7>>(rows, cols, std::move(watermark), psnr); break;
+    case 9: return std::make_unique<WatermarkCuda<9>>(rows, cols, std::move(watermark), psnr); break;
 #elif defined(_USE_EIGEN_)
     switch (p) {
-    case 3: return std::make_unique<WatermarkEigen<3>>(height, width, watermarkPassword, psnr); break;
-    case 5: return std::make_unique<WatermarkEigen<5>>(height, width, watermarkPassword, psnr); break;
-    case 7: return std::make_unique<WatermarkEigen<7>>(height, width, watermarkPassword, psnr); break;
-    case 9: return std::make_unique<WatermarkEigen<9>>(height, width, watermarkPassword, psnr); break;
+    case 3: return std::make_unique<WatermarkEigen<3>>(rows, cols, std::move(watermark), psnr); break;
+    case 5: return std::make_unique<WatermarkEigen<5>>(rows, cols, std::move(watermark), psnr); break;
+    case 7: return std::make_unique<WatermarkEigen<7>>(rows, cols, std::move(watermark), psnr); break;
+    case 9: return std::make_unique<WatermarkEigen<9>>(rows, cols, std::move(watermark), psnr); break;
 #endif
     default: throw std::invalid_argument("Unsupported value for p. Allowed p values: 3, 5, 7, 9");
     }
 }
 
-void InternalUtils::rotate(FloatBufferIO& img, const uint16_t orientation) {
+void InternalUtils::rotate(FloatBufferIO& img, const int orientation) {
     switch (orientation) {
     case 2: img.mirror('x'); break;
     case 3: img.rotate(180); break;
@@ -285,18 +290,33 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile, const bool cap
     std::ifstream fileStream(imageFile, std::ifstream::binary);
     TinyEXIF::EXIFInfo exif(fileStream); // parse EXIF for orientation
     auto cimgRgb = FloatBufferIO(imageFile.c_str());
-    InternalUtils::rotate(cimgRgb, exif.Orientation); // optional rotate (if required)
+    const int channels = cimgRgb.spectrum();
+    // anything outside the EXIF orientations 1-8 is not rotated
+    const int orientation = exif.Orientation >= 1 && exif.Orientation <= 8 ? exif.Orientation : 1;
+#if defined(_USE_GPU_)
+    // the upload kernel orients 1 and 3 channel images and writes their original preview
+    const bool hostImage = channels == 4;
+    const int deviceOrientation = hostImage ? 1 : orientation;
+    if (hostImage)
+        InternalUtils::rotate(cimgRgb, orientation);
+    const bool swapAxes = deviceOrientation >= 5;
+    rows = swapAxes ? cimgRgb.width() : cimgRgb.height();
+    cols = swapAxes ? cimgRgb.height() : cimgRgb.width();
+#else
+    constexpr bool hostImage = true;
+    InternalUtils::rotate(cimgRgb, orientation);
     rows = cimgRgb.height();
     cols = cimgRgb.width();
+#endif
 
-    if (captureOriginal && (cimgRgb.spectrum() == 1 || cimgRgb.spectrum() == 3 || cimgRgb.spectrum() == 4)) {
-        // Convert the CPU pixels for the single image preview
-        const int channels = cimgRgb.spectrum();
-        const size_t planeSize = static_cast<size_t>(rows) * cols;
-        const float* source = cimgRgb.data();
+    if (captureOriginal && (channels == 1 || channels == 3 || channels == 4)) {
         buf.previewChannels = channels;
-        buf.originalPreview.resize(planeSize * channels);
-        makeOriginalPreview(source, buf.originalPreview.data(), planeSize, channels);
+        // Convert the CPU pixels for the single image preview
+        if (hostImage) {
+            const size_t planeSize = static_cast<size_t>(rows) * cols;
+            buf.originalPreview.resize(planeSize * channels);
+            makeOriginalPreview(cimgRgb.data(), buf.originalPreview.data(), planeSize, channels);
+        }
     }
 
 #if defined(_USE_GPU_)
@@ -305,10 +325,11 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile, const bool cap
 #elif defined(_USE_OPENCL_)
     auto stream = OclQueueManager::getInstance().getQueueRaw();
 #endif
-    switch (cimgRgb.spectrum()) {
-    case 1: image = cimgGrayToGpu(cimgRgb, stream); break;
+    std::vector<uint8_t>* devicePreview = captureOriginal && !hostImage ? &buf.originalPreview : nullptr;
+    switch (channels) {
+    case 1: image = uploadOriented(cimgRgb, deviceOrientation, devicePreview).second; break;
     case 3: {
-        auto [rgb, gray] = cimgRgbToGpuAndGray(cimgRgb, stream);
+        auto [rgb, gray] = uploadOriented(cimgRgb, deviceOrientation, devicePreview);
         rgbImage = std::move(rgb);
         image = std::move(gray);
         isRGB = true;
@@ -319,7 +340,7 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile, const bool cap
         alphaChannel.emplace(cimgRgb.get_shared_channel(3));
         auto rgbView = cimgRgb.get_shared_channels(0, 2);
         cimgAlphaZero(rgbView, *alphaChannel);
-        auto [rgb, gray] = cimgRgbToGpuAndGray(rgbView, stream);
+        auto [rgb, gray] = uploadOriented(rgbView, deviceOrientation, nullptr);
         rgbImage = std::move(rgb);
         image = std::move(gray);
         isRGB = true;
@@ -333,7 +354,7 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile, const bool cap
     clFinish(stream);
 #endif
 #elif defined(_USE_EIGEN_)
-    switch (cimgRgb.spectrum()) {
+    switch (channels) {
     case 1: image = eigen_utils::cimgToEigenGray(cimgRgb); break;
     case 3: {
         auto [rgb, gray] = eigen_utils::cimgToEigenRgbAndGray(cimgRgb);

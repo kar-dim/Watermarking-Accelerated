@@ -1,6 +1,8 @@
+#include "common_utils.hpp"
+#include "kernels/generation_kernels.hpp"
+#include "kernels/half_kernels.hpp"
 #include "kernels/kernels.hpp"
 #include "kernels/utility_kernels.hpp"
-#include "luma_coefficients.hpp"
 #include "OclQueueManager.hpp"
 #include "opencl_utils.hpp"
 #include <algorithm>
@@ -149,7 +151,7 @@ cl::Program buildKernels(const int p) {
         for (int groupSize = static_cast<int>(std::min(256u, maxPow2WorkGroupSize(device))); groupSize >= 64; groupSize /= 2) {
             const string baseOptions = openClStdOption(device) + " -DWINDOW_SIZE=" + std::to_string(p) + " -DWG_SIZE=" + std::to_string(groupSize);
             string buildLog;
-            cl::Program program(context, kernels);
+            cl::Program program(context, cl::Program::Sources{halfKernels, kernels});
             if (tryBuildProgram(program, device, baseOptions + reductionOptions, buildLog)) {
                 if (kernelsFit(program, device, groupSize)) {
                     cout << "OpenCL kernel p=" << p << ": " << description << ", work-group size " << groupSize << " (" << openClStdOption(device) << ")\n";
@@ -161,7 +163,7 @@ cl::Program buildKernels(const int p) {
                 cout << "NOTE: OpenCL optimized reduction kernel build failed for p=" << p << ", using portable local-memory reductions.\n";
                 if (!buildLog.empty())
                     cout << buildLog << "\n";
-                program = cl::Program(context, kernels);
+                program = cl::Program(context, cl::Program::Sources{halfKernels, kernels});
                 buildLog.clear();
                 if (tryBuildProgram(program, device, baseOptions + " -DWM_DISABLE_SUBGROUPS=1", buildLog) && kernelsFit(program, device, groupSize))
                     return program;
@@ -197,6 +199,39 @@ cl::Program buildUtilityKernels() {
     throw std::runtime_error("Failed to build OpenCL utility kernels. Check the error messages above for details.");
 }
 
+cl::Program buildGenerationKernels() {
+    auto& mgr = OclQueueManager::getInstance();
+    cl::Device device = mgr.getDevice();
+    cl::Program program(mgr.getContext(), cl::Program::Sources{halfKernels, generationKernels});
+    const string options = openClStdOption(device) + std::format(" -DTWO_PI=0x{:a}f", CommonUtils::kTwoPi);
+    string buildLog;
+    if (tryBuildProgram(program, device, options, buildLog))
+        return program;
+    cout << buildLog << "\n";
+    throw std::runtime_error("Failed to build the OpenCL watermark generation kernels. Check the error messages above for details.");
+}
+
+namespace {
+// work-group size of the one dimensional generation kernels
+int generationGroupSize() { return static_cast<int>(std::min(256u, maxPow2WorkGroupSize(OclQueueManager::getInstance().getDevice()))); }
+} // namespace
+
+void launchGenerateWatermarkKernel(const std::array<uint32_t, 16>& baseState, const cl::Buffer& watermark, const int64_t numElements, cl::CommandQueue& queue) {
+    cl_uint16 state;
+    std::copy(baseState.begin(), baseState.end(), state.s);
+    const int groupSize = generationGroupSize();
+    const int64_t chachaBlocks = (numElements + 7) / 8;
+    const size_t globalSize = static_cast<size_t>((chachaBlocks + groupSize - 1) / groupSize) * groupSize;
+    queue.enqueueNDRangeKernel(KernelBuilder(GenerationKernelCache::getProgram(), "generate_watermark").args(state, watermark, static_cast<cl_ulong>(numElements)).build(), cl::NullRange,
+        cl::NDRange(globalSize), cl::NDRange(groupSize));
+}
+
+void launchBoxMullerKernel(const cl::Buffer& randomPairs, const cl::Buffer& normals, const int pairs, cl::CommandQueue& queue) {
+    const int groupSize = generationGroupSize();
+    queue.enqueueNDRangeKernel(KernelBuilder(GenerationKernelCache::getProgram(), "box_muller_pairs").args(randomPairs, normals, pairs).build(), cl::NullRange, cl::NDRange(roundUp(pairs, groupSize)),
+        cl::NDRange(groupSize));
+}
+
 unsigned int maxPow2WorkGroupSize(const cl::Device& device) {
     const unsigned int maxWorkGroup = static_cast<unsigned int>(device.getInfo<CL_DEVICE_MAX_WORK_GROUP_SIZE>());
     unsigned int maxValidGroup = 1024;
@@ -229,10 +264,16 @@ std::size_t reductionScratchBytes(const cl::Program& program, const char* kernel
     return scratchSlots * valuesPerReduction * sizeof(float);
 }
 
-void launchRowMajorRgbToColMajor(const cl::Buffer& src, const cl::Buffer& rgbDst, const cl::Buffer& grayDst, const int width, const int height, cl::CommandQueue& queue) {
-    constexpr int blockSize = 16;
-    queue.enqueueNDRangeKernel(KernelBuilder(UtilityKernelCache::getProgram(), "row_major_rgb_to_col_major").args(src, rgbDst, grayDst, width, height).build(), cl::NullRange,
-        cl::NDRange(roundUp(width, blockSize), roundUp(height, blockSize)), cl::NDRange(blockSize, blockSize));
+void launchOrientRowMajorToColMajor(const cl::Buffer& src, const cl::Buffer& rgbDst, const cl::Buffer& grayDst, const cl::Buffer& display, const int srcWidth, const int srcHeight, const int channels,
+    const int orientation, cl::CommandQueue& queue) {
+    // 32x32 tiles, a 32x8 work-group covers one (4 rows per work-item)
+    constexpr int tileSize = 32;
+    constexpr int rowsPerItem = 4;
+    const bool swapAxes = orientation >= 5;
+    const int width = swapAxes ? srcHeight : srcWidth;
+    const int height = swapAxes ? srcWidth : srcHeight;
+    queue.enqueueNDRangeKernel(KernelBuilder(UtilityKernelCache::getProgram(), "orient_row_major_to_col_major").args(src, rgbDst, grayDst, display, srcWidth, srcHeight, channels, orientation).build(),
+        cl::NullRange, cl::NDRange(roundUp(width, tileSize), roundUp(height, tileSize) / rowsPerItem), cl::NDRange(tileSize, tileSize / rowsPerItem));
 }
 
 void launchU8ToFloatGray(const cl::Buffer& input, const cl::Buffer& output, const int planeSize, const int numChannels, cl::CommandQueue& queue) {
@@ -246,6 +287,12 @@ void launchColMajorToRowMajorU8(const cl::Buffer& src, const cl::Buffer& dst, co
     constexpr int blockSize = 16;
     queue.enqueueNDRangeKernel(KernelBuilder(UtilityKernelCache::getProgram(), "col_major_to_row_major_u8").args(src, dst, width, height).build(), cl::NullRange,
         cl::NDRange(roundUp(width, blockSize), roundUp(height, blockSize), channels), cl::NDRange(blockSize, blockSize));
+}
+
+void launchColMajorToInterleavedU8(const cl::Buffer& src, const cl::Buffer& dst, const int width, const int height, const int channels, cl::CommandQueue& queue) {
+    constexpr int blockSize = 16;
+    queue.enqueueNDRangeKernel(KernelBuilder(UtilityKernelCache::getProgram(), "col_major_to_interleaved_u8").args(src, dst, width, height, channels).build(), cl::NullRange,
+        cl::NDRange(roundUp(width, blockSize), roundUp(height, blockSize)), cl::NDRange(blockSize, blockSize));
 }
 
 void launchPitchedToFloat(const cl::Buffer& src, const cl::Buffer& dst, const int width, const int height, const int pitch, cl::CommandQueue& queue) {

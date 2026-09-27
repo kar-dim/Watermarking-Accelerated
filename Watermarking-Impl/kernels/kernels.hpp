@@ -6,12 +6,6 @@ inline const std::string kernels = R"CLC(
 #define PAD                 (WINDOW_SIZE / 2)
 #define NEIGHB_SIZE         ((WINDOW_SIZE * WINDOW_SIZE) - 1)
 #define WINDOW_CENTER       ((WINDOW_SIZE * WINDOW_SIZE) / 2)
-#define N_PIXELS            (float) (WINDOW_SIZE * WINDOW_SIZE)
-#define N_PIXELS_SQ         (N_PIXELS * N_PIXELS)
-// Work-group dimensions for NVF kernels
-#define NVF_ROWS            (WG_SIZE / 32)
-#define SH_DIM_FAST         (32 + (2 * PAD))
-#define SH_DIM_SLOW         (NVF_ROWS + (2 * PAD))
 
 #pragma OPENCL EXTENSION cl_khr_int64_base_atomics : enable
 
@@ -169,82 +163,10 @@ WM_INLINE float toUnscaledFloat(const ulong value) { return (float)(value) * 1.0
 )CLC"
                                    R"CLC(
 
-// Computes NVF mask for tests with one output per work-item
-#define FILL_BLOCK_IMPL(LOAD_EXPR)                                             \
-    const int baseGlobalX = (int)(get_group_id(1) * get_local_size(1)) - PAD;  \
-    const int baseGlobalY = (int)(get_group_id(0) * get_local_size(0)) - PAD;  \
-    const int tid = get_local_id(1) * get_local_size(0) + get_local_id(0);     \
-    const int totalThreads = get_local_size(0) * get_local_size(1);            \
-    const int totalElements = SH_DIM_FAST * SH_DIM_SLOW;                       \
-                                                                               \
-    for (int i = tid; i < totalElements; i += totalThreads) {                  \
-        const int r = i % SH_DIM_FAST;                                         \
-        const int c = i / SH_DIM_FAST;                                         \
-        const int globalX = clamp(baseGlobalX + c, 0, width - 1);              \
-        const int globalY = clamp(baseGlobalY + r, 0, height - 1);             \
-        const int idx = globalX * height + globalY;                            \
-        sharedMem[i] = (LOAD_EXPR);                                            \
-    }
-
-WM_INLINE void fillBlock(const __global float* restrict input, __local float* restrict sharedMem, const int width, const int height) {
-    FILL_BLOCK_IMPL(input[idx])
-}
-
-WM_INLINE float compute_nvf_mask(__local float region[SH_DIM_SLOW][SH_DIM_FAST], const int shSlow, const int shFast) {
-    float sum = 0.0f, sumSq = 0.0f;
-    #pragma unroll
-    for (int i = -PAD; i <= PAD; i++) {
-        #pragma unroll
-        for (int j = -PAD; j <= PAD; j++) {
-            const float pixelValue = region[shSlow + i][shFast + j];
-            sum += pixelValue;
-            sumSq += pixelValue * pixelValue;
-        }
-    }
-    const float numerator = (N_PIXELS * sumSq) - (sum * sum);
-    const float output = native_divide(numerator, N_PIXELS_SQ + numerator);
-    return clamp(output, 0.0f, 1.0f);
-}
-
-
-__kernel void nvf(const __global float* restrict input, __global float* restrict nvf, const int width, const int height) {
-    const int x = get_global_id(1);
-    const int y = get_global_id(0);
-    __local __attribute__((aligned(16))) float region[SH_DIM_SLOW][SH_DIM_FAST];
-    fillBlock(input, &region[0][0], width, height);
-    barrier(CLK_LOCAL_MEM_FENCE);
-    if (y >= height || x >= width)
-        return;
-    nvf[(x * height) + y] = compute_nvf_mask(region, get_local_id(1) + PAD, get_local_id(0) + PAD);
-}
-
+// rounds to the nearest half value (toHalfBits, halfKernels), the conversion back is exact
 WM_INLINE float roundToHalf(const float value) {
-    ushort bits;
-    vstore_half_rte(value, 0, (__private half*)&bits);
+    const ushort bits = toHalfBits(value);
     return vload_half(0, (__private const half*)&bits);
-}
-
-__kernel void nvf_u_and_sumsq_fused(const __global float* restrict input, const __global half* restrict w, __global half* restrict u, volatile __global ulong* restrict globalSumSq,
-    const int width, const int height, __local float* restrict reductionScratch)
-{
-    const int x = get_global_id(1);
-    const int y = get_global_id(0);
-    const int linearTid = get_local_id(1) * get_local_size(0) + get_local_id(0);
-    __local __attribute__((aligned(16))) float region[SH_DIM_SLOW][SH_DIM_FAST];
-    fillBlock(input, &region[0][0], width, height);
-    barrier(CLK_LOCAL_MEM_FENCE);
-
-    float threadSumSq = 0.0f;
-    if (x < width && y < height) {
-        const float maskVal = compute_nvf_mask(region, get_local_id(1) + PAD, get_local_id(0) + PAD);
-        const int idx = (x * height) + y;
-        const float uVal = roundToHalf(maskVal * vload_half(idx, w));
-        vstore_half_rte(uVal, idx, u);
-        threadSumSq = uVal * uVal;
-    }
-    REDUCE_SUM(linearTid, (get_local_size(0) * get_local_size(1)) / 2, reductionScratch, threadSumSq);
-    if (linearTid == 0)
-        atom_add(globalSumSq, toScaledUlong(reductionScratch[0]));
 }
 
 // Prediction error tile where each work-item processes 4 rows by 2 columns
@@ -262,9 +184,9 @@ __kernel void nvf_u_and_sumsq_fused(const __global float* restrict input, const 
 #define ET_FILL_ITERATIONS  ((ET_SH_SIZE + WG_SIZE - 1) / WG_SIZE)
 #define ET_OUTPUTS          (ET_ROWS * ET_COLS)
 
-// Fills local memory tile with image region using clamped edges
+// Fills local memory tile with image region using clamped edges, masked: |input| * w (the ME mask times the watermark)
 // Loads all values into registers before writing to local memory
-WM_INLINE void fillErrorTile(const __global float* restrict inputA, const __global half* restrict inputB, const int mode, __local float* restrict region, const int tileSlow0,
+WM_INLINE void fillErrorTile(const __global float* restrict input, const __global half* restrict w, const int masked, __local float* restrict region, const int tileSlow0,
     const int tileFast0, const int width, const int height)
 {
     const int lid = get_local_id(0);
@@ -276,12 +198,7 @@ WM_INLINE void fillErrorTile(const __global float* restrict inputA, const __glob
             const int r = i % ET_SH_FAST;
             const int c = i / ET_SH_FAST;
             const int idx = (clamp(tileSlow0 - PAD + c, 0, width - 1) * height) + clamp(tileFast0 - PAD + r, 0, height - 1);
-            float value = inputA[idx];
-            if (mode == 2)
-                value = fabs(value);
-            if (mode != 0)
-                value *= vload_half(idx, inputB);
-            values[it] = value;
+            values[it] = masked ? fabs(input[idx]) * vload_half(idx, w) : input[idx];
         }
     }
     #pragma unroll
@@ -376,15 +293,16 @@ WM_INLINE float4 loadRows4Half(const __global half* restrict input, const int x,
 }
 WM_INLINE void storeRows4Half(__global half* restrict output, const int x, const int y0, const int height, const float4 value) {
     const int idx = (x * height) + y0;
+    __global ushort* restrict bits = (__global ushort*)output;
     if ((height & 3) == 0) {
         if (y0 < height)
-            vstore_half4_rte(value, 0, output + idx);
+            vstore4((ushort4)(toHalfBits(value.x), toHalfBits(value.y), toHalfBits(value.z), toHalfBits(value.w)), 0, bits + idx);
         return;
     }
-    if (y0 < height) vstore_half_rte(value.x, idx, output);
-    if (y0 + 1 < height) vstore_half_rte(value.y, idx + 1, output);
-    if (y0 + 2 < height) vstore_half_rte(value.z, idx + 2, output);
-    if (y0 + 3 < height) vstore_half_rte(value.w, idx + 3, output);
+    if (y0 < height) bits[idx] = toHalfBits(value.x);
+    if (y0 + 1 < height) bits[idx + 1] = toHalfBits(value.y);
+    if (y0 + 2 < height) bits[idx + 2] = toHalfBits(value.z);
+    if (y0 + 3 < height) bits[idx + 3] = toHalfBits(value.w);
 }
 
 // Base coordinates for work-group and work-item outputs
@@ -472,17 +390,18 @@ __kernel __attribute__((reqd_work_group_size(WG_SIZE, 1, 1))) void me_error_sequ
     }
 }
 
-// Computes partial correlation sums and writes final result from the last finished work-group
-__kernel __attribute__((reqd_work_group_size(WG_SIZE, 1, 1))) void calculate_error_sequence_and_partial_corr_fused(__global const float* restrict mask,
-    __global const half* restrict w, __global const float* restrict e_u, __global const float* restrict coeffs, __global float* restrict partialDots,
-    __global float* restrict partialNormU, __global float* restrict partialNormZ, volatile __global uint* restrict groupCounter, __global float* restrict correlation,
-    const int width, const int height, __global const int* restrict stopFlag, const int absMask, __local float* restrict reductionScratch)
+// Correlation of the image prediction error e_u with the prediction error of |e_u| * w (the ME mask times the watermark, not divided by
+// max|e_u|: the correlation does not depend on the scale). Computes partial sums and writes the final result from the last finished work-group
+__kernel __attribute__((reqd_work_group_size(WG_SIZE, 1, 1))) void calculate_error_sequence_and_partial_corr_fused(__global const float* restrict e_u,
+    __global const half* restrict w, __global const float* restrict coeffs, __global float* restrict partialDots, __global float* restrict partialNormU,
+    __global float* restrict partialNormZ, volatile __global uint* restrict groupCounter, __global float* restrict correlation, const int width, const int height,
+    __global const int* restrict stopFlag, __local float* restrict reductionScratch)
 {
     __local float4 regionStorage[ET_SH_SIZE / 4];
     __local float* region = (__local float*)regionStorage;
     __local int isLastGroup;
     float coef[NEIGHB_SIZE];
-    fillErrorTile(mask, w, absMask ? 2 : 1, region, ET_TILE_SLOW0, ET_TILE_FAST0, width, height);
+    fillErrorTile(e_u, w, 1, region, ET_TILE_SLOW0, ET_TILE_FAST0, width, height);
     loadCoefficients(coeffs, coef);
     barrier(CLK_LOCAL_MEM_FENCE);
 
@@ -555,14 +474,11 @@ __kernel __attribute__((reqd_work_group_size(WG_SIZE, 1, 1))) void calculate_err
 )CLC"
                                    R"CLC(
 
-// Computes embedding strength and checks whether the image is flat
-WM_INLINE float embedStrength(__global const ulong* restrict sumSqPtr, const int hasMaxAbs, const float strengthNumerator) {
-    const float uSumSquared = toUnscaledFloat(sumSqPtr[0]);
-    float normalizedSumSquared = uSumSquared;
-    if (hasMaxAbs) {
-        const float normFactor = 1.0f / ((as_float((uint)sumSqPtr[1]) + 1.0e-6f) * ME_MASK_PRESCALE);
-        normalizedSumSquared *= normFactor * normFactor;
-    }
+// Computes embedding strength and checks whether the image is flat: sumSq[0] = sum(u^2) (fixed point), sumSq[1] = max|e| (float bits)
+WM_INLINE float embedStrength(__global const ulong* restrict sumSq, const float strengthNumerator) {
+    const float uSumSquared = toUnscaledFloat(sumSq[0]);
+    const float normFactor = 1.0f / ((as_float((uint)sumSq[1]) + 1.0e-6f) * ME_MASK_PRESCALE);
+    const float normalizedSumSquared = uSumSquared * (normFactor * normFactor);
     return (normalizedSumSquared > 1e-3f) ? (strengthNumerator * rsqrt(uSumSquared)) : 0.0f;
 }
 
@@ -571,10 +487,10 @@ WM_INLINE uchar toPixel(const float value) { return convert_uchar(clamp(value + 
 WM_INLINE uchar4 toPixels4(const float4 values) { return convert_uchar4(clamp(values + 0.5f, 0.0f, 255.0f)); }
 
 // Adds watermark to RGB channels: output = input + strength * u
-__kernel void apply_watermark_rgb(__global const uchar* restrict input, __global const half* restrict u, __global const ulong* restrict sumSqPtr, __global uchar* restrict output,
-    const float strengthNumerator, const int planeElements, const int hasMaxAbs)
+__kernel void apply_watermark_rgb(__global const uchar* restrict input, __global const half* restrict u, __global const ulong* restrict sumSq, __global uchar* restrict output,
+    const float strengthNumerator, const int planeElements)
 {
-    const float strength = embedStrength(sumSqPtr, hasMaxAbs, strengthNumerator);
+    const float strength = embedStrength(sumSq, strengthNumerator);
     const int stride = get_global_size(0);
     const int planeVectors = planeElements % 4 == 0 ? planeElements / 4 : 0;
     for (int v = get_global_id(0); v < planeVectors; v += stride) {
@@ -592,10 +508,10 @@ __kernel void apply_watermark_rgb(__global const uchar* restrict input, __global
 }
 
 // Adds watermark to grayscale image: output = luma + strength * u
-__kernel void apply_watermark_gray(__global const float* restrict input, __global const half* restrict u, __global const ulong* restrict sumSqPtr, __global uchar* restrict output,
-    const float strengthNumerator, const int planeElements, const int hasMaxAbs)
+__kernel void apply_watermark_gray(__global const float* restrict input, __global const half* restrict u, __global const ulong* restrict sumSq, __global uchar* restrict output,
+    const float strengthNumerator, const int planeElements)
 {
-    const float strength = embedStrength(sumSqPtr, hasMaxAbs, strengthNumerator);
+    const float strength = embedStrength(sumSq, strengthNumerator);
     const int stride = get_global_size(0);
     const int planeVectors = planeElements % 4 == 0 ? planeElements / 4 : 0;
     for (int v = get_global_id(0); v < planeVectors; v += stride)
@@ -608,10 +524,10 @@ __kernel void apply_watermark_gray(__global const float* restrict input, __globa
 #define TR_TILE 16
 #define TR_ROWS (WG_SIZE / TR_TILE)
 __kernel __attribute__((reqd_work_group_size(TR_TILE, TR_ROWS, 1))) void apply_watermark_row_major(__global const float* restrict input, __global const half* restrict u,
-    __global const ulong* restrict sumSqPtr, __global uchar* restrict output, const float strengthNumerator, const int width, const int height, const int hasMaxAbs)
+    __global const ulong* restrict sumSq, __global uchar* restrict output, const float strengthNumerator, const int width, const int height)
 {
     __local uchar tile[TR_TILE][TR_TILE + 4];
-    const float strength = embedStrength(sumSqPtr, hasMaxAbs, strengthNumerator);
+    const float strength = embedStrength(sumSq, strengthNumerator);
     const int row = get_group_id(0) * TR_TILE + get_local_id(0);
     for (int i = get_local_id(1); i < TR_TILE; i += TR_ROWS) {
         const int col = get_group_id(1) * TR_TILE + i;
@@ -1022,7 +938,7 @@ WM_INLINE float2 ffFromUlong(const ulong value) {
 WM_INLINE float ffToFloat(const float2 a) { return a.x + a.y; }
 WM_INLINE float2 ffMul(const float2 a, const float2 b) {
     float2 p = ffTwoProd(a.x, b.x);
-    p.y += (a.x * b.y) + (a.y * b.x);
+    p.y = fma(a.x, b.y, fma(a.y, b.x, p.y));
     return ffQuickTwoSum(p.x, p.y);
 }
 // Computes c - a * b with fast error compensation for Cholesky updates
@@ -1213,5 +1129,8 @@ __kernel __attribute__((reqd_work_group_size(WG_SIZE, 1, 1))) void me_solve_syst
     if (lid == 0)
         *stopFlag = 0;
 }
+
+// the float-float code ends here: kernels added below get the default contraction (a * b + c may become one fma)
+#pragma OPENCL FP_CONTRACT ON
 
 )CLC";

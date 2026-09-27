@@ -2,7 +2,9 @@
 #include "CudaCheck.hpp"
 #include "HdrTonemap.hpp"
 #include <algorithm>
+#include <array>
 #include <cstdint>
+#include <cuda_fp16.h>
 #include <cuda_runtime.h>
 
 /*!
@@ -14,7 +16,9 @@ void launchNV12ToYUV420pKernel(const uint8_t* uvSrc, const int uvPitch, uint8_t*
 void launchPitchedToFloatKernel(const uint8_t* ySrc, float* yDst, const int width, const int height, const int pitch, const cudaStream_t stream);
 void launchU8ToFloatGrayKernel(const uint8_t* input, float* output, const int planeSize, const int numChannels, const cudaStream_t stream);
 void launchColMajorToRowMajorU8Kernel(const uint8_t* src, uint8_t* dst, const int width, const int height, const int channels, const cudaStream_t stream);
-void launchRowMajorRgbToColMajorKernel(const uint8_t* src, uint8_t* rgbDst, float* grayDst, const int width, const int height, const cudaStream_t stream);
+void launchColMajorToInterleavedU8Kernel(const uint8_t* src, uint8_t* dst, const int width, const int height, const int channels, const cudaStream_t stream);
+void launchOrientRowMajorToColMajorKernel(
+    const uint8_t* src, uint8_t* rgbDst, float* grayDst, uint8_t* display, const int srcWidth, const int srcHeight, const int channels, const int orientation, const cudaStream_t stream);
 // HDR (P010LE BT.2020 PQ) -> SDR (BT.709) conversion kernels
 void launchP010HdrYToSdrFloatKernel(const uint16_t* ySrc, const int yPitchBytes, const uint16_t* uvSrc, const int uvPitchBytes, float* yDst, const int width, const int height,
     const video_utils::MobiusParams& mobius, const cudaStream_t stream);
@@ -22,6 +26,10 @@ void launchP010HdrUVToSdrNV12Kernel(const uint16_t* ySrc, const int yPitchBytes,
     const video_utils::MobiusParams& mobius, const cudaStream_t stream);
 void launchP010HdrYToSdrU8Kernel(const uint16_t* ySrc, const int yPitchBytes, const uint16_t* uvSrc, const int uvPitchBytes, uint8_t* yDst, const int width, const int height,
     const video_utils::MobiusParams& mobius, const cudaStream_t stream);
+// watermark generation (ChaCha20 + Box-Muller): "numElements" half values from the ChaCha20 start state
+void launchGenerateWatermarkKernel(const std::array<uint32_t, 16>& baseState, __half* watermark, const int64_t numElements, const cudaStream_t stream);
+// TEST only kernel: the Box-Muller transform of the generation kernel on (x1, x2) pairs of 24-bit random values, writes (z0, z1) pairs
+void launchBoxMullerKernel(const uint32_t* randomPairs, float* normals, const int pairs, const cudaStream_t stream);
 // helper method to calculate kernel grid size from given 2D dimensions and blockSize.
 inline dim3 gridSizeCalculate(const dim3 blockSize, const int cols, const int rows) { return dim3((rows + blockSize.x - 1) / blockSize.x, (cols + blockSize.y - 1) / blockSize.y); }
 // helper method to calculate a 1D grid size for a given number of elements and block size, with a maximum of 2560 blocks (used for grid-stride kernels only)

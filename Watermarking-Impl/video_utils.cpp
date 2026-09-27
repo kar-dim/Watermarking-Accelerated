@@ -1,10 +1,9 @@
 #include "AuxiliaryMux.hpp"
 #include "AvUtil.hpp"
 #include "buffer.hpp"
-#include "common_utils.hpp"
 #include "EncodeOptions.hpp"
 #include "include/WatermarkCore.hpp"
-#include "include/WatermarkTypes.hpp"
+#include "utils.hpp"
 #include "video_defines.hpp"
 #include "video_utils.hpp"
 #include "VideoProcessingContext.hpp"
@@ -510,7 +509,7 @@ void loadInputFrame(VideoSession* s, const uint8_t* hostPtr, const int srcPitch)
 
 // watermark the frame and fill the processed Y plane, the embedding writes the row-major Y plane directly (no transposition pass)
 void embedAndFillYPlane(VideoSession* s, const ImageBuffer& buffer, AVFrame* encFrame = nullptr) {
-    s->watermarkObj->makeWatermark(buffer, s->watermarkedFrame, MaskMethod::ME, WatermarkBase::Layout::RowMajor);
+    s->watermarkObj->makeWatermark(buffer, s->watermarkedFrame, WatermarkBase::Layout::RowMajor);
 #if defined(_USE_GPU_)
     s->watermarkedFrame.toHost(s->hostFrame->get());
 #else
@@ -715,7 +714,7 @@ void detectWatermark(VideoSession* s, int& framesCount, const AVFrame* frame) {
         return;
     }
     loadInputFrame(s, frame->data[0], frame->linesize[0]);
-    const float correlation = s->watermarkObj->detectWatermark(s->inputFrame, MaskMethod::ME);
+    const float correlation = s->watermarkObj->detectWatermark(s->inputFrame);
     cout << "Correlation for frame: " << (framesCount + 1) << ": " << correlation << "\n";
     framesCount++;
 }
@@ -778,7 +777,7 @@ void embedWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* fra
                 loadHdrLuma(s, frame, luma, mobius, stream);
             else
                 cuda_utils::launchPitchedToFloatKernel(frame->data[0], luma.data(), width, height, frame->linesize[0], stream);
-            s->watermarkObj->makeWatermark(luma, s->watermarkedFrame, MaskMethod::ME, WatermarkBase::Layout::RowMajor);
+            s->watermarkObj->makeWatermark(luma, s->watermarkedFrame, WatermarkBase::Layout::RowMajor);
             ySrc = s->watermarkedFrame.data();
             yPitch = width;
         } else if (isHdr) {
@@ -840,7 +839,7 @@ void detectWatermarkHWAccel(VideoSession* s, int& framesCount, const AVFrame* fr
     } else {
         cuda_utils::launchPitchedToFloatKernel(frame->data[0], luma.data(), width, height, frame->linesize[0], stream);
     }
-    const float correlation = s->watermarkObj->detectWatermark(luma, MaskMethod::ME);
+    const float correlation = s->watermarkObj->detectWatermark(luma);
     cout << "Correlation for frame: " << (framesCount + 1) << ": " << correlation << "\n";
     framesCount++;
 }

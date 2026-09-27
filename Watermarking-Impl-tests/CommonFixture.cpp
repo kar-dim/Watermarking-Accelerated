@@ -1,20 +1,29 @@
 #include "../Watermarking-Impl/AuxiliaryMux.hpp"
 #include "../Watermarking-Impl/AvUtil.hpp"
 #include "../Watermarking-Impl/EncodeOptions.hpp"
+#include "../Watermarking-Impl/half_float.hpp"
 #include "../Watermarking-Impl/WatermarkCrypto.hpp"
 #if defined(_USE_OPENCL_)
+#include "../Watermarking-Impl/OclArray.hpp"
 #include "../Watermarking-Impl/opencl_utils.hpp"
 #include <cstdlib>
 #include <optional>
+#elif defined(_USE_CUDA_)
+#include "../Watermarking-Impl/cuda_utils.hpp"
+#include "../Watermarking-Impl/CudaArray.hpp"
+#include "../Watermarking-Impl/CudaStreamManager.hpp"
 #endif
-#include "../Watermarking-Util/include/common_utils.hpp"
 #include "WatermarkCore.hpp"
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <bit>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <future>
 #include <gtest/gtest.h>
@@ -26,9 +35,13 @@
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <thread>
+#include <tuple>
+#include <type_traits>
 #include <utility>
 #include <vector>
-#include <WatermarkTypes.hpp>
+// needs <cstdio> first (FILE)
+#include <jpeglib.h>
 
 #if defined(_USE_EIGEN_)
 #include <omp.h>
@@ -48,6 +61,8 @@ constexpr const char* defaultPassword = "random_watermark_password";
 const fs::path colorImage = "samples/images/512.png";
 const fs::path grayImage = "samples/images/512_gray.jpg";
 const fs::path alphaImage = "samples/images/4k_argb.png";
+// 720p.png stored rotated 90 degrees counter-clockwise with EXIF orientation 6
+const fs::path exifImage = "samples/images/720p_exif6.jpg";
 // small (1.9 MB / 693 frame) clip, it also tests the 10-bit to 8-bit filter graph
 const fs::path shortVideo = "samples/videos/sample_1080p_10bit.mkv";
 
@@ -59,8 +74,118 @@ std::string hexDigest(const std::array<uint8_t, 32>& digest) {
     return result.str();
 }
 
-SessionPixelData embedAndRead(ImageSession* session, const MaskMethod method) {
-    embedImage(session, method);
+// every 24-bit random value once as x1 and once as x2
+std::vector<uint32_t> everyRandomPair() {
+    constexpr uint32_t count = 1u << 24;
+    std::vector<uint32_t> pairs(2 * static_cast<size_t>(count));
+    for (uint32_t i = 0; i < count; ++i) {
+        pairs[2 * static_cast<size_t>(i)] = i;
+        pairs[(2 * static_cast<size_t>(i)) + 1] = ((i * 0x9E3779B1u) + 0x2545F4u) & 0xFFFFFFu;
+    }
+    return pairs;
+}
+
+// the reference transform of the CPU on every pair
+std::vector<float> referenceBoxMuller(const std::vector<uint32_t>& randomPairs) {
+    std::vector<float> normals(randomPairs.size());
+    for (size_t i = 0; i < randomPairs.size(); i += 2)
+        std::tie(normals[i], normals[i + 1]) = WatermarkCrypto::generateBoxMullerNormalPair(static_cast<uint64_t>(randomPairs[i]) << 40, static_cast<uint64_t>(randomPairs[i + 1]) << 40);
+    return normals;
+}
+
+// the scalar reference watermark: ChaCha20 block by block, the reference transform, half rounding
+std::vector<uint16_t> referenceWatermark(const std::array<uint32_t, 16>& baseState, const int64_t numElements) {
+    std::vector<uint16_t> halfBits(static_cast<size_t>(numElements));
+    for (int64_t block = 0; block * 8 < numElements; ++block) {
+        const std::array<uint64_t, 8> randomBits = WatermarkCrypto::chacha20Block(baseState, static_cast<uint64_t>(block));
+        for (int j = 0; j < 8 && (block * 8) + j < numElements; ++j) {
+            const auto [z0, z1] = WatermarkCrypto::generateBoxMullerNormalPair(randomBits[j & ~1], randomBits[j | 1]);
+            halfBits[static_cast<size_t>((block * 8) + j)] = HalfFloat::fromFloat((j & 1) ? z1 : z0);
+        }
+    }
+    return halfBits;
+}
+
+// empty when "actual" and "expected" have the same bits
+template <typename T>
+std::string bitDifferences(const std::vector<T>& actual, const std::vector<T>& expected) {
+    using Bits = std::conditional_t<sizeof(T) == 4, uint32_t, uint16_t>;
+    if (actual.size() != expected.size())
+        return std::format("size {} instead of {}", actual.size(), expected.size());
+    size_t differences = 0;
+    std::string first;
+    for (size_t i = 0; i < actual.size(); ++i) {
+        if (std::bit_cast<Bits>(actual[i]) == std::bit_cast<Bits>(expected[i]))
+            continue;
+        if (differences++ == 0)
+            first = std::format("first at {}: {:#x} instead of {:#x}", i, std::bit_cast<Bits>(actual[i]), std::bit_cast<Bits>(expected[i]));
+    }
+    return differences == 0 ? std::string() : std::format("{} of {} values differ, {}", differences, actual.size(), first);
+}
+
+#if defined(_USE_CUDA_) || defined(_USE_OPENCL_)
+// the Box-Muller transform and the watermark of the device generation kernels (the selected GPU)
+#if defined(_USE_CUDA_)
+std::vector<float> deviceBoxMuller(const std::vector<uint32_t>& randomPairs) {
+    const cudaStream_t stream = CudaStreamManager::getInstance().getComputeStream();
+    const int count = static_cast<int>(randomPairs.size());
+    const CudaArray<uint32_t> input(count, 1, randomPairs.data(), stream);
+    CudaArray<float> normals(count, stream);
+    cuda_utils::launchBoxMullerKernel(input.data(), normals.data(), count / 2, stream);
+    std::vector<float> result(randomPairs.size());
+    normals.toHost(result.data());
+    return result;
+}
+
+std::vector<uint16_t> deviceWatermark(const std::array<uint32_t, 16>& baseState, const int64_t numElements) {
+    const cudaStream_t stream = CudaStreamManager::getInstance().getComputeStream();
+    CudaArray<__half> watermark(static_cast<int>(numElements), stream);
+    cuda_utils::launchGenerateWatermarkKernel(baseState, watermark.data(), numElements, stream);
+    std::vector<uint16_t> halfBits(static_cast<size_t>(numElements));
+    watermark.toHost(reinterpret_cast<__half*>(halfBits.data()));
+    return halfBits;
+}
+#else
+std::vector<float> deviceBoxMuller(const std::vector<uint32_t>& randomPairs) {
+    auto& queueManager = OclQueueManager::getInstance();
+    const int count = static_cast<int>(randomPairs.size());
+    const OclArray<uint32_t> input(count, 1, randomPairs.data(), queueManager.getQueueRaw());
+    const OclArray<float> normals(count, queueManager.getQueueRaw());
+    cl_utils::launchBoxMullerKernel(input.clBuffer(), normals.clBuffer(), count / 2, queueManager.getQueue());
+    std::vector<float> result(randomPairs.size());
+    normals.toHost(result.data());
+    return result;
+}
+
+std::vector<uint16_t> deviceWatermark(const std::array<uint32_t, 16>& baseState, const int64_t numElements) {
+    auto& queueManager = OclQueueManager::getInstance();
+    const OclArray<cl_half> watermark(static_cast<int>(numElements), queueManager.getQueueRaw());
+    cl_utils::launchGenerateWatermarkKernel(baseState, watermark.clBuffer(), numElements, queueManager.getQueue());
+    std::vector<uint16_t> halfBits(static_cast<size_t>(numElements));
+    watermark.toHost(halfBits.data());
+    return halfBits;
+}
+#endif
+
+// runs "check" (with the device name) on the GPUs: CUDA the first device, OpenCL every device
+template <typename Check>
+void forEachDevice(Check&& check) {
+#if defined(_USE_CUDA_)
+    ASSERT_TRUE(initializeEnvironment(0));
+    check(getDeviceName());
+#else
+    const std::vector<std::string> devices = getAvailableDevices();
+    for (size_t deviceIndex = 0; deviceIndex < devices.size(); ++deviceIndex) {
+        ASSERT_TRUE(initializeEnvironment(static_cast<int>(deviceIndex))) << devices[deviceIndex];
+        check(devices[deviceIndex]);
+    }
+    ASSERT_TRUE(initializeEnvironment(0));
+#endif
+}
+#endif
+
+SessionPixelData embedAndRead(ImageSession* session) {
+    embedImage(session);
     finish();
     return getSessionPixelData(session);
 }
@@ -91,6 +216,79 @@ void writeNoiseBmp(const fs::path& path, const int width, const int height) {
     }
     std::ofstream output(path, std::ios::binary);
     ASSERT_TRUE(output.write(reinterpret_cast<const char*>(bmp.data()), static_cast<std::streamsize>(bmp.size())));
+}
+
+// writes an 8-bit binary PGM (one channel) filled with deterministic noise
+void writeNoisePgm(const fs::path& path, const int width, const int height) {
+    std::string pgm = std::format("P5\n{} {}\n255\n", width, height);
+    uint32_t state = 54321;
+    for (int i = 0; i < width * height; ++i) {
+        state = (state * 1664525u) + 1013904223u;
+        pgm.push_back(static_cast<char>(state >> 24));
+    }
+    std::ofstream output(path, std::ios::binary);
+    ASSERT_TRUE(output.write(pgm.data(), static_cast<std::streamsize>(pgm.size())));
+}
+
+// the stored pixel (as in the file) of the displayed pixel (x, y) for an EXIF orientation 1-8 (the same table as PIL's ImageOps.exif_transpose)
+std::pair<int, int> orientedSource(const int x, const int y, const int storedWidth, const int storedHeight, const int orientation) {
+    switch (orientation) {
+    case 2: return {storedWidth - 1 - x, y};
+    case 3: return {storedWidth - 1 - x, storedHeight - 1 - y};
+    case 4: return {x, storedHeight - 1 - y};
+    case 5: return {y, x};
+    case 6: return {y, storedHeight - 1 - x};
+    case 7: return {storedWidth - 1 - y, storedHeight - 1 - x};
+    case 8: return {storedWidth - 1 - y, x};
+    default: return {x, y};
+    }
+}
+
+// writes "displayed" (row-major interleaved, 1 or 3 channels) as a quality 100, 4:4:4 JPEG with the EXIF orientation tag, its pixels stored so that a viewer applying the
+// orientation shows "displayed"
+void writeOrientedJpeg(const fs::path& path, const std::vector<uint8_t>& displayed, const int width, const int height, const int channels, const int orientation) {
+    const bool swapAxes = orientation >= 5;
+    const int storedWidth = swapAxes ? height : width;
+    const int storedHeight = swapAxes ? width : height;
+    std::vector<uint8_t> stored(displayed.size());
+    for (int y = 0; y < height; ++y)
+        for (int x = 0; x < width; ++x) {
+            const auto [storedX, storedY] = orientedSource(x, y, storedWidth, storedHeight, orientation);
+            for (int channel = 0; channel < channels; ++channel)
+                stored[(static_cast<size_t>(storedY) * storedWidth + storedX) * channels + channel] = displayed[(static_cast<size_t>(y) * width + x) * channels + channel];
+        }
+    // APP1: "Exif\0\0", little endian TIFF header, IFD0 with one entry (0x0112 orientation, SHORT)
+    const uint8_t exif[] = {'E', 'x', 'i', 'f', 0, 0, 'I', 'I', 0x2A, 0, 8, 0, 0, 0, 1, 0, 0x12, 0x01, 3, 0, 1, 0, 0, 0, static_cast<uint8_t>(orientation), 0, 0, 0, 0, 0, 0, 0};
+    std::vector<uint8_t> jpeg(stored.size() * 2 + 65536);
+    unsigned char* buffer = jpeg.data();
+    unsigned long size = static_cast<unsigned long>(jpeg.size());
+    jpeg_compress_struct compressor{};
+    jpeg_error_mgr errors{};
+    compressor.err = jpeg_std_error(&errors);
+    jpeg_create_compress(&compressor);
+    jpeg_mem_dest(&compressor, &buffer, &size);
+    compressor.image_width = static_cast<JDIMENSION>(storedWidth);
+    compressor.image_height = static_cast<JDIMENSION>(storedHeight);
+    compressor.input_components = channels;
+    compressor.in_color_space = channels == 3 ? JCS_RGB : JCS_GRAYSCALE;
+    jpeg_set_defaults(&compressor);
+    jpeg_set_quality(&compressor, 100, TRUE);
+    // no chroma subsampling: block of one color decodes to the same pixels wherever it is (only its DC coefficient, no upsampling)
+    for (int component = 0; component < compressor.num_components; ++component)
+        compressor.comp_info[component].h_samp_factor = compressor.comp_info[component].v_samp_factor = 1;
+    compressor.write_JFIF_header = FALSE;
+    jpeg_start_compress(&compressor, TRUE);
+    jpeg_write_marker(&compressor, JPEG_APP0 + 1, exif, sizeof(exif));
+    for (int row = 0; row < storedHeight; ++row) {
+        JSAMPROW rowPointer = stored.data() + static_cast<size_t>(row) * storedWidth * channels;
+        jpeg_write_scanlines(&compressor, &rowPointer, 1);
+    }
+    jpeg_finish_compress(&compressor);
+    jpeg_destroy_compress(&compressor);
+    // the buffer was large enough, libjpeg did not replace it
+    ASSERT_EQ(buffer, jpeg.data());
+    std::ofstream output(path, std::ios::binary);
+    ASSERT_TRUE(output.write(reinterpret_cast<const char*>(jpeg.data()), static_cast<std::streamsize>(size)));
 }
 
 // look up one key in a parsed option dictionary, empty when absent
@@ -162,19 +360,14 @@ struct ReductionPathResult {
     float correlation = 0.0f;
 };
 
-std::array<ReductionPathResult, 2> runReductionPath() {
-    std::array<ReductionPathResult, 2> results;
-    const std::array methods = {MaskMethod::NVF, MaskMethod::ME};
-    for (size_t index = 0; index < methods.size(); ++index) {
-        ImageHandle reductionSession = createImageSession(defaultPassword, defaultP, defaultPsnr);
-        loadImage(reductionSession.get(), colorImage.string());
-        embedImage(reductionSession.get(), methods[index]);
-        finish();
-        results[index].pixels = getSessionPixelData(reductionSession.get());
-        prepareDetectionImage(reductionSession.get(), methods[index]);
-        results[index].correlation = detectEmbeddedBuffer(reductionSession.get(), methods[index]);
-    }
-    return results;
+ReductionPathResult runReductionPath() {
+    ImageHandle reductionSession = createImageSession(defaultPassword, defaultP, defaultPsnr);
+    loadImage(reductionSession.get(), colorImage.string());
+    ReductionPathResult result;
+    result.pixels = embedAndRead(reductionSession.get());
+    prepareDetectionImage(reductionSession.get());
+    result.correlation = detectEmbeddedBuffer(reductionSession.get());
+    return result;
 }
 #endif
 } // namespace
@@ -205,6 +398,57 @@ TEST(WatermarkCryptoTest, Sha256MatchesPublishedVectors) {
     EXPECT_EQ(hexDigest(WatermarkCrypto::sha256("abc")), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
 }
 
+// the AVX2 (and AVX-512) Box-Muller transforms are the reference transform, bit for bit, for every input
+TEST(WatermarkCryptoTest, VectorBoxMullerMatchesTheScalarReferenceForEveryInput) {
+    const std::vector<uint32_t> pairs = everyRandomPair();
+    std::vector<std::array<uint64_t, 8>> blocks(pairs.size() / 8);
+    for (size_t i = 0; i < pairs.size(); ++i)
+        blocks[i / 8][i % 8] = (static_cast<uint64_t>(pairs[i]) << 40) | ((i * 0x9E3779B97F4A7C15ull) >> 24);
+    const std::vector<float> expected = referenceBoxMuller(pairs);
+
+    std::vector<float> vector2(pairs.size());
+    for (size_t block = 0; block < blocks.size(); block += 2)
+        WatermarkCrypto::generateBoxMullerNormalBlockPair(blocks[block], blocks[block + 1], vector2.data() + (block * 8));
+    EXPECT_EQ(bitDifferences(vector2, expected), "") << "AVX2";
+#if defined(__AVX512F__)
+    std::vector<float> vector4(pairs.size());
+    for (size_t block = 0; block < blocks.size(); block += 4)
+        WatermarkCrypto::generateBoxMullerNormalBlockQuad(blocks.data() + block, vector4.data() + (block * 8));
+    EXPECT_EQ(bitDifferences(vector4, expected), "") << "AVX-512";
+#endif
+}
+
+// the CPU generation (vector ChaCha20 and Box-Muller, the scalar tail) is the scalar reference, partial last blocks included
+TEST(WatermarkCryptoTest, HostWatermarkMatchesTheScalarReference) {
+    const std::array<uint32_t, 16> baseState = WatermarkCrypto::computeBaseState(defaultPassword);
+    for (const int64_t numElements : {1, 7, 8, 9, 63, 64, 65, 127, 129, 136, 324, 1000, 12293, 3840 * 2160}) {
+        const auto host = WatermarkCrypto::generateHalfWatermark(baseState, numElements);
+        const std::vector<uint16_t> hostBits(host.get(), host.get() + numElements);
+        EXPECT_EQ(bitDifferences(hostBits, referenceWatermark(baseState, numElements)), "") << numElements << " values";
+    }
+}
+
+#if defined(_USE_CUDA_) || defined(_USE_OPENCL_)
+// the Box-Muller transform of the device generation kernel is the CPU reference, bit for bit, for every input
+TEST(WatermarkGenerationTest, DeviceBoxMullerMatchesTheCpuForEveryInput) {
+    const std::vector<uint32_t> pairs = everyRandomPair();
+    const std::vector<float> expected = referenceBoxMuller(pairs);
+    forEachDevice([&](const std::string& device) { EXPECT_EQ(bitDifferences(deviceBoxMuller(pairs), expected), "") << device; });
+}
+
+// the watermark generated on the device is the CPU watermark, partial last blocks included
+TEST(WatermarkGenerationTest, DeviceWatermarkMatchesTheCpu) {
+    const std::array<uint32_t, 16> baseState = WatermarkCrypto::computeBaseState(defaultPassword);
+    forEachDevice([&](const std::string& device) {
+        for (const int64_t numElements : {1, 7, 8, 9, 63, 64, 65, 129, 324, 1920 * 1080 + 5, 3840 * 2160}) {
+            const auto host = WatermarkCrypto::generateHalfWatermark(baseState, numElements);
+            const std::vector<uint16_t> hostBits(host.get(), host.get() + numElements);
+            EXPECT_EQ(bitDifferences(deviceWatermark(baseState, numElements), hostBits), "") << device << ", " << numElements << " values";
+        }
+    });
+}
+#endif
+
 #if defined(_USE_OPENCL_)
 TEST(OpenCLReductionTest, AvailableDevicesMatchForcedPortableResults) {
     PortableReductionOverrideGuard restoreOverride;
@@ -217,12 +461,9 @@ TEST(OpenCLReductionTest, AvailableDevicesMatchForcedPortableResults) {
         buildOpenCLKernels(); // every documented prediction order must compile on every device
         const cl::Program selectedProgram = cl_utils::OpenCLKernelCache<defaultP>::getProgram();
         const cl_utils::ReductionMode selectedMode = cl_utils::reductionMode(selectedProgram);
-        const auto selected = runReductionPath();
-
-        for (size_t method = 0; method < selected.size(); ++method) {
-            EXPECT_TRUE(std::isfinite(selected[method].correlation)) << devices[deviceIndex];
-            EXPECT_GT(selected[method].correlation, 0.5f) << devices[deviceIndex];
-        }
+        const ReductionPathResult selected = runReductionPath();
+        EXPECT_TRUE(std::isfinite(selected.correlation)) << devices[deviceIndex];
+        EXPECT_GT(selected.correlation, 0.5f) << devices[deviceIndex];
 
         if (selectedMode == cl_utils::ReductionMode::Portable)
             continue;
@@ -230,15 +471,12 @@ TEST(OpenCLReductionTest, AvailableDevicesMatchForcedPortableResults) {
         setPortableReductionOverride(true);
         const cl::Program portableProgram = cl_utils::OpenCLKernelCache<defaultP>::getProgram();
         ASSERT_EQ(cl_utils::reductionMode(portableProgram), cl_utils::ReductionMode::Portable) << devices[deviceIndex];
-        const auto portable = runReductionPath();
-
-        for (size_t method = 0; method < selected.size(); ++method) {
-            EXPECT_EQ(selected[method].pixels.width, portable[method].pixels.width) << devices[deviceIndex];
-            EXPECT_EQ(selected[method].pixels.height, portable[method].pixels.height) << devices[deviceIndex];
-            EXPECT_EQ(selected[method].pixels.channels, portable[method].pixels.channels) << devices[deviceIndex];
-            EXPECT_EQ(selected[method].pixels.pixels, portable[method].pixels.pixels) << devices[deviceIndex];
-            EXPECT_NEAR(selected[method].correlation, portable[method].correlation, 1.0e-4f) << devices[deviceIndex];
-        }
+        const ReductionPathResult portable = runReductionPath();
+        EXPECT_EQ(selected.pixels.width, portable.pixels.width) << devices[deviceIndex];
+        EXPECT_EQ(selected.pixels.height, portable.pixels.height) << devices[deviceIndex];
+        EXPECT_EQ(selected.pixels.channels, portable.pixels.channels) << devices[deviceIndex];
+        EXPECT_EQ(selected.pixels.pixels, portable.pixels.pixels) << devices[deviceIndex];
+        EXPECT_NEAR(selected.correlation, portable.correlation, 1.0e-4f) << devices[deviceIndex];
     }
 }
 #endif
@@ -300,39 +538,37 @@ TEST_F(WatermarkTest, OriginalPreviewInterleavesRgbPixelsAndTail) {
     EXPECT_EQ(preview.pixels, expected);
 }
 
-TEST_F(WatermarkTest, EmbedsAndDetectsBothMasks) {
-    for (const MaskMethod method : {MaskMethod::NVF, MaskMethod::ME}) {
-        embedImage(session.get(), method);
-        finish();
-        prepareDetectionImage(session.get(), method);
-        const float correlation = detectEmbeddedBuffer(session.get(), method);
-        EXPECT_TRUE(std::isfinite(correlation));
-        EXPECT_GT(correlation, 0.5f);
-    }
+TEST_F(WatermarkTest, EmbedsAndDetects) {
+    embedImage(session.get());
+    finish();
+    prepareDetectionImage(session.get());
+    const float correlation = detectEmbeddedBuffer(session.get());
+    EXPECT_TRUE(std::isfinite(correlation));
+    EXPECT_GT(correlation, 0.5f);
 }
 
 TEST_F(WatermarkTest, SavesReloadsAndDetectsFromTemporaryDirectory) {
-    embedImage(session.get(), MaskMethod::ME);
+    embedImage(session.get());
     finish();
 
     const fs::path requestedPath = tempDir / "result.png";
     const fs::path savedPath = tempDir / "resultW_ME.png";
-    saveImage(session.get(), requestedPath.string(), MaskMethod::ME);
+    saveImage(session.get(), requestedPath.string());
     ASSERT_TRUE(fs::exists(savedPath));
 
     ImageHandle diskSession = createImageSession(defaultPassword, defaultP, defaultPsnr);
     loadImage(diskSession.get(), savedPath.string());
-    const float diskCorrelation = detectLoadedImage(diskSession.get(), MaskMethod::ME);
+    const float diskCorrelation = detectLoadedImage(diskSession.get());
     EXPECT_TRUE(std::isfinite(diskCorrelation));
     EXPECT_GT(diskCorrelation, 0.65f);
 }
 
 TEST_F(WatermarkTest, ReusesSessionAcrossSameSizeRgbAndGrayImages) {
-    const SessionPixelData rgb = embedAndRead(session.get(), MaskMethod::NVF);
+    const SessionPixelData rgb = embedAndRead(session.get());
     ASSERT_EQ(rgb.channels, 3);
 
     loadImage(session.get(), grayImage.string());
-    const SessionPixelData gray = embedAndRead(session.get(), MaskMethod::NVF);
+    const SessionPixelData gray = embedAndRead(session.get());
     EXPECT_EQ(gray.width, rgb.width);
     EXPECT_EQ(gray.height, rgb.height);
     EXPECT_EQ(gray.channels, 1);
@@ -340,28 +576,28 @@ TEST_F(WatermarkTest, ReusesSessionAcrossSameSizeRgbAndGrayImages) {
 }
 
 TEST_F(WatermarkTest, SameInputsAreDeterministicAcrossSessions) {
-    const SessionPixelData first = embedAndRead(session.get(), MaskMethod::NVF);
+    const SessionPixelData first = embedAndRead(session.get());
 
     ImageHandle secondSession = createImageSession(defaultPassword, defaultP, defaultPsnr);
     loadImage(secondSession.get(), colorImage.string());
-    const SessionPixelData second = embedAndRead(secondSession.get(), MaskMethod::NVF);
+    const SessionPixelData second = embedAndRead(secondSession.get());
     EXPECT_EQ(first.pixels, second.pixels);
 }
 
 TEST_F(WatermarkTest, ExportedImageRemainsStableAcrossSessionReuse) {
-    embedImage(session.get(), MaskMethod::NVF);
+    embedImage(session.get());
     finish();
     ExportHandle exported = createReusableExportBuffer();
-    exportForSave(session.get(), exported.get(), MaskMethod::NVF);
-    const fs::path first = tempDir / "firstW_NVF.png";
-    const fs::path second = tempDir / "secondW_NVF.png";
-    const fs::path third = tempDir / "thirdW_NVF.png";
-    flushToDiskAsync(exported.get(), (tempDir / "first.png").string(), MaskMethod::NVF);
+    exportForSave(session.get(), exported.get());
+    const fs::path first = tempDir / "firstW_ME.png";
+    const fs::path second = tempDir / "secondW_ME.png";
+    const fs::path third = tempDir / "thirdW_ME.png";
+    flushToDiskAsync(exported.get(), (tempDir / "first.png").string());
 
     updateSessionParams(session.get(), defaultP, 30.0f);
-    embedImage(session.get(), MaskMethod::NVF);
+    embedImage(session.get());
     finish();
-    flushToDiskAsync(exported.get(), (tempDir / "second.png").string(), MaskMethod::NVF);
+    flushToDiskAsync(exported.get(), (tempDir / "second.png").string());
 
     std::ifstream firstFile(first, std::ios::binary);
     std::ifstream secondFile(second, std::ios::binary);
@@ -370,8 +606,8 @@ TEST_F(WatermarkTest, ExportedImageRemainsStableAcrossSessionReuse) {
     const std::vector<char> secondBytes(std::istreambuf_iterator<char>{secondFile}, {});
     EXPECT_EQ(firstBytes, secondBytes);
 
-    exportForSave(session.get(), exported.get(), MaskMethod::NVF);
-    flushToDiskAsync(exported.get(), (tempDir / "third.png").string(), MaskMethod::NVF);
+    exportForSave(session.get(), exported.get());
+    flushToDiskAsync(exported.get(), (tempDir / "third.png").string());
     std::ifstream thirdFile(third, std::ios::binary);
     ASSERT_TRUE(thirdFile);
     const std::vector<char> thirdBytes(std::istreambuf_iterator<char>{thirdFile}, {});
@@ -379,34 +615,48 @@ TEST_F(WatermarkTest, ExportedImageRemainsStableAcrossSessionReuse) {
 }
 
 TEST_F(WatermarkTest, DifferentPasswordsProduceDifferentWatermarks) {
-    const SessionPixelData first = embedAndRead(session.get(), MaskMethod::NVF);
+    const SessionPixelData first = embedAndRead(session.get());
 
     ImageHandle secondSession = createImageSession("a_different_password", defaultP, defaultPsnr);
     loadImage(secondSession.get(), colorImage.string());
-    const SessionPixelData second = embedAndRead(secondSession.get(), MaskMethod::NVF);
+    const SessionPixelData second = embedAndRead(secondSession.get());
     EXPECT_NE(first.pixels, second.pixels);
 }
 
 TEST_F(WatermarkTest, PsnrOnlyUpdatePreservesTheDeterministicWatermark) {
-    const SessionPixelData original = embedAndRead(session.get(), MaskMethod::NVF);
+    const SessionPixelData original = embedAndRead(session.get());
 
     updateSessionParams(session.get(), defaultP, 30.0f);
-    const SessionPixelData stronger = embedAndRead(session.get(), MaskMethod::NVF);
+    const SessionPixelData stronger = embedAndRead(session.get());
     EXPECT_NE(original.pixels, stronger.pixels);
 
     updateSessionParams(session.get(), defaultP, defaultPsnr);
-    const SessionPixelData restored = embedAndRead(session.get(), MaskMethod::NVF);
+    const SessionPixelData restored = embedAndRead(session.get());
     EXPECT_EQ(original.pixels, restored.pixels);
+}
+
+// a p change keeps the watermark (it depends only on the password and the size): the same output as a new session with that p
+TEST_F(WatermarkTest, PredictionOrderUpdateKeepsTheWatermark) {
+    const SessionPixelData original = embedAndRead(session.get());
+
+    updateSessionParams(session.get(), 5, defaultPsnr);
+    const SessionPixelData updated = embedAndRead(session.get());
+    ImageHandle fresh = createImageSession(defaultPassword, 5, defaultPsnr);
+    loadImage(fresh.get(), colorImage.string());
+    EXPECT_EQ(updated.pixels, embedAndRead(fresh.get()).pixels);
+
+    updateSessionParams(session.get(), defaultP, defaultPsnr);
+    EXPECT_EQ(original.pixels, embedAndRead(session.get()).pixels);
 }
 
 TEST_F(WatermarkTest, SupportsEveryDocumentedPredictionOrder) {
     for (const int predictionOrder : {3, 5, 7, 9}) {
         ImageHandle pSession = createImageSession(defaultPassword, predictionOrder, defaultPsnr);
         loadImage(pSession.get(), colorImage.string());
-        const SessionPixelData output = embedAndRead(pSession.get(), MaskMethod::ME);
+        const SessionPixelData output = embedAndRead(pSession.get());
         EXPECT_EQ(output.pixels.size(), static_cast<size_t>(output.width) * output.height * output.channels) << "p=" << predictionOrder;
-        prepareDetectionImage(pSession.get(), MaskMethod::ME);
-        const float correlation = detectEmbeddedBuffer(pSession.get(), MaskMethod::ME);
+        prepareDetectionImage(pSession.get());
+        const float correlation = detectEmbeddedBuffer(pSession.get());
         EXPECT_TRUE(std::isfinite(correlation)) << "p=" << predictionOrder;
         EXPECT_GT(correlation, 0.5f) << "p=" << predictionOrder;
     }
@@ -429,11 +679,11 @@ TEST_F(WatermarkTest, EmbedsAndDetectsTheSmallestImagesForLargeWindows) {
                 writeNoiseBmp(input, width, height);
                 ImageHandle small = createImageSession(defaultPassword, order, defaultPsnr);
                 loadImage(small.get(), input.string());
-                const SessionPixelData output = embedAndRead(small.get(), MaskMethod::ME);
+                const SessionPixelData output = embedAndRead(small.get());
                 EXPECT_EQ(output.width, width) << "p=" << order << " " << size;
                 EXPECT_EQ(output.height, height) << "p=" << order << " " << size;
-                prepareDetectionImage(small.get(), MaskMethod::ME);
-                const float correlation = detectEmbeddedBuffer(small.get(), MaskMethod::ME);
+                prepareDetectionImage(small.get());
+                const float correlation = detectEmbeddedBuffer(small.get());
                 EXPECT_TRUE(std::isfinite(correlation)) << "p=" << order << " " << size;
             }
         }
@@ -480,7 +730,7 @@ TEST_F(WatermarkTest, HandlesNonAsciiPathsLikeTheUi) {
     // single image: load, embed and save through UTF-8 strings
     ImageHandle single = createImageSession(defaultPassword, defaultP, defaultPsnr);
     loadImage(single.get(), utf8(folder / u8"\u03b5\u03b9\u03ba\u03cc\u03bd\u03b1.png"), true);
-    embedImage(single.get(), MaskMethod::ME);
+    embedImage(single.get());
     finish();
     const fs::path saved = folder / u8"\u03b1\u03c0\u03bf\u03c4\u03ad\u03bb\u03b5\u03c3\u03bc\u03b1.png";
     saveImageExact(single.get(), utf8(saved));
@@ -489,7 +739,7 @@ TEST_F(WatermarkTest, HandlesNonAsciiPathsLikeTheUi) {
     // batch: the folder comes back from its UTF-8 text, then list, preload, embed and save
     const fs::path batchFolder(utf8(folder));
     ASSERT_TRUE(fs::is_directory(batchFolder));
-    const std::vector<fs::path> files = CommonUtils::getValidImageFiles(batchFolder);
+    const std::vector<fs::path> files = WatermarkCore::getValidImageFiles(batchFolder);
     ASSERT_EQ(files.size(), 3u);
     const fs::path outputDir = batchFolder / "watermark_output";
     fs::create_directories(outputDir);
@@ -497,9 +747,9 @@ TEST_F(WatermarkTest, HandlesNonAsciiPathsLikeTheUi) {
     ExportHandle exportBuffer = createReusableExportBuffer();
     for (const fs::path& file : files) {
         bindPreloadedImage(batch.get(), preloadImageFromDisk(file.string()));
-        embedImage(batch.get(), MaskMethod::ME);
-        exportForSave(batch.get(), exportBuffer.get(), MaskMethod::ME);
-        flushToDiskAsync(exportBuffer.get(), (outputDir / file.filename()).string(), MaskMethod::ME);
+        embedImage(batch.get());
+        exportForSave(batch.get(), exportBuffer.get());
+        flushToDiskAsync(exportBuffer.get(), (outputDir / file.filename()).string());
     }
     EXPECT_EQ(std::distance(fs::directory_iterator(outputDir), fs::directory_iterator{}), 3);
 }
@@ -510,18 +760,18 @@ TEST_F(WatermarkTest, PreservesTheAlphaChannelWhenSaving) {
     loadImage(alphaSession.get(), alphaImage.string(), true);
     const OriginalPixelData original = takeOriginalPixelData(alphaSession.get());
     ASSERT_EQ(original.channels, 4);
-    embedImage(alphaSession.get(), MaskMethod::ME);
+    embedImage(alphaSession.get());
     finish();
 
     const fs::path requested = tempDir / "alpha.png";
     const fs::path saved = tempDir / "alphaW_ME.png";
-    saveImage(alphaSession.get(), requested.string(), MaskMethod::ME);
+    saveImage(alphaSession.get(), requested.string());
     ASSERT_TRUE(fs::exists(saved));
 
     ExportHandle exported = createReusableExportBuffer();
-    exportForSave(alphaSession.get(), exported.get(), MaskMethod::ME);
+    exportForSave(alphaSession.get(), exported.get());
     const fs::path exportedSaved = tempDir / "alpha_exportW_ME.png";
-    auto saveTask = std::async(std::launch::async, flushToDiskAsync, exported.get(), (tempDir / "alpha_export.png").string(), MaskMethod::ME);
+    auto saveTask = std::async(std::launch::async, flushToDiskAsync, exported.get(), (tempDir / "alpha_export.png").string());
     loadImage(alphaSession.get(), colorImage.string());
     saveTask.get();
     ASSERT_TRUE(fs::exists(exportedSaved));
@@ -541,7 +791,7 @@ TEST_F(WatermarkTest, PreservesTheAlphaChannelWhenSaving) {
                 break;
             }
         }
-        const float correlation = detectLoadedImage(reloaded.get(), MaskMethod::ME);
+        const float correlation = detectLoadedImage(reloaded.get());
         EXPECT_TRUE(std::isfinite(correlation));
         EXPECT_GT(correlation, 0.5f);
     }
@@ -560,9 +810,9 @@ TEST(EigenDetectionTest, LargePredictionWindowsRemainStableWithOneThread) {
         omp_set_num_threads(threads);
         auto image = createImageSession(defaultPassword, order, defaultPsnr);
         loadImage(image.get(), "samples/images/4k.png");
-        embedImage(image.get(), MaskMethod::ME);
-        prepareDetectionImage(image.get(), MaskMethod::ME);
-        return detectEmbeddedBuffer(image.get(), MaskMethod::ME);
+        embedImage(image.get());
+        prepareDetectionImage(image.get());
+        return detectEmbeddedBuffer(image.get());
     };
 
     for (const int order : {7, 9}) {
@@ -587,9 +837,9 @@ TEST(GpuDetectionTest, FourKLargePredictionWindowsRemainDetectable) {
         for (const int order : {7, 9}) {
             auto image = createImageSession(defaultPassword, order, defaultPsnr);
             loadImage(image.get(), "samples/images/4k.png");
-            embedImage(image.get(), MaskMethod::ME);
-            prepareDetectionImage(image.get(), MaskMethod::ME);
-            const float correlation = detectEmbeddedBuffer(image.get(), MaskMethod::ME);
+            embedImage(image.get());
+            prepareDetectionImage(image.get());
+            const float correlation = detectEmbeddedBuffer(image.get());
             EXPECT_TRUE(std::isfinite(correlation)) << devices[deviceIndex] << " p=" << order;
             EXPECT_GT(correlation, 0.75f) << devices[deviceIndex] << " p=" << order;
         }
@@ -597,38 +847,131 @@ TEST(GpuDetectionTest, FourKLargePredictionWindowsRemainDetectable) {
 }
 #endif
 
-TEST(PreviewPixelConversionTest, HandlesPlanarRgbAndGrayWithPaddedRows) {
-    for (const auto [width, height] : {
-             std::pair{5,  3 },
-             std::pair{8,  8 },
-             std::pair{13, 11},
-             std::pair{16, 31},
-             std::pair{17, 35}
-    }) {
-        for (const int channels : {1, 3}) {
-            SessionPixelData source;
-            source.width = width;
-            source.height = height;
-            source.channels = channels;
-            const size_t planeSize = static_cast<size_t>(source.width) * source.height;
-            source.pixels.resize(planeSize * channels);
-            for (int channel = 0; channel < channels; ++channel)
-                for (int col = 0; col < source.width; ++col)
-                    for (int row = 0; row < source.height; ++row)
-                        source.pixels[static_cast<size_t>(channel) * planeSize + static_cast<size_t>(col) * source.height + row] = static_cast<uint8_t>(channel * 50 + col * 7 + row);
+// the display buffer is the planar session output interleaved, for sizes with partial GPU tiles and SIMD blocks, the row padding stays untouched
+TEST_F(WatermarkTest, PreviewMatchesTheSessionPixelsWithPaddedRows) {
+    // the fixture session belongs to device 0, every device gets its own session
+    session.reset();
+    const auto check = [&](const std::string& device) {
+        ImageHandle previewSession = createImageSession(defaultPassword, defaultP, defaultPsnr);
+        for (const auto [width, height] : {
+                 std::pair{9,  9 },
+                 std::pair{13, 11},
+                 std::pair{16, 31},
+                 std::pair{33, 35},
+                 std::pair{70, 47}
+        }) {
+            for (const int channels : {1, 3}) {
+                const std::string name = std::format("{} preview_{}x{}_{}", device, width, height, channels);
+                const fs::path input = tempDir / std::format("preview_{}x{}{}", width, height, channels == 3 ? ".bmp" : ".pgm");
+                if (channels == 3)
+                    writeNoiseBmp(input, width, height);
+                else
+                    writeNoisePgm(input, width, height);
+                loadImage(previewSession.get(), input.string());
+                const SessionPixelData source = embedAndRead(previewSession.get());
+                ASSERT_EQ(source.channels, channels) << name;
+                const PreviewFormat format = getSessionPreviewFormat(previewSession.get());
+                EXPECT_EQ(format.width, width) << name;
+                EXPECT_EQ(format.height, height) << name;
+                EXPECT_EQ(format.channels, channels) << name;
 
-            const size_t stride = static_cast<size_t>(source.width) * channels + 3;
-            std::vector<uint8_t> preview(stride * source.height, 0xA5);
-            copySessionPixelsForPreview(source, preview.data(), stride);
-            for (int row = 0; row < source.height; ++row) {
-                for (int col = 0; col < source.width; ++col)
-                    for (int channel = 0; channel < channels; ++channel)
-                        EXPECT_EQ(preview[static_cast<size_t>(row) * stride + col * channels + channel], static_cast<uint8_t>(channel * 50 + col * 7 + row));
-                for (size_t padding = static_cast<size_t>(source.width) * channels; padding < stride; ++padding)
-                    EXPECT_EQ(preview[static_cast<size_t>(row) * stride + padding], 0xA5);
+                const size_t stride = static_cast<size_t>(width) * channels + 3;
+                const size_t planeSize = static_cast<size_t>(width) * height;
+                std::vector<uint8_t> preview(stride * height, 0xA5);
+                copySessionPreview(previewSession.get(), preview.data(), stride);
+                int mismatches = 0;
+                for (int row = 0; row < height; ++row) {
+                    for (int col = 0; col < width; ++col)
+                        for (int channel = 0; channel < channels; ++channel)
+                            mismatches += preview[static_cast<size_t>(row) * stride + col * channels + channel] !=
+                                          source.pixels[static_cast<size_t>(channel) * planeSize + static_cast<size_t>(col) * height + row];
+                    for (size_t padding = static_cast<size_t>(width) * channels; padding < stride; ++padding)
+                        mismatches += preview[static_cast<size_t>(row) * stride + padding] != 0xA5;
+                }
+                EXPECT_EQ(mismatches, 0) << name;
             }
         }
-    }
+    };
+#if defined(_USE_CUDA_) || defined(_USE_OPENCL_)
+    forEachDevice(check);
+#else
+    check(getDeviceName());
+#endif
+}
+
+// every EXIF orientation of one displayed image (40x72: partial GPU tiles) loads upright, with the embedded pixels and the original preview of orientation 1.
+// The image is 8x8 blocks of one color, exact in a quality 100 4:4:4 JPEG
+TEST_F(WatermarkTest, ExifOrientationsLoadUpright) {
+    // the fixture session belongs to device 0, every device gets its own sessions
+    session.reset();
+    constexpr int width = 40;
+    constexpr int height = 72;
+    const auto check = [&](const std::string& device) {
+        for (const int channels : {1, 3}) {
+            std::vector<uint8_t> blockColors(static_cast<size_t>(width / 8) * (height / 8) * channels);
+            uint32_t state = 777;
+            for (uint8_t& color : blockColors) {
+                state = (state * 1664525u) + 1013904223u;
+                color = static_cast<uint8_t>(state >> 24);
+            }
+            std::vector<uint8_t> displayed(static_cast<size_t>(width) * height * channels);
+            for (int y = 0; y < height; ++y)
+                for (int x = 0; x < width; ++x)
+                    for (int channel = 0; channel < channels; ++channel)
+                        displayed[(static_cast<size_t>(y) * width + x) * channels + channel] = blockColors[((y / 8) * (width / 8) + (x / 8)) * channels + channel];
+
+            SessionPixelData reference;
+            OriginalPixelData referenceOriginal;
+            for (int orientation = 1; orientation <= 8; ++orientation) {
+                const std::string name = std::format("{} channels={} orientation={}", device, channels, orientation);
+                const fs::path input = tempDir / std::format("oriented_{}_{}.jpg", channels, orientation);
+                writeOrientedJpeg(input, displayed, width, height, channels, orientation);
+                ImageHandle oriented = createImageSession(defaultPassword, defaultP, defaultPsnr);
+                loadImage(oriented.get(), input.string(), true);
+                OriginalPixelData original = takeOriginalPixelData(oriented.get());
+                const SessionPixelData output = embedAndRead(oriented.get());
+                ASSERT_EQ(output.width, width) << name;
+                ASSERT_EQ(output.height, height) << name;
+                ASSERT_EQ(output.channels, channels) << name;
+                ASSERT_EQ(original.width, width) << name;
+                ASSERT_EQ(original.height, height) << name;
+                ASSERT_EQ(original.channels, channels) << name;
+                if (orientation == 1) {
+                    // gray blocks survive the JPEG exactly (color blocks go through YCbCr)
+                    if (channels == 1)
+                        EXPECT_TRUE(original.pixels == displayed) << name;
+                    reference = output;
+                    referenceOriginal = std::move(original);
+                    continue;
+                }
+                EXPECT_TRUE(output.pixels == reference.pixels) << name;
+                EXPECT_TRUE(original.pixels == referenceOriginal.pixels) << name;
+            }
+        }
+    };
+#if defined(_USE_CUDA_) || defined(_USE_OPENCL_)
+    forEachDevice(check);
+#else
+    check(getDeviceName());
+#endif
+}
+
+// the EXIF sample loads upright (1280x720), close to 720p.png (it is a quality 95 JPEG of it)
+TEST_F(WatermarkTest, ExifSampleLoadsUpright) {
+    ImageHandle rotated = createImageSession(defaultPassword, defaultP, defaultPsnr);
+    loadImage(rotated.get(), exifImage.string(), true);
+    loadImage(session.get(), "samples/images/720p.png", true);
+    EXPECT_EQ(getImageDims(rotated.get()), std::make_pair(720, 1280));
+    const OriginalPixelData shown = takeOriginalPixelData(rotated.get());
+    const OriginalPixelData expected = takeOriginalPixelData(session.get());
+    ASSERT_EQ(shown.width, 1280);
+    ASSERT_EQ(shown.height, 720);
+    ASSERT_EQ(shown.channels, expected.channels);
+    ASSERT_EQ(shown.pixels.size(), expected.pixels.size());
+    double difference = 0.0;
+    for (size_t i = 0; i < shown.pixels.size(); ++i)
+        difference += std::abs(static_cast<int>(shown.pixels[i]) - static_cast<int>(expected.pixels[i]));
+    EXPECT_LT(difference / static_cast<double>(shown.pixels.size()), 2.0);
 }
 
 TEST_F(WatermarkTest, RejectsHighBitDepthVideoDetection) {
@@ -872,4 +1215,48 @@ TEST(EncodeOptionsTest, ParsesBothNumericAndFourCcCodecTags) {
     EXPECT_EQ(video_utils::parseEncodeOptions("-c:v libx265 -tag:v hvc1").codecTag, "hvc1");
     EXPECT_EQ(video_utils::codecTagFromString("hvc1"), 0x31637668U); // little endian 'h','v','c','1'
     EXPECT_EQ(video_utils::codecTagFromString("0x31637668"), 0x31637668U);
+}
+
+// the UI benchmark and batch workers: images are preloaded on another thread (on the GPU backends they are uploaded on the compute stream)
+// while the session embeds and detects (CUDA records its graphs meanwhile). Every run must work, the next one on a new thread too
+TEST(WatermarkThreadingTest, EmbedsAndDetectsWhileAnotherThreadPreloadsImages) {
+    for (int run = 0; run < 2; ++run) {
+        std::string error;
+        std::thread worker([&] {
+            if (!initializeEnvironment(0)) {
+                error = "no device";
+                return;
+            }
+            const int device = getCurrentDeviceIndex();
+            // a small image keeps the other thread uploading all the time
+            std::atomic<bool> stop = false;
+            std::future<void> preloads = std::async(std::launch::async, [&] {
+                while (!stop)
+                    preloadImageFromDisk("samples/images/18x18.png", device, false);
+            });
+            try {
+                ImageHandle session = createImageSession(defaultPassword, defaultP, defaultPsnr);
+                loadImage(session.get(), colorImage.string());
+                // every p change records new graphs
+                for (int round = 0; round < 5; ++round) {
+                    for (const int p : {3, 5, 7, 9}) {
+                        updateSessionParams(session.get(), p, defaultPsnr);
+                        embedImage(session.get());
+                        finish();
+                        prepareDetectionImage(session.get());
+                        detectEmbeddedBuffer(session.get());
+                    }
+                }
+            } catch (const std::exception& e) { error = e.what(); }
+            stop = true;
+            try {
+                preloads.get();
+            } catch (const std::exception& e) {
+                if (error.empty())
+                    error = e.what();
+            }
+        });
+        worker.join();
+        EXPECT_EQ(error, "") << "run " << run;
+    }
 }

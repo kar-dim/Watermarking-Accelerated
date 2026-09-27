@@ -1,6 +1,5 @@
 #pragma once
 
-#include "include/WatermarkTypes.hpp"
 #include "video_defines.hpp"
 #include "VideoProcessingContext.hpp"
 #include <string>
@@ -30,6 +29,9 @@ inline bool is10bit(const AVCodecContext* codecCtx, const AVStream* st) {
 }
 // PQ HDR10 or HLG HDR
 inline bool isHDR(const AVCodecContext* codecCtx) { return codecCtx->color_trc == AVCOL_TRC_SMPTE2084 || codecCtx->color_trc == AVCOL_TRC_ARIB_STD_B67; }
+
+// the video operation of videoDispatcher
+enum class VideoMode { EMBED, DETECT };
 
 // public API
 AVCodecContextPtr openDecoder(const AVCodecParameters* inputCodecParams, bool useHwDecoderRequested, bool& useHwDecoder, AVRational pktTimebase);
