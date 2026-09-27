@@ -4,7 +4,6 @@
 #include "utils.hpp"
 #include "WatermarkBase.hpp"
 #include <algorithm>
-#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -63,51 +62,62 @@ void saveCimgByExtension(const Gray8BufferIO& cimgToSave, const string& path) {
         throw std::runtime_error("Unsupported image format: " + extension);
 }
 
+// decode the image file to 8 bits per sample
+Gray8BufferIO loadImage8(const string& imageFile) {
+    // null for types it does not detect (the loader falls back to the extension)
+    const char* detectedType = cimg_library::cimg::ftype(nullptr, imageFile.c_str());
+    const string fileType = detectedType ? detectedType : "";
+    unsigned int bitsPerValue = 8;
+    Gray8BufferIO image;
+    if (fileType == "png")
+        image.load_png(imageFile.c_str(), &bitsPerValue);
+    else if (fileType == "tif")
+        image.load_tiff(imageFile.c_str(), 0, 0, 1, &bitsPerValue);
+    else
+        image.load(imageFile.c_str());
+    checkError(bitsPerValue > 8, "Unsupported image: " + std::to_string(bitsPerValue) + " bits per sample, only 8-bit images are supported");
+    return image;
+}
+
 // zero out RGB channels where alpha is 0, branchless, exploiting CImg's planar layout (RRRR...GGGG...BBBB...)
-void cimgAlphaZero(FloatBufferIO& rgb, const Gray8BufferIO& alpha) {
+void cimgAlphaZero(Gray8BufferIO& rgb, const Gray8BufferIO& alpha) {
     const int planeSize = rgb.width() * rgb.height();
-    float* R = rgb.data();
-    float* G = R + planeSize;
-    float* B = G + planeSize;
+    uint8_t* R = rgb.data();
+    uint8_t* G = R + planeSize;
+    uint8_t* B = G + planeSize;
     const uint8_t* A = alpha.data();
 #pragma omp parallel for schedule(static)
     for (int i = 0; i < planeSize; i++) {
-        const float mask = A[i] ? 1.0f : 0.0f;
-        R[i] *= mask;
-        G[i] *= mask;
-        B[i] *= mask;
+        const uint8_t mask = A[i] ? 0xFF : 0;
+        R[i] &= mask;
+        G[i] &= mask;
+        B[i] &= mask;
     }
 }
 
-// clamp and round 8 float samples to 8 bytes (the low 8 bytes of the result). 8-bit input have integer values, they convert perfectly
-inline __m128i packBytes(const float* source) {
-    const __m256 values = _mm256_loadu_ps(source);
-    const __m256 clamped = _mm256_max_ps(_mm256_setzero_ps(), _mm256_min_ps(values, _mm256_set1_ps(255.0f)));
-    const __m256i integers = _mm256_cvtps_epi32(clamped);
-    const __m128i halves = _mm_packs_epi32(_mm256_castsi256_si128(integers), _mm256_extracti128_si256(integers, 1));
-    return _mm_packus_epi16(halves, _mm_setzero_si128());
-}
+// 8 samples of a plane (the low 8 bytes of the result)
+inline __m128i loadBytes(const uint8_t* source) { return _mm_loadl_epi64(reinterpret_cast<const __m128i*>(source)); }
 
 // this interleaves CImg's planar pixels for the preview without an intermediate image
-void makeOriginalPreview(const float* source, uint8_t* preview, const size_t pixelCount, const int channels) {
+void makeOriginalPreview(const uint8_t* source, uint8_t* preview, const size_t pixelCount, const int channels) {
     const size_t blocks = pixelCount / 8;
-    const float* green = channels >= 3 ? source + pixelCount : source;
-    const float* blue = channels >= 3 ? green + pixelCount : source;
-    const float* alpha = channels == 4 ? blue + pixelCount : source;
+    const uint8_t* green = channels >= 3 ? source + pixelCount : source;
+    const uint8_t* blue = channels >= 3 ? green + pixelCount : source;
+    const uint8_t* alpha = channels == 4 ? blue + pixelCount : source;
     const __m128i zero = _mm_setzero_si128();
     const __m128i rgbMask = _mm_setr_epi8(0, 1, 2, 4, 5, 6, 8, 9, 10, 12, 13, 14, -1, -1, -1, -1);
     // note: 1000000 is an heuristic threshold, seems good enough
 #pragma omp parallel for if (pixelCount > 1000000) schedule(static)
     for (std::ptrdiff_t block = 0; block < static_cast<std::ptrdiff_t>(blocks); ++block) {
         const size_t offset = static_cast<size_t>(block) * 8;
-        const __m128i redBytes = packBytes(source + offset);
+        const __m128i redBytes = loadBytes(source + offset);
         if (channels == 1) {
             _mm_storel_epi64(reinterpret_cast<__m128i*>(preview + offset), redBytes);
         } else {
-            const __m128i greenBytes = packBytes(green + offset);
-            const __m128i blueBytes = packBytes(blue + offset);
+            const __m128i greenBytes = loadBytes(green + offset);
+            const __m128i blueBytes = loadBytes(blue + offset);
             const __m128i rg = _mm_unpacklo_epi8(redBytes, greenBytes);
-            const __m128i ba = _mm_unpacklo_epi8(blueBytes, channels == 4 ? packBytes(alpha + offset) : zero);
+            const __m128i ba = _mm_unpacklo_epi8(blueBytes, channels == 4 ? loadBytes(alpha + offset) : zero);
             const __m128i first = _mm_unpacklo_epi16(rg, ba);
             const __m128i second = _mm_unpackhi_epi16(rg, ba);
             if (channels == 4) {
@@ -125,43 +135,16 @@ void makeOriginalPreview(const float* source, uint8_t* preview, const size_t pix
     // tail pixels (not multiple by AVX2 size (8))
     for (size_t pixel = blocks * 8; pixel < pixelCount; ++pixel)
         for (int channel = 0; channel < channels; ++channel)
-            preview[pixel * channels + channel] = static_cast<uint8_t>(std::lround(std::clamp(source[static_cast<size_t>(channel) * pixelCount + pixel], 0.0f, 255.0f)));
+            preview[pixel * channels + channel] = source[static_cast<size_t>(channel) * pixelCount + pixel];
 }
 } // namespace
 
 // GPU helpers for CImg (row-major) -> GPU array (column-major) conversion
 #if defined(_USE_GPU_)
 namespace {
-// CImg image (planar, row-major) as bytes, return the 8-bit image the embedding reads
-std::vector<uint8_t> toBytes(const FloatBufferIO& img) {
-    const size_t count = img.size();
-    const float* source = img.data();
-    std::vector<uint8_t> bytes(count);
-#if defined(__AVX512F__)
-    // 16 samples per step for AVX512
-    constexpr size_t lanes = 16;
-    const size_t blocks = count / lanes;
-#pragma omp parallel for if (count > 1000000) schedule(static)
-    for (std::ptrdiff_t block = 0; block < static_cast<std::ptrdiff_t>(blocks); ++block) {
-        const __m512 clamped = _mm512_max_ps(_mm512_setzero_ps(), _mm512_min_ps(_mm512_loadu_ps(source + block * lanes), _mm512_set1_ps(255.0f)));
-        _mm_storeu_si128(reinterpret_cast<__m128i*>(bytes.data() + block * lanes), _mm512_cvtusepi32_epi8(_mm512_cvtps_epi32(clamped)));
-    }
-#else
-    // 8 samples per step for AVX2
-    constexpr size_t lanes = 8;
-    const size_t blocks = count / lanes;
-#pragma omp parallel for if (count > 1000000) schedule(static)
-    for (std::ptrdiff_t block = 0; block < static_cast<std::ptrdiff_t>(blocks); ++block)
-        _mm_storel_epi64(reinterpret_cast<__m128i*>(bytes.data() + block * lanes), packBytes(source + block * lanes));
-#endif
-    for (size_t i = blocks * lanes; i < count; ++i)
-        bytes[i] = static_cast<uint8_t>(std::lround(std::clamp(source[i], 0.0f, 255.0f)));
-    return bytes;
-}
-
 // uploads the 8-bit image (1 or 3 channels) and orients it (EXIF orientation) on the device: column-major 8-bit RGB planes (empty for grayscale) and float luma.
 // With "preview", the displayed row-major interleaved pixels (the original image preview) are downloaded into it
-std::pair<ImageOutputBuffer, ImageBuffer> uploadOriented(const FloatBufferIO& img, const int orientation, std::vector<uint8_t>* preview) {
+std::pair<ImageOutputBuffer, ImageBuffer> uploadOriented(const Gray8BufferIO& img, const int orientation, std::vector<uint8_t>* preview) {
     const int channels = img.spectrum();
     const int srcRows = img.height();
     const int srcCols = img.width();
@@ -170,7 +153,7 @@ std::pair<ImageOutputBuffer, ImageBuffer> uploadOriented(const FloatBufferIO& im
     const int cols = swapAxes ? srcRows : srcCols;
 #if defined(_USE_CUDA_)
     const cudaStream_t stream = CudaStreamManager::getInstance().getComputeStream();
-    const CudaArray<uint8_t> source(srcRows, srcCols, channels, toBytes(img).data(), stream);
+    const CudaArray<uint8_t> source(srcRows, srcCols, channels, img.data(), stream);
     CudaArray<uint8_t> rgb = channels == 3 ? CudaArray<uint8_t>(rows, cols, 3, stream) : CudaArray<uint8_t>();
     CudaArray<float> gray(rows, cols, stream);
     CudaArray<uint8_t> display = preview ? CudaArray<uint8_t>(rows, cols, channels, stream) : CudaArray<uint8_t>();
@@ -178,7 +161,7 @@ std::pair<ImageOutputBuffer, ImageBuffer> uploadOriented(const FloatBufferIO& im
 #elif defined(_USE_OPENCL_)
     auto& mgr = OclQueueManager::getInstance();
     const cl_command_queue queue = mgr.getQueueRaw();
-    const OclArray<uint8_t> source(srcRows, srcCols, channels, toBytes(img).data(), queue);
+    const OclArray<uint8_t> source(srcRows, srcCols, channels, img.data(), queue);
     OclArray<uint8_t> rgb = channels == 3 ? OclArray<uint8_t>(rows, cols, 3, queue) : OclArray<uint8_t>();
     OclArray<float> gray(rows, cols, queue);
     OclArray<uint8_t> display = preview ? OclArray<uint8_t>(rows, cols, channels, queue) : OclArray<uint8_t>();
@@ -260,7 +243,7 @@ std::unique_ptr<WatermarkBase> InternalUtils::createWatermarkObject(
     }
 }
 
-void InternalUtils::rotate(FloatBufferIO& img, const int orientation) {
+void InternalUtils::rotate(Gray8BufferIO& img, const int orientation) {
     switch (orientation) {
     case 2: img.mirror('x'); break;
     case 3: img.rotate(180); break;
@@ -289,7 +272,7 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile, const bool cap
     auto& isRGB = buf.isRGB;
     std::ifstream fileStream(imageFile, std::ifstream::binary);
     TinyEXIF::EXIFInfo exif(fileStream); // parse EXIF for orientation
-    auto cimgRgb = FloatBufferIO(imageFile.c_str());
+    auto cimgRgb = loadImage8(imageFile);
     const int channels = cimgRgb.spectrum();
     // anything outside the EXIF orientations 1-8 is not rotated
     const int orientation = exif.Orientation >= 1 && exif.Orientation <= 8 ? exif.Orientation : 1;
@@ -336,8 +319,8 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile, const bool cap
         break;
     }
     case 4: {
-        // CImg<float> -> CImg<uint8_t> creates an owning copy, so we are safe
-        alphaChannel.emplace(cimgRgb.get_shared_channel(3));
+        // owning copy here on purpose (avoid dangling shared CImg pointer)
+        alphaChannel.emplace(cimgRgb.get_channel(3));
         auto rgbView = cimgRgb.get_shared_channels(0, 2);
         cimgAlphaZero(rgbView, *alphaChannel);
         auto [rgb, gray] = uploadOriented(rgbView, deviceOrientation, nullptr);
@@ -363,8 +346,8 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile, const bool cap
         break;
     }
     case 4: {
-        // Different types, thus it creates an owning 8-bit alpha plane, we are safe
-        alphaChannel.emplace(cimgRgb.get_shared_channel(3));
+        // owning copy here on purpose (avoid dangling shared CImg pointer)
+        alphaChannel.emplace(cimgRgb.get_channel(3));
         auto rgbView = cimgRgb.get_shared_channels(0, 2);
         cimgAlphaZero(rgbView, *alphaChannel);
         auto [rgb, gray] = eigen_utils::cimgToEigenRgbAndGray(rgbView);

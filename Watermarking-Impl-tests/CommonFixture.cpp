@@ -42,6 +42,7 @@
 #include <vector>
 // needs <cstdio> first (FILE)
 #include <jpeglib.h>
+#include <png.h>
 
 #if defined(_USE_EIGEN_)
 #include <omp.h>
@@ -972,6 +973,43 @@ TEST_F(WatermarkTest, ExifSampleLoadsUpright) {
     for (size_t i = 0; i < shown.pixels.size(); ++i)
         difference += std::abs(static_cast<int>(shown.pixels[i]) - static_cast<int>(expected.pixels[i]));
     EXPECT_LT(difference / static_cast<double>(shown.pixels.size()), 2.0);
+}
+
+// images greater than 8 bits per sample are rejected (the 8-bit loaders would truncate them)
+TEST_F(WatermarkTest, RejectsHighBitDepthImages) {
+    constexpr int width = 24;
+    constexpr int height = 16;
+    const auto writePng = [&](const fs::path& path, const uint32_t format, const void* pixels, const void* colormap, const uint32_t colormapEntries) {
+        png_image image{};
+        image.version = PNG_IMAGE_VERSION;
+        image.width = width;
+        image.height = height;
+        image.format = format;
+        image.colormap_entries = colormapEntries;
+        ASSERT_NE(png_image_write_to_file(&image, path.string().c_str(), 0, pixels, 0, colormap), 0) << image.message;
+    };
+    const std::vector<uint16_t> deep(static_cast<size_t>(width) * height * 3, 40000);
+    const fs::path deepRgb = tempDir / "deep_rgb.png";
+    const fs::path deepGray = tempDir / "deep_gray.png";
+    writePng(deepRgb, PNG_FORMAT_LINEAR_RGB, deep.data(), nullptr, 0);
+    writePng(deepGray, PNG_FORMAT_LINEAR_Y, deep.data(), nullptr, 0);
+    EXPECT_THROW(loadImage(session.get(), deepRgb.string()), std::runtime_error);
+    EXPECT_THROW(loadImage(session.get(), deepGray.string()), std::runtime_error);
+
+    // 4 colors: a 2-bit palette PNG, loaded as 8-bit RGB
+    constexpr std::array<uint8_t, 12> palette{10, 200, 30, 250, 5, 90, 0, 0, 0, 255, 255, 255};
+    std::vector<uint8_t> indices(static_cast<size_t>(width) * height);
+    for (size_t i = 0; i < indices.size(); ++i)
+        indices[i] = static_cast<uint8_t>((i * 7 + i / width) % 4);
+    const fs::path palettePng = tempDir / "palette.png";
+    writePng(palettePng, PNG_FORMAT_RGB_COLORMAP, indices.data(), palette.data(), 4);
+    loadImage(session.get(), palettePng.string(), true);
+    const OriginalPixelData original = takeOriginalPixelData(session.get());
+    ASSERT_EQ(original.channels, 3);
+    std::vector<uint8_t> expected;
+    for (const uint8_t index : indices)
+        expected.insert(expected.end(), palette.begin() + index * 3, palette.begin() + index * 3 + 3);
+    EXPECT_TRUE(original.pixels == expected);
 }
 
 TEST_F(WatermarkTest, RejectsHighBitDepthVideoDetection) {

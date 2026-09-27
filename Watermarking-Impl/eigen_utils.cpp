@@ -2,8 +2,6 @@
 #include "common_utils.hpp"
 #include "eigen_rgb_array.hpp"
 #include "eigen_utils.hpp"
-#include <algorithm>
-#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <Eigen/Core>
@@ -42,20 +40,19 @@ Gray8BufferIO eigenGrayToCimg(const Gray8Buffer& arrayGray) {
     return output;
 }
 
-// row-major planar float RGB (CImg) -> column-major 8-bit RGB (clamped and rounded) + float luma
-std::pair<EigenArrayU8RGB, ArrayXXf> cimgToEigenRgbAndGray(const FloatBufferIO& rgbImage) {
+// row-major planar 8-bit RGB (CImg) -> column-major 8-bit RGB + float luma
+std::pair<EigenArrayU8RGB, ArrayXXf> cimgToEigenRgbAndGray(const Gray8BufferIO& rgbImage) {
     const int rows = rgbImage.height();
     const int cols = rgbImage.width();
     const size_t planeSize = static_cast<size_t>(rows) * cols;
-    const float* red = rgbImage.data();
-    const float* green = red + planeSize;
-    const float* blue = green + planeSize;
+    const uint8_t* red = rgbImage.data();
+    const uint8_t* green = red + planeSize;
+    const uint8_t* blue = green + planeSize;
     EigenArrayU8RGB output = makeEigenRGBu8(rows, cols);
     ArrayXXf gray(rows, cols);
     uint8_t* outputRed = output[0].data();
     uint8_t* outputGreen = output[1].data();
     uint8_t* outputBlue = output[2].data();
-    const auto toByte = [](const float value) { return static_cast<uint8_t>(std::lround(std::clamp(value, 0.0f, 255.0f))); };
     float* outputGray = gray.data();
 #pragma omp parallel for schedule(static)
     for (int col = 0; col < cols; ++col) {
@@ -63,9 +60,9 @@ std::pair<EigenArrayU8RGB, ArrayXXf> cimgToEigenRgbAndGray(const FloatBufferIO& 
         for (int row = 0; row < rows; ++row) {
             const size_t inputIndex = static_cast<size_t>(row) * cols + col;
             const size_t outputIndex = outputColumn + row;
-            const uint8_t r = toByte(red[inputIndex]);
-            const uint8_t g = toByte(green[inputIndex]);
-            const uint8_t b = toByte(blue[inputIndex]);
+            const uint8_t r = red[inputIndex];
+            const uint8_t g = green[inputIndex];
+            const uint8_t b = blue[inputIndex];
             outputRed[outputIndex] = r;
             outputGreen[outputIndex] = g;
             outputBlue[outputIndex] = b;
@@ -75,7 +72,7 @@ std::pair<EigenArrayU8RGB, ArrayXXf> cimgToEigenRgbAndGray(const FloatBufferIO& 
     return {std::move(output), std::move(gray)};
 }
 
-ImageBuffer cimgToEigenGray(const FloatBufferIO& grayImage) {
+ImageBuffer cimgToEigenGray(const Gray8BufferIO& grayImage) {
     const int rows = grayImage.height();
     const int cols = grayImage.width();
     ArrayXXf output(rows, cols);

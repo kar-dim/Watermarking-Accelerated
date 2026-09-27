@@ -65,7 +65,7 @@
       <PreprocessorDefinitions>X64;NDEBUG;_CONSOLE;_USE_CUDA_;_USE_GPU_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <DebugInformationFormat>None</DebugInformationFormat>
-      <AdditionalIncludeDirectories>$(WatermarkingPublicIncludeDirectories);$(WatermarkingImplDir)libs\inih;$(WatermarkingImplDir)libs\libjpeg\include;$(ProjectDir)libs\googletest-1.17.0\include;$(WatermarkingMediaIncludeDirectory);$(CUDA_PATH)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(WatermarkingPublicIncludeDirectories);$(WatermarkingImplDir)libs\inih;$(WatermarkingImplDir)libs\libjpeg\include;$(WatermarkingImplDir)libs\libpng\include;$(ProjectDir)libs\googletest-1.17.0\include;$(WatermarkingMediaIncludeDirectory);$(CUDA_PATH)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <EnableEnhancedInstructionSet>$(WatermarkingInstructionSet)</EnableEnhancedInstructionSet>
     </ClCompile>
@@ -116,7 +116,7 @@
       <PreprocessorDefinitions>X64;NDEBUG;_CONSOLE;_USE_OPENCL_;_USE_GPU_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <DebugInformationFormat>None</DebugInformationFormat>
-      <AdditionalIncludeDirectories>$(WatermarkingPublicIncludeDirectories);$(WatermarkingImplDir)libs\opencl\include;$(WatermarkingImplDir)libs\inih;$(WatermarkingImplDir)libs\libjpeg\include;$(ProjectDir)libs\googletest-1.17.0\include;$(WatermarkingMediaIncludeDirectory);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(WatermarkingPublicIncludeDirectories);$(WatermarkingImplDir)libs\opencl\include;$(WatermarkingImplDir)libs\inih;$(WatermarkingImplDir)libs\libjpeg\include;$(WatermarkingImplDir)libs\libpng\include;$(ProjectDir)libs\googletest-1.17.0\include;$(WatermarkingMediaIncludeDirectory);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <EnableEnhancedInstructionSet>$(WatermarkingInstructionSet)</EnableEnhancedInstructionSet>
     </ClCompile>
