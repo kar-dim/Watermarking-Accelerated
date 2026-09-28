@@ -142,7 +142,7 @@
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(WatermarkingImplDir)libs\zlib\lib;$(LLVMInstallDir)\x64\lib;$(LLVMInstallDir)\lib;$(WatermarkingImplDir)libs\libpng\lib;$(WatermarkingImplDir)libs\libjpeg\lib;$(WatermarkingImplDir)libs\libwebp\lib;$(WatermarkingImplDir)libs\libtiff\lib;$(WatermarkingImplDir)libs\ffmpeg\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(WatermarkingCoreDir)libs\zlib\lib;$(LLVMInstallDir)\x64\lib;$(LLVMInstallDir)\lib;$(WatermarkingCoreDir)libs\libpng\lib;$(WatermarkingCoreDir)libs\libjpeg\lib;$(WatermarkingCoreDir)libs\libwebp\lib;$(WatermarkingCoreDir)libs\libtiff\lib;$(WatermarkingCoreDir)libs\ffmpeg\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>libomp.lib;$(WatermarkingDebugImageDependencies);$(WatermarkingMediaDependencies);%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
@@ -160,7 +160,7 @@
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>false</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(WatermarkingImplDir)libs\opencl\lib;$(WatermarkingThirdPartyLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(WatermarkingCoreDir)libs\opencl\lib;$(WatermarkingThirdPartyLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>OpenCL.lib;$(WatermarkingReleaseImageDependencies);$(WatermarkingMediaDependencies);%(AdditionalDependencies)</AdditionalDependencies>
       <IgnoreSpecificDefaultLibraries>LIBCMT</IgnoreSpecificDefaultLibraries>
     </Link>
@@ -176,7 +176,7 @@
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(WatermarkingImplDir)libs\opencl\lib;$(WatermarkingThirdPartyLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(WatermarkingCoreDir)libs\opencl\lib;$(WatermarkingThirdPartyLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>OpenCL.lib;$(WatermarkingDebugImageDependencies);$(WatermarkingMediaDependencies);%(AdditionalDependencies)</AdditionalDependencies>
       <IgnoreSpecificDefaultLibraries>LIBCMT</IgnoreSpecificDefaultLibraries>
     </Link>
@@ -193,7 +193,7 @@
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>false</GenerateDebugInformation>
-      <AdditionalLibraryDirectories>$(WatermarkingImplDir)libs\zlib\lib;$(LLVMInstallDir)\x64\lib;$(LLVMInstallDir)\lib;$(WatermarkingImplDir)libs\libpng\lib;$(WatermarkingImplDir)libs\libjpeg\lib;$(WatermarkingImplDir)libs\libwebp\lib;$(WatermarkingImplDir)libs\libtiff\lib;$(WatermarkingImplDir)libs\ffmpeg\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(WatermarkingCoreDir)libs\zlib\lib;$(LLVMInstallDir)\x64\lib;$(LLVMInstallDir)\lib;$(WatermarkingCoreDir)libs\libpng\lib;$(WatermarkingCoreDir)libs\libjpeg\lib;$(WatermarkingCoreDir)libs\libwebp\lib;$(WatermarkingCoreDir)libs\libtiff\lib;$(WatermarkingCoreDir)libs\ffmpeg\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>libomp.lib;$(WatermarkingReleaseImageDependencies);$(WatermarkingMediaDependencies);%(AdditionalDependencies)</AdditionalDependencies>
       <OptimizeReferences>true</OptimizeReferences>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
@@ -241,7 +241,7 @@
     <ClCompile Include="main.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\Watermarking-Impl\Watermarking-Impl.vcxproj">
+    <ProjectReference Include="..\Watermarking-Core\Watermarking-Core.vcxproj">
       <Project>{c5147f67-deb5-53d1-0721-708c83f1fd9e}</Project>
     </ProjectReference>
   </ItemGroup>

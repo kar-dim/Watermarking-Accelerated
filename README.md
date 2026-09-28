@@ -134,10 +134,10 @@ ffmpeg -y -f rawvideo
 # How to Build
 
 This project is built using **Visual Studio** and consists of a **solution with various projects**.
-- Watermarking-Impl: The Core of this project, implements the algorithms for each backend. It also implements a fast, efficient, secure and deterministic watermark generation: CUDA/OpenCL kernels on the GPU, AVX2/AVX-512 with OpenMP on the CPU, with identical results. It is built as a **static library**.
+- Watermarking-Core: The Core of this project, implements the algorithms for each backend. It also implements a fast, efficient, secure and deterministic watermark generation: CUDA/OpenCL kernels on the GPU, AVX2/AVX-512 with OpenMP on the CPU, with identical results. It is built as a **static library**.
 - Watermarking-CLI: The sample command line application that interacts with the Core project to embed and detect watermark in images and video.
 - Watermarking-UI: The Qt image workflow and benchmark application. It uses the Core project for single-image embedding, image batches, and performance measurements.
-- Watermarking-Impl-tests: GoogleTest suite for the Core project. Runs from the build output folder (the samples are copied there at build time).
+- Watermarking-Core-tests: GoogleTest suite for the Core project. Runs from the build output folder (the samples are copied there at build time).
 
 ### Solution Configurations
 

@@ -33,7 +33,7 @@
   <PropertyGroup Label="Globals">
     <ProjectGuid>{C5147F67-DEB5-53D1-0721-708C83F1FD9E}</ProjectGuid>
     <RootNamespace>Watermarking_Thesis</RootNamespace>
-    <ProjectName>Watermarking-Impl</ProjectName>
+    <ProjectName>Watermarking-Core</ProjectName>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />

@@ -65,7 +65,7 @@
       <PreprocessorDefinitions>X64;NDEBUG;_CONSOLE;_USE_CUDA_;_USE_GPU_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <DebugInformationFormat>None</DebugInformationFormat>
-      <AdditionalIncludeDirectories>$(WatermarkingPublicIncludeDirectories);$(WatermarkingImplDir)libs\inih;$(WatermarkingImplDir)libs\libjpeg\include;$(WatermarkingImplDir)libs\libpng\include;$(ProjectDir)libs\googletest-1.17.0\include;$(WatermarkingMediaIncludeDirectory);$(CUDA_PATH)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(WatermarkingPublicIncludeDirectories);$(WatermarkingCoreDir)libs\inih;$(WatermarkingCoreDir)libs\libjpeg\include;$(WatermarkingCoreDir)libs\libpng\include;$(ProjectDir)libs\googletest-1.17.0\include;$(WatermarkingMediaIncludeDirectory);$(CUDA_PATH)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <EnableEnhancedInstructionSet>$(WatermarkingInstructionSet)</EnableEnhancedInstructionSet>
     </ClCompile>
@@ -74,8 +74,8 @@
       <SubSystem>Console</SubSystem>
       <OptimizeReferences>true</OptimizeReferences>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
-      <AdditionalLibraryDirectories>$(WatermarkingLibraryOutputDirectory);$(WatermarkingImplDir)libs\zlib\lib;$(WatermarkingImplDir)libs\libpng\lib;$(WatermarkingImplDir)libs\libjpeg\lib;$(WatermarkingImplDir)libs\libwebp\lib;$(WatermarkingImplDir)libs\libtiff\lib;$(ProjectDir)libs\googletest-1.17.0\lib;$(WatermarkingImplDir)libs\ffmpeg\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>cudart_static.lib;cuda.lib;nvjpeg.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;zlib.lib;libpng16.lib;jpeg.lib;libwebp.lib;tiff.lib;Watermarking-Impl.lib;gtest.lib;gtest_main.lib;avutil.lib;avformat.lib;swscale.lib;avcodec.lib;avfilter.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(WatermarkingLibraryOutputDirectory);$(WatermarkingCoreDir)libs\zlib\lib;$(WatermarkingCoreDir)libs\libpng\lib;$(WatermarkingCoreDir)libs\libjpeg\lib;$(WatermarkingCoreDir)libs\libwebp\lib;$(WatermarkingCoreDir)libs\libtiff\lib;$(ProjectDir)libs\googletest-1.17.0\lib;$(WatermarkingCoreDir)libs\ffmpeg\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>cudart_static.lib;cuda.lib;nvjpeg.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;zlib.lib;libpng16.lib;jpeg.lib;libwebp.lib;tiff.lib;Watermarking-Core.lib;gtest.lib;gtest_main.lib;avutil.lib;avformat.lib;swscale.lib;avcodec.lib;avfilter.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <IgnoreSpecificDefaultLibraries>LIBCMT</IgnoreSpecificDefaultLibraries>
     </Link>
     <CudaCompile>
@@ -95,7 +95,7 @@
       <PreprocessorDefinitions>X64;NDEBUG;_CONSOLE;_CRT_SECURE_NO_WARNINGS;_USE_EIGEN_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <DebugInformationFormat>None</DebugInformationFormat>
-      <AdditionalIncludeDirectories>$(WatermarkingPublicIncludeDirectories);$(WatermarkingImplDir)libs\Eigen;$(WatermarkingImplDir)libs\CImg;$(WatermarkingImplDir)libs\zlib\include;$(WatermarkingImplDir)libs\inih;$(WatermarkingImplDir)libs\libpng\include;$(WatermarkingImplDir)libs\libjpeg\include;$(WatermarkingImplDir)libs\libwebp\include;$(WatermarkingImplDir)libs\libtiff\include;$(ProjectDir)libs\googletest-1.17.0\include;$(WatermarkingMediaIncludeDirectory);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(WatermarkingPublicIncludeDirectories);$(WatermarkingCoreDir)libs\Eigen;$(WatermarkingCoreDir)libs\CImg;$(WatermarkingCoreDir)libs\zlib\include;$(WatermarkingCoreDir)libs\inih;$(WatermarkingCoreDir)libs\libpng\include;$(WatermarkingCoreDir)libs\libjpeg\include;$(WatermarkingCoreDir)libs\libwebp\include;$(WatermarkingCoreDir)libs\libtiff\include;$(ProjectDir)libs\googletest-1.17.0\include;$(WatermarkingMediaIncludeDirectory);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>-openmp $(WatermarkingClangSimdFlags) /clang:-O3 /Zc:__cplusplus -flto=thin %(AdditionalOptions)</AdditionalOptions>
       <FunctionLevelLinking>true</FunctionLevelLinking>
     </ClCompile>
@@ -104,8 +104,8 @@
       <SubSystem>Console</SubSystem>
       <OptimizeReferences>true</OptimizeReferences>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
-      <AdditionalLibraryDirectories>$(WatermarkingLibraryOutputDirectory);$(WatermarkingImplDir)libs\libpng\lib;$(LLVMInstallDir)\x64\lib;$(LLVMInstallDir)\lib;$(WatermarkingImplDir)libs\zlib\lib;$(WatermarkingImplDir)libs\libjpeg\lib;$(WatermarkingImplDir)libs\libwebp\lib;$(WatermarkingImplDir)libs\libtiff\lib;$(ProjectDir)libs\googletest-1.17.0\lib;$(WatermarkingImplDir)libs\ffmpeg\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>zlib.lib;libomp.lib;libpng16.lib;jpeg.lib;tiff.lib;libwebp.lib;Watermarking-Impl.lib;gtest.lib;gtest_main.lib;avutil.lib;avformat.lib;swscale.lib;avcodec.lib;avfilter.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(WatermarkingLibraryOutputDirectory);$(WatermarkingCoreDir)libs\libpng\lib;$(LLVMInstallDir)\x64\lib;$(LLVMInstallDir)\lib;$(WatermarkingCoreDir)libs\zlib\lib;$(WatermarkingCoreDir)libs\libjpeg\lib;$(WatermarkingCoreDir)libs\libwebp\lib;$(WatermarkingCoreDir)libs\libtiff\lib;$(ProjectDir)libs\googletest-1.17.0\lib;$(WatermarkingCoreDir)libs\ffmpeg\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>zlib.lib;libomp.lib;libpng16.lib;jpeg.lib;tiff.lib;libwebp.lib;Watermarking-Core.lib;gtest.lib;gtest_main.lib;avutil.lib;avformat.lib;swscale.lib;avcodec.lib;avfilter.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='OPENCL_Release|x64'">
@@ -116,7 +116,7 @@
       <PreprocessorDefinitions>X64;NDEBUG;_CONSOLE;_USE_OPENCL_;_USE_GPU_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <DebugInformationFormat>None</DebugInformationFormat>
-      <AdditionalIncludeDirectories>$(WatermarkingPublicIncludeDirectories);$(WatermarkingImplDir)libs\opencl\include;$(WatermarkingImplDir)libs\inih;$(WatermarkingImplDir)libs\libjpeg\include;$(WatermarkingImplDir)libs\libpng\include;$(ProjectDir)libs\googletest-1.17.0\include;$(WatermarkingMediaIncludeDirectory);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(WatermarkingPublicIncludeDirectories);$(WatermarkingCoreDir)libs\opencl\include;$(WatermarkingCoreDir)libs\inih;$(WatermarkingCoreDir)libs\libjpeg\include;$(WatermarkingCoreDir)libs\libpng\include;$(ProjectDir)libs\googletest-1.17.0\include;$(WatermarkingMediaIncludeDirectory);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <EnableEnhancedInstructionSet>$(WatermarkingInstructionSet)</EnableEnhancedInstructionSet>
     </ClCompile>
@@ -125,8 +125,8 @@
       <SubSystem>Console</SubSystem>
       <OptimizeReferences>true</OptimizeReferences>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
-      <AdditionalLibraryDirectories>$(WatermarkingImplDir)libs\zlib\lib;$(WatermarkingImplDir)libs\libpng\lib;$(WatermarkingImplDir)libs\libjpeg\lib;$(WatermarkingImplDir)libs\libwebp\lib;$(WatermarkingImplDir)libs\libtiff\lib;$(WatermarkingLibraryOutputDirectory);$(WatermarkingImplDir)libs\opencl\lib;$(ProjectDir)libs\googletest-1.17.0\lib;$(WatermarkingImplDir)libs\ffmpeg\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>zlib.lib;libpng16.lib;jpeg.lib;libwebp.lib;tiff.lib;OpenCL.lib;Watermarking-Impl.lib;gtest.lib;gtest_main.lib;avutil.lib;avformat.lib;swscale.lib;avcodec.lib;avfilter.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>$(WatermarkingCoreDir)libs\zlib\lib;$(WatermarkingCoreDir)libs\libpng\lib;$(WatermarkingCoreDir)libs\libjpeg\lib;$(WatermarkingCoreDir)libs\libwebp\lib;$(WatermarkingCoreDir)libs\libtiff\lib;$(WatermarkingLibraryOutputDirectory);$(WatermarkingCoreDir)libs\opencl\lib;$(ProjectDir)libs\googletest-1.17.0\lib;$(WatermarkingCoreDir)libs\ffmpeg\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>zlib.lib;libpng16.lib;jpeg.lib;libwebp.lib;tiff.lib;OpenCL.lib;Watermarking-Core.lib;gtest.lib;gtest_main.lib;avutil.lib;avformat.lib;swscale.lib;avcodec.lib;avfilter.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <IgnoreSpecificDefaultLibraries>LIBCMT</IgnoreSpecificDefaultLibraries>
     </Link>
   </ItemDefinitionGroup>
@@ -134,7 +134,7 @@
     <ClCompile Include="CommonFixture.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\Watermarking-Impl\Watermarking-Impl.vcxproj">
+    <ProjectReference Include="..\Watermarking-Core\Watermarking-Core.vcxproj">
       <Project>{c5147f67-deb5-53d1-0721-708c83f1fd9e}</Project>
     </ProjectReference>
   </ItemGroup>

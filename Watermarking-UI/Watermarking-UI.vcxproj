@@ -269,7 +269,7 @@
       <PreprocessorDefinitions>WIN32;WIN64;_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
-      <AdditionalLibraryDirectories>$(WatermarkingImplDir)libs\zlib\lib;$(LLVMInstallDir)\x64\lib;$(LLVMInstallDir)\lib;$(WatermarkingImplDir)libs\libpng\lib;$(WatermarkingImplDir)libs\libjpeg\lib;$(WatermarkingImplDir)libs\libwebp\lib;$(WatermarkingImplDir)libs\libtiff\lib;$(WatermarkingImplDir)libs\ffmpeg\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(WatermarkingCoreDir)libs\zlib\lib;$(LLVMInstallDir)\x64\lib;$(LLVMInstallDir)\lib;$(WatermarkingCoreDir)libs\libpng\lib;$(WatermarkingCoreDir)libs\libjpeg\lib;$(WatermarkingCoreDir)libs\libwebp\lib;$(WatermarkingCoreDir)libs\libtiff\lib;$(WatermarkingCoreDir)libs\ffmpeg\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>$(CoreLibraryDependencies);libomp.lib;$(WatermarkingDebugImageDependencies);$(WatermarkingMediaDependencies);%(AdditionalDependencies)</AdditionalDependencies>
       <EntryPointSymbol>WinMainCRTStartup</EntryPointSymbol>
     </Link>
@@ -285,7 +285,7 @@
       <PreprocessorDefinitions>WIN32;WIN64;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
-      <AdditionalLibraryDirectories>$(WatermarkingImplDir)libs\zlib\lib;$(LLVMInstallDir)\x64\lib;$(LLVMInstallDir)\lib;$(WatermarkingImplDir)libs\libpng\lib;$(WatermarkingImplDir)libs\libjpeg\lib;$(WatermarkingImplDir)libs\libwebp\lib;$(WatermarkingImplDir)libs\libtiff\lib;$(WatermarkingImplDir)libs\ffmpeg\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(WatermarkingCoreDir)libs\zlib\lib;$(LLVMInstallDir)\x64\lib;$(LLVMInstallDir)\lib;$(WatermarkingCoreDir)libs\libpng\lib;$(WatermarkingCoreDir)libs\libjpeg\lib;$(WatermarkingCoreDir)libs\libwebp\lib;$(WatermarkingCoreDir)libs\libtiff\lib;$(WatermarkingCoreDir)libs\ffmpeg\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>$(CoreLibraryDependencies);libomp.lib;$(WatermarkingReleaseImageDependencies);$(WatermarkingMediaDependencies);%(AdditionalDependencies)</AdditionalDependencies>
       <EntryPointSymbol>WinMainCRTStartup</EntryPointSymbol>
     </Link>
@@ -307,7 +307,7 @@
       <EnableEnhancedInstructionSet>$(WatermarkingInstructionSet)</EnableEnhancedInstructionSet>
     </ClCompile>
     <Link>
-      <AdditionalLibraryDirectories>$(WatermarkingImplDir)libs\zlib\lib;$(WatermarkingImplDir)libs\libpng\lib;$(WatermarkingImplDir)libs\libjpeg\lib;$(WatermarkingImplDir)libs\libwebp\lib;$(WatermarkingImplDir)libs\libtiff\lib;$(WatermarkingImplDir)libs\opencl\lib;$(WatermarkingImplDir)libs\ffmpeg\lib</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(WatermarkingCoreDir)libs\zlib\lib;$(WatermarkingCoreDir)libs\libpng\lib;$(WatermarkingCoreDir)libs\libjpeg\lib;$(WatermarkingCoreDir)libs\libwebp\lib;$(WatermarkingCoreDir)libs\libtiff\lib;$(WatermarkingCoreDir)libs\opencl\lib;$(WatermarkingCoreDir)libs\ffmpeg\lib</AdditionalLibraryDirectories>
       <AdditionalDependencies>$(CoreLibraryDependencies);OpenCL.lib;$(WatermarkingReleaseImageDependencies);$(WatermarkingMediaDependencies);%(AdditionalDependencies)</AdditionalDependencies>
       <IgnoreSpecificDefaultLibraries>LIBCMT</IgnoreSpecificDefaultLibraries>
       <EntryPointSymbol>WinMainCRTStartup</EntryPointSymbol>
@@ -322,7 +322,7 @@
       <EnableEnhancedInstructionSet>$(WatermarkingInstructionSet)</EnableEnhancedInstructionSet>
     </ClCompile>
     <Link>
-      <AdditionalLibraryDirectories>$(WatermarkingImplDir)libs\zlib\lib;$(WatermarkingImplDir)libs\libpng\lib;$(WatermarkingImplDir)libs\libjpeg\lib;$(WatermarkingImplDir)libs\libwebp\lib;$(WatermarkingImplDir)libs\libtiff\lib;$(WatermarkingImplDir)libs\opencl\lib;$(WatermarkingImplDir)libs\ffmpeg\lib</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(WatermarkingCoreDir)libs\zlib\lib;$(WatermarkingCoreDir)libs\libpng\lib;$(WatermarkingCoreDir)libs\libjpeg\lib;$(WatermarkingCoreDir)libs\libwebp\lib;$(WatermarkingCoreDir)libs\libtiff\lib;$(WatermarkingCoreDir)libs\opencl\lib;$(WatermarkingCoreDir)libs\ffmpeg\lib</AdditionalLibraryDirectories>
       <AdditionalDependencies>$(CoreLibraryDependencies);OpenCL.lib;$(WatermarkingDebugImageDependencies);$(WatermarkingMediaDependencies);%(AdditionalDependencies)</AdditionalDependencies>
       <IgnoreSpecificDefaultLibraries>LIBCMT</IgnoreSpecificDefaultLibraries>
       <EntryPointSymbol>WinMainCRTStartup</EntryPointSymbol>
@@ -423,7 +423,7 @@
     <ClCompile Include="main.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\Watermarking-Impl\Watermarking-Impl.vcxproj">
+    <ProjectReference Include="..\Watermarking-Core\Watermarking-Core.vcxproj">
       <Project>{c5147f67-deb5-53d1-0721-708c83f1fd9e}</Project>
     </ProjectReference>
   </ItemGroup>

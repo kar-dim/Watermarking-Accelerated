@@ -7,15 +7,15 @@
 Watermarking-CLI/**/*.cpp text eol=crlf
 Watermarking-CLI/**/*.hpp text eol=crlf
 Watermarking-CLI/**/*.h text eol=crlf
-Watermarking-Impl/**/*.cpp text eol=crlf
-Watermarking-Impl/**/*.hpp text eol=crlf
-Watermarking-Impl/**/*.h text eol=crlf
-Watermarking-Impl/**/*.cu text eol=crlf
-Watermarking-Impl/**/*.cuh text eol=crlf
-Watermarking-Impl/**/*.cl text eol=crlf
-Watermarking-Impl-tests/**/*.cpp text eol=crlf
-Watermarking-Impl-tests/**/*.hpp text eol=crlf
-Watermarking-Impl-tests/**/*.h text eol=crlf
+Watermarking-Core/**/*.cpp text eol=crlf
+Watermarking-Core/**/*.hpp text eol=crlf
+Watermarking-Core/**/*.h text eol=crlf
+Watermarking-Core/**/*.cu text eol=crlf
+Watermarking-Core/**/*.cuh text eol=crlf
+Watermarking-Core/**/*.cl text eol=crlf
+Watermarking-Core-tests/**/*.cpp text eol=crlf
+Watermarking-Core-tests/**/*.hpp text eol=crlf
+Watermarking-Core-tests/**/*.h text eol=crlf
 Watermarking-UI/**/*.cpp text eol=crlf
 Watermarking-UI/**/*.hpp text eol=crlf
 Watermarking-UI/**/*.h text eol=crlf
@@ -68,4 +68,4 @@ Watermarking-Util/**/*.h text eol=crlf
 #*.PDF   diff=astextplain
 #*.rtf   diff=astextplain
 #*.RTF   diff=astextplain
-Watermarking-Impl/libs/** filter=lfs diff=lfs merge=lfs -text
+Watermarking-Core/libs/** filter=lfs diff=lfs merge=lfs -text

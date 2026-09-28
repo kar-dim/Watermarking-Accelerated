@@ -16,17 +16,17 @@
   </Target>
 
   <ItemGroup Condition="'$(ConfigurationType)' == 'Application'">
-    <WatermarkingRuntimeFile Include="$(WatermarkingImplDir)libs\ffmpeg\bin\*.dll" />
-    <WatermarkingRuntimeFile Include="$(WatermarkingImplDir)libs\zlib\bin\zlib1.dll" />
-    <WatermarkingRuntimeFile Include="$(WatermarkingImplDir)libs\libjpeg\bin\jpeg62.dll" />
-    <WatermarkingRuntimeFile Include="$(WatermarkingImplDir)libs\libtiff\bin\tiff.dll" />
-    <WatermarkingRuntimeFile Include="$(WatermarkingImplDir)libs\libpng\bin\libpng16d.dll" Condition="$(Configuration.Contains('Debug'))" />
-    <WatermarkingRuntimeFile Include="$(WatermarkingImplDir)libs\libpng\bin\libpng16.dll" Condition="!$(Configuration.Contains('Debug'))" />
+    <WatermarkingRuntimeFile Include="$(WatermarkingCoreDir)libs\ffmpeg\bin\*.dll" />
+    <WatermarkingRuntimeFile Include="$(WatermarkingCoreDir)libs\zlib\bin\zlib1.dll" />
+    <WatermarkingRuntimeFile Include="$(WatermarkingCoreDir)libs\libjpeg\bin\jpeg62.dll" />
+    <WatermarkingRuntimeFile Include="$(WatermarkingCoreDir)libs\libtiff\bin\tiff.dll" />
+    <WatermarkingRuntimeFile Include="$(WatermarkingCoreDir)libs\libpng\bin\libpng16d.dll" Condition="$(Configuration.Contains('Debug'))" />
+    <WatermarkingRuntimeFile Include="$(WatermarkingCoreDir)libs\libpng\bin\libpng16.dll" Condition="!$(Configuration.Contains('Debug'))" />
     <WatermarkingRuntimeFile Include="$(CUDA_PATH)\bin\x64\nvjpeg64_*.dll" Condition="$(Configuration.StartsWith('CUDA_'))" />
     <WatermarkingRuntimeFile Include="$(LLVMInstallDir)\x64\bin\libomp.dll" Condition="$(Configuration.StartsWith('EIGEN_')) and Exists('$(LLVMInstallDir)\x64\bin\libomp.dll')" />
     <WatermarkingRuntimeFile Include="$(LLVMInstallDir)\bin\libomp.dll" Condition="$(Configuration.StartsWith('EIGEN_')) and !Exists('$(LLVMInstallDir)\x64\bin\libomp.dll') and Exists('$(LLVMInstallDir)\bin\libomp.dll')" />
     <WatermarkingRuntimeFile Include="$(VCInstallDir)Redist\MSVC\$(VCToolsRedistVersion)\$(WatermarkingCrtSubDir)\*.dll" Condition="Exists('$(VCInstallDir)Redist\MSVC\$(VCToolsRedistVersion)\$(WatermarkingCrtSubDir)')" />
-    <WatermarkingSampleFile Include="$(WatermarkingRoot)samples\**\*" Condition="'$(MSBuildProjectName)' == 'Watermarking-CLI' or '$(MSBuildProjectName)' == 'Watermarking-Impl-tests'" />
+    <WatermarkingSampleFile Include="$(WatermarkingRoot)samples\**\*" Condition="'$(MSBuildProjectName)' == 'Watermarking-CLI' or '$(MSBuildProjectName)' == 'Watermarking-Core-tests'" />
   </ItemGroup>
 
   <ItemDefinitionGroup Condition="'$(ConfigurationType)' == 'Application'">

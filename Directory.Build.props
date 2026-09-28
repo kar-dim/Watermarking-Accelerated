@@ -15,11 +15,11 @@
   <PropertyGroup Label="Watermarking shared paths">
     <WatermarkingRoot>$(MSBuildThisFileDirectory)</WatermarkingRoot>
     <WatermarkingLibraryOutputDirectory>$(WatermarkingRoot)$(Platform)\lib\$(Configuration)$(WatermarkingOutputSuffix)\</WatermarkingLibraryOutputDirectory>
-    <WatermarkingImplDir>$(WatermarkingRoot)Watermarking-Impl\</WatermarkingImplDir>
-    <WatermarkingPublicIncludeDirectories>$(WatermarkingImplDir)include</WatermarkingPublicIncludeDirectories>
-    <WatermarkingImageIncludeDirectories>$(WatermarkingImplDir)libs\CImg;$(WatermarkingImplDir)libs\zlib\include;$(WatermarkingImplDir)libs\libpng\include;$(WatermarkingImplDir)libs\libjpeg\include;$(WatermarkingImplDir)libs\libwebp\include;$(WatermarkingImplDir)libs\libtiff\include</WatermarkingImageIncludeDirectories>
-    <WatermarkingMediaIncludeDirectory>$(WatermarkingImplDir)libs\ffmpeg\include</WatermarkingMediaIncludeDirectory>
-    <WatermarkingThirdPartyLibraryDirectories>$(WatermarkingImplDir)libs\zlib\lib;$(WatermarkingImplDir)libs\libpng\lib;$(WatermarkingImplDir)libs\libjpeg\lib;$(WatermarkingImplDir)libs\libwebp\lib;$(WatermarkingImplDir)libs\libtiff\lib;$(WatermarkingImplDir)libs\ffmpeg\lib</WatermarkingThirdPartyLibraryDirectories>
+    <WatermarkingCoreDir>$(WatermarkingRoot)Watermarking-Core\</WatermarkingCoreDir>
+    <WatermarkingPublicIncludeDirectories>$(WatermarkingCoreDir)include</WatermarkingPublicIncludeDirectories>
+    <WatermarkingImageIncludeDirectories>$(WatermarkingCoreDir)libs\CImg;$(WatermarkingCoreDir)libs\zlib\include;$(WatermarkingCoreDir)libs\libpng\include;$(WatermarkingCoreDir)libs\libjpeg\include;$(WatermarkingCoreDir)libs\libwebp\include;$(WatermarkingCoreDir)libs\libtiff\include</WatermarkingImageIncludeDirectories>
+    <WatermarkingMediaIncludeDirectory>$(WatermarkingCoreDir)libs\ffmpeg\include</WatermarkingMediaIncludeDirectory>
+    <WatermarkingThirdPartyLibraryDirectories>$(WatermarkingCoreDir)libs\zlib\lib;$(WatermarkingCoreDir)libs\libpng\lib;$(WatermarkingCoreDir)libs\libjpeg\lib;$(WatermarkingCoreDir)libs\libwebp\lib;$(WatermarkingCoreDir)libs\libtiff\lib;$(WatermarkingCoreDir)libs\ffmpeg\lib</WatermarkingThirdPartyLibraryDirectories>
     <WatermarkingMediaDependencies>avutil.lib;avformat.lib;swscale.lib;avcodec.lib;avfilter.lib</WatermarkingMediaDependencies>
     <WatermarkingReleaseImageDependencies>zlib.lib;libpng16.lib;jpeg.lib;libwebp.lib;tiff.lib</WatermarkingReleaseImageDependencies>
     <WatermarkingDebugImageDependencies>zlibd.lib;libpng16d.lib;jpeg.lib;libwebp.lib;tiff.lib</WatermarkingDebugImageDependencies>
