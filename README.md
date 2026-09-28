@@ -184,6 +184,7 @@ We bundle all necessary DLLs with the prebuilt binaries so the application runs 
 - [CImg](https://cimg.eu/): A C++ library for image processing.
 - [inih](https://github.com/jtilly/inih): A lightweight C++ library for parsing .ini configuration files.
 - [cub](https://github.com/NVIDIA/cccl): A lower-level CUDA library designed for speed-of-light parallel algorithms. Used for device-wide, block-wide, and warp-wide reductions.
+- [nvJPEG](https://developer.nvidia.com/nvjpeg): NVIDIA's high-performance GPU-accelerated library for decoding, encoding and transcoding JPEG format images (CUDA only).
 - [Intel VTune Profiler](https://www.intel.com/content/www/us/en/develop/tools/vtune-profiler.html) and [AMD uProf](https://developer.amd.com/amd-uprof/): Used to profile CPU performance.
 - [NVIDIA Nsight Systems](https://developer.nvidia.com/nsight-systems) and [NVIDIA Compute](https://developer.nvidia.com/nsight-compute): Used to profile overall system-wide CUDA performance, and to individually profile specific CUDA kernels with detailed performance metrics.
 
