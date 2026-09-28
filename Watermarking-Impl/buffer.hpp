@@ -1,7 +1,5 @@
 #pragma once
-#include "cimg_init.h"
 #include <cstdint>
-using Gray8BufferIO = cimg_library::CImg<uint8_t>;
 #if defined(_USE_CUDA_)
 #include "CudaArray.hpp"
 #include <cuda_fp16.h>

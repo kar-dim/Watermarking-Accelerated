@@ -4,7 +4,6 @@
 #include "common_utils.hpp"
 #include "EncodeOptions.hpp"
 #include "include/WatermarkCore.hpp"
-#include "utils.hpp"
 #include "video_defines.hpp"
 #include "video_utils.hpp"
 #include "VideoProcessingContext.hpp"

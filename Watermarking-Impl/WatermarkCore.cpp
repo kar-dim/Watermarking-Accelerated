@@ -7,6 +7,7 @@
 #include "video_utils.hpp"
 #include "VideoProcessingContext.hpp"
 #include "WatermarkBase.hpp"
+#include "WatermarkFactory.hpp"
 #include <algorithm>
 #include <array>
 #include <cctype>
@@ -75,7 +76,7 @@ struct PreloadedImage {
 
 struct ExportedImage {
     ImageOutputBuffer finalPixels;
-    std::optional<Gray8BufferIO> alpha;
+    std::vector<uint8_t> alpha;
 };
 
 void ImageSessionDeleter::operator()(ImageSession* s) const { delete s; }

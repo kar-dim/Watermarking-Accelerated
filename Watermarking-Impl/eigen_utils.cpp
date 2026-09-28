@@ -1,6 +1,7 @@
 #include "buffer.hpp"
 #include "common_utils.hpp"
 #include "eigen_rgb_array.hpp"
+#include "cimg_init.h"
 #include "eigen_utils.hpp"
 #include "simd.hpp"
 #include <array>
@@ -100,16 +101,16 @@ void transposePlane(const uint8_t* source, uint8_t* destination, const int heigh
 
 namespace eigen_utils {
 // column-major 8-bit RGB (+ optional alpha) -> row-major planar CImg
-Gray8BufferIO eigenRgbToCimg(const EigenArrayU8RGB& arrayRgb, const std::optional<Gray8BufferIO>& alphaChannel) {
+Gray8BufferIO eigenRgbToCimg(const EigenArrayU8RGB& arrayRgb, const std::vector<uint8_t>& alphaChannel) {
     const auto rows = arrayRgb[0].rows();
     const auto cols = arrayRgb[0].cols();
-    const int channels = alphaChannel.has_value() ? 4 : 3;
+    const int channels = alphaChannel.empty() ? 3 : 4;
     Gray8BufferIO output(static_cast<unsigned int>(cols), static_cast<unsigned int>(rows), 1, channels);
     const size_t planeSize = static_cast<size_t>(rows) * cols;
     for (int channel = 0; channel < 3; channel++)
         transposePlane(arrayRgb[channel].data(), output.data() + (channel * planeSize), static_cast<int>(cols), static_cast<int>(rows));
     if (channels == 4)
-        std::memcpy(output.data() + (3 * planeSize), alphaChannel->data(), planeSize);
+        std::memcpy(output.data() + (3 * planeSize), alphaChannel.data(), planeSize);
     return output;
 }
 

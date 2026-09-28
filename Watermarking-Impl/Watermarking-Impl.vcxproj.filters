@@ -19,12 +19,18 @@
     <ClInclude Include="CudaCheck.hpp">
       <Filter>Header Files\cuda</Filter>
     </ClInclude>
-    <CudaCompile Include="utils.cpp">
+    <ClCompile Include="utils.cpp">
       <Filter>Source Files\util</Filter>
-    </CudaCompile>
-    <CudaCompile Include="video_utils.cpp">
+    </ClCompile>
+    <ClCompile Include="video_utils.cpp">
       <Filter>Source Files\util</Filter>
+    </ClCompile>
+    <CudaCompile Include="WatermarkFactory.cpp">
+      <Filter>Source Files</Filter>
     </CudaCompile>
+    <ClCompile Include="WatermarkFactory.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="Header Files">
@@ -119,6 +125,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="WatermarkBase.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="WatermarkFactory.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="eigen_rgb_array.hpp">

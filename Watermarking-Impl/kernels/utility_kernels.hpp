@@ -87,7 +87,7 @@ __kernel void u8_to_float_gray(
     }
 }
 
-// the source pixel (row-major, as stored in the file) of the displayed pixel (x, y) for the EXIF orientations 1-8, the transforms of InternalUtils::rotate
+// the source pixel (row-major, as stored in the file) of the displayed pixel (x, y) for the EXIF orientations 1-8, the transforms of rotate() in utils.cpp
 static inline int2 orientedSource(const int x, const int y, const int srcWidth, const int srcHeight, const int orientation) {
     switch (orientation) {
     case 2: return (int2)(srcWidth - 1 - x, y);

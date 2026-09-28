@@ -1,7 +1,7 @@
 #pragma once
 #include "common_utils.hpp"
 #include <cstdint>
-#include <cub/cub.cuh>
+#include <cub/block/block_reduce.cuh>
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -989,7 +989,7 @@ __global__ void colMajorToRowMajorU8(const uint8_t* __restrict__ src, uint8_t* _
 // Transposes column-major planar uint8 (1 or 3 channels) to row-major interleaved uint8 (display layout)
 __global__ void colMajorToInterleavedU8(const uint8_t* __restrict__ src, uint8_t* __restrict__ dst, const int width, const int height, const int channels);
 
-// the source pixel (row-major, as stored in the file) of the displayed pixel (x, y) for the EXIF orientations 1-8, the transforms of InternalUtils::rotate
+// the source pixel (row-major, as stored in the file) of the displayed pixel (x, y) for the EXIF orientations 1-8, the transforms of rotate() in utils.cpp
 __device__ __forceinline__ int2 orientedSource(const int x, const int y, const int srcWidth, const int srcHeight, const int orientation) {
     switch (orientation) {
     case 2: return make_int2(srcWidth - 1 - x, y);

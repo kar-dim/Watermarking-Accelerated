@@ -1,7 +1,6 @@
 #pragma once
 #include "buffer.hpp"
 #include <cstdint>
-#include <optional>
 #include <vector>
 
 /*!
@@ -12,7 +11,8 @@ struct ImageFileBuffer {
     // 8-bit RGB image (empty for grayscale images) and the float luma the watermark is computed from
     ImageOutputBuffer rgbImage;
     ImageBuffer image;
-    std::optional<Gray8BufferIO> alphaChannel;
+    // the alpha plane of 4 channel images (row-major, as displayed), empty otherwise
+    std::vector<uint8_t> alphaChannel;
     unsigned int rows = 0, cols = 0;
     bool isRGB = false;
     std::vector<uint8_t> originalPreview;

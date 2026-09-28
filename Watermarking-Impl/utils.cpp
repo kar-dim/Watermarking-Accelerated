@@ -1,9 +1,9 @@
 #include "buffer.hpp"
+#include "cimg_init.h"
 #include "common_utils.hpp"
 #include "ImageFileBuffer.hpp"
 #include "TinyEXIF.h"
 #include "utils.hpp"
-#include "WatermarkBase.hpp"
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -20,21 +20,17 @@
 #include "OclQueueManager.hpp"
 #include "OclArray.hpp"
 #include "opencl_utils.hpp"
-#include "WatermarkOCL.hpp"
 #include <cctype>
 #elif defined(_USE_CUDA_)
 #include "CudaStreamManager.hpp"
 #include "CudaArray.hpp"
 #include "CudaCheck.hpp"
-#include "WatermarkCuda.cuh"
 #include "cuda_utils.hpp"
 #include "nvjpeg_utils.hpp"
 #include <cctype>
 #elif defined(_USE_EIGEN_)
 #include <cctype>
-#include "cimg_init.h"
 #include "eigen_utils.hpp"
-#include "WatermarkEigen.hpp"
 #endif
 
 using std::string;
@@ -98,16 +94,18 @@ Gray8BufferIO loadImage8(const string& imageFile) {
 }
 
 // zero out RGB channels where alpha is 0, branchless, exploiting CImg's planar layout (RRRR...GGGG...BBBB...)
-void cimgAlphaZero(Gray8BufferIO& rgb, const Gray8BufferIO& alpha) {
+void cimgAlphaZero(Gray8BufferIO& rgb, const uint8_t* A) {
     const int planeSize = rgb.width() * rgb.height();
     uint8_t* R = rgb.data();
     uint8_t* G = R + planeSize;
     uint8_t* B = G + planeSize;
-    const uint8_t* A = alpha.data();
     // 32 pixels per step (clang does not vectorize the scalar loop!)
     constexpr int lanes = 32;
     const int blocks = planeSize / lanes;
+    // GPU builds load on the batch prefetch thread: no OpenMP region there (MSVC's OpenMP threads spin after each region, slowing the decoding and the host threads next to it
+#if !defined(_USE_GPU_)
 #pragma omp parallel for schedule(static)
+#endif
     for (int block = 0; block < blocks; block++) {
         const size_t offset = static_cast<size_t>(block) * lanes;
         const __m256i transparent = _mm256_cmpeq_epi8(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(A + offset)), _mm256_setzero_si256());
@@ -121,6 +119,26 @@ void cimgAlphaZero(Gray8BufferIO& rgb, const Gray8BufferIO& alpha) {
         R[i] &= mask;
         G[i] &= mask;
         B[i] &= mask;
+    }
+}
+
+// the EXIF orientation on the host (CImg), the same transforms as the upload kernels
+void rotate(Gray8BufferIO& img, const int orientation) {
+    switch (orientation) {
+    case 2: img.mirror('x'); break;
+    case 3: img.rotate(180); break;
+    case 4: img.mirror('y'); break;
+    case 5:
+        img.mirror('x');
+        img.rotate(270);
+        break;
+    case 6: img.rotate(90); break;
+    case 7:
+        img.mirror('x');
+        img.rotate(90);
+        break;
+    case 8: img.rotate(270); break;
+    default: break;
     }
 }
 
@@ -229,13 +247,13 @@ std::vector<uint8_t> readJpegFile(const string& imageFile) {
 } // namespace
 #endif
 
-void InternalUtils::saveImage(const string& imagePath, const string& suffix, const ImageOutputBuffer& watermark, const std::optional<Gray8BufferIO>& alphaChannel) {
+void InternalUtils::saveImage(const string& imagePath, const string& suffix, const ImageOutputBuffer& watermark, const std::vector<uint8_t>& alphaChannel) {
     const string watermarkedFile = addSuffixBeforeExtension(imagePath, suffix);
 #if defined(_USE_GPU_)
     const int rows = watermark.getRows();
     const int cols = watermark.getCols();
     const int channels = watermark.getChannels();
-    const bool hasAlpha = alphaChannel.has_value();
+    const bool hasAlpha = !alphaChannel.empty();
 #if defined(_USE_CUDA_)
     // async saves can run on another host thread, select the buffer device first
     CUDA_CHECK(cudaSetDevice(watermark.getDeviceIndex()));
@@ -258,69 +276,12 @@ void InternalUtils::saveImage(const string& imagePath, const string& suffix, con
     Gray8BufferIO output(cols, rows, 1, hasAlpha ? 4 : channels);
     rowMajor.toHost(output.data());
     if (hasAlpha)
-        std::memcpy(output.data() + (3 * cols * rows), alphaChannel->data(), cols * rows);
+        std::memcpy(output.data() + (3 * cols * rows), alphaChannel.data(), cols * rows);
     saveCimgByExtension(output, watermarkedFile);
 #elif defined(_USE_EIGEN_)
     const auto cimgToSave = watermark.isRGB() ? eigen_utils::eigenRgbToCimg(watermark.getRGB(), alphaChannel) : eigen_utils::eigenGrayToCimg(watermark.getGray());
     saveCimgByExtension(cimgToSave, watermarkedFile);
 #endif
-}
-
-std::unique_ptr<WatermarkBase> InternalUtils::createWatermarkObject(
-    const unsigned int height, const unsigned int width, const string& watermarkPassword, const int p, const float psnr, std::unique_ptr<WatermarkBase> previous) {
-    if (p != 3 && p != 5 && p != 7 && p != 9)
-        throw std::invalid_argument("Unsupported value for p. Allowed p values: 3, 5, 7, 9");
-    if (height < static_cast<unsigned int>(p) || width < static_cast<unsigned int>(p))
-        throw std::invalid_argument("Image dimensions must each be at least p pixels");
-    const int rows = static_cast<int>(height);
-    const int cols = static_cast<int>(width);
-    WatermarkBuffer watermark = [&] {
-        if (previous && previous->hasSize(rows, cols))
-            return previous->releaseWatermark();
-        previous.reset();
-        return WatermarkBase::generateWatermark(watermarkPassword, rows, cols);
-    }();
-    previous.reset();
-#if defined(_USE_OPENCL_)
-    switch (p) {
-    case 3: return std::make_unique<WatermarkOCL<3>>(rows, cols, std::move(watermark), psnr); break;
-    case 5: return std::make_unique<WatermarkOCL<5>>(rows, cols, std::move(watermark), psnr); break;
-    case 7: return std::make_unique<WatermarkOCL<7>>(rows, cols, std::move(watermark), psnr); break;
-    case 9: return std::make_unique<WatermarkOCL<9>>(rows, cols, std::move(watermark), psnr); break;
-#elif defined(_USE_CUDA_)
-    switch (p) {
-    case 3: return std::make_unique<WatermarkCuda<3>>(rows, cols, std::move(watermark), psnr); break;
-    case 5: return std::make_unique<WatermarkCuda<5>>(rows, cols, std::move(watermark), psnr); break;
-    case 7: return std::make_unique<WatermarkCuda<7>>(rows, cols, std::move(watermark), psnr); break;
-    case 9: return std::make_unique<WatermarkCuda<9>>(rows, cols, std::move(watermark), psnr); break;
-#elif defined(_USE_EIGEN_)
-    switch (p) {
-    case 3: return std::make_unique<WatermarkEigen<3>>(rows, cols, std::move(watermark), psnr); break;
-    case 5: return std::make_unique<WatermarkEigen<5>>(rows, cols, std::move(watermark), psnr); break;
-    case 7: return std::make_unique<WatermarkEigen<7>>(rows, cols, std::move(watermark), psnr); break;
-    case 9: return std::make_unique<WatermarkEigen<9>>(rows, cols, std::move(watermark), psnr); break;
-#endif
-    default: throw std::invalid_argument("Unsupported value for p. Allowed p values: 3, 5, 7, 9");
-    }
-}
-
-void InternalUtils::rotate(Gray8BufferIO& img, const int orientation) {
-    switch (orientation) {
-    case 2: img.mirror('x'); break;
-    case 3: img.rotate(180); break;
-    case 4: img.mirror('y'); break;
-    case 5:
-        img.mirror('x');
-        img.rotate(270);
-        break;
-    case 6: img.rotate(90); break;
-    case 7:
-        img.mirror('x');
-        img.rotate(90);
-        break;
-    case 8: img.rotate(270); break;
-    default: break;
-    }
 }
 
 ImageFileBuffer InternalUtils::loadImage(const string& imageFile, const bool captureOriginal) {
@@ -363,13 +324,13 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile, const bool cap
     const bool hostImage = channels == 4;
     const int deviceOrientation = hostImage ? 1 : orientation;
     if (hostImage)
-        InternalUtils::rotate(cimgRgb, orientation);
+        rotate(cimgRgb, orientation);
     const bool swapAxes = deviceOrientation >= 5;
     rows = swapAxes ? cimgRgb.width() : cimgRgb.height();
     cols = swapAxes ? cimgRgb.height() : cimgRgb.width();
 #else
     constexpr bool hostImage = true;
-    InternalUtils::rotate(cimgRgb, orientation);
+    rotate(cimgRgb, orientation);
     rows = cimgRgb.height();
     cols = cimgRgb.width();
 #endif
@@ -401,10 +362,10 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile, const bool cap
         break;
     }
     case 4: {
-        // owning copy here on purpose (avoid dangling shared CImg pointer)
-        alphaChannel.emplace(cimgRgb.get_channel(3));
+        const uint8_t* alphaPlane = cimgRgb.data(0, 0, 0, 3);
+        alphaChannel.assign(alphaPlane, alphaPlane + static_cast<size_t>(cimgRgb.width()) * cimgRgb.height());
         auto rgbView = cimgRgb.get_shared_channels(0, 2);
-        cimgAlphaZero(rgbView, *alphaChannel);
+        cimgAlphaZero(rgbView, alphaChannel.data());
         auto [rgb, gray] = uploadOriented(rgbView, deviceOrientation, nullptr);
         rgbImage = std::move(rgb);
         image = std::move(gray);
@@ -428,10 +389,10 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile, const bool cap
         break;
     }
     case 4: {
-        // owning copy here on purpose (avoid dangling shared CImg pointer)
-        alphaChannel.emplace(cimgRgb.get_channel(3));
+        const uint8_t* alphaPlane = cimgRgb.data(0, 0, 0, 3);
+        alphaChannel.assign(alphaPlane, alphaPlane + static_cast<size_t>(cimgRgb.width()) * cimgRgb.height());
         auto rgbView = cimgRgb.get_shared_channels(0, 2);
-        cimgAlphaZero(rgbView, *alphaChannel);
+        cimgAlphaZero(rgbView, alphaChannel.data());
         auto [rgb, gray] = eigen_utils::cimgToEigenRgbAndGray(rgbView);
         rgbImage = std::move(rgb);
         image = std::move(gray);
