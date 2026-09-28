@@ -165,9 +165,9 @@ We bundle all necessary DLLs with the prebuilt binaries so the application runs 
 
 | Backend | Dependencies |
 |---------|--------------|
-| **All** |	`Microsoft Visual C++ CRT (msvcp140*.dll, vcruntime140*.dll, concrt140*.dll, etc.)`, `FFmpeg (all libav*.dll)`, `zlib1.dll`, `libpng16.dll`, `jpeg62.dll`, `tiff.dll`, `libwebp.lib` (static lib) |
-| **CUDA** |  `cudart_static.lib`, `cuda.lib` (from CUDA toolkit) |
-| **OpenCL** | `OpenCL.lib` |
+| **All** |	`Microsoft Visual C++ CRT (msvcp140*.dll, vcruntime140*.dll, concrt140*.dll, etc.)`, `FFmpeg libav dll`, `zlib1.dll`, `libpng16.dll`, `jpeg62.dll`, `tiff.dll`, `libwebp.lib` (static lib) |
+| **CUDA** | `nvjpeg64_13.dll` (from CUDA Toolkit) |
+| **OpenCL** | `OpenCL.dll` (system drivers)|
 | **Eigen** | `libomp.dll` (clang's OpenMP) |
 
 **NOTES:**
