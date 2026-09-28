@@ -28,6 +28,7 @@
 #include "CudaCheck.hpp"
 #include "WatermarkCuda.cuh"
 #include "cuda_utils.hpp"
+#include "nvjpeg_utils.hpp"
 #include <cctype>
 #elif defined(_USE_EIGEN_)
 #include <cctype>
@@ -46,15 +47,25 @@ string addSuffixBeforeExtension(const string& file, const string& suffix) {
     return file.substr(0, dot) + suffix + file.substr(dot);
 }
 
-// save a CImg image selecting the correct encoder by file extension
-void saveCimgByExtension(const Gray8BufferIO& cimgToSave, const string& path) {
+string lowercaseExtension(const string& path) {
     string extension = path.substr(path.find_last_of('.') + 1);
     std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
+    return extension;
+}
+
+bool hasJpegExtension(const string& path) {
+    const string extension = lowercaseExtension(path);
+    return extension == "jpg" || extension == "jpeg";
+}
+
+// save a CImg image selecting the correct encoder by file extension
+void saveCimgByExtension(const Gray8BufferIO& cimgToSave, const string& path) {
+    const string extension = lowercaseExtension(path);
     if (extension == "png")
         cimgToSave.save_png(path.c_str());
     else if (extension == "bmp")
         cimgToSave.save_bmp(path.c_str());
-    else if (extension == "jpg" || extension == "jpeg")
+    else if (hasJpegExtension(path))
         cimgToSave.save_jpeg(path.c_str());
     else if (extension == "webp")
         cimgToSave.save_webp(path.c_str());
@@ -63,6 +74,9 @@ void saveCimgByExtension(const Gray8BufferIO& cimgToSave, const string& path) {
     else
         throw std::runtime_error("Unsupported image format: " + extension);
 }
+
+// anything outside the EXIF orientations 1-8 is not rotated
+int exifOrientation(const TinyEXIF::EXIFInfo& exif) { return exif.Orientation >= 1 && exif.Orientation <= 8 ? exif.Orientation : 1; }
 
 // decode the image file to 8 bits per sample
 Gray8BufferIO loadImage8(const string& imageFile) {
@@ -78,6 +92,8 @@ Gray8BufferIO loadImage8(const string& imageFile) {
     else
         image.load(imageFile.c_str());
     checkError(bitsPerValue > 8, "Unsupported image: " + std::to_string(bitsPerValue) + " bits per sample, only 8-bit images are supported");
+    // JPEG has no alpha: 4 components are CMYK, which CImg returns unconverted (K would be taken as the alpha channel)
+    checkError(fileType == "jpg" && image.spectrum() == 4, "Unsupported image: CMYK JPEG, only grayscale and RGB JPEG images are supported");
     return image;
 }
 
@@ -155,18 +171,17 @@ void makeOriginalPreview(const uint8_t* source, uint8_t* preview, const size_t p
 // GPU helpers for CImg (row-major) -> GPU array (column-major) conversion
 #if defined(_USE_GPU_)
 namespace {
-// uploads the 8-bit image (1 or 3 channels) and orients it (EXIF orientation) on the device: column-major 8-bit RGB planes (empty for grayscale) and float luma.
-// With "preview", the displayed row-major interleaved pixels (the original image preview) are downloaded into it
-std::pair<ImageOutputBuffer, ImageBuffer> uploadOriented(const Gray8BufferIO& img, const int orientation, std::vector<uint8_t>* preview) {
-    const int channels = img.spectrum();
-    const int srcRows = img.height();
-    const int srcCols = img.width();
+// orients (EXIF orientation) a row-major planar 8-bit image on the device (1 or 3 channels, the CImg layout): column-major 8-bit RGB planes (empty for
+// grayscale) and float luma. With "preview", the displayed row-major interleaved pixels (the original image preview) are downloaded into it
+std::pair<ImageOutputBuffer, ImageBuffer> orientOnDevice(const ImageOutputBuffer& source, const int orientation, std::vector<uint8_t>* preview) {
+    const int channels = source.getChannels();
+    const int srcRows = source.getRows();
+    const int srcCols = source.getCols();
     const bool swapAxes = orientation >= 5;
     const int rows = swapAxes ? srcCols : srcRows;
     const int cols = swapAxes ? srcRows : srcCols;
 #if defined(_USE_CUDA_)
     const cudaStream_t stream = CudaStreamManager::getInstance().getComputeStream();
-    const CudaArray<uint8_t> source(srcRows, srcCols, channels, img.data(), stream);
     CudaArray<uint8_t> rgb = channels == 3 ? CudaArray<uint8_t>(rows, cols, 3, stream) : CudaArray<uint8_t>();
     CudaArray<float> gray(rows, cols, stream);
     CudaArray<uint8_t> display = preview ? CudaArray<uint8_t>(rows, cols, channels, stream) : CudaArray<uint8_t>();
@@ -174,7 +189,6 @@ std::pair<ImageOutputBuffer, ImageBuffer> uploadOriented(const Gray8BufferIO& im
 #elif defined(_USE_OPENCL_)
     auto& mgr = OclQueueManager::getInstance();
     const cl_command_queue queue = mgr.getQueueRaw();
-    const OclArray<uint8_t> source(srcRows, srcCols, channels, img.data(), queue);
     OclArray<uint8_t> rgb = channels == 3 ? OclArray<uint8_t>(rows, cols, 3, queue) : OclArray<uint8_t>();
     OclArray<float> gray(rows, cols, queue);
     OclArray<uint8_t> display = preview ? OclArray<uint8_t>(rows, cols, channels, queue) : OclArray<uint8_t>();
@@ -185,6 +199,32 @@ std::pair<ImageOutputBuffer, ImageBuffer> uploadOriented(const Gray8BufferIO& im
         display.toHost(preview->data());
     }
     return {std::move(rgb), std::move(gray)};
+}
+
+// uploads the CImg image (1 or 3 channels) and orients it on the device
+std::pair<ImageOutputBuffer, ImageBuffer> uploadOriented(const Gray8BufferIO& img, const int orientation, std::vector<uint8_t>* preview) {
+#if defined(_USE_CUDA_)
+    const ImageOutputBuffer source(img.height(), img.width(), img.spectrum(), img.data(), CudaStreamManager::getInstance().getComputeStream());
+#elif defined(_USE_OPENCL_)
+    const ImageOutputBuffer source(img.height(), img.width(), img.spectrum(), img.data(), OclQueueManager::getInstance().getQueueRaw());
+#endif
+    return orientOnDevice(source, orientation, preview);
+}
+} // namespace
+#endif
+
+#if defined(_USE_CUDA_)
+namespace {
+// the whole file when it starts with the JPEG SOI marker (FF D8), empty otherwise
+std::vector<uint8_t> readJpegFile(const string& imageFile) {
+    std::ifstream fileStream(imageFile, std::ifstream::binary | std::ifstream::ate);
+    const std::streamoff size = fileStream ? static_cast<std::streamoff>(fileStream.tellg()) : 0;
+    std::vector<uint8_t> file(size >= 2 ? 2 : 0);
+    if (file.empty() || !fileStream.seekg(0).read(reinterpret_cast<char*>(file.data()), 2) || file[0] != 0xFF || file[1] != 0xD8)
+        return {};
+    file.resize(static_cast<size_t>(size));
+    fileStream.read(reinterpret_cast<char*>(file.data() + 2), size - 2);
+    return fileStream ? file : std::vector<uint8_t>();
 }
 } // namespace
 #endif
@@ -202,6 +242,14 @@ void InternalUtils::saveImage(const string& imagePath, const string& suffix, con
     auto stream = CudaStreamManager::getInstance().getComputeStream();
     CudaArray<uint8_t> rowMajor(rows, cols, channels, stream);
     cuda_utils::launchColMajorToRowMajorU8Kernel(watermark.data(), rowMajor.data(), cols, rows, channels, stream);
+    // JPEG (no alpha) is encoded on the device, only the bitstream is downloaded, CImg saves it when nvJPEG fails
+    if (!hasAlpha && hasJpegExtension(watermarkedFile)) {
+        if (const std::vector<uint8_t> jpeg = nvjpeg_utils::encode(rowMajor, stream); !jpeg.empty()) {
+            std::ofstream file(watermarkedFile, std::ofstream::binary);
+            checkError(!file.write(reinterpret_cast<const char*>(jpeg.data()), static_cast<std::streamsize>(jpeg.size())), "Unable to write the image file: " + watermarkedFile);
+            return;
+        }
+    }
 #elif defined(_USE_OPENCL_)
     auto& mgr = OclQueueManager::getInstance();
     OclArray<uint8_t> rowMajor(rows, cols, channels, mgr.getQueueRaw());
@@ -283,12 +331,33 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile, const bool cap
     auto& rows = buf.rows;
     auto& cols = buf.cols;
     auto& isRGB = buf.isRGB;
+#if defined(_USE_CUDA_)
+    // a JPEG file is read once, nvJPEG decodes it on the device and TinyEXIF parses the orientation from it
+    // if nvJPEG cannot decode, we take the CImg path below
+    const std::vector<uint8_t> jpeg = readJpegFile(imageFile);
+    if (!jpeg.empty()) {
+        const cudaStream_t stream = CudaStreamManager::getInstance().getComputeStream();
+        if (auto decoded = nvjpeg_utils::decode(jpeg.data(), jpeg.size(), stream)) {
+            const int orientation = exifOrientation(TinyEXIF::EXIFInfo(jpeg.data(), static_cast<unsigned>(jpeg.size())));
+            const bool swapAxes = orientation >= 5;
+            rows = swapAxes ? decoded->getCols() : decoded->getRows();
+            cols = swapAxes ? decoded->getRows() : decoded->getCols();
+            if (captureOriginal)
+                buf.previewChannels = decoded->getChannels();
+            auto [rgb, gray] = orientOnDevice(*decoded, orientation, captureOriginal ? &buf.originalPreview : nullptr);
+            isRGB = !rgb.empty();
+            rgbImage = std::move(rgb);
+            image = std::move(gray);
+            CUDA_CHECK(cudaStreamSynchronize(stream));
+            return buf;
+        }
+    }
+#endif
     std::ifstream fileStream(imageFile, std::ifstream::binary);
     TinyEXIF::EXIFInfo exif(fileStream); // parse EXIF for orientation
     auto cimgRgb = loadImage8(imageFile);
     const int channels = cimgRgb.spectrum();
-    // anything outside the EXIF orientations 1-8 is not rotated
-    const int orientation = exif.Orientation >= 1 && exif.Orientation <= 8 ? exif.Orientation : 1;
+    const int orientation = exifOrientation(exif);
 #if defined(_USE_GPU_)
     // the upload kernel orients 1 and 3 channel images and writes their original preview
     const bool hostImage = channels == 4;

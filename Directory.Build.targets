@@ -22,6 +22,7 @@
     <WatermarkingRuntimeFile Include="$(WatermarkingImplDir)libs\libtiff\bin\tiff.dll" />
     <WatermarkingRuntimeFile Include="$(WatermarkingImplDir)libs\libpng\bin\libpng16d.dll" Condition="$(Configuration.Contains('Debug'))" />
     <WatermarkingRuntimeFile Include="$(WatermarkingImplDir)libs\libpng\bin\libpng16.dll" Condition="!$(Configuration.Contains('Debug'))" />
+    <WatermarkingRuntimeFile Include="$(CUDA_PATH)\bin\x64\nvjpeg64_*.dll" Condition="$(Configuration.StartsWith('CUDA_'))" />
     <WatermarkingRuntimeFile Include="$(LLVMInstallDir)\x64\bin\libomp.dll" Condition="$(Configuration.StartsWith('EIGEN_')) and Exists('$(LLVMInstallDir)\x64\bin\libomp.dll')" />
     <WatermarkingRuntimeFile Include="$(LLVMInstallDir)\bin\libomp.dll" Condition="$(Configuration.StartsWith('EIGEN_')) and !Exists('$(LLVMInstallDir)\x64\bin\libomp.dll') and Exists('$(LLVMInstallDir)\bin\libomp.dll')" />
     <WatermarkingRuntimeFile Include="$(VCInstallDir)Redist\MSVC\$(VCToolsRedistVersion)\$(WatermarkingCrtSubDir)\*.dll" Condition="Exists('$(VCInstallDir)Redist\MSVC\$(VCToolsRedistVersion)\$(WatermarkingCrtSubDir)')" />

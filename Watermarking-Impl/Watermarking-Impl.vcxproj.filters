@@ -7,6 +7,12 @@
     <CudaCompile Include="cuda_utils.cu">
       <Filter>Source Files\cuda</Filter>
     </CudaCompile>
+    <ClCompile Include="nvjpeg_utils.cpp">
+      <Filter>Source Files\cuda</Filter>
+    </ClCompile>
+    <ClInclude Include="nvjpeg_utils.hpp">
+      <Filter>Header Files\cuda</Filter>
+    </ClInclude>
     <ClInclude Include="CudaStreamManager.hpp">
       <Filter>Header Files\cuda</Filter>
     </ClInclude>

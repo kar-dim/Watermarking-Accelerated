@@ -141,7 +141,7 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <SubSystem>Console</SubSystem>
-      <AdditionalDependencies>cudart_static.lib;cuda.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;avutil.lib;avformat.lib;swscale.lib;avcodec.lib;avfilter.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>cudart_static.lib;cuda.lib;nvjpeg.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;avutil.lib;avformat.lib;swscale.lib;avcodec.lib;avfilter.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(AF_PATH)\lib;$(ProjectDir)libs\ffmpeg\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <IgnoreSpecificDefaultLibraries>LIBCMT</IgnoreSpecificDefaultLibraries>
     </Link>
@@ -172,7 +172,7 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <SubSystem>Console</SubSystem>
-      <AdditionalDependencies>cudart_static.lib;cuda.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;avutil.lib;avformat.lib;swscale.lib;avcodec.lib;avfilter.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>cudart_static.lib;cuda.lib;nvjpeg.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;avutil.lib;avformat.lib;swscale.lib;avcodec.lib;avfilter.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(AF_PATH)\lib;$(ProjectDir)libs\ffmpeg\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <IgnoreSpecificDefaultLibraries>LIBCMT</IgnoreSpecificDefaultLibraries>
     </Link>
@@ -328,6 +328,12 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='OPENCL_Release|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='OPENCL_Debug|x64'">true</ExcludedFromBuild>
     </ClCompile>
+    <ClCompile Include="nvjpeg_utils.cpp">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='OPENCL_Release|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='OPENCL_Debug|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='EIGEN_Release|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='EIGEN_Debug|x64'">true</ExcludedFromBuild>
+    </ClCompile>
     <ClCompile Include="opencl_utils.cpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='CUDA_Debug|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='CUDA_Release|x64'">true</ExcludedFromBuild>
@@ -380,6 +386,12 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='EIGEN_Release|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='OPENCL_Release|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='OPENCL_Debug|x64'">true</ExcludedFromBuild>
+    </ClInclude>
+    <ClInclude Include="nvjpeg_utils.hpp">
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='OPENCL_Release|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='OPENCL_Debug|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='EIGEN_Release|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='EIGEN_Debug|x64'">true</ExcludedFromBuild>
     </ClInclude>
     <ClInclude Include="cuda_utils.hpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='OPENCL_Release|x64'">true</ExcludedFromBuild>

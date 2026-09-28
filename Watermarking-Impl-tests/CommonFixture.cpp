@@ -12,6 +12,7 @@
 #include "../Watermarking-Impl/cuda_utils.hpp"
 #include "../Watermarking-Impl/CudaArray.hpp"
 #include "../Watermarking-Impl/CudaStreamManager.hpp"
+#include "../Watermarking-Impl/nvjpeg_utils.hpp"
 #endif
 #include "WatermarkCore.hpp"
 #include <algorithm>
@@ -291,6 +292,101 @@ void writeOrientedJpeg(const fs::path& path, const std::vector<uint8_t>& display
     std::ofstream output(path, std::ios::binary);
     ASSERT_TRUE(output.write(reinterpret_cast<const char*>(jpeg.data()), static_cast<std::streamsize>(size)));
 }
+
+std::vector<uint8_t> readBytes(const fs::path& path) {
+    std::ifstream input(path, std::ios::binary);
+    return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+}
+
+// gradients plus deterministic noise, row-major interleaved
+std::vector<uint8_t> jpegTestPattern(const int width, const int height, const int components) {
+    std::vector<uint8_t> pixels(static_cast<size_t>(width) * height * components);
+    uint32_t state = 4242;
+    for (int y = 0; y < height; ++y)
+        for (int x = 0; x < width; ++x)
+            for (int component = 0; component < components; ++component) {
+                state = (state * 1664525u) + 1013904223u;
+                pixels[(static_cast<size_t>(y) * width + x) * components + component] = static_cast<uint8_t>((x * 3) + (y * 2) + (component * 60) + (state >> 27));
+            }
+    return pixels;
+}
+
+// writes "pixels" (row-major interleaved; 1, 3 or 4 components: gray, RGB, CMYK) as a quality 90 JPEG, the first component sampled "sampling" times the others
+// in both directions (1: 4:4:4, 2: 4:2:0)
+void writeJpeg(const fs::path& path, const std::vector<uint8_t>& pixels, const int width, const int height, const int components, const int sampling, const bool progressive) {
+    std::vector<uint8_t> jpeg(pixels.size() * 2 + 65536);
+    unsigned char* buffer = jpeg.data();
+    unsigned long size = static_cast<unsigned long>(jpeg.size());
+    jpeg_compress_struct compressor{};
+    jpeg_error_mgr errors{};
+    compressor.err = jpeg_std_error(&errors);
+    jpeg_create_compress(&compressor);
+    jpeg_mem_dest(&compressor, &buffer, &size);
+    compressor.image_width = static_cast<JDIMENSION>(width);
+    compressor.image_height = static_cast<JDIMENSION>(height);
+    compressor.input_components = components;
+    compressor.in_color_space = components == 4 ? JCS_CMYK : components == 3 ? JCS_RGB : JCS_GRAYSCALE;
+    jpeg_set_defaults(&compressor);
+    jpeg_set_quality(&compressor, 90, TRUE);
+    compressor.comp_info[0].h_samp_factor = compressor.comp_info[0].v_samp_factor = sampling;
+    for (int component = 1; component < compressor.num_components; ++component)
+        compressor.comp_info[component].h_samp_factor = compressor.comp_info[component].v_samp_factor = 1;
+    if (progressive)
+        jpeg_simple_progression(&compressor);
+    jpeg_start_compress(&compressor, TRUE);
+    for (int row = 0; row < height; ++row) {
+        JSAMPROW rowPointer = const_cast<uint8_t*>(pixels.data()) + static_cast<size_t>(row) * width * components;
+        jpeg_write_scanlines(&compressor, &rowPointer, 1);
+    }
+    jpeg_finish_compress(&compressor);
+    jpeg_destroy_compress(&compressor);
+    // the buffer was large enough, libjpeg did not replace it
+    ASSERT_EQ(buffer, jpeg.data());
+    std::ofstream output(path, std::ios::binary);
+    ASSERT_TRUE(output.write(reinterpret_cast<const char*>(jpeg.data()), static_cast<std::streamsize>(size)));
+}
+
+struct DecodedJpeg {
+    std::vector<uint8_t> pixels; // row-major interleaved
+    int width = 0;
+    int height = 0;
+    int components = 0;
+    // sampling factor of the first component (2 for 4:2:0)
+    int lumaSampling = 0;
+};
+
+// libjpeg's decode with its defaults (as CImg decodes)
+DecodedJpeg decodeJpeg(const fs::path& path) {
+    const std::vector<uint8_t> file = readBytes(path);
+    jpeg_decompress_struct decompressor{};
+    jpeg_error_mgr errors{};
+    decompressor.err = jpeg_std_error(&errors);
+    jpeg_create_decompress(&decompressor);
+    jpeg_mem_src(&decompressor, file.data(), static_cast<unsigned long>(file.size()));
+    jpeg_read_header(&decompressor, TRUE);
+    DecodedJpeg decoded;
+    decoded.lumaSampling = decompressor.comp_info[0].h_samp_factor;
+    jpeg_start_decompress(&decompressor);
+    decoded.width = static_cast<int>(decompressor.output_width);
+    decoded.height = static_cast<int>(decompressor.output_height);
+    decoded.components = decompressor.output_components;
+    decoded.pixels.resize(static_cast<size_t>(decoded.width) * decoded.height * decoded.components);
+    while (decompressor.output_scanline < decompressor.output_height) {
+        JSAMPROW rowPointer = decoded.pixels.data() + static_cast<size_t>(decompressor.output_scanline) * decoded.width * decoded.components;
+        jpeg_read_scanlines(&decompressor, &rowPointer, 1);
+    }
+    jpeg_finish_decompress(&decompressor);
+    jpeg_destroy_decompress(&decompressor);
+    return decoded;
+}
+
+#if defined(_USE_CUDA_)
+// true when nvJPEG decodes the file (no CImg fallback)
+bool decodesWithNvJpeg(const fs::path& path) {
+    const std::vector<uint8_t> file = readBytes(path);
+    return nvjpeg_utils::decode(file.data(), file.size(), CudaStreamManager::getInstance().getComputeStream()).has_value();
+}
+#endif
 
 // look up one key in a parsed option dictionary, empty when absent
 std::string dictValue(const video_utils::ParsedEncodeOptions& parsed, const char* key) {
@@ -1010,6 +1106,114 @@ TEST_F(WatermarkTest, RejectsHighBitDepthImages) {
     for (const uint8_t index : indices)
         expected.insert(expected.end(), palette.begin() + index * 3, palette.begin() + index * 3 + 3);
     EXPECT_TRUE(original.pixels == expected);
+}
+
+// JPEG decoding: CImg (libjpeg) on the Eigen and OpenCL builds, nvJPEG on CUDA, within +-3 of libjpeg (different IDCT and upsampling rounding).
+// The odd size has partial chroma blocks
+TEST_F(WatermarkTest, LoadsJpegVariantsLikeLibjpeg) {
+#if defined(_USE_CUDA_)
+    constexpr int tolerance = 3;
+#else
+    constexpr int tolerance = 0;
+#endif
+    struct Variant {
+        const char* name;
+        int components;
+        int sampling;
+        bool progressive;
+    };
+    constexpr Variant variants[] = {
+        {"420",              3, 2, false},
+        {"444",              3, 1, false},
+        {"gray",             1, 1, false},
+        {"progressive_420",  3, 2, true },
+        {"progressive_gray", 1, 1, true }
+    };
+    for (const auto [width, height] : {
+             std::pair{101, 77},
+             std::pair{128, 64}
+    }) {
+        for (const Variant& variant : variants) {
+            const std::string name = std::format("{}_{}x{}", variant.name, width, height);
+            const fs::path path = tempDir / (name + ".jpg");
+            writeJpeg(path, jpegTestPattern(width, height, variant.components), width, height, variant.components, variant.sampling, variant.progressive);
+            const DecodedJpeg expected = decodeJpeg(path);
+#if defined(_USE_CUDA_)
+            EXPECT_TRUE(decodesWithNvJpeg(path)) << name;
+#endif
+            ImageHandle jpegSession = createImageSession(defaultPassword, defaultP, defaultPsnr);
+            loadImage(jpegSession.get(), path.string(), true);
+            const OriginalPixelData original = takeOriginalPixelData(jpegSession.get());
+            ASSERT_EQ(original.width, width) << name;
+            ASSERT_EQ(original.height, height) << name;
+            ASSERT_EQ(original.channels, variant.components) << name;
+            ASSERT_EQ(original.pixels.size(), expected.pixels.size()) << name;
+            int maxDifference = 0;
+            for (size_t i = 0; i < original.pixels.size(); ++i)
+                maxDifference = std::max(maxDifference, std::abs(static_cast<int>(original.pixels[i]) - static_cast<int>(expected.pixels[i])));
+            EXPECT_LE(maxDifference, tolerance) << name;
+        }
+    }
+}
+
+// JPEG has no alpha channel: 4 component (CMYK) JPEG is rejected instead of taking K as the alpha
+TEST_F(WatermarkTest, RejectsCmykJpeg) {
+    constexpr int width = 32;
+    constexpr int height = 24;
+    const fs::path path = tempDir / "cmyk.jpg";
+    writeJpeg(path, jpegTestPattern(width, height, 4), width, height, 4, 1, false);
+#if defined(_USE_CUDA_)
+    EXPECT_FALSE(decodesWithNvJpeg(path));
+#endif
+    EXPECT_THROW(loadImage(session.get(), path.string()), std::runtime_error);
+}
+
+// JPEG saving (nvJPEG on CUDA, else CImg) with libjpeg's defaults: 4:2:0 color, one component gray, close to the session pixels and detectable after reloading
+TEST_F(WatermarkTest, SavesJpegWithLibjpegDefaults) {
+    for (const fs::path& input : {colorImage, grayImage}) {
+        const std::string name = input.stem().string();
+        ImageHandle jpegSession = createImageSession(defaultPassword, defaultP, defaultPsnr);
+        loadImage(jpegSession.get(), input.string());
+        const SessionPixelData pixels = embedAndRead(jpegSession.get());
+        saveImage(jpegSession.get(), (tempDir / (name + ".jpg")).string());
+        const fs::path saved = tempDir / (name + "W_ME.jpg");
+        const DecodedJpeg decoded = decodeJpeg(saved);
+        ASSERT_EQ(decoded.width, pixels.width) << name;
+        ASSERT_EQ(decoded.height, pixels.height) << name;
+        ASSERT_EQ(decoded.components, pixels.channels) << name;
+        EXPECT_EQ(decoded.lumaSampling, pixels.channels == 3 ? 2 : 1) << name;
+        // the session pixels are column-major planes
+        const size_t planeSize = static_cast<size_t>(pixels.width) * pixels.height;
+        double difference = 0.0;
+        for (int y = 0; y < pixels.height; ++y)
+            for (int x = 0; x < pixels.width; ++x)
+                for (int channel = 0; channel < pixels.channels; ++channel) {
+                    const int savedValue = decoded.pixels[(static_cast<size_t>(y) * pixels.width + x) * pixels.channels + channel];
+                    const int sessionValue = pixels.pixels[channel * planeSize + static_cast<size_t>(x) * pixels.height + y];
+                    difference += std::abs(savedValue - sessionValue);
+                }
+        const double meanDifference = difference / static_cast<double>(planeSize * pixels.channels);
+        EXPECT_LT(meanDifference, pixels.channels == 3 ? 2.5 : 0.25) << name;
+        ImageHandle reloaded = createImageSession(defaultPassword, defaultP, defaultPsnr);
+        loadImage(reloaded.get(), saved.string());
+        EXPECT_GT(detectLoadedImage(reloaded.get()), 0.5f) << name;
+    }
+}
+
+// batch saves run on many threads (they share a few nvJPEG encoders on CUDA): every file is complete and the same
+TEST_F(WatermarkTest, SavesJpegsFromSeveralThreadsAtOnce) {
+    embedImage(session.get());
+    finish();
+    constexpr int threads = 6;
+    std::vector<std::future<void>> saves;
+    for (int i = 0; i < threads; ++i)
+        saves.push_back(std::async(std::launch::async, [&, i] { saveImage(session.get(), (tempDir / std::format("parallel_{}.jpg", i)).string()); }));
+    for (auto& save : saves)
+        save.get();
+    const std::vector<uint8_t> first = readBytes(tempDir / "parallel_0W_ME.jpg");
+    ASSERT_FALSE(first.empty());
+    for (int i = 1; i < threads; ++i)
+        EXPECT_TRUE(readBytes(tempDir / std::format("parallel_{}W_ME.jpg", i)) == first) << i;
 }
 
 TEST_F(WatermarkTest, RejectsHighBitDepthVideoDetection) {
