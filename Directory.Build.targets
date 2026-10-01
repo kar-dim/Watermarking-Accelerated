@@ -4,8 +4,8 @@
     <WatermarkingRuntimeDestination>$(TargetDir)</WatermarkingRuntimeDestination>
     <WatermarkingRuntimeDestination Condition="'$(MSBuildProjectName)' == 'Watermarking-UI'">$(OutDir)Watermarking-UI\</WatermarkingRuntimeDestination>
     <WatermarkingFormatOnBuild Condition="'$(WatermarkingFormatOnBuild)' == ''">true</WatermarkingFormatOnBuild>
-    <WatermarkingCrtSubDir Condition="$(Configuration.Contains('Debug'))">debug_nonredist\x64\Microsoft.VC143.DebugCRT</WatermarkingCrtSubDir>
-    <WatermarkingCrtSubDir Condition="!$(Configuration.Contains('Debug'))">x64\Microsoft.VC143.CRT</WatermarkingCrtSubDir>
+    <WatermarkingCrtSubDir Condition="$(Configuration.Contains('Debug'))">debug_nonredist\x64\Microsoft.VC$(PlatformToolsetVersion).DebugCRT</WatermarkingCrtSubDir>
+    <WatermarkingCrtSubDir Condition="!$(Configuration.Contains('Debug'))">x64\Microsoft.VC$(PlatformToolsetVersion).CRT</WatermarkingCrtSubDir>
   </PropertyGroup>
 
   <Target Name="FormatWatermarkingSources"
