@@ -23,6 +23,7 @@
     <WatermarkingMediaDependencies>avutil.lib;avformat.lib;swscale.lib;avcodec.lib;avfilter.lib</WatermarkingMediaDependencies>
     <WatermarkingReleaseImageDependencies>zlib.lib;libpng16.lib;jpeg.lib;libwebp.lib;tiff.lib</WatermarkingReleaseImageDependencies>
     <WatermarkingDebugImageDependencies>zlibd.lib;libpng16d.lib;jpeg.lib;libwebp.lib;tiff.lib</WatermarkingDebugImageDependencies>
+    <VcpkgEnabled>false</VcpkgEnabled>
   </PropertyGroup>
 
   <ItemDefinitionGroup Label="Watermarking shared compiler defaults">

@@ -23,7 +23,7 @@ int main(int argc, char* argv[]) {
     app.setWindowIcon(QIcon(":/assets/watermark_icon.ico"));
     // Share painted widget colors with the stylesheet
     QFile styleFile(":/stylesheets/main.qss");
-    styleFile.open(QFile::ReadOnly);
+    (void)styleFile.open(QFile::ReadOnly);
     QString stylesheet = QString::fromUtf8(styleFile.readAll());
     const ThemePalette& palette = themePalette();
     stylesheet.replace("@ACCENT_HOVER@", palette.accent.lighter(110).name());
