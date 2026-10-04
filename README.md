@@ -87,7 +87,7 @@ For the repeated benchmark, use `Watermarking-CLI.exe --bench --benchmark_loops 
 | `--p` | Prediction window size: 3 (default), 5, 7, or 9. Images and frames must be at least `p x p` pixels. |
 | `--psnr` | Positive, finite embed PSNR in dB (default: 40). Higher values reduce watermark strength and can make detection harder. |
 | `--benchmark_loops` | Positive measured iteration count for `--bench` only. Defaults to 100 on Eigen and 1000 on GPU backends. |
-| `--gpu_device_id` | Zero-based CUDA/OpenCL GPU index (default: 0). An invalid index falls back to 0. `--opencl_device_id` remains accepted as a legacy alias. |
+| `--gpu_device_id` | Zero-based CUDA/OpenCL GPU index (default: 0). An invalid index falls back to 0. |
 
 **Video-only options:**
 

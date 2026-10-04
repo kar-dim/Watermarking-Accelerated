@@ -65,7 +65,6 @@ constexpr std::array cliSettings = {
     OptionDefinition{"global",  "psnr"                },
     OptionDefinition{"global",  "display_fps"         },
     OptionDefinition{"compute", "gpu_device_id"       },
-    OptionDefinition{"compute", "opencl_device_id"    },
     OptionDefinition{"compute", "cuda_hw_decoder"     },
     OptionDefinition{"compute", "cuda_hw_encoder"     },
     OptionDefinition{"image",   "mode"                },
@@ -157,8 +156,7 @@ CommandLineOptions parseCommandLine(const int argc, char* argv[]) {
 
         // Match the option to its definition and store its value
         const auto definition = resolveOption(option);
-        const auto name = definition.name == "opencl_device_id" ? "gpu_device_id" : definition.name;
-        result.settings[settingKey(definition.section, name)] = std::move(value);
+        result.settings[settingKey(definition.section, definition.name)] = std::move(value);
     }
     return result;
 }
@@ -186,7 +184,6 @@ Global settings:
 
 Compute settings:
   --gpu_device_id N          GPU device index (CUDA and OpenCL builds, defaults to 0).
-  --opencl_device_id N       Legacy alias for gpu_device_id.
   --cuda_hw_decoder BOOL     Use NVDEC with CPU fallback (CUDA only; default: true).
   --cuda_hw_encoder BOOL     Use NVENC for video (all builds; default: false).
 

@@ -42,7 +42,7 @@ Invoke-Case 'valid-defaults' $baseArguments 0 'Embedded ME watermark.*p = 3, PSN
 Invoke-Case 'explicit-options' ($baseArguments + @('--p', '5', '--psnr', '42', '--no-pause')) 0 'Embedded ME watermark.*p = 5, PSNR = 42'
 Invoke-Case 'qualified-and-equals' @('--global.watermark_password=regression-password', '--image.mode=single', "--image.path=$imagePath", "--image.output_path=$fixtureDirectory/output.png", '--global.p=5', '--global.psnr=42') 0 'Embedded ME watermark.*p = 5, PSNR = 42'
 Invoke-Case 'repeated-option' ($baseArguments + @('--p', 'invalid', '--p', '3')) 0 'Embedded ME watermark'
-Invoke-Case 'legacy-device-alias' ($baseArguments + @('--opencl_device_id', '0')) 0 'Embedded ME watermark'
+Invoke-Case 'explicit-gpu-device' ($baseArguments + @('--gpu_device_id', '0')) 0 'Embedded ME watermark'
 # Required inputs should produce actionable errors instead of implicit sample operations.
 Invoke-Case 'missing-password' @('--image.path', $imagePath, '--output_path', "$fixtureDirectory/output.png") 1 'No valid watermark password'
 Invoke-Case 'missing-output' @('--watermark_password', 'regression-password', '--image.path', $imagePath) 1 'requires --output_path'
