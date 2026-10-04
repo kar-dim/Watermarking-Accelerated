@@ -1,5 +1,4 @@
 #include "common_utils.hpp"
-#include "libs/inih/INIReader.h"
 #include "WatermarkCore.hpp"
 #include <algorithm>
 #include <array>
@@ -26,6 +25,11 @@
 #include <vector>
 #include <windows.h>
 
+/*!
+ *  \brief  Command-line interface entry point for image/video watermarking and benchmarking
+ *  \author Dimitris Karatzas
+ */
+
 using namespace CommonUtils;
 using namespace WatermarkCore;
 namespace fs = std::filesystem;
@@ -48,13 +52,13 @@ double executionTime(F&& func, int loops = 1, const bool warmup = true) {
     auto end = std::chrono::high_resolution_clock::now();
     return std::chrono::duration<double>(end - start).count();
 }
-// Command-line option definition mapping an INI section to its key name
+// Grouped option names keep image/video mode and path unambiguous
 struct OptionDefinition {
     std::string_view section;
     std::string_view name;
 };
 
-// List of supported command-line settings matching INI configuration keys
+// Supported command-line options and their groups
 constexpr std::array cliSettings = {
     OptionDefinition{"global",  "watermark_password"  },
     OptionDefinition{"global",  "p"                   },
@@ -77,16 +81,14 @@ constexpr std::array cliSettings = {
 };
 
 // Builds a lookup key string from section and setting name
-string settingKey(const std::string_view section, const std::string_view name) { return string(section) + "=" + string(name); }
+string settingKey(const std::string_view section, const std::string_view name) { return string(section) + "." + string(name); }
 
-// Holds parsed command-line flags and setting overrides
+// Holds parsed command-line flags and option values
 struct CommandLineOptions {
     std::map<string, string> settings;
-    string settingsFile = "settings.ini";
     bool benchmark = false;
     bool benchmarkSave = false;
     bool help = false;
-    bool noPause = false;
 };
 
 // Resolves a command-line option name to an OptionDefinition
@@ -116,7 +118,7 @@ OptionDefinition resolveOption(const std::string_view option) {
     return *match;
 }
 
-// Parses command-line arguments into flags and setting overrides
+// Parses command-line arguments into flags and option values
 CommandLineOptions parseCommandLine(const int argc, char* argv[]) {
     CommandLineOptions result;
     for (int i = 1; i < argc; ++i) {
@@ -127,17 +129,15 @@ CommandLineOptions parseCommandLine(const int argc, char* argv[]) {
         }
         if (argument == "--bench") {
             result.benchmark = true;
-            result.noPause = true;
             continue;
         }
         if (argument == "--bench-save") {
             result.benchmark = true;
             result.benchmarkSave = true;
-            result.noPause = true;
             continue;
         }
         if (argument == "--no-pause") {
-            result.noPause = true;
+            // Keep accepting the legacy flag; CLI commands never pause
             continue;
         }
         if (!argument.starts_with("--"))
@@ -155,12 +155,7 @@ CommandLineOptions parseCommandLine(const int argc, char* argv[]) {
             value = argv[++i];
         }
 
-        // Custom INI settings file override
-        if (option == "settings") {
-            result.settingsFile = std::move(value);
-            continue;
-        }
-        // Match option to setting definition and store override
+        // Match the option to its definition and store its value
         const auto definition = resolveOption(option);
         const auto name = definition.name == "opencl_device_id" ? "gpu_device_id" : definition.name;
         result.settings[settingKey(definition.section, name)] = std::move(value);
@@ -173,108 +168,98 @@ void printHelp() {
     cout << R"(
 Usage: Watermarking-CLI [options]
 
-The application reads settings.ini, then applies command-line overrides.
+Configure the application with command-line options. With no options, show help.
 
 Control options:
   --bench                    Benchmark ME embed/detect for p=3,5,7,9 and 480p..4K.
                              Writes readme_pictures/{cuda,opencl,eigen}.csv.
+                             Uses a fixed password unless one is supplied.
   --bench-save               Also save one embedded image per benchmark case.
-  --settings FILE            Read a different INI file (default: settings.ini).
-  --no-pause                 Do not wait for a key before exiting.
+  --no-pause                 Legacy flag; CLI commands never pause.
   -h, --help                 Show this help.
 
 Global settings:
-  --watermark_password TEXT  Password used to generate the watermark.
-  --p N                      Prediction window size: 3, 5, 7, or 9.
-  --psnr DB                  Embed strength as a positive PSNR value in dB.
-  --display_fps BOOL         Show FPS for video operations (true/false).
+  --watermark_password TEXT  Required password for image/video operations.
+  --p N                      Prediction window size: 3, 5, 7, or 9 (default: 3).
+  --psnr DB                  Positive embed PSNR in dB (default: 40).
+  --display_fps BOOL         Show FPS for video operations (default: true).
 
 Compute settings:
   --gpu_device_id N          GPU device index (CUDA and OpenCL builds, defaults to 0).
   --opencl_device_id N       Legacy alias for gpu_device_id.
-  --cuda_hw_decoder BOOL     Use NVDEC for video, with CPU fallback (CUDA only).
-  --cuda_hw_encoder BOOL     Use NVENC for video (true/false; all builds).
+  --cuda_hw_decoder BOOL     Use NVDEC with CPU fallback (CUDA only; default: true).
+  --cuda_hw_encoder BOOL     Use NVENC for video (all builds; default: false).
 
 Image settings:
-  --image.mode MODE          single, batch_embed, or batch_detect.
+  --image.mode MODE          single, batch_embed, or batch_detect (default: single).
   --image.path PATH          Input image, or input directory for batch mode.
   --output_path FILE         Required destination file for single mode.
   --benchmark_loops N        Positive measured loop count for --bench only.
 
 Video settings:
-  --video.mode MODE          embed or detect.
+  --video.mode MODE          embed or detect (default: embed).
   --video.path FILE          Input video; selects video mode when provided.
   --encode_output_path FILE  Destination video file for embed mode.
   --encode_codec_options STR Software encoder and options, e.g. -c:v libx265.
   --hw_encode_options STR    NVENC encoder and options, e.g. -c:v hevc_nvenc.
-  --watermark_interval N     Embed or detect every Nth video frame (N >= 1).
+  --watermark_interval N     Embed or detect every Nth frame (N >= 1; default: 1).
 
-Every setting also accepts its section-qualified spelling, for example
+Every option also accepts its group-qualified spelling, for example
 --global.p=5 or --compute.gpu_device_id=1. Values may use '--key value' or
-'--key=value'. The duplicated mode/path names must be section-qualified.
+'--key=value'. The duplicated mode/path names must be group-qualified.
+
+Example: Watermarking-CLI --image.path input.png --output_path output.png
+         --watermark_password "your-password"
 )";
 }
 
-// Configuration accessor that applies command-line overrides on top of INI values
+// Typed access to command-line values with defaults for omitted options
 class Settings {
   public:
-    Settings(const INIReader& ini, const std::map<string, string>& overrides) : ini_(ini), overrides_(overrides) {}
+    explicit Settings(const std::map<string, string>& values) : values_(values) {}
 
-    // Retrieves string value with command-line override precedence
+    // Use the caller's default when the option was not supplied
     string Get(const string& section, const string& name, const string& defaultValue) const {
-        const auto overrideValue = overrides_.find(settingKey(section, name));
-        return overrideValue == overrides_.end() ? ini_.Get(section, name, defaultValue) : overrideValue->second;
+        const auto value = values_.find(settingKey(section, name));
+        return value == values_.end() ? defaultValue : value->second;
     }
 
-    // Retrieves integer value with command-line override precedence
+    // Reject overflow and trailing text in integer options
     long GetInteger(const string& section, const string& name, const long defaultValue) const {
-        const string* value = findOverride(section, name);
-        if (!value)
-            return ini_.GetInteger(section, name, defaultValue);
+        const string value = Get(section, name, std::to_string(defaultValue));
         errno = 0;
         char* end = nullptr;
-        const long parsed = std::strtol(value->c_str(), &end, 0);
-        if (errno != 0 || end == value->c_str() || *end != '\0')
-            throw std::runtime_error("Invalid integer for '--" + name + "': " + *value);
+        const long parsed = std::strtol(value.c_str(), &end, 0);
+        if (errno != 0 || end == value.c_str() || *end != '\0')
+            throw std::runtime_error("Invalid integer for '" + section + "." + name + "': " + value);
         return parsed;
     }
 
-    // Retrieves float value with command-line override precedence
+    // Reject non-finite, out-of-range and partially parsed numbers
     float GetFloat(const string& section, const string& name, const float defaultValue) const {
-        const string* value = findOverride(section, name);
-        if (!value)
-            return ini_.GetFloat(section, name, defaultValue);
+        const string value = Get(section, name, std::to_string(defaultValue));
         errno = 0;
         char* end = nullptr;
-        const float parsed = std::strtof(value->c_str(), &end);
-        if (errno != 0 || end == value->c_str() || *end != '\0')
-            throw std::runtime_error("Invalid number for '--" + name + "': " + *value);
+        const float parsed = std::strtof(value.c_str(), &end);
+        if (errno != 0 || end == value.c_str() || *end != '\0' || !std::isfinite(parsed))
+            throw std::runtime_error("Invalid number for '" + section + "." + name + "': " + value);
         return parsed;
     }
 
-    // Retrieves boolean value with command-line override precedence
+    // Accept common boolean spellings without case sensitivity
     bool GetBoolean(const string& section, const string& name, const bool defaultValue) const {
-        const string* value = findOverride(section, name);
-        if (!value)
-            return ini_.GetBoolean(section, name, defaultValue);
-        string normalized = *value;
+        const string value = Get(section, name, defaultValue ? "true" : "false");
+        string normalized = value;
         std::transform(normalized.begin(), normalized.end(), normalized.begin(), [](const unsigned char c) { return static_cast<char>(std::tolower(c)); });
         if (normalized == "true" || normalized == "yes" || normalized == "on" || normalized == "1")
             return true;
         if (normalized == "false" || normalized == "no" || normalized == "off" || normalized == "0")
             return false;
-        throw std::runtime_error("Invalid boolean for '--" + name + "': " + *value);
+        throw std::runtime_error("Invalid boolean for '" + section + "." + name + "': " + value);
     }
 
   private:
-    // Looks up a setting override by section and key name
-    const string* findOverride(const string& section, const string& name) const {
-        const auto value = overrides_.find(settingKey(section, name));
-        return value == overrides_.end() ? nullptr : &value->second;
-    }
-
-    const INIReader& ini_;
-    const std::map<string, string>& overrides_;
+    const std::map<string, string>& values_;
 };
 
 // Escapes and quotes a string for CSV formatting
@@ -291,11 +276,11 @@ string csvString(const string& value) {
  *  \author Dimitris Karatzas
  */
 // batch processing of images in a directory (for both embed and detect)
-static int testForImageBatch(const Settings& inir, const int p, const float psnr, const bool isEmbed) {
-    const string watermarkPassword = inir.Get("global", "watermark_password", "");
+static int testForImageBatch(const Settings& options, const int p, const float psnr, const bool isEmbed) {
+    const string watermarkPassword = options.Get("global", "watermark_password", "");
     checkError(watermarkPassword.empty(), "No valid watermark password specified!");
 
-    const fs::path inputDir(inir.Get("image", "path", ""));
+    const fs::path inputDir(options.Get("image", "path", ""));
     if (!fs::exists(inputDir) || !fs::is_directory(inputDir))
         throw std::runtime_error("Error: Batch path is not a valid directory!");
 
@@ -305,8 +290,9 @@ static int testForImageBatch(const Settings& inir, const int p, const float psnr
         fs::path inputFile;
         std::future<void> future;
     };
-    std::queue<PendingSave> saveTasks;
     std::vector<ExportHandle> exportPool;
+    // async future destructors join before the buffers they write from are released, including on exceptions
+    std::queue<PendingSave> saveTasks;
     size_t bufferIndex = 0;
     size_t maxParallelSaves = 0;
     if (isEmbed) {
@@ -398,19 +384,19 @@ static int testForImageBatch(const Settings& inir, const int p, const float psnr
     cout << info(std::format("\nBatch complete! Successfully processed {}/{} images.\n", successCount, validFiles.size()));
     cout << info("Total batch time: " + formatExecutionTime(false, totalBatchTime) + "\n");
 
-    return EXIT_SUCCESS;
+    return static_cast<size_t>(successCount) == validFiles.size() ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
 // embed one ME watermark and write the requested output image
-static int testForImageSingle(const Settings& inir, const int p, const float psnr) {
-    const string imageFile = inir.Get("image", "path", "NO_IMAGE");
+static int testForImageSingle(const Settings& options, const int p, const float psnr) {
+    const string imageFile = options.Get("image", "path", "NO_IMAGE");
     checkError(imageFile == "NO_IMAGE", "No valid image file specified!");
-    const string outputPath = inir.Get("image", "output_path", "");
-    checkError(outputPath.empty(), "Single image mode requires --output_path (or [image]/output_path).");
+    const string outputPath = options.Get("image", "output_path", "");
+    checkError(outputPath.empty(), "Single image mode requires --output_path.");
     std::error_code pathError;
     checkError(fs::equivalent(imageFile, outputPath, pathError), "Input and output image must be different files.");
-    const string watermarkPassword = inir.Get("global", "watermark_password", "");
-    checkError(watermarkPassword.empty(), "No valid watermark seed specified!");
+    const string watermarkPassword = options.Get("global", "watermark_password", "");
+    checkError(watermarkPassword.empty(), "No valid watermark password specified! Supply --watermark_password.");
     const auto started = std::chrono::steady_clock::now();
     auto s = createImageSession(watermarkPassword, p, psnr);
     loadImage(s.get(), imageFile);
@@ -425,27 +411,27 @@ static int testForImageSingle(const Settings& inir, const int p, const float psn
     return EXIT_SUCCESS;
 }
 
-// video processing, it opens the video, embeds or detects the watermark based on the mode specified in settings.ini,
+// Video processing embeds or detects the watermark according to --video.mode,
 // and optionally encodes the output video with the embedded watermark (using hardware acceleration if specified and available)
-static int testForVideo(const Settings& inir, const string& videoFile, const int p, const float psnr) {
-    const bool showFps = inir.GetBoolean("global", "display_fps", true);
-    const string videoMode = inir.Get("video", "mode", "embed");
+static int testForVideo(const Settings& options, const string& videoFile, const int p, const float psnr) {
+    const bool showFps = options.GetBoolean("global", "display_fps", true);
+    const string videoMode = options.Get("video", "mode", "embed");
     checkError(videoMode != "embed" && videoMode != "detect", "Invalid video mode. Must be 'embed' or 'detect'.");
     const bool isEmbed = videoMode == "embed";
 
     // supply the relevant settings to the video session input struct
     VideoSettings settings;
     settings.videoFile = videoFile;
-    settings.watermarkPassword = inir.Get("global", "watermark_password", "");
+    settings.watermarkPassword = options.Get("global", "watermark_password", "");
     checkError(settings.watermarkPassword.empty(), "No valid watermark password specified!");
     settings.p = p;
     settings.psnr = psnr;
-    settings.watermarkInterval = static_cast<int>(inir.GetInteger("video", "watermark_interval", 1));
-    settings.useHwDecoder = inir.GetBoolean("compute", "cuda_hw_decoder", true);
-    settings.useHwEncoder = inir.GetBoolean("compute", "cuda_hw_encoder", false);
-    settings.encodeOptions = settings.useHwEncoder ? inir.Get("video", "hw_encode_options", "-c:v hevc_nvenc -preset p6 -tune hq -cq 26 -b:v 0")
-                                                   : inir.Get("video", "encode_codec_options", "-c:v libx265 -preset fast -crf 23");
-    settings.encodeOutputPath = inir.Get("video", "encode_output_path", "");
+    settings.watermarkInterval = static_cast<int>(options.GetInteger("video", "watermark_interval", 1));
+    settings.useHwDecoder = options.GetBoolean("compute", "cuda_hw_decoder", true);
+    settings.useHwEncoder = options.GetBoolean("compute", "cuda_hw_encoder", false);
+    settings.encodeOptions = settings.useHwEncoder ? options.Get("video", "hw_encode_options", "-c:v hevc_nvenc -preset p6 -tune hq -cq 26 -b:v 0")
+                                                   : options.Get("video", "encode_codec_options", "-c:v libx265 -preset fast -crf 23");
+    settings.encodeOutputPath = options.Get("video", "encode_output_path", "");
 
     // Video embedding also runs FFmpeg encoder threads. Limit Eigen/OpenMP to
     // physical cores so the two thread pools do not oversubscribe the CPU
@@ -490,7 +476,8 @@ static int runCliBenchmark(const Settings& settings, const float psnr, const boo
     const int defaultLoops = backend == "eigen" ? 100 : 1000;
     const int loops = settings.GetInteger("image", "benchmark_loops", defaultLoops);
     checkError(loops <= 0, "benchmark_loops must be positive.");
-    const string watermarkPassword = settings.Get("global", "watermark_password", "");
+    // fixed benchmark password keeps measurements independent of external configuration.
+    const string watermarkPassword = settings.Get("global", "watermark_password", "benchmark-watermark-password");
     checkError(watermarkPassword.empty(), "No valid watermark password specified!");
 
     // Create output folder and initialize benchmark CSV file
@@ -565,56 +552,44 @@ int main(const int argc, char* argv[]) {
     // the process code page is UTF-8 (utf8.manifest), the console must print the same bytes
     SetConsoleOutputCP(CP_UTF8);
     int exitCode = EXIT_SUCCESS;
-    // Supplying any argument implies non-interactive use
-    bool pauseBeforeExit = argc == 1;
     try {
-        // Parse command-line options and overrides
+        // Parse command-line options before initializing the backend
         const CommandLineOptions commandLine = parseCommandLine(argc, argv);
-        pauseBeforeExit = !commandLine.noPause;
-        if (commandLine.help) {
+        if (commandLine.help || argc == 1) {
             printHelp();
             return EXIT_SUCCESS;
         }
-        // open parameters file
-        const INIReader ini(commandLine.settingsFile);
-        if (ini.ParseError() < 0)
-            throw std::runtime_error("Could not load " + commandLine.settingsFile);
-        // Combine INI settings with command-line overrides
-        const Settings inir(ini, commandLine.settings);
+        const Settings options(commandLine.settings);
         // initialize backend data (GPU devices, OpenMP threads, etc.)
-        // the generic key takes precedence while old INI files remain valid
-        initializeEnvironment(inir.GetInteger("compute", "gpu_device_id", inir.GetInteger("compute", "opencl_device_id", 0)));
-        const float psnr = inir.GetFloat("global", "psnr", -1.0f);
+        initializeEnvironment(options.GetInteger("compute", "gpu_device_id", 0));
+        const float psnr = options.GetFloat("global", "psnr", 40.0f);
         if (!std::isfinite(psnr) || psnr <= 0)
             throw std::runtime_error("PSNR must be a finite number greater than 0");
         // Run standalone benchmark if requested
         if (commandLine.benchmark)
-            return runCliBenchmark(inir, psnr, commandLine.benchmarkSave);
+            return runCliBenchmark(options, psnr, commandLine.benchmarkSave);
 
-        const int p = inir.GetInteger("global", "p", -1);
+        const int p = options.GetInteger("global", "p", 3);
         if (p != 3 && p != 5 && p != 7 && p != 9)
             throw std::runtime_error("p must be 3, 5, 7 or 9");
         // test algorithms
-        const string videoFile = inir.Get("video", "path", "");
-        const string imageMode = inir.Get("image", "mode", "");
+        const string videoFile = options.Get("video", "path", "");
+        const string imageMode = options.Get("image", "mode", "single");
         if (!videoFile.empty())
-            exitCode = testForVideo(inir, videoFile, p, psnr);
+            exitCode = testForVideo(options, videoFile, p, psnr);
         else if (imageMode == "batch_embed")
-            exitCode = testForImageBatch(inir, p, psnr, true);
+            exitCode = testForImageBatch(options, p, psnr, true);
         else if (imageMode == "batch_detect")
-            exitCode = testForImageBatch(inir, p, psnr, false);
+            exitCode = testForImageBatch(options, p, psnr, false);
         else if (imageMode == "single")
-            exitCode = testForImageSingle(inir, p, psnr);
+            exitCode = testForImageSingle(options, p, psnr);
         else
-            throw std::runtime_error("Invalid mode specified in settings.ini. Must be 'single', 'batch' for images, or specify a video path.");
+            throw std::runtime_error("Invalid mode. Use --image.mode single, batch_embed or batch_detect, or supply --video.path.");
     } catch (const std::exception& ex) {
         cout << err(string("Fatal error: ") + ex.what() + "\n");
         exitCode = EXIT_FAILURE;
     }
     // flush first
     cout.flush();
-    // Pause terminal only if run interactively
-    if (pauseBeforeExit)
-        system("pause");
     return exitCode;
 }

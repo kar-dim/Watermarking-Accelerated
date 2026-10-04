@@ -1,5 +1,11 @@
 #pragma once
 #include <string>
+
+/*!
+ *  \brief  OpenCL kernel source code for planar buffer transposes, RGB-to-gray conversions, and parallel reductions
+ *  \author Dimitris Karatzas
+ */
+
 inline const std::string utilityKernels = R"CLC(
 
 // coalesced tiled transpose: column-major uchar to row-major uchar, multi-channel via z-dimension

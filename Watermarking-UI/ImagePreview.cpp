@@ -32,7 +32,7 @@ QImage imagePreviewFromSession(const WatermarkCore::ImageSession* session) {
 // reused buffer skips the allocation and the first touch page faults of a new one
 void updatePreviewFromSession(const WatermarkCore::ImageSession* session, QImage& preview) {
     const auto [width, height, channels] = WatermarkCore::getSessionPreviewFormat(session);
-    const QImage::Format format = channels == 3 ? QImage::Format_RGB888 : QImage::Format_Grayscale8;
+    const QImage::Format format = channels == 4 ? QImage::Format_RGBA8888 : channels == 3 ? QImage::Format_RGB888 : QImage::Format_Grayscale8;
     // a shared buffer is still displayed elsewhere, writing to it would detach it with a copy of the old pixels first
     if (!preview.isDetached() || preview.width() != width || preview.height() != height || preview.format() != format)
         preview = QImage(width, height, format);

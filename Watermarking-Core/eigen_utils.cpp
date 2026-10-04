@@ -16,6 +16,11 @@
 #include <vector>
 #include <windows.h>
 
+/*!
+ *  \brief  Eigen-based matrix operations, SIMD shift matrix assembly, and solver implementations
+ *  \author Dimitris Karatzas
+ */
+
 using namespace Eigen;
 
 namespace {

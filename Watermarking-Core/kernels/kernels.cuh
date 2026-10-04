@@ -7,6 +7,11 @@
 #include <device_launch_parameters.h>
 #include <type_traits>
 
+/*!
+ *  \brief  CUDA device helper functions, atomic fixed-point conversions, and block reduction types
+ *  \author Dimitris Karatzas
+ */
+
 // Convert float to fixed point uint64 for deterministic atomic additions
 __device__ inline uint64_t toScaledUint64(float value) { return static_cast<uint64_t>(value * 1000000000.0f); }
 __device__ inline float toUnscaledFloat(uint64_t value) { return static_cast<float>(value * 1.0e-9f); }

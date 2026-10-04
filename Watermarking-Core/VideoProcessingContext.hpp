@@ -4,6 +4,7 @@
 #include "buffer.hpp"
 #include "HdrTonemap.hpp"
 #include "HostMemory.hpp"
+#include "OutputFile.hpp"
 #include "include/WatermarkCore.hpp"
 #include "video_defines.hpp"
 #include "WatermarkBase.hpp"
@@ -20,8 +21,9 @@ extern "C" {
 
 namespace WatermarkCore {
 /*!
- * \brief  The unified internal session for video processing,
- *         this is hidden from the public API but shared internally
+ *  \brief  The unified internal session for video processing,
+ *          this is hidden from the public API but shared internally
+ *  \author Dimitris Karatzas
  */
 struct VideoSession {
     VideoSettings settings;
@@ -52,6 +54,7 @@ struct VideoSession {
     ImageBuffer inputFrame;
     ImageOutputBuffer watermarkedFrame;
     // output encoding (embed mode only, initialized in embedVideo, null for detect)
+    OutputFile outputFile; // destroyed after the FFmpeg contexts have closed their handles
     video_utils::AVOutputFormatContextPtr outputFormatCtx;
     video_utils::AVCodecContextPtr outputEncoderCtx;
     video_utils::AuxiliaryMux auxMux; // handles audio remux and subtitle transcoding
@@ -66,8 +69,6 @@ struct VideoSession {
     int64_t presentationEnd = AV_NOPTS_VALUE;
     int64_t firstReorderDelay = 0;
     uint64_t encodedPackets = 0;
-    // true once the output file is opened, a failed embed deletes only a file it created
-    bool outputFileCreated = false;
     // convenient getter for video properties
     inline std::pair<int, int> videoDims() const { return {videoStream->codecpar->height, videoStream->codecpar->width}; }
 };

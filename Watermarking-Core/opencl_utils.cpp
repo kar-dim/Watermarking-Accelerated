@@ -20,6 +20,11 @@
 using std::cout;
 using std::string;
 
+/*!
+ *  \brief  OpenCL runtime initialization, kernel caching, device query, and execution dispatch
+ *  \author Dimitris Karatzas
+ */
+
 namespace {
 bool hasExtension(const string& extensions, const std::string_view wanted) {
     std::istringstream list(extensions);

@@ -1,4 +1,10 @@
 #pragma once
+
+/*!
+ *  \brief  SIMD instruction set requirement validation (AVX2/AVX-512) and intrinsics header inclusion
+ *  \author Dimitris Karatzas
+ */
+
 // the host code needs at least AVX2. The AVX-512 code paths (#if defined(__AVX512F__)) are used when the
 // build enables AVX-512 (msbuild -p:WatermarkingSimd=AVX512), an AVX-512 build also defines __AVX2__
 #if !defined(__AVX2__)

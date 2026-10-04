@@ -3,6 +3,11 @@
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
 
+/*!
+ *  \brief  CUDA device kernels for watermark embedding, prediction error filtering, and transforms
+ *  \author Dimitris Karatzas
+ */
+
 __global__ void apply_watermark_row_major(
     const float* __restrict__ input, const __half* __restrict__ u, const uint64_t* __restrict__ sumSq, uint8_t* __restrict__ output, const float strengthNumerator, const int width, const int height) {
     __shared__ uint8_t tile[32][36];

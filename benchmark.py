@@ -218,8 +218,8 @@ def parse_args() -> argparse.Namespace:
         help="generate GUI benchmark figure (5.png) from ui_bench.csv",
     )
     # CUDA and OpenCL number the GPUs differently, each backend gets its own index
-    parser.add_argument("--cuda-device-id", type=int, help="GPU index for the CUDA benchmark (overrides settings.ini)")
-    parser.add_argument("--opencl-device-id", type=int, help="GPU index for the OpenCL benchmark (overrides settings.ini)")
+    parser.add_argument("--cuda-device-id", type=int, help="GPU index for the CUDA benchmark (default: 0)")
+    parser.add_argument("--opencl-device-id", type=int, help="GPU index for the OpenCL benchmark (default: 0)")
     parser.add_argument("--loops", type=int, help="iterations per measurement for each backend (requires --run)")
     return parser.parse_args()
 

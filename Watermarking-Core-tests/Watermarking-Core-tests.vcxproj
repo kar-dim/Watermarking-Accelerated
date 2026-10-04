@@ -65,7 +65,7 @@
       <PreprocessorDefinitions>X64;NDEBUG;_CONSOLE;_USE_CUDA_;_USE_GPU_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <DebugInformationFormat>None</DebugInformationFormat>
-      <AdditionalIncludeDirectories>$(WatermarkingPublicIncludeDirectories);$(WatermarkingCoreDir)libs\inih;$(WatermarkingCoreDir)libs\libjpeg\include;$(WatermarkingCoreDir)libs\libpng\include;$(ProjectDir)libs\googletest-1.17.0\include;$(WatermarkingMediaIncludeDirectory);$(CUDA_PATH)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(WatermarkingPublicIncludeDirectories);$(WatermarkingCoreDir)libs\libjpeg\include;$(WatermarkingCoreDir)libs\libpng\include;$(ProjectDir)libs\googletest-1.17.0\include;$(WatermarkingMediaIncludeDirectory);$(CUDA_PATH)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <EnableEnhancedInstructionSet>$(WatermarkingInstructionSet)</EnableEnhancedInstructionSet>
     </ClCompile>
@@ -95,7 +95,7 @@
       <PreprocessorDefinitions>X64;NDEBUG;_CONSOLE;_CRT_SECURE_NO_WARNINGS;_USE_EIGEN_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <DebugInformationFormat>None</DebugInformationFormat>
-      <AdditionalIncludeDirectories>$(WatermarkingPublicIncludeDirectories);$(WatermarkingCoreDir)libs\Eigen;$(WatermarkingCoreDir)libs\CImg;$(WatermarkingCoreDir)libs\zlib\include;$(WatermarkingCoreDir)libs\inih;$(WatermarkingCoreDir)libs\libpng\include;$(WatermarkingCoreDir)libs\libjpeg\include;$(WatermarkingCoreDir)libs\libwebp\include;$(WatermarkingCoreDir)libs\libtiff\include;$(ProjectDir)libs\googletest-1.17.0\include;$(WatermarkingMediaIncludeDirectory);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(WatermarkingPublicIncludeDirectories);$(WatermarkingCoreDir)libs\Eigen;$(WatermarkingCoreDir)libs\CImg;$(WatermarkingCoreDir)libs\zlib\include;$(WatermarkingCoreDir)libs\libpng\include;$(WatermarkingCoreDir)libs\libjpeg\include;$(WatermarkingCoreDir)libs\libwebp\include;$(WatermarkingCoreDir)libs\libtiff\include;$(ProjectDir)libs\googletest-1.17.0\include;$(WatermarkingMediaIncludeDirectory);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>-openmp $(WatermarkingClangSimdFlags) /clang:-O3 /Zc:__cplusplus -flto=thin %(AdditionalOptions)</AdditionalOptions>
       <FunctionLevelLinking>true</FunctionLevelLinking>
     </ClCompile>
@@ -116,7 +116,7 @@
       <PreprocessorDefinitions>X64;NDEBUG;_CONSOLE;_USE_OPENCL_;_USE_GPU_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <DebugInformationFormat>None</DebugInformationFormat>
-      <AdditionalIncludeDirectories>$(WatermarkingPublicIncludeDirectories);$(WatermarkingCoreDir)libs\opencl\include;$(WatermarkingCoreDir)libs\inih;$(WatermarkingCoreDir)libs\libjpeg\include;$(WatermarkingCoreDir)libs\libpng\include;$(ProjectDir)libs\googletest-1.17.0\include;$(WatermarkingMediaIncludeDirectory);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(WatermarkingPublicIncludeDirectories);$(WatermarkingCoreDir)libs\opencl\include;$(WatermarkingCoreDir)libs\libjpeg\include;$(WatermarkingCoreDir)libs\libpng\include;$(ProjectDir)libs\googletest-1.17.0\include;$(WatermarkingMediaIncludeDirectory);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <EnableEnhancedInstructionSet>$(WatermarkingInstructionSet)</EnableEnhancedInstructionSet>
     </ClCompile>
@@ -132,6 +132,9 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="CommonFixture.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="CliRegression.ps1" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Watermarking-Core\Watermarking-Core.vcxproj">

@@ -3,6 +3,10 @@
 #include <stdexcept>
 #include <string>
 
+/*!
+ *  \brief  Common color conversion constants, console styling, and assertion helpers
+ *  \author Dimitris Karatzas
+ */
 namespace CommonUtils {
 // ITU-R BT.601 RGB-to-grayscale coefficients shared by the CPU and GPU backends.
 inline constexpr float kLumaR = 0.299f;

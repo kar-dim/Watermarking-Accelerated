@@ -1,5 +1,6 @@
 #pragma once
 #include "OclQueueManager.hpp"
+#include "CheckedSize.hpp"
 #include "opencl_init.h"
 #include <stdexcept>
 #include <string>
@@ -26,13 +27,13 @@ class OclArray {
     void alloc() {
         if (size() > 0) {
             auto& mgr = OclQueueManager::getInstance();
-            mem = mgr.getPool().acquire(bytes(), mgr.getContextRaw());
+            mem = mgr.acquireBuffer(bytes(), queue);
         }
     }
 
     void freeArray() {
         if (mem) {
-            OclQueueManager::getInstance().getPool().release(bytes(), mem);
+            OclQueueManager::getInstance().releaseBuffer(bytes(), mem);
             mem = nullptr;
         }
     }
@@ -100,8 +101,8 @@ class OclArray {
     int getRows() const { return rows; }
     int getCols() const { return cols; }
     int getChannels() const { return channels; }
-    int size() const { return rows * cols * channels; }
-    size_t bytes() const { return static_cast<size_t>(size()) * sizeof(T); }
+    int size() const { return InternalUtils::checkedElements(rows, cols, channels); }
+    size_t bytes() const { return InternalUtils::checkedProduct(static_cast<size_t>(size()), sizeof(T)); }
     bool empty() const { return mem == nullptr; }
     cl_command_queue getQueue() const { return queue; }
 
@@ -133,6 +134,9 @@ class OclArray {
 
     // if the destination needs a pitch, we can use cudaMemcpy2DAsync to copy the data row by row, with the specified pitch for the destination
     void toHostPitched(T* dst, const int rowElements, const size_t dstPitchBytes) const {
+        if (rowElements <= 0 || size() % rowElements != 0 || dstPitchBytes < InternalUtils::checkedProduct(static_cast<size_t>(rowElements), sizeof(T)))
+            throw std::invalid_argument("Invalid pitched buffer layout");
+        InternalUtils::checkedProduct(dstPitchBytes, static_cast<size_t>(size() / rowElements));
         if (mem) {
             const size_t rowBytes = static_cast<size_t>(rowElements) * sizeof(T);
             const size_t origin[3] = {0, 0, 0};

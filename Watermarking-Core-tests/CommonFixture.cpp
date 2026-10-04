@@ -1,6 +1,8 @@
 #include "../Watermarking-Core/AuxiliaryMux.hpp"
 #include "../Watermarking-Core/AvUtil.hpp"
 #include "../Watermarking-Core/EncodeOptions.hpp"
+#include "../Watermarking-Core/CheckedSize.hpp"
+#include "../Watermarking-Core/OutputFile.hpp"
 #include "../Watermarking-Core/half_float.hpp"
 #include "../Watermarking-Core/WatermarkCrypto.hpp"
 #if defined(_USE_OPENCL_)
@@ -53,6 +55,11 @@ extern "C" {
 #include "libavutil/dict.h"
 }
 
+/*!
+ *  \brief  Comprehensive unit, integration, and regression tests for Watermarking-Core
+ *  \author Dimitris Karatzas
+ */
+
 using namespace WatermarkCore;
 namespace fs = std::filesystem;
 
@@ -68,6 +75,7 @@ const fs::path exifImage = "samples/images/720p_exif6.jpg";
 // small (1.9 MB / 693 frame) clip, it also tests the 10-bit to 8-bit filter graph
 const fs::path shortVideo = "samples/videos/sample_1080p_10bit.mkv";
 
+// Render digests in the form used by the published SHA-256 test vectors
 std::string hexDigest(const std::array<uint8_t, 32>& digest) {
     std::ostringstream result;
     result << std::hex << std::setfill('0');
@@ -186,6 +194,7 @@ void forEachDevice(Check&& check) {
 }
 #endif
 
+// Wait for backend work before copying the embedded pixels to the host
 SessionPixelData embedAndRead(ImageSession* session) {
     embedImage(session);
     finish();
@@ -293,6 +302,7 @@ void writeOrientedJpeg(const fs::path& path, const std::vector<uint8_t>& display
     ASSERT_TRUE(output.write(reinterpret_cast<const char*>(jpeg.data()), static_cast<std::streamsize>(size)));
 }
 
+// Read the whole file for codec comparisons and destination-preservation checks
 std::vector<uint8_t> readBytes(const fs::path& path) {
     std::ifstream input(path, std::ios::binary);
     return {std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
@@ -408,6 +418,112 @@ VideoSettings makeVideoSettings(const std::string& input) {
     return settings;
 }
 
+// lossless uniform frame, with equivalent normalized samples at either input depth
+void writeUniformVideo(const fs::path& path, const bool deep, const AVColorTransferCharacteristic transfer) {
+    using namespace video_utils;
+    AVFormatContext* rawOutput = nullptr;
+    checkAv(avformat_alloc_output_context2(&rawOutput, nullptr, "matroska", path.string().c_str()), "Allocate fixture muxer");
+    AVOutputFormatContextPtr output(rawOutput);
+    const AVCodec* codec = avcodec_find_encoder(AV_CODEC_ID_FFV1);
+    AVCodecContextPtr encoder(avcodec_alloc_context3(codec));
+    if (!encoder)
+        throw std::runtime_error("Allocate fixture encoder");
+    encoder->width = encoder->height = 16;
+    encoder->time_base = {1, 30};
+    encoder->framerate = {30, 1};
+    encoder->pix_fmt = deep ? AV_PIX_FMT_YUV420P10LE : AV_PIX_FMT_YUV420P;
+    encoder->color_range = AVCOL_RANGE_MPEG;
+    encoder->color_primaries = transfer == AVCOL_TRC_BT709 ? AVCOL_PRI_BT709 : AVCOL_PRI_BT2020;
+    encoder->color_trc = transfer;
+    encoder->colorspace = transfer == AVCOL_TRC_BT709 ? AVCOL_SPC_BT709 : AVCOL_SPC_BT2020_NCL;
+    if (output->oformat->flags & AVFMT_GLOBALHEADER)
+        encoder->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
+    checkAv(avcodec_open2(encoder.get(), codec, nullptr), "Open fixture encoder");
+    AVStream* stream = avformat_new_stream(output.get(), nullptr);
+    if (!stream)
+        throw std::runtime_error("Allocate fixture stream");
+    stream->time_base = encoder->time_base;
+    stream->avg_frame_rate = encoder->framerate;
+    checkAv(avcodec_parameters_from_context(stream->codecpar, encoder.get()), "Copy fixture encoder parameters");
+    checkAv(avio_open(&output->pb, path.string().c_str(), AVIO_FLAG_WRITE), "Open fixture output");
+    checkAv(avformat_write_header(output.get(), nullptr), "Write fixture header");
+    AVFramePtr frame(av_frame_alloc());
+    if (!frame)
+        throw std::runtime_error("Allocate fixture frame");
+    frame->format = encoder->pix_fmt;
+    frame->width = frame->height = 16;
+    frame->pts = 0;
+    frame->duration = 1;
+    frame->sample_aspect_ratio = {1, 1};
+    frame->color_range = encoder->color_range;
+    frame->color_primaries = encoder->color_primaries;
+    frame->color_trc = encoder->color_trc;
+    frame->colorspace = encoder->colorspace;
+    checkAv(av_frame_get_buffer(frame.get(), 32), "Allocate fixture pixels");
+    for (int plane = 0; plane < 3; ++plane) {
+        const int side = plane == 0 ? 16 : 8;
+        for (int row = 0; row < side; ++row)
+            for (int col = 0; col < side; ++col) {
+                auto* line = frame->data[plane] + row * frame->linesize[plane];
+                if (deep)
+                    reinterpret_cast<uint16_t*>(line)[col] = 512;
+                else
+                    line[col] = 128;
+            }
+    }
+    AVPacketPtr packet(av_packet_alloc());
+    if (!packet)
+        throw std::runtime_error("Allocate fixture packet");
+    checkAv(avcodec_send_frame(encoder.get(), frame.get()), "Encode fixture frame");
+    checkAv(avcodec_send_frame(encoder.get(), nullptr), "Flush fixture encoder");
+    int status;
+    while ((status = avcodec_receive_packet(encoder.get(), packet.get())) >= 0) {
+        av_packet_rescale_ts(packet.get(), encoder->time_base, stream->time_base);
+        packet->stream_index = stream->index;
+        checkAv(av_interleaved_write_frame(output.get(), packet.get()), "Write fixture packet");
+    }
+    if (status != AVERROR_EOF)
+        checkAv(status, "Drain fixture encoder");
+    checkAv(av_write_trailer(output.get()), "Write fixture trailer");
+    checkAv(avio_closep(&output->pb), "Close fixture file");
+}
+
+// Inspect the first decoded sample and transfer tag to verify HDR conversion
+std::pair<int, AVColorTransferCharacteristic> firstVideoLuma(const fs::path& path) {
+    using namespace video_utils;
+    AVFormatContext* rawInput = nullptr;
+    checkAv(avformat_open_input(&rawInput, path.string().c_str(), nullptr, nullptr), "Open test video");
+    AVFormatContextPtr input(rawInput);
+    checkAv(avformat_find_stream_info(input.get(), nullptr), "Read test video streams");
+    const int index = av_find_best_stream(input.get(), AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
+    checkAv(index, "Find test video stream");
+    const auto* parameters = input->streams[index]->codecpar;
+    const auto* codec = avcodec_find_decoder(parameters->codec_id);
+    AVCodecContextPtr decoder(avcodec_alloc_context3(codec));
+    if (!decoder)
+        throw std::runtime_error("Allocate test decoder");
+    checkAv(avcodec_parameters_to_context(decoder.get(), parameters), "Copy test decoder parameters");
+    checkAv(avcodec_open2(decoder.get(), codec, nullptr), "Open test decoder");
+    AVPacketPtr packet(av_packet_alloc());
+    AVFramePtr frame(av_frame_alloc());
+    if (!packet || !frame)
+        throw std::runtime_error("Allocate test decode buffers");
+    while (true) {
+        const int read = av_read_frame(input.get(), packet.get());
+        if (read != AVERROR_EOF)
+            checkAv(read, "Read test packet");
+        if (read == AVERROR_EOF || packet->stream_index == index) {
+            checkAv(avcodec_send_packet(decoder.get(), read == AVERROR_EOF ? nullptr : packet.get()), "Decode test packet");
+            if (avcodec_receive_frame(decoder.get(), frame.get()) == 0)
+                return {frame->data[0][0], parameters->color_trc};
+        }
+        if (read == AVERROR_EOF)
+            throw std::runtime_error("Test video produced no frame");
+        av_packet_unref(packet.get());
+    }
+}
+
+// Collect per-frame correlations from the public detection log
 std::vector<float> capturedCorrelations(VideoSession* session, int& framesProcessed) {
     testing::internal::CaptureStdout();
     framesProcessed = detectVideo(session);
@@ -431,6 +547,7 @@ void setPortableReductionOverride(const bool enabled) {
 #endif
 }
 
+// Restore the caller's reduction override when a test leaves its scope
 class PortableReductionOverrideGuard {
     std::optional<std::string> original;
 
@@ -457,6 +574,7 @@ struct ReductionPathResult {
     float correlation = 0.0f;
 };
 
+// Compare both embedding and detection across OpenCL reduction paths
 ReductionPathResult runReductionPath() {
     ImageHandle reductionSession = createImageSession(defaultPassword, defaultP, defaultPsnr);
     loadImage(reductionSession.get(), colorImage.string());
@@ -469,6 +587,7 @@ ReductionPathResult runReductionPath() {
 #endif
 } // namespace
 
+// Give each test a loaded session and a temporary directory cleaned up afterward
 class WatermarkTest : public ::testing::Test {
   protected:
     ImageHandle session{nullptr};
@@ -489,6 +608,26 @@ class WatermarkTest : public ::testing::Test {
         fs::remove_all(tempDir, ignored);
     }
 };
+
+#if defined(_USE_OPENCL_)
+// Concurrent first use must publish complete programs for the active context
+TEST(OpenCLCacheTest, ConcurrentColdProgramBuildsShareAValidProgram) {
+    initializeEnvironment(0);
+    std::vector<std::future<cl_context>> builders;
+    for (int i = 0; i < 8; ++i)
+        builders.push_back(std::async(std::launch::async, [] {
+            const auto watermark = cl_utils::OpenCLKernelCache<9>::getProgram();
+            const auto utility = cl_utils::UtilityKernelCache::getProgram();
+            const auto generation = cl_utils::GenerationKernelCache::getProgram();
+            const auto context = watermark.getInfo<CL_PROGRAM_CONTEXT>();
+            if (context != utility.getInfo<CL_PROGRAM_CONTEXT>() || context != generation.getInfo<CL_PROGRAM_CONTEXT>())
+                throw std::runtime_error("Program contexts differ");
+            return context.get();
+        }));
+    for (auto& builder : builders)
+        EXPECT_EQ(builder.get(), OclQueueManager::getInstance().getContextRaw());
+}
+#endif
 
 TEST(WatermarkCryptoTest, Sha256MatchesPublishedVectors) {
     EXPECT_EQ(hexDigest(WatermarkCrypto::sha256("")), "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
@@ -759,10 +898,117 @@ TEST_F(WatermarkTest, SupportsEveryDocumentedPredictionOrder) {
     }
 }
 
-TEST_F(WatermarkTest, RejectsUndocumentedPredictionOrder) {
-    ImageHandle badSession = createImageSession(defaultPassword, 4, defaultPsnr);
-    EXPECT_THROW(loadImage(badSession.get(), colorImage.string()), std::invalid_argument);
+TEST_F(WatermarkTest, RejectsUndocumentedPredictionOrder) { EXPECT_THROW(createImageSession(defaultPassword, 4, defaultPsnr), std::invalid_argument); }
+
+// A failed parameter or image update must leave the previous session usable
+TEST_F(WatermarkTest, RejectedUpdatesPreserveAWorkingSession) {
+    const auto before = embedAndRead(session.get());
+    EXPECT_THROW(updateSessionParams(session.get(), 4, defaultPsnr), std::invalid_argument);
+    EXPECT_THROW(updateSessionParams(session.get(), 3, std::numeric_limits<float>::infinity()), std::invalid_argument);
+    updateSessionParams(session.get(), defaultP, defaultPsnr);
+    EXPECT_EQ(embedAndRead(session.get()).pixels, before.pixels);
+
+    const fs::path tiny = tempDir / "tiny.bmp";
+    writeNoiseBmp(tiny, 5, 5);
+    loadImage(session.get(), tiny.string());
+    const auto small = embedAndRead(session.get());
+    EXPECT_THROW(updateSessionParams(session.get(), 9, defaultPsnr), std::invalid_argument);
+    EXPECT_EQ(embedAndRead(session.get()).pixels, small.pixels);
+    writeNoiseBmp(tiny, 2, 2);
+    EXPECT_THROW(loadImage(session.get(), tiny.string()), std::invalid_argument);
+    EXPECT_EQ(embedAndRead(session.get()).pixels, small.pixels);
 }
+
+// Output and detection buffers are valid only after their preparation step
+TEST_F(WatermarkTest, UnpreparedAndStaleBuffersReportErrors) {
+    auto unloaded = createImageSession(defaultPassword, defaultP, defaultPsnr);
+    EXPECT_THROW(embedImage(unloaded.get()), std::logic_error);
+    EXPECT_THROW(detectLoadedImage(unloaded.get()), std::logic_error);
+    EXPECT_THROW(prepareDetectionImage(session.get()), std::logic_error);
+    EXPECT_THROW(getSessionPixelData(session.get()), std::logic_error);
+    embedImage(session.get());
+    EXPECT_THROW(detectEmbeddedBuffer(session.get()), std::logic_error);
+    prepareDetectionImage(session.get());
+    EXPECT_TRUE(std::isfinite(detectEmbeddedBuffer(session.get())));
+    embedImage(session.get());
+    EXPECT_THROW(detectEmbeddedBuffer(session.get()), std::logic_error);
+    loadImage(session.get(), colorImage.string());
+    EXPECT_THROW(getSessionPreviewFormat(session.get()), std::logic_error);
+}
+
+// Exercise size limits without attempting enormous allocations
+TEST(BufferSizeTest, RejectsOverflowBeforeAllocating) {
+    using namespace InternalUtils;
+    EXPECT_EQ(checkedElements(3840, 2160, 4), 33177600);
+    EXPECT_THROW(checkedElements(65536, 65536), std::length_error);
+    EXPECT_THROW(checkedElements(32768, 32768, 3), std::length_error);
+    EXPECT_THROW(checkedElements(-1, 1), std::invalid_argument);
+    EXPECT_THROW(checkedProduct(std::numeric_limits<size_t>::max(), 2), std::length_error);
+    EXPECT_THROW(checkedPowerOfTwo(std::numeric_limits<size_t>::max()), std::length_error);
+    EXPECT_THROW(checkImageDimensions(std::numeric_limits<unsigned int>::max(), 3), std::invalid_argument);
+    EXPECT_NO_THROW(checkVideoPitch(2160, 3840, 4096));
+    EXPECT_THROW(checkVideoPitch(2160, 3840, 1 << 30), std::length_error);
+    EXPECT_THROW(checkVideoPitch(2160, 3840, -4096), std::invalid_argument);
+#if defined(_USE_OPENCL_)
+    EXPECT_THROW(OclArray<uint8_t>(65536, 65536, nullptr), std::length_error);
+#elif defined(_USE_CUDA_)
+    EXPECT_THROW(CudaArray<uint8_t>(65536, 65536, nullptr), std::length_error);
+#endif
+}
+
+#if defined(_USE_CUDA_)
+// A constructor that fails during upload must return its allocation to the pool
+TEST(CudaBufferTest, FailedUploadReturnsItsAllocationToThePool) {
+    initializeEnvironment(0);
+    auto& manager = CudaStreamManager::getInstance();
+    const auto stream = manager.getComputeStream();
+    for (const int channels : {1, 3}) {
+        CUDA_CHECK(cudaStreamSynchronize(stream));
+        manager.getPool().reset(stream);
+        float* allocation = nullptr;
+        {
+            CudaArray<float> buffer(317, 631, channels, stream);
+            allocation = buffer.data();
+        }
+        if (channels == 1)
+            EXPECT_THROW(CudaArray<float>(317, 631, static_cast<const float*>(nullptr), stream), std::runtime_error);
+        else
+            EXPECT_THROW(CudaArray<float>(317, 631, channels, static_cast<const float*>(nullptr), stream), std::runtime_error);
+        // Consume the intentional runtime error before unrelated kernel launch checks.
+        cudaGetLastError();
+        CudaArray<float> recovered(317, 631, channels, stream);
+        EXPECT_EQ(recovered.data(), allocation);
+        recovered.fillZero();
+        CUDA_CHECK(cudaStreamSynchronize(stream));
+    }
+}
+#endif
+
+#if defined(_USE_OPENCL_)
+// Sessions, preloads and exported buffers must release their old device first
+TEST_F(WatermarkTest, OpenCLSwitchRequiresReleasingLiveHandles) {
+    if (getAvailableDevices().size() < 2)
+        GTEST_SKIP() << "Requires two OpenCL devices";
+    auto preload = preloadImageFromDisk(colorImage.string());
+    EXPECT_THROW(initializeEnvironment(1), std::runtime_error);
+    EXPECT_EQ(getCurrentDeviceIndex(), 0);
+    preload.reset();
+    EXPECT_THROW(initializeEnvironment(1), std::runtime_error);
+    EXPECT_GT(detectLoadedImage(session.get()) + 1.0f, 0.0f);
+    session.reset();
+    ASSERT_TRUE(initializeEnvironment(1));
+    session = createImageSession(defaultPassword, defaultP, defaultPsnr);
+    loadImage(session.get(), colorImage.string());
+    embedImage(session.get());
+    auto exported = createReusableExportBuffer();
+    exportForSave(session.get(), exported.get());
+    session.reset();
+    EXPECT_THROW(initializeEnvironment(0), std::runtime_error);
+    flushToDiskAsync(exported.get(), (tempDir / "old-device.png").string());
+    exported.reset();
+    ASSERT_TRUE(initializeEnvironment(0));
+}
+#endif
 
 // for p >= 7 the GPU builds copy 3 * pad rows from the top and 3 * pad rows from the bottom of the image. Below 6 * pad rows the two parts
 // overlap, and below 3 * pad rows the copy used to read outside the image (for CUDA: run with compute-sanitizer to check the reads)
@@ -994,6 +1240,52 @@ TEST_F(WatermarkTest, PreviewMatchesTheSessionPixelsWithPaddedRows) {
 #else
     check(getDeviceName());
 #endif
+}
+
+// RGBA previews must match saved pixels while leaving row padding untouched
+TEST_F(WatermarkTest, RgbaPreviewMatchesSavedPixelsAndPreservesPadding) {
+    constexpr int width = 23, height = 17;
+    std::vector<uint8_t> input(width * height * 4);
+    for (size_t i = 0; i < input.size(); ++i)
+        input[i] = static_cast<uint8_t>((i * 73 + 19) % 256);
+    for (size_t i = 3; i < input.size(); i += 4)
+        input[i] = std::array<uint8_t, 3>{0, 128, 255}[(i / 4) % 3];
+    const auto path = tempDir / "rgba.png";
+    png_image image{};
+    image.version = PNG_IMAGE_VERSION;
+    image.width = width;
+    image.height = height;
+    image.format = PNG_FORMAT_RGBA;
+    ASSERT_TRUE(png_image_write_to_file(&image, path.string().c_str(), 0, input.data(), 0, nullptr));
+    loadImage(session.get(), path.string());
+    const auto planar = embedAndRead(session.get());
+    ASSERT_EQ(getSessionPreviewFormat(session.get()).channels, 4);
+    constexpr size_t stride = width * 4 + 7;
+    std::vector<uint8_t> preview(stride * height, 0xA5);
+    copySessionPreview(session.get(), preview.data(), stride);
+    const auto saved = tempDir / "saved-rgba.png";
+    saveImageExact(session.get(), saved.string());
+    png_image decoded{};
+    decoded.version = PNG_IMAGE_VERSION;
+    ASSERT_TRUE(png_image_begin_read_from_file(&decoded, saved.string().c_str()));
+    decoded.format = PNG_FORMAT_RGBA;
+    std::vector<uint8_t> savedPixels(PNG_IMAGE_SIZE(decoded));
+    ASSERT_TRUE(png_image_finish_read(&decoded, nullptr, savedPixels.data(), 0, nullptr));
+    png_image_free(&decoded);
+    int mismatches = 0;
+    for (int row = 0; row < height; ++row) {
+        for (int col = 0; col < width; ++col) {
+            const size_t pixel = static_cast<size_t>(row) * width + col;
+            for (int channel = 0; channel < 4; ++channel) {
+                const uint8_t actual = preview[row * stride + col * 4 + channel];
+                mismatches += actual != savedPixels[pixel * 4 + channel];
+                mismatches += actual != (channel == 3 ? input[pixel * 4 + 3] : planar.pixels[channel * width * height + col * height + row]);
+            }
+        }
+        for (size_t padding = width * 4; padding < stride; ++padding)
+            mismatches += preview[row * stride + padding] != 0xA5;
+    }
+    EXPECT_EQ(mismatches, 0);
 }
 
 // every EXIF orientation of one displayed image (40x72: partial GPU tiles) loads upright, with the embedded pixels and the original preview of orientation 1.
@@ -1283,6 +1575,175 @@ TEST_F(WatermarkTest, RefusesToOverwriteTheInputVideo) {
     EXPECT_THROW(embedVideo(session.get()), std::runtime_error);
 }
 
+// A muxer header failure must preserve the destination and remove temporary output
+TEST_F(WatermarkTest, FailedVideoHeaderPreservesExistingOutput) {
+    const fs::path output = tempDir / "existing.mp4";
+    const std::string sentinel = "existing destination must survive";
+    {
+        std::ofstream file(output, std::ios::binary);
+        file << sentinel;
+    }
+    auto settings = makeVideoSettings(shortVideo.string());
+    settings.encodeOptions = "-c:v libx264 -preset ultrafast -tag:v BAD!";
+    settings.encodeOutputPath = output.string();
+    auto video = initVideo(settings);
+    EXPECT_THROW(embedVideo(video.get()), std::runtime_error);
+    const auto bytes = readBytes(output);
+    EXPECT_EQ(std::string(bytes.begin(), bytes.end()), sentinel);
+    EXPECT_EQ(std::distance(fs::directory_iterator(tempDir), fs::directory_iterator{}), 1);
+}
+
+// A minimal WAV exercises missing-video validation without an external fixture
+TEST_F(WatermarkTest, AudioOnlyInputReportsNoVideo) {
+    const fs::path input = tempDir / "audio.wav";
+    std::array<uint8_t, 844> wave{};
+    const auto put16 = [&](size_t offset, uint16_t value) {
+        wave[offset] = static_cast<uint8_t>(value);
+        wave[offset + 1] = static_cast<uint8_t>(value >> 8);
+    };
+    const auto put32 = [&](size_t offset, uint32_t value) {
+        for (int byte = 0; byte < 4; ++byte)
+            wave[offset + byte] = static_cast<uint8_t>(value >> (byte * 8));
+    };
+    std::memcpy(wave.data(), "RIFF", 4);
+    put32(4, static_cast<uint32_t>(wave.size() - 8));
+    std::memcpy(wave.data() + 8, "WAVEfmt ", 8);
+    put32(16, 16);
+    put16(20, 1);
+    put16(22, 1);
+    put32(24, 8000);
+    put32(28, 8000);
+    put16(32, 1);
+    put16(34, 8);
+    std::memcpy(wave.data() + 36, "data", 4);
+    put32(40, 800);
+    {
+        std::ofstream file(input, std::ios::binary);
+        file.write(reinterpret_cast<const char*>(wave.data()), wave.size());
+    }
+    EXPECT_THROW(initVideo(makeVideoSettings(input.string())), std::runtime_error);
+}
+
+// An existing directory forces replacement to fail and tests destructor cleanup
+TEST_F(WatermarkTest, OutputReplacementFailurePreservesTheDestinationAndCleansTemporaryFiles) {
+    const fs::path destination = tempDir / "existing-directory.mp4";
+    fs::create_directory(destination);
+    {
+        std::ofstream file(destination / "sentinel");
+        file << "keep";
+    }
+    {
+        OutputFile file;
+        file.prepare(destination.string());
+        {
+            std::ofstream temporary(video_utils::pathFromUtf8(file.path()));
+            temporary << "new output";
+        }
+        EXPECT_THROW(file.commit(), std::system_error);
+        EXPECT_TRUE(fs::exists(destination / "sentinel"));
+    }
+    EXPECT_EQ(std::distance(fs::directory_iterator(tempDir), fs::directory_iterator{}), 1);
+}
+
+// MP4 faststart must finish reopening the temporary file before it is published
+TEST_F(WatermarkTest, ReplacesExistingMp4OnlyAfterFaststartFinalization) {
+    const auto input = tempDir / "input.mkv";
+    const auto output = tempDir / "existing.mp4";
+    writeUniformVideo(input, false, AVCOL_TRC_BT709);
+    {
+        std::ofstream sentinel(output);
+        sentinel << "old destination";
+    }
+    auto settings = makeVideoSettings(input.string());
+    settings.encodeOptions = "-c:v libx264 -preset ultrafast -movflags +faststart";
+    settings.encodeOutputPath = output.string();
+    auto video = initVideo(settings);
+    ASSERT_EQ(embedVideo(video.get()), 1);
+    video.reset();
+    EXPECT_NEAR(firstVideoLuma(output).first, 128, 1);
+    EXPECT_EQ(std::distance(fs::directory_iterator(tempDir), fs::directory_iterator{}), 2);
+}
+
+// Equivalent HDR samples should produce matching SDR output at both input depths
+TEST_F(WatermarkTest, ToneMapsBothEightAndTenBitPqAndHlg) {
+    for (const auto transfer : {AVCOL_TRC_SMPTE2084, AVCOL_TRC_ARIB_STD_B67}) {
+        std::array<int, 2> luma{};
+        for (const bool deep : {false, true}) {
+            const auto input = tempDir / std::format("hdr-{}-{}.mkv", static_cast<int>(transfer), deep);
+            const auto output = tempDir / std::format("sdr-{}-{}.mkv", static_cast<int>(transfer), deep);
+            writeUniformVideo(input, deep, transfer);
+            auto settings = makeVideoSettings(input.string());
+            settings.encodeOptions = "-c:v ffv1";
+            settings.encodeOutputPath = output.string();
+            auto video = initVideo(settings);
+            ASSERT_EQ(embedVideo(video.get()), 1);
+            video.reset();
+            const auto [sample, tag] = firstVideoLuma(output);
+            EXPECT_EQ(tag, AVCOL_TRC_BT709);
+            luma[deep ? 1 : 0] = sample;
+        }
+        EXPECT_NE(luma[0], 128) << "HDR samples require an actual conversion before SDR tagging";
+        EXPECT_NEAR(luma[0], luma[1], 1) << "transfer " << static_cast<int>(transfer);
+    }
+}
+
+// Synthetic packets test muxer buffering; their payloads do not need to be decodable
+TEST(VideoMuxTest, EmptyAudioStreamDoesNotRetainTheWholeVideo) {
+    using namespace video_utils;
+    auto input = std::unique_ptr<AVFormatContext, decltype(&avformat_free_context)>(avformat_alloc_context(), avformat_free_context);
+    ASSERT_NE(input, nullptr);
+    auto* audio = avformat_new_stream(input.get(), nullptr);
+    ASSERT_NE(audio, nullptr);
+    audio->codecpar->codec_type = AVMEDIA_TYPE_AUDIO;
+    audio->codecpar->codec_id = AV_CODEC_ID_PCM_S16LE;
+    audio->codecpar->sample_rate = 8000;
+    audio->codecpar->bits_per_coded_sample = 16;
+    av_channel_layout_default(&audio->codecpar->ch_layout, 1);
+    audio->time_base = {1, 8000};
+    AVFormatContext* rawOutput = nullptr;
+    ASSERT_EQ(avformat_alloc_output_context2(&rawOutput, nullptr, "matroska", nullptr), 0);
+    auto output = std::unique_ptr<AVFormatContext, decltype(&avformat_free_context)>(rawOutput, avformat_free_context);
+    auto* video = avformat_new_stream(output.get(), nullptr);
+    ASSERT_NE(video, nullptr);
+    video->time_base = {1, 1000};
+    video->codecpar->codec_type = AVMEDIA_TYPE_VIDEO;
+    video->codecpar->codec_id = AV_CODEC_ID_MPEG4;
+    video->codecpar->width = video->codecpar->height = 16;
+    AuxiliaryMux mux;
+    AuxiliaryMuxSetup setup;
+    setup.input = input.get();
+    setup.output = output.get();
+    setup.outputPath = "test.mkv";
+    const int64_t defaultInterleaveDelta = output->max_interleave_delta;
+    std::string error;
+    ASSERT_TRUE(mux.configure(setup, error)) << error;
+    EXPECT_EQ(output->max_interleave_delta, defaultInterleaveDelta);
+    ASSERT_GT(output->max_interleave_delta, 0);
+    ASSERT_EQ(avio_open_dyn_buf(&output->pb), 0);
+    ASSERT_GE(avformat_write_header(output.get(), nullptr), 0);
+    avio_flush(output->pb);
+    const auto headerBytes = avio_tell(output->pb);
+    AVPacketPtr packet(av_packet_alloc());
+    ASSERT_NE(packet, nullptr);
+    for (int i = 0; i < 120; ++i) {
+        ASSERT_EQ(av_new_packet(packet.get(), 100000), 0);
+        std::memset(packet->data, 0, packet->size);
+        packet->stream_index = video->index;
+        packet->pts = packet->dts = i * 1000;
+        packet->duration = 1000;
+        packet->flags = AV_PKT_FLAG_KEY;
+        ASSERT_GE(av_interleaved_write_frame(output.get(), packet.get()), 0);
+    }
+    avio_flush(output->pb);
+    // Most packets should be written before the trailer, even with the default limit
+    EXPECT_GT(avio_tell(output->pb) - headerBytes, 10000000);
+    EXPECT_GE(av_write_trailer(output.get()), 0);
+    uint8_t* bytes = nullptr;
+    avio_close_dyn_buf(output->pb, &bytes);
+    av_free(bytes);
+    output->pb = nullptr;
+}
+
 TEST_F(WatermarkTest, RejectsAnEncoderThatDisagreesWithTheSelectedBackend) {
     VideoSettings settings = makeVideoSettings(shortVideo.string());
     settings.useHwEncoder = false;
@@ -1300,7 +1761,7 @@ TEST_F(WatermarkTest, RejectsAnEncodeOptionsStringWithoutAnEncoder) {
     EXPECT_THROW(embedVideo(session.get()), std::runtime_error);
 }
 
-// encode option parsing
+// Repair invalid DTS values without changing timestamps that are already valid
 TEST(VideoTimestampTest, RepairsOnlyInvalidDecodeTimestamps) {
     int64_t lastDts = AV_NOPTS_VALUE;
     AVPacket packet{};
@@ -1415,6 +1876,7 @@ TEST(VideoMuxTest, ConvertsTextSubtitlesAndDropsEventsItCannotConvert) {
     EXPECT_FALSE(error.empty());
 }
 
+// Encoder option parsing keeps codec options separate from pipeline-owned settings
 TEST(EncodeOptionsTest, ExtractsTheEncoderAndForwardsTheRest) {
     const video_utils::ParsedEncodeOptions parsed = video_utils::parseEncodeOptions("-c:v libx265 -preset fast -crf 23");
     EXPECT_EQ(parsed.codecName, "libx265");
@@ -1435,6 +1897,12 @@ TEST(EncodeOptionsTest, IgnoresOptionsThePipelineOwns) {
     EXPECT_EQ(dictValue(parsed, "pix_fmt"), "") << "pixel format is chosen by the pipeline, not the user";
     EXPECT_EQ(dictValue(parsed, "map"), "");
     EXPECT_FALSE(parsed.ignored.empty());
+}
+
+TEST(EncodeOptionsTest, CannotDisableTheMuxInterleaveLimit) {
+    const auto parsed = video_utils::parseEncodeOptions("-c:v libx264 -max_interleave_delta 0");
+    EXPECT_EQ(dictValue(parsed, "max_interleave_delta"), "");
+    EXPECT_EQ(parsed.ignored, std::vector<std::string>{"-max_interleave_delta"});
 }
 
 TEST(EncodeOptionsTest, FlagsColourOptionsThatClashWithTheSourceMetadata) {

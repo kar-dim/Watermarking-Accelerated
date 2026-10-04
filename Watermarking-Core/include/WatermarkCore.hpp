@@ -46,6 +46,7 @@ using ImageHandle = std::unique_ptr<ImageSession, ImageSessionDeleter>;
 using PreloadedHandle = std::unique_ptr<PreloadedImage, PreloadedImageDeleter>;
 using ExportHandle = std::unique_ptr<ExportedImage, ExportedImageDeleter>;
 
+// OpenCL device switches require releasing all live image/session/export buffers first
 // environment and params functions
 bool initializeEnvironment(const int deviceIndex = 0);
 void updateSessionParams(ImageSession* session, const int p, const float psnr);
@@ -79,7 +80,7 @@ ExportHandle createReusableExportBuffer();
 void exportForSave(ImageSession* session, ExportedImage* reusableBuffer);
 void flushToDiskAsync(ExportedImage* handle, const std::string& outPath);
 SessionPixelData getSessionPixelData(const ImageSession* session);
-// size and channels (1 or 3) of the session output, for the display buffer of copySessionPreview
+// size and channels (1, 3 or 4 with preserved alpha) of the embedded output for copySessionPreview
 PreviewFormat getSessionPreviewFormat(const ImageSession* session);
 // copy the session output into a row-major interleaved display buffer (rows start every bytesPerLine, the padding is not touched)
 void copySessionPreview(const ImageSession* session, uint8_t* destination, size_t bytesPerLine);

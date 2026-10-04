@@ -1,5 +1,6 @@
 #pragma once
 #include "opencl_init.h"
+#include "CheckedSize.hpp"
 #include <cstddef>
 #include <mutex>
 #include <stdexcept>
@@ -43,7 +44,7 @@ class OclMemPool {
     void setCapacity(const size_t vramBytes) { maxPoolBytes = static_cast<size_t>(vramBytes * 0.95); }
 
     cl_mem acquire(const size_t bytes, cl_context ctx) {
-        const size_t rounded = roundUpPow2(bytes);
+        const size_t rounded = InternalUtils::checkedPowerOfTwo(bytes);
         std::lock_guard lock(mtx);
         auto it = memList.find(rounded);
         if (it != memList.end()) {
@@ -59,17 +60,19 @@ class OclMemPool {
         return m;
     }
 
-    void release(const size_t bytes, cl_mem m) {
+    void release(const size_t bytes, cl_mem m) noexcept {
         if (!m)
             return;
         const size_t rounded = roundUpPow2(bytes);
         std::lock_guard lock(mtx);
-        if (maxPoolBytes > 0 && pooledBytes + rounded > maxPoolBytes) {
+        if (maxPoolBytes > 0 && (rounded > maxPoolBytes || pooledBytes > maxPoolBytes - rounded)) {
             clReleaseMemObject(m);
             return;
         }
-        pooledBytes += rounded;
-        memList.emplace(rounded, m);
+        try {
+            memList.emplace(rounded, m);
+            pooledBytes += rounded;
+        } catch (...) { clReleaseMemObject(m); }
     }
 
     void reset() {

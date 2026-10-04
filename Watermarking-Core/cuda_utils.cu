@@ -1,4 +1,4 @@
-﻿#include "cuda_utils.hpp"
+#include "cuda_utils.hpp"
 #include "kernels/kernels.cuh"
 #include <algorithm>
 #include <array>
@@ -6,6 +6,10 @@
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
 
+/*!
+ *  \brief  CUDA kernel launch wrappers for image conversions, watermark generation, and reductions
+ *  \author Dimitris Karatzas
+ */
 namespace cuda_utils {
 
 // convert NV12 UV plane to YUV420p format

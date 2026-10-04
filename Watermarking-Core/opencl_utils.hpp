@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
@@ -68,7 +69,10 @@ struct OpenCLKernelCache {
     static cl::Program getProgram() {
         static std::unordered_map<int, cl::Program> programs;
         static uint32_t cachedGeneration = 0;
+        static std::mutex mutex;
+        std::lock_guard lock(mutex);
         auto& mgr = OclQueueManager::getInstance();
+        auto contextLock = mgr.lockContext();
         const uint32_t currentGen = mgr.getContextGeneration();
         if (cachedGeneration != currentGen) {
             programs.clear();
@@ -88,7 +92,10 @@ struct DeviceProgramCache {
     static cl::Program getProgram() {
         static std::unordered_map<int, cl::Program> programs;
         static uint32_t cachedGeneration = 0;
+        static std::mutex mutex;
+        std::lock_guard lock(mutex);
         auto& mgr = OclQueueManager::getInstance();
+        auto contextLock = mgr.lockContext();
         const uint32_t currentGen = mgr.getContextGeneration();
         if (cachedGeneration != currentGen) {
             programs.clear();

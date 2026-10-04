@@ -1,6 +1,7 @@
 #pragma once
 
 #include "buffer.hpp"
+#include "CheckedSize.hpp"
 #include <cmath>
 #include <string>
 #include <utility>
@@ -24,7 +25,7 @@ class WatermarkBase {
   public:
     // "watermark": the rows x cols watermark of the password, from generateWatermark (or from an object of the same size)
     WatermarkBase(const int rows, const int cols, WatermarkBuffer watermark, const float psnr)
-        : baseRows(rows), baseCols(cols), totalPixels(baseRows * baseCols), randomMatrix(std::move(watermark)), strengthFactor(computeStrengthFactor(psnr)),
+        : baseRows(rows), baseCols(cols), totalPixels(InternalUtils::checkedElements(rows, cols)), randomMatrix(std::move(watermark)), strengthFactor(computeStrengthFactor(psnr)),
           strengthNumerator(strengthFactor * std::sqrt(static_cast<float>(totalPixels))) {}
 
     // delete copy and move operations we don't wannt them

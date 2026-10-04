@@ -1,6 +1,10 @@
 #pragma once
 #include <string>
 
+/*!
+ *  \brief  OpenCL kernel source for deterministic IEEE 754 half-precision float conversions
+ *  \author Dimitris Karatzas
+ */
 // OpenCL float -> half rounding, the same bits as HalfFloat::fromFloat on the host and __float2half_rn in CUDA
 // (half -> float with vload_half is exact and stays as is), because some drivers are bugged on the vstore_half_rte
 inline const std::string halfKernels = R"CLC(

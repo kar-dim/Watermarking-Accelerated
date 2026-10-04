@@ -1,4 +1,5 @@
 #pragma once
+#include "CheckedSize.hpp"
 #if defined(_USE_CUDA_)
 #include "CudaCheck.hpp"
 #include <cuda_runtime.h>
@@ -17,12 +18,13 @@ template <typename T>
 class HostMemory {
   public:
     HostMemory(const size_t size) {
+        [[maybe_unused]] const size_t bytes = InternalUtils::checkedProduct(size, sizeof(T));
 #if defined(_USE_CUDA_)
-        CUDA_CHECK(cudaHostAlloc(&ptr, size * sizeof(T), cudaHostAllocDefault));
+        CUDA_CHECK(cudaHostAlloc(&ptr, bytes, cudaHostAllocDefault));
 #elif defined(_USE_OPENCL_)
         queue = OclQueueManager::getInstance().getQueue();
-        pinnedBuffer = cl::Buffer(OclQueueManager::getInstance().getContext(), CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR, size * sizeof(T));
-        ptr = static_cast<T*>(queue.enqueueMapBuffer(pinnedBuffer, CL_TRUE, CL_MAP_READ | CL_MAP_WRITE, 0, size * sizeof(T)));
+        pinnedBuffer = cl::Buffer(OclQueueManager::getInstance().getContext(), CL_MEM_READ_WRITE | CL_MEM_ALLOC_HOST_PTR, bytes);
+        ptr = static_cast<T*>(queue.enqueueMapBuffer(pinnedBuffer, CL_TRUE, CL_MAP_READ | CL_MAP_WRITE, 0, bytes));
 #elif defined(_USE_EIGEN_)
         pinnedBuffer = std::make_unique<T[]>(size);
         ptr = pinnedBuffer.get();

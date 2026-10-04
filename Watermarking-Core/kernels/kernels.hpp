@@ -1,6 +1,11 @@
 #pragma once
 #include <string>
-// OpenCL kernels for ME prediction system, prediction errors, and watermark embedding
+
+/*!
+ *  \brief  OpenCL kernel source code for ME prediction, shift matrix assembly, and watermark embedding
+ *  \author Dimitris Karatzas
+ */
+
 inline const std::string kernels = R"CLC(
 
 #define PAD                 (WINDOW_SIZE / 2)

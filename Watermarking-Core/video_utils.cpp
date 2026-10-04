@@ -70,12 +70,18 @@ extern "C" {
 #include "libavutil/pixfmt.h"
 #include "libavutil/rational.h"
 #include "libavutil/hwcontext.h"
+#include "libavutil/imgutils.h"
 #include "libavcodec/defs.h"
 }
 
 #if defined(_USE_EIGEN_)
 using namespace Eigen;
 #endif
+
+/*!
+ *  \brief  Video decode, encode, filter graph, HW acceleration, and frame processing pipelines
+ *  \author Dimitris Karatzas
+ */
 
 using namespace CommonUtils;
 using namespace WatermarkCore;
@@ -400,6 +406,10 @@ AVCodecContextPtr openDecoderHWAccel(const AVCodecParameters* inputCodecParams, 
         cout << info(std::format("NVDEC output format '{}' unsupported, falling back to software decoder (CPU).\n", av_get_pix_fmt_name(ctx->sw_pix_fmt) ? av_get_pix_fmt_name(ctx->sw_pix_fmt) : "?"));
         return openSoftwareDecoder(inputCodecParams, pktTimebase);
     }
+    if (isHDR(ctx.get()) && ctx->sw_pix_fmt == AV_PIX_FMT_NV12) {
+        cout << info("8-bit HDR requires software tone mapping, falling back to software decoder (CPU).\n");
+        return openSoftwareDecoder(inputCodecParams, pktTimebase);
+    }
     useHwDecoder = true;
     return ctx;
 }
@@ -412,10 +422,11 @@ AVCodecContextPtr openDecoderHWAccel(const AVCodecParameters* inputCodecParams, 
 // HDR + NVDEC -> "" (tonemapped by custom CUDA kernels in embedWatermarkHWAccel)
 // HDR + SW decoder -> zscale+tonemap (CPU tonemap)
 string getFilterGraphString(const VideoSession* s) {
-    if (!is10bit(s->inputDecoderCtx.get(), s->videoStream))
-        return ""; // 8-bit SDR, no filtering (save processing time)
-    if (!isHDR(s->inputDecoderCtx.get()))
+    if (!isHDR(s->inputDecoderCtx.get())) {
+        if (!is10bit(s->inputDecoderCtx.get(), s->videoStream))
+            return "";
         return s->useHwDecoder ? "scale_cuda=format=nv12" : "format=yuv420p"; // 10-bit SDR, fast conversion to 8-bit
+    }
     // NVDEC + HDR: conversion is done by CUDA kernels, no filter graph needed
     if (s->useHwDecoder)
         return "";
@@ -872,6 +883,13 @@ int processFrames(VideoSession* s, const bool needsFilter, Func&& processFrameAr
             checkError(frameFormat != s->decodedFormat, pixelFormatChangeMessage(s->decodedFormat, frameFormat));
             if (needsFilter)
                 filterFrame(frame, filteredFrame, s);
+            int minimumStrides[4]{};
+            checkAv(av_image_fill_linesizes(minimumStrides, decodedPixelFormat(frame.get()), frame->width), "Invalid video plane layout");
+            for (int plane = 0; plane < 4; ++plane)
+                if (minimumStrides[plane] > 0) {
+                    checkError(!frame->data[plane], "Missing decoded video plane");
+                    InternalUtils::checkVideoPitch(plane == 0 ? frame->height : frame->height / 2, minimumStrides[plane], frame->linesize[plane]);
+                }
             processFrame(frame.get(), framesCount);
         }
     };
@@ -1085,7 +1103,7 @@ void initOutputEncoder(VideoSession* s) {
 
     const AVCodec* encoder = avcodec_find_encoder_by_name(codecName.c_str());
     if (!encoder)
-        throw std::runtime_error("Encoder not found: '" + codecName + "' (check encode_codec_options / hw_encode_options in settings.ini)");
+        throw std::runtime_error("Encoder not found: '" + codecName + "' (check the video encoder options)");
 
     // backend and codec must agree: hw_encode_options must name a hardware encoder, encode_codec_options a software one
     const bool encIsHw = (encoder->capabilities & AV_CODEC_CAP_HARDWARE) != 0;
@@ -1206,12 +1224,14 @@ void initOutputEncoder(VideoSession* s) {
     const bool auxConfigured = s->auxMux.configure(auxSetup, auxError);
     checkError(!auxConfigured, auxError);
 
-    // open the output file and write the container header
-    if (!(s->outputFormatCtx->oformat->flags & AVFMT_NOFILE)) {
-        checkAv(avio_open(&s->outputFormatCtx->pb, s->settings.encodeOutputPath.c_str(), AVIO_FLAG_WRITE), "Failed to open output file: " + s->settings.encodeOutputPath);
-        s->outputFileCreated = true;
-    }
-    s->outputFormatCtx->max_interleave_delta = 0;
+    checkError((s->outputFormatCtx->oformat->flags & AVFMT_NOFILE) != 0, "Video output requires a single-file container");
+    s->outputFile.prepare(s->settings.encodeOutputPath);
+    const std::string temporaryPath = s->outputFile.path();
+    // muxers such as MP4 faststart reopen url during finalization. They must reopen the temporary file
+    av_freep(&s->outputFormatCtx->url);
+    s->outputFormatCtx->url = av_strdup(temporaryPath.c_str());
+    checkError(!s->outputFormatCtx->url, "Failed to allocate temporary output URL");
+    checkAv(avio_open(&s->outputFormatCtx->pb, temporaryPath.c_str(), AVIO_FLAG_WRITE), "Failed to open temporary output file");
 
     // leftover unconsumed options (like -movflags +faststart) go to the container muxer
     const int headerRet = avformat_write_header(s->outputFormatCtx.get(), opts.ptr());
@@ -1241,17 +1261,14 @@ void flushAndFinalize(VideoSession* s) {
         s->heldPacket->duration = std::max(s->heldPacket->duration, s->presentationEnd - decodeEnd);
     }
     writeHeldPacket(s);
-    checkAv(av_write_trailer(s->outputFormatCtx.get()), "Failed to write container trailer (output file may be truncated)");
+    checkAv(av_write_trailer(s->outputFormatCtx.get()), "Failed to finalize encoded video");
     closeOutputFile(s);
+    s->outputFile.commit();
 }
 
 void discardOutput(VideoSession* s) noexcept {
-    if (!s->outputFileCreated)
-        return;
     s->outputFormatCtx.reset(); // closes the file
-    s->outputFileCreated = false;
-    std::error_code ignored;
-    std::filesystem::remove(pathFromUtf8(s->settings.encodeOutputPath), ignored);
+    s->outputFile.discard();
 }
 
 } // namespace video_utils

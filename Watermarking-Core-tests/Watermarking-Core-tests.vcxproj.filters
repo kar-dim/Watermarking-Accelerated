@@ -7,10 +7,18 @@
     <Filter Include="Header Files">
       <UniqueIdentifier>{9855bb82-b175-49d5-afbc-fe8d411d0cdf}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Scripts">
+      <UniqueIdentifier>{824f9476-515a-4fb4-8149-76655aa6985e}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="CommonFixture.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="CliRegression.ps1">
+      <Filter>Scripts</Filter>
+    </None>
   </ItemGroup>
 </Project>

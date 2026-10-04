@@ -13,6 +13,11 @@
 #include <utility>
 #include <vector>
 
+/*!
+ *  \brief  Implementation of GPU-accelerated JPEG encoding and decoding using nvJPEG
+ *  \author Dimitris Karatzas
+ */
+
 namespace {
 template <auto Destroy>
 struct Destroyer {
@@ -253,6 +258,7 @@ std::optional<CudaArray<uint8_t>> nvjpeg_utils::decode(const uint8_t* jpeg, cons
     // not supported, those will fallback to CImg
     if ((components != 1 && components != 3) || precision != 8)
         return std::nullopt;
+    InternalUtils::checkImageDimensions(height, width);
     const int rows = static_cast<int>(height);
     const int cols = static_cast<int>(width);
     const int channels = static_cast<int>(components);

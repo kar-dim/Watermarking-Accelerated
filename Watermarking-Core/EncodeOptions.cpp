@@ -12,6 +12,11 @@ extern "C" {
 #include "libavutil/dict.h"
 }
 
+/*!
+ *  \brief  Parsing and sanitization of FFmpeg encoder options and codec tags
+ *  \author Dimitris Karatzas
+ */
+
 namespace video_utils {
 namespace {
 
@@ -88,7 +93,7 @@ ParsedEncodeOptions parseEncodeOptions(const std::string& text) {
         const std::string key = splitSpecifier(tokens[index].substr(1), specifier);
         const bool hasValue = index + 1 < tokens.size() && isOptionValue(tokens[index + 1]);
         const size_t step = hasValue ? 2 : 1;
-        if (key == "map" || (specifier != 0 && specifier != 'v') || key == "pix_fmt" || key == "pixel_format") {
+        if (key == "map" || (specifier != 0 && specifier != 'v') || key == "pix_fmt" || key == "pixel_format" || key == "max_interleave_delta") {
             result.ignored.push_back(tokens[index]);
             index += step;
             continue;
@@ -135,7 +140,7 @@ void reportParsedOptions(const ParsedEncodeOptions& parsed, const MediaLog& log)
             joined += (joined.empty() ? "" : " ") + token;
         log("encode: option(s) '" + joined + "' " + std::string(why));
     };
-    report(parsed.ignored, "ignored, application handles audio/subtitles and pixel format directly");
+    report(parsed.ignored, "ignored, application handles stream mapping and pixel format and preserves the default interleave limit");
     report(parsed.valueless, "dropped, no value follows");
     report(parsed.overrides, "overrides color/aspect tags taken from source, output may be mislabelled");
 }

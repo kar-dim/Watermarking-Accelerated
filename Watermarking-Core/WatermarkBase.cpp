@@ -15,6 +15,11 @@
 #include <Eigen/Core>
 #endif
 
+/*!
+ *  \brief  WatermarkBase implementation for watermark buffer generation and PSNR math
+ *  \author Dimitris Karatzas
+ */
+
 WatermarkBuffer WatermarkBase::generateWatermark(const std::string& watermarkPassword, const int rows, const int cols) {
     const int64_t numElements = static_cast<int64_t>(rows) * cols;
     // the ChaCha20 start state (the SHA-256 key of the password), the block counter is set per block

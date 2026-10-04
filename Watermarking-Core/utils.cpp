@@ -1,37 +1,42 @@
 #include "buffer.hpp"
+#include "CheckedSize.hpp"
 #include "cimg_init.h"
 #include "common_utils.hpp"
 #include "ImageFileBuffer.hpp"
 #include "TinyEXIF.h"
 #include "utils.hpp"
 #include <algorithm>
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
-#include <cstring>
 #include <fstream>
-#include <memory>
-#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
+#if defined(_USE_GPU_)
+#include <cstring>
+#endif
+
 #if defined(_USE_OPENCL_)
-#include "OclQueueManager.hpp"
 #include "OclArray.hpp"
+#include "OclQueueManager.hpp"
 #include "opencl_utils.hpp"
-#include <cctype>
 #elif defined(_USE_CUDA_)
-#include "CudaStreamManager.hpp"
+#include "cuda_utils.hpp"
 #include "CudaArray.hpp"
 #include "CudaCheck.hpp"
-#include "cuda_utils.hpp"
+#include "CudaStreamManager.hpp"
 #include "nvjpeg_utils.hpp"
-#include <cctype>
 #elif defined(_USE_EIGEN_)
-#include <cctype>
 #include "eigen_utils.hpp"
 #endif
+
+/*!
+ *  \brief  Image I/O, format conversion, EXIF parsing, and buffer manipulation helper functions
+ *  \author Dimitris Karatzas
+ */
 
 using std::string;
 using namespace CommonUtils;
@@ -90,6 +95,8 @@ Gray8BufferIO loadImage8(const string& imageFile) {
     checkError(bitsPerValue > 8, "Unsupported image: " + std::to_string(bitsPerValue) + " bits per sample, only 8-bit images are supported");
     // JPEG has no alpha: 4 components are CMYK, which CImg returns unconverted (K would be taken as the alpha channel)
     checkError(fileType == "jpg" && image.spectrum() == 4, "Unsupported image: CMYK JPEG, only grayscale and RGB JPEG images are supported");
+    InternalUtils::checkImageDimensions(image.height(), image.width());
+    InternalUtils::checkedElements(image.height(), image.width(), image.spectrum());
     return image;
 }
 

@@ -1,5 +1,6 @@
 #pragma once
 #include <cuda_runtime.h>
+#include "CheckedSize.hpp"
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -42,7 +43,7 @@ class CudaMemPool {
     void setCapacity(const size_t vramBytes) { maxPoolBytes = static_cast<size_t>(vramBytes * 0.95); }
 
     void* acquire(const size_t bytes, cudaStream_t stream) {
-        const size_t rounded = roundUpPow2(bytes);
+        const size_t rounded = InternalUtils::checkedPowerOfTwo(bytes);
         std::lock_guard lock(mtx);
         auto it = memList.find(rounded);
         if (it != memList.end()) {
@@ -58,17 +59,19 @@ class CudaMemPool {
         return ptr;
     }
 
-    void release(const size_t bytes, void* ptr, cudaStream_t stream) {
+    void release(const size_t bytes, void* ptr, cudaStream_t stream) noexcept {
         if (!ptr)
             return;
         const size_t rounded = roundUpPow2(bytes);
         std::lock_guard lock(mtx);
-        if (maxPoolBytes > 0 && pooledBytes + rounded > maxPoolBytes) {
+        if (maxPoolBytes > 0 && (rounded > maxPoolBytes || pooledBytes > maxPoolBytes - rounded)) {
             cudaFreeAsync(ptr, stream);
             return;
         }
-        pooledBytes += rounded;
-        memList.emplace(rounded, ptr);
+        try {
+            memList.emplace(rounded, ptr);
+            pooledBytes += rounded;
+        } catch (...) { cudaFreeAsync(ptr, stream); }
     }
 
     void reset(cudaStream_t stream) {

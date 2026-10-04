@@ -42,7 +42,7 @@ The trick: the sum for neighbors ```a``` and ```b``` only depends on how far apa
 # Run the pre-built binaries
 
 Get the latest binaries [here](https://github.com/kar-dim/Watermarking-Accelerated/releases) for Eigen, OpenCL or CUDA platform. The binaries contain:
-- The CLI (command line) application and a sample config file (settings.ini).
+- The CLI (command line) application.
 - The embedded CUDA/OpenCL/Eigen implementations of the watermarking algorithms.
 - The Qt application for single-image watermarking, image batches, and backend benchmarking.
 - Some sample image and video files
@@ -67,35 +67,46 @@ $$\text{Score} = C \cdot \sqrt{\text{FPS}_{\text{embed}} \cdot \text{FPS}_{\text
 
 To build with ```AVX-512```, pass ```-p:WatermarkingSimd=AVX512``` to MSBuild (for example ```msbuild Watermarking-Thesis.sln -p:Configuration=EIGEN_Release -p:Platform=x64 -p:WatermarkingSimd=AVX512```). The output goes to separate folders (```x64\EIGEN_Release_AVX512\```), next to the AVX2 build. The AVX-512 build only runs on CPUs with AVX-512 and the gains are small, AVX2 stays the default.
 
-The CLI application can be parameterized from the corresponding ```settings.ini``` file or with command-line arguments. Command-line values override the INI file, use the INI key as the option name (for example, ```--p 5```, ```--psnr=42```, or ```--gpu_device_id 1```). Because both image and video settings contain ```mode``` and ```path```, those options must include their section: ```--image.mode single```, ```--image.path samples/images/720p.png```, ```--video.mode detect```, etc. Run ```Watermarking-CLI.exe --help``` for the complete list. Here is a detailed explanation for each parameter:
+The CLI accepts command-line options only. Values can use `--key value` or `--key=value`, for example `--p 5`, `--psnr=42`, or `--gpu_device_id 1`. The duplicated `mode` and `path` names must include their group: `--image.mode`, `--image.path`, `--video.mode`, and `--video.path`. Other options also accept a group prefix, such as `--global.p` or `--compute.gpu_device_id`. Run `Watermarking-CLI.exe --help`, or run without arguments, for the complete list and defaults.
 
-For a one-shot image embed: `Watermarking-CLI.exe --image.mode single --image.path samples/images/720p.png --output_path 720p_watermarked.png --no-pause`. For the repeated benchmark instead: `Watermarking-CLI.exe --bench --benchmark_loops 100`.
+Image and video operations require an explicit `--watermark_password`. The defaults are `p=3`, PSNR 40 dB, and image mode `single`, supply the input and destination paths for an image embed:
 
-| Parameter                         | Description                                                                                                                 |
-|-----------------------------------|-----------------------------------------------------------------------------------------------------------------------------               |
-| \[image\]/mode                    | ```[single, batch_embed, batch_detect]```: `single` embeds ME once into `[image]/path`, writes `[image]/output_path`, and reports embed time. Batch modes embed or detect all images under the directory in `[image]/path`, embedding writes to its `watermark_output` subdirectory. |
-| \[image\]/path                    | Path to the input image (or directory for batched operations) to embed/detect watermark. This will set the sample application to ```image mode``` |
-| \[image\]/output_path             | Required output filename for `single` mode. The input image cannot be overwritten. |
-| watermark_password                | The watermark password. Used to generate a deterministic and secure (as much as possible) watermark. |
-| display_fps                       | ```[true/false]```: Set to true to display execution times in FPS. Else, it will display execution time in seconds.                            |
-| p                                 | Window size for masking algorithms. All implementations support values of ```p=3,5,7``` and ```9```. Images and video frames must be at least ```p x p``` pixels. |
-| psnr                              | PSNR (Peak Signal-to-Noise Ratio). Higher values correspond to less watermark in the image, reducing noise, but making detection harder.   |
-| benchmark_loops                   | Positive iteration count for `--bench` only. The default is 100 on Eigen and 1000 on GPU backends. |
-| gpu_device_id                     | ```[CUDA/OpenCL / Number]```: Selects a GPU by its zero-based index. An invalid index falls back to 0. The previous ```opencl_device_id``` key remains accepted for older settings files and scripts. |
+```powershell
+Watermarking-CLI.exe --image.path samples/images/720p.png --output_path 720p_watermarked.png --watermark_password "your-password"
+```
 
+For the repeated benchmark, use `Watermarking-CLI.exe --bench --benchmark_loops 100`. Benchmarks use a fixed password unless `--watermark_password` is supplied. CLI commands exit without an interactive pause, `--no-pause` remains accepted for existing scripts.
 
-**Video-only settings:**
+| Option | Description |
+|---|---|
+| `--image.mode` | `single` (default), `batch_embed`, or `batch_detect`. Single mode embeds ME once and saves to `--output_path`. Batch modes process images in `--image.path`, embedding writes to its `watermark_output` subdirectory. |
+| `--image.path` | Input image, or input directory for batch mode. |
+| `--output_path` | Required destination filename for single mode. The input image cannot be overwritten. |
+| `--watermark_password` | Password used to generate the deterministic watermark. Required for image/video operations. |
+| `--display_fps` | Show video execution times as FPS (`true`, default) or seconds (`false`). |
+| `--p` | Prediction window size: 3 (default), 5, 7, or 9. Images and frames must be at least `p x p` pixels. |
+| `--psnr` | Positive, finite embed PSNR in dB (default: 40). Higher values reduce watermark strength and can make detection harder. |
+| `--benchmark_loops` | Positive measured iteration count for `--bench` only. Defaults to 100 on Eigen and 1000 on GPU backends. |
+| `--gpu_device_id` | Zero-based CUDA/OpenCL GPU index (default: 0). An invalid index falls back to 0. `--opencl_device_id` remains accepted as a legacy alias. |
 
-| Parameter                         | Description                                                                                                                 |
-|-----------------------------------|-----------------------------------------------------------------------------------------------------------------------------                |
-| mode                              | ```[embed/detect]```: Sets the video mode. Both options read the ```[video]/path``` as input video and either embed the watermark (re-encoding the output via libav) or try to detect the watermark.
-| \[video\]/path                    | Path to the video file, if we want to embed or detect the watermark for a video. This will set the sample application to ```video mode``` and will read the video-only settings that are described in this section plus the common settings (```watermark_password```, ```display_fps```, ```p```, ```psnr``` and ```gpu_device_id```) |
-| watermark_interval                | ```[Number]```: Embed or try to detect the watermark every ```watermark_interval``` frames. If set to 1 when embedding, the watermark will be embedded for all frames, which degrades video quality. If the current frame is not divisible by this parameter, then for embedding the frame is passed to the encoder as-is (no watermark), and for detection the frame is decoded and skipped. |
-| cuda_hw_decoder                   | ```[true/false]``` (CUDA only): Offload decoding to the GPU using **NVDEC**. When set to ```true```, the application automatically detects the input video's codec and selects the appropriate hardware decoder (```hevc_cuvid```, ```h264_cuvid```, ```av1_cuvid```, etc.). If NVDEC cannot open the stream or is unsupported, the application will automatically fall back to CPU decoding.|
-| cuda_hw_encoder                   | ```[true/false]```: Offload encoding to the GPU using **NVENC**. This makes more sense when combined with **NVDEC** but it is not necessary. If set, then the encoder options of ```encode_codec_options``` settings are ignored, and valid nvenc codec options must be provided in the ```hw_encode_options``` section. This works even for Eigen/OpenCL builds, assuming a compatible NVIDIA GPU exists, but incurs transparent Host/Device transfers reducing slightly its effectiveness (in CUDA build it is zero copy if used alongside **NVDEC**). |
-| encode_output_path                | Set this value to a file path, in order to embed watermark on the video from ```[video]/path``` parameter and save the watermarked file to disk. This will set the sample application to ```video embedding mode```. If you want to detect the watermark from the ```video``` parameter then comment this line, effectively setting the sample application to ```video detect mode```. |
-| encode_codec_options              | Encoder options passed directly to the libav encoder. Configures the codec and its quality settings. Example: ```-c:v libx265 -preset fast -crf 23```.|
-| hw_encode_options                 | These are FFmpeg options for encoding with NVENC. Only used when `cuda_hw_encoder` is `true` and overwrites the ```encode_codec_options``` option. Example: ```-c:v hevc_nvenc -preset p6 -tune hq -cq 26 -b:v 0``` is the NVENC equivalent to the sample used for CPU encoder. NOTE: Encoding and decoding as separate, we can decode with CPU and encode with NVENC (and vice versa), and of course we can do both!
+**Video-only options:**
+
+Providing `--video.path` selects video processing. For example, to detect a watermark:
+
+```powershell
+Watermarking-CLI.exe --video.path samples/videos/sample_1080p.mkv --video.mode detect --watermark_password "your-password"
+```
+
+| Option | Description |
+|---|---|
+| `--video.mode` | `embed` (default) or `detect`. Both modes read `--video.path`: embedding re-encodes the watermarked video. |
+| `--video.path` | Input video filename. Uses the common password, p, PSNR, timing, and device options above. |
+| `--watermark_interval` | Embed or detect every Nth frame (N >= 1, default: 1). Other frames pass unchanged to the encoder when embedding, or are skipped when detecting. |
+| `--cuda_hw_decoder` | Use NVDEC with CPU fallback (`true`, default: CUDA only). The codec is selected from the input stream automatically. |
+| `--cuda_hw_encoder` | Use NVENC (`false` by default). Available on all backends with a compatible NVIDIA GPU. Uses `--hw_encode_options` instead of `--encode_codec_options`, Eigen/OpenCL incur host/device transfers. |
+| `--encode_output_path` | Required destination filename for video embedding. Use `--video.mode detect` to detect without writing a video. |
+| `--encode_codec_options` | Software encoder and quality options. Default: `-c:v libx265 -preset fast -crf 23`. Quote the whole value when passing it on the command line. |
+| `--hw_encode_options` | NVENC encoder and quality options, used only when `--cuda_hw_encoder true`. Default: `-c:v hevc_nvenc -preset p6 -tune hq -cq 26 -b:v 0`. Quote the whole value. Encoding and decoding can independently use hardware acceleration. |
 
 # Video Encoding Pipeline
 
@@ -116,7 +127,6 @@ ffmpeg -y -f rawvideo
   <encoder_options>
   -c:s copy -c:a copy
   -map 1:s? -map 0:v -map 1:a?
-  -max_interleave_delta 0
   <output_file>
 ```
 
@@ -126,7 +136,7 @@ ffmpeg -y -f rawvideo
 - `<encoder_options>`: **USER SUPPLIED** codec, preset, and quality flags from ```encode_codec_options``` (or ```hw_encode_options``` when NVENC is enabled).
 - `-c:s copy -c:a copy`: Audio and subtitle streams copied without re-encoding.
 - `-map 1:s? -map 0:v -map 1:a?`: Video from the watermarked stream, audio/subtitles from the original input.
-- `-max_interleave_delta 0`: Avoids interleaving delay issues in the output container.
+- Muxing uses FFmpeg's default interleave limit (10 seconds, `max_interleave_delta` ffmpeg option), keeping buffering finite for empty or sparse auxiliary streams. Encoder options cannot override this limit.
 - `<output_file>`: **USER SUPPLIED** — destination path set via ```encode_output_path```.
 
 **NOTE:** 10-bit video is supported: 10-bit SDR is converted to 8-bit before watermarking (`format=yuv420p` on the CPU decoder, `scale_cuda=format=nv12` on NVDEC), so each sample loses precision (10 to 8 bits). HDR 10-bit is tonemapped with the Mobius algorithm to SDR. If CPU decoder is used, then we use the FFmpeg's `tonemap=mobius` filter. For Hardware-accelerated decoder (NVDEC) a custom Mobius kernel pipeline is implemented, because currently it is impossible to do the tonemapping by FFmpeg provided filters. Encoding output is always 8-bit SDR.
@@ -182,7 +192,6 @@ We bundle all necessary DLLs with the prebuilt binaries so the application runs 
 - [Eigen](https://eigen.tuxfamily.org/index.php?title=Main_Page): A C++ template library for linear algebra.
 - [FFmpeg](https://www.ffmpeg.org/): A complete, cross-platform solution to record, convert and stream audio and video.
 - [CImg](https://cimg.eu/): A C++ library for image processing.
-- [inih](https://github.com/jtilly/inih): A lightweight C++ library for parsing .ini configuration files.
 - [cub](https://github.com/NVIDIA/cccl): A lower-level CUDA library designed for speed-of-light parallel algorithms. Used for device-wide, block-wide, and warp-wide reductions.
 - [nvJPEG](https://developer.nvidia.com/nvjpeg): NVIDIA's high-performance GPU-accelerated library for decoding, encoding and transcoding JPEG format images (CUDA only).
 - [Intel VTune Profiler](https://www.intel.com/content/www/us/en/develop/tools/vtune-profiler.html) and [AMD uProf](https://developer.amd.com/amd-uprof/): Used to profile CPU performance.
@@ -206,7 +215,7 @@ The CLI benchmark sweep can be reproduced automatically from the repository root
 python benchmark.py --run
 ```
 
-This runs the CUDA and OpenCL Release CLIs with 1000 loops per measurement and the Eigen/CPU Release CLI with 100 loops. Pass `--loops N` to `benchmark.py --run` to set the same positive loop count for all three backends. Each CLI's ```--bench``` mode benchmarks ME embedding and detection for p=3,5,7,9 using the 480p, 720p, 1080p, and 4K sample images. Raw results are written to ```readme_pictures/cuda.csv```, ```readme_pictures/opencl.csv```, and ```readme_pictures/eigen.csv```, after which figures 1–4 are regenerated. To redraw the figures without rerunning the benchmarks, use ```python benchmark.py --figures```. A GPU can be selected with ```--cuda-device-id N``` and ```--opencl-device-id N``` when using ```--run``` (separate options because CUDA and OpenCL number the devices differently, OpenCL also lists integrated GPUs and CPUs).
+This runs the CUDA and OpenCL Release CLIs with 1000 loops per measurement and the Eigen/CPU Release CLI with 100 loops. Pass `--loops N` to `benchmark.py --run` to set the same positive loop count for all three backends. Each CLI's ```--bench``` mode benchmarks ME embedding and detection for p=3,5,7,9 using the 480p, 720p, 1080p, and 4K sample images. Raw results are written to ```readme_pictures/cuda.csv```, ```readme_pictures/opencl.csv```, and ```readme_pictures/eigen.csv```, after which figures 1–4 are regenerated. To redraw the figures without rerunning the benchmarks, use ```python benchmark.py --figures```. A GPU can be selected with ```--cuda-device-id N``` and ```--opencl-device-id N``` when using ```--run``` (separate options because CUDA and OpenCL number the devices differently, OpenCL also lists integrated GPUs and enumerates GPU devices only).
 
 p = 3            |  p = 5
 :-------------------------:|:-------------------------:

@@ -7,5 +7,10 @@
 #define cimg_use_tiff
 #include <CImg.h>
 #include <cstdint>
+
+/*!
+ *  \brief  CImg configuration, codec flags, and Gray8BufferIO image type alias
+ *  \author Dimitris Karatzas
+ */
 // the 8-bit image of the loaders and savers (planar, row-major)
 using Gray8BufferIO = cimg_library::CImg<uint8_t>;

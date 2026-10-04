@@ -1,5 +1,10 @@
 #pragma once
 #include <cstdint>
+
+/*!
+ *  \brief  Type aliases and buffer definitions for CUDA, OpenCL, and Eigen backends
+ *  \author Dimitris Karatzas
+ */
 #if defined(_USE_CUDA_)
 #include "CudaArray.hpp"
 #include <cuda_fp16.h>

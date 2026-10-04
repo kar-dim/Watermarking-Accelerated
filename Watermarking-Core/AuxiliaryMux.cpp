@@ -25,6 +25,10 @@ extern "C" {
 #include "libavutil/mem.h"
 }
 
+/*!
+ *  \brief  Implementation of container auxiliary streams multiplexing (audio, subtitles, attachments)
+ *  \author Dimitris Karatzas
+ */
 namespace video_utils {
 namespace {
 
@@ -173,7 +177,6 @@ bool AuxiliaryMux::configure(const AuxiliaryMuxSetup& setup, std::string& error)
         error = "Could not allocate the output chapter table.";
         return false;
     }
-    output_->max_interleave_delta = 0;
     return true;
 }
 

@@ -166,6 +166,12 @@
     <ClInclude Include="HostMemory.hpp">
       <Filter>Header Files\util</Filter>
     </ClInclude>
+    <ClInclude Include="CheckedSize.hpp">
+      <Filter>Header Files\util</Filter>
+    </ClInclude>
+    <ClInclude Include="OutputFile.hpp">
+      <Filter>Header Files\util</Filter>
+    </ClInclude>
     <ClInclude Include="video_defines.hpp">
       <Filter>Header Files\util</Filter>
     </ClInclude>

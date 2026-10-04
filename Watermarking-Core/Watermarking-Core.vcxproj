@@ -419,6 +419,8 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='CUDA_Debug|x64'">true</ExcludedFromBuild>
     </ClInclude>
     <ClInclude Include="HostMemory.hpp" />
+    <ClInclude Include="CheckedSize.hpp" />
+    <ClInclude Include="OutputFile.hpp" />
     <ClInclude Include="ImageFileBuffer.hpp" />
     <ClInclude Include="ImageEigenOutputBuffer.hpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='CUDA_Debug|x64'">true</ExcludedFromBuild>

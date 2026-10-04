@@ -1,6 +1,10 @@
 #pragma once
 #include <string>
 
+/*!
+ *  \brief  OpenCL kernel source for ChaCha20 PRNG and Box-Muller Gaussian watermark generation
+ *  \author Dimitris Karatzas
+ */
 // The OpenCL watermark generation. For bit-exactness we use fma(), correctly rounded sqrt and FP_CONTRACT OFF
 inline const std::string generationKernels = R"CLC(
 #pragma OPENCL FP_CONTRACT OFF

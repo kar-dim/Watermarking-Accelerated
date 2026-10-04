@@ -1,5 +1,6 @@
 #pragma once
 #include "CudaStreamManager.hpp"
+#include "CheckedSize.hpp"
 #include <cuda_runtime.h>
 
 /*!
@@ -54,12 +55,24 @@ class CudaArray {
 
     CudaArray(const int rows, const int cols, const T* hostData, cudaStream_t stream) : rows(rows), cols(cols), stream(stream) {
         alloc();
-        CUDA_CHECK(cudaMemcpyAsync(ptr_, hostData, bytes(), cudaMemcpyHostToDevice, stream));
+        try {
+            if (ptr_)
+                CUDA_CHECK(cudaMemcpyAsync(ptr_, hostData, bytes(), cudaMemcpyHostToDevice, stream));
+        } catch (...) {
+            freeArray();
+            throw;
+        }
     }
 
     CudaArray(const int rows, const int cols, const int channels, const T* hostData, cudaStream_t stream) : rows(rows), cols(cols), channels(channels), stream(stream) {
         alloc();
-        CUDA_CHECK(cudaMemcpyAsync(ptr_, hostData, bytes(), cudaMemcpyHostToDevice, stream));
+        try {
+            if (ptr_)
+                CUDA_CHECK(cudaMemcpyAsync(ptr_, hostData, bytes(), cudaMemcpyHostToDevice, stream));
+        } catch (...) {
+            freeArray();
+            throw;
+        }
     }
 
     ~CudaArray() { freeArray(); }
@@ -97,8 +110,8 @@ class CudaArray {
     int getCols() const { return cols; }
     int getChannels() const { return channels; }
     int getDeviceIndex() const { return deviceIndex; }
-    int size() const { return rows * cols * channels; }
-    size_t bytes() const { return static_cast<size_t>(size()) * sizeof(T); }
+    int size() const { return InternalUtils::checkedElements(rows, cols, channels); }
+    size_t bytes() const { return InternalUtils::checkedProduct(static_cast<size_t>(size()), sizeof(T)); }
     bool empty() const { return ptr_ == nullptr; }
     cudaStream_t getStream() const { return stream; }
 
@@ -134,6 +147,9 @@ class CudaArray {
 
     // if the destination needs a pitch, we can use cudaMemcpy2DAsync to copy the data row by row, with the specified pitch for the destination
     void toHostPitched(T* dst, const int rowElements, const size_t dstPitchBytes) const {
+        if (rowElements <= 0 || size() % rowElements != 0 || dstPitchBytes < InternalUtils::checkedProduct(static_cast<size_t>(rowElements), sizeof(T)))
+            throw std::invalid_argument("Invalid pitched buffer layout");
+        InternalUtils::checkedProduct(dstPitchBytes, static_cast<size_t>(size() / rowElements));
         if (ptr_) {
             const size_t rowBytes = static_cast<size_t>(rowElements) * sizeof(T);
             CUDA_CHECK(selectOwnDevice());
