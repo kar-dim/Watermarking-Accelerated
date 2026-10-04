@@ -165,6 +165,9 @@ void BenchmarkWorker::run() {
                     prefetchTask = std::async(std::launch::async, preloadImageFromDisk, validFiles[i + 1].string(), selectedDevice, false);
                 // lazily initialize the watermark session based on the current image dimensions
                 bindPreloadedImage(session.get(), std::move(currentImage));
+                // the prefetch shares the device stream/queue and the CPU cores with the timed work, it must finish before measuring
+                if (prefetchTask.valid())
+                    prefetchTask.wait();
 
                 // for all combinations
                 for (int p : pValues) {
