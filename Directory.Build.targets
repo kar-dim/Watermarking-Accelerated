@@ -16,6 +16,22 @@
   </Target>
 
   <ItemGroup Condition="'$(ConfigurationType)' == 'Application'">
+    <WatermarkingLicenseFile Include="$(WatermarkingRoot)LICENSES\README.md" />
+    <WatermarkingLicenseFile Include="$(WatermarkingRoot)LICENSES\Common\**\*">
+      <LicenseSubdirectory>Common\%(RecursiveDir)</LicenseSubdirectory>
+    </WatermarkingLicenseFile>
+    <WatermarkingLicenseFile Include="$(WatermarkingRoot)LICENSES\Qt\**\*" Exclude="$(WatermarkingRoot)LICENSES\Qt\MESA_LICENSE.txt" Condition="'$(MSBuildProjectName)' == 'Watermarking-UI'">
+      <LicenseSubdirectory>Qt\%(RecursiveDir)</LicenseSubdirectory>
+    </WatermarkingLicenseFile>
+    <WatermarkingLicenseFile Include="$(WatermarkingRoot)LICENSES\Eigen\**\*" Condition="$(Configuration.StartsWith('EIGEN_'))">
+      <LicenseSubdirectory>Eigen\%(RecursiveDir)</LicenseSubdirectory>
+    </WatermarkingLicenseFile>
+    <WatermarkingLicenseFile Include="$(WatermarkingRoot)LICENSES\OpenCL\**\*" Condition="$(Configuration.StartsWith('OPENCL_'))">
+      <LicenseSubdirectory>OpenCL\%(RecursiveDir)</LicenseSubdirectory>
+    </WatermarkingLicenseFile>
+    <WatermarkingLicenseFile Include="$(WatermarkingRoot)LICENSES\CUDA\**\*" Condition="$(Configuration.StartsWith('CUDA_'))">
+      <LicenseSubdirectory>CUDA\%(RecursiveDir)</LicenseSubdirectory>
+    </WatermarkingLicenseFile>
     <WatermarkingRuntimeFile Include="$(WatermarkingCoreDir)libs\ffmpeg\bin\*.dll" />
     <WatermarkingRuntimeFile Include="$(WatermarkingCoreDir)libs\zlib\bin\zlib1.dll" />
     <WatermarkingRuntimeFile Include="$(WatermarkingCoreDir)libs\libjpeg\bin\jpeg62.dll" />
@@ -26,7 +42,8 @@
     <WatermarkingRuntimeFile Include="$(LLVMInstallDir)\x64\bin\libomp.dll" Condition="$(Configuration.StartsWith('EIGEN_')) and Exists('$(LLVMInstallDir)\x64\bin\libomp.dll')" />
     <WatermarkingRuntimeFile Include="$(LLVMInstallDir)\bin\libomp.dll" Condition="$(Configuration.StartsWith('EIGEN_')) and !Exists('$(LLVMInstallDir)\x64\bin\libomp.dll') and Exists('$(LLVMInstallDir)\bin\libomp.dll')" />
     <WatermarkingRuntimeFile Include="$(VCInstallDir)Redist\MSVC\$(VCToolsRedistVersion)\$(WatermarkingCrtSubDir)\*.dll" Condition="Exists('$(VCInstallDir)Redist\MSVC\$(VCToolsRedistVersion)\$(WatermarkingCrtSubDir)')" />
-    <WatermarkingSampleFile Include="$(WatermarkingRoot)samples\**\*" Condition="'$(MSBuildProjectName)' == 'Watermarking-CLI' or '$(MSBuildProjectName)' == 'Watermarking-Core-tests'" />
+    <WatermarkingRuntimeFile Include="$(VCInstallDir)Redist\MSVC\$(VCToolsRedistVersion)\x64\Microsoft.VC$(PlatformToolsetVersion).OpenMP\vcomp140.dll" Condition="!$(Configuration.Contains('Debug')) and !$(Configuration.StartsWith('EIGEN_')) and Exists('$(VCInstallDir)Redist\MSVC\$(VCToolsRedistVersion)\x64\Microsoft.VC$(PlatformToolsetVersion).OpenMP\vcomp140.dll')" />
+    <WatermarkingSampleFile Include="$(WatermarkingRoot)samples\**\*" Exclude="$(WatermarkingRoot)samples\videos\**\*" Condition="'$(MSBuildProjectName)' == 'Watermarking-CLI' or '$(MSBuildProjectName)' == 'Watermarking-Core-tests'" />
   </ItemGroup>
 
   <ItemDefinitionGroup Condition="'$(ConfigurationType)' == 'Application'">
@@ -39,9 +56,13 @@
     <MakeDir Directories="$(WatermarkingRuntimeDestination)" />
     <Copy SourceFiles="@(WatermarkingRuntimeFile)" DestinationFolder="$(WatermarkingRuntimeDestination)" SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(WatermarkingRuntimeFile)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" Condition="'$(WatermarkingRuntimeDestination)' != '$(TargetDir)'" />
+    <Copy SourceFiles="$(WatermarkingRoot)LICENSE" DestinationFolder="$(WatermarkingRuntimeDestination)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(WatermarkingRoot)THIRD_PARTY_NOTICES.md" DestinationFolder="$(WatermarkingRuntimeDestination)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(WatermarkingLicenseFile)" DestinationFiles="@(WatermarkingLicenseFile->'$(WatermarkingRuntimeDestination)licenses\%(LicenseSubdirectory)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(WatermarkingSampleFile)"
           DestinationFiles="@(WatermarkingSampleFile->'$(TargetDir)samples\%(RecursiveDir)%(Filename)%(Extension)')"
           SkipUnchangedFiles="true"
           Condition="'@(WatermarkingSampleFile)' != ''" />
+    <Copy SourceFiles="$(WatermarkingRoot)Watermarking-UI\assets\fonts\OFL.txt" DestinationFolder="$(WatermarkingRuntimeDestination)licenses\SofiaSans" SkipUnchangedFiles="true" Condition="'$(MSBuildProjectName)' == 'Watermarking-UI'" />
   </Target>
 </Project>

@@ -1,0 +1,19 @@
+FFmpeg 64-bit shared Windows build from www.gyan.dev
+
+Version: 9.0.2-full_build-www.gyan.dev
+License reported by avcodec_license(): GPL version 3 or later
+Source commit: 946fcce07b
+Source reference: https://github.com/FFmpeg/FFmpeg/commit/946fcce07b
+
+Configuration reported by avcodec_configuration():
+--enable-gpl --enable-version3 --enable-shared --disable-w32threads --disable-autodetect --enable-cairo --enable-fontconfig --enable-iconv --enable-gnutls --enable-lcms2 --enable-libxml2 --enable-gmp --enable-bzlib --enable-lzma --enable-libsnappy --enable-zlib --enable-librist --enable-libsrt --enable-libssh --enable-libzmq --enable-avisynth --enable-libbluray --enable-libcaca --enable-libdvdnav --enable-libdvdread --enable-sdl2 --enable-libaribb24 --enable-libaribcaption --enable-libdav1d --enable-libdavs2 --enable-libopenjpeg --enable-libquirc --enable-libuavs3d --enable-libxevd --enable-libzvbi --enable-liboapv --enable-libqrencode --enable-librav1e --enable-libsvtav1 --enable-libvvenc --enable-libwebp --enable-libx264 --enable-libx265 --enable-libxavs2 --enable-libxeve --enable-libxvid --enable-libaom --enable-libjxl --enable-libsvtjpegxs --enable-libvpx --enable-mediafoundation --enable-libass --enable-frei0r --enable-libfreetype --enable-libfribidi --enable-libharfbuzz --enable-liblensfun --enable-libvidstab --enable-libvmaf --enable-libzimg --enable-amf --enable-cuda-llvm --enable-cuvid --enable-dxva2 --enable-d3d11va --enable-d3d12va --enable-ffnvcodec --enable-libvpl --enable-nvdec --enable-nvenc --enable-vaapi --enable-vulkan --enable-libplacebo --enable-opencl --enable-libcdio --enable-openal --enable-libgme --enable-libmodplug --enable-libopenmpt --enable-libopencore-amrwb --enable-libmp3lame --enable-libshine --enable-libtheora --enable-libtwolame --enable-libvo-amrwbenc --enable-libcodec2 --enable-libilbc --enable-libgsm --enable-liblc3 --enable-libopencore-amrnb --enable-libopus --enable-libspeex --enable-libvorbis --enable-ladspa --enable-libbs2b --enable-libflite --enable-libmysofa --enable-librubberband --enable-libsoxr --enable-chromaprint --enable-whisper
+
+Vendored DLL SHA-256 hashes:
+avcodec-63.dll  4d458a276fda363709ed2ac4ad14aea122c536e61919feebd919d5f8490be7a9
+avfilter-12.dll  4ec6eb2db944740c364d93b29d91c9137beb38d09e923f6ed14f31aa039851de
+avformat-63.dll  360e66109b2ce3f02d56cd940e625a6909304eea1f4d0fcbbbb2d40d74308ee0
+avutil-61.dll  9230e42b6b8e1fa20ec83af1eb4c4b2ae90b0c8d7c29093369250eed562372df
+swresample-7.dll  1f2a0bdca315f1a05fe398e7a0d97db8d0e34ba2a86ec59303bf32bbd9430123
+swscale-10.dll  af91db7f45644157469a110438a8c648314927ec83e334d4cacac3870d99fabe
+
+Redistribution requires exact matching FFmpeg/dependency source, patches, build scripts and all embedded component notices. See ../README.md.

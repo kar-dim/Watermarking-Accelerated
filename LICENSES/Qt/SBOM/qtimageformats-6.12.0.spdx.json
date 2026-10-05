@@ -1,0 +1,3577 @@
+{
+    "SPDXID": "SPDXRef-DOCUMENT",
+    "creationInfo": {
+        "created": "2026-09-26T10:15:47Z",
+        "creators": [
+            "Organization: TheQtCompany",
+            "Tool: Qt Build System"
+        ],
+        "comment": "This SPDX document was created from CMake 4.3.2, using the qt\nbuild system from https://code.qt.io/cgit/qt/qtbase.git/tree/cmake/QtPublicSbomHelpers.cmake"
+    },
+    "dataLicense": "CC0-1.0",
+    "externalDocumentRefs": [
+        {
+            "externalDocumentId": "DocumentRef-qtbase-b62004158ac8",
+            "spdxDocument": "https://qt.io/spdxdocs/qtbase-025bdad1+HEAD-host-windows-amd64-target-windows-msvc-amd64-97ddb606-d9f5-503b-b79b-0ebcf28f512d",
+            "checksum": {
+                "algorithm": "SHA1",
+                "checksumValue": "67748ea9db6631ff0b7e8aec411de67d02355b43"
+            }
+        }
+    ],
+    "hasExtractedLicensingInfos": [
+        {
+            "extractedText": "Licensees holding valid commercial Qt licenses may use this software in\naccordance with the the terms contained in a written agreement between\nyou and The Qt Company. Alternatively, the terms and conditions that were\naccepted by the licensee when buying and/or downloading the\nsoftware do apply.\n\nFor the latest licensing terms and conditions, see https://www.qt.io/terms-conditions.\nFor further information use the contact form at https://www.qt.io/contact-us.\n",
+            "licenseId": "LicenseRef-Qt-Commercial"
+        }
+    ],
+    "name": "qtimageformats-6.12.0",
+    "spdxVersion": "SPDX-2.3",
+    "documentNamespace": "https://qt.io/spdxdocs/qtimageformats-6.12.0-host-windows-amd64-target-windows-msvc-amd64-44b69923-eafd-560f-b15e-fdaac83ccd54",
+    "packages": [
+        {
+            "SPDXID": "SPDXRef-Package-qtimageformats-c78f33b066dc",
+            "builtDate": "2026-09-26T10:15:47Z",
+            "comment": "Built by CMake 4.3.2 with RelWithDebInfo;Debug configuration for Windows (AMD64)\nqtimageformats was configured with:\n    qt-configure-module <sources>/qtimageformats -- -DFFMPEG_DIR=C:\\FFmpeg-n9.0.1\\build\\msvc\\installed -DQT_DEPLOY_FFMPEG=TRUE -DFEATURE_clangcpp=OFF -DINPUT_headersclean=ON -DCMAKE_MAKE_PROGRAM=C:\\Utils\\Ninja\\ninja.exe -DQT_INSTALL_CONFIG_INFO_FILES=ON -DQT_GENERATE_SBOM=ON -DQT_GENERATE_SOURCE_SBOM=ON -DQT_SBOM_VERIFY_SPDX_V2=ON -DQT_SBOM_REQUIRE_GENERATE_SPDX_V2_JSON=ON -DQT_SBOM_REQUIRE_VERIFY_SPDX_V2=ON -DQT_SBOM_VERIFY_CYDX_V1_6=ON -DQT_SBOM_REQUIRE_GENERATE_CYDX_V1_6=ON -DQT_SBOM_REQUIRE_VERIFY_CYDX_V1_6=ON -DQT_SBOM_PYTHON_INTERP=C:\\Python310_64\\python.exe -DQT_SBOM_PYTHON_APPS_PATH=C:\\Python310_64\\Scripts -DQT_LINT_SOURCE_SBOM=ON -DQT_INTERNAL_SBOM_DEFAULT_CHECKS=ON -DQT_INTERNAL_SBOM_AUDIT=ON -DQT_INTERNAL_SBOM_AUDIT_NO_ERROR=ON -DQT_BUILD_TESTS=OFF -DCMAKE_AUTOGEN_VERBOSE=ON -DCMAKE_MESSAGE_LOG_LEVEL=STATUS -DCMAKE_C_COMPILER_LAUNCHER=sccache -DCMAKE_CXX_COMPILER_LAUNCHER=sccache -DBUILD_WITH_PCH=OFF\n",
+            "copyrightText": "Copyright (C) The Qt Company Ltd. and other contributors.",
+            "downloadLocation": "git://code.qt.io/qt/qtimageformats.git",
+            "externalRefs": [
+                {
+                    "referenceCategory": "SECURITY",
+                    "referenceLocator": "cpe:2.3:a:qt:qtimageformats:6.12.0:*:*:*:*:*:*:*",
+                    "referenceType": "cpe23Type"
+                },
+                {
+                    "referenceCategory": "PACKAGE_MANAGER",
+                    "referenceLocator": "pkg:generic/TheQtCompany/qtimageformats@6.12.0",
+                    "referenceType": "purl"
+                }
+            ],
+            "filesAnalyzed": false,
+            "homepage": "https://qt.io",
+            "licenseConcluded": "NOASSERTION",
+            "licenseDeclared": "NOASSERTION",
+            "name": "qtimageformats",
+            "supplier": "Organization: TheQtCompany",
+            "versionInfo": "6.12.0"
+        },
+        {
+            "SPDXID": "SPDXRef-Package-qtimageformats-qt-plugin-QTgaPlugin-c78f33b066dc",
+            "comment": "\nCMake target name: QTgaPlugin\n",
+            "copyrightText": "Copyright (C) The Qt Company Ltd. and other contributors.",
+            "downloadLocation": "git://code.qt.io/qt/qtimageformats.git",
+            "externalRefs": [
+                {
+                    "referenceCategory": "PACKAGE_MANAGER",
+                    "referenceLocator": "pkg:github/qt/qtimageformats?library_name=QTgaPlugin#src/plugins/imageformats/tga",
+                    "referenceType": "purl"
+                },
+                {
+                    "referenceCategory": "PACKAGE_MANAGER",
+                    "referenceLocator": "pkg:generic/TheQtCompany/qtimageformats-QTgaPlugin?vcs_url=https://code.qt.io/qt/qtimageformats.git&library_name=QTgaPlugin#src/plugins/imageformats/tga",
+                    "referenceType": "purl"
+                },
+                {
+                    "referenceCategory": "SECURITY",
+                    "referenceLocator": "cpe:2.3:a:qt:qt:6.12.0:*:*:*:*:*:*:*",
+                    "referenceType": "cpe23Type"
+                },
+                {
+                    "referenceCategory": "SECURITY",
+                    "referenceLocator": "cpe:2.3:a:qt:qtimageformats:6.12.0:*:*:*:*:*:*:*",
+                    "referenceType": "cpe23Type"
+                }
+            ],
+            "filesAnalyzed": true,
+            "licenseConcluded": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "licenseDeclared": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "name": "QTgaPlugin",
+            "packageVerificationCode": {
+                "packageVerificationCodeValue": "b53f869d0b80134dfc132a09b18a46d91f004d0d"
+            },
+            "primaryPackagePurpose": "LIBRARY",
+            "supplier": "Organization: TheQtCompany",
+            "versionInfo": "6.12.0"
+        },
+        {
+            "SPDXID": "SPDXRef-Package-qtimageformats-qt-plugin-QWbmpPlugin-c78f33b066dc",
+            "comment": "\nCMake target name: QWbmpPlugin\n",
+            "copyrightText": "Copyright (C) The Qt Company Ltd. and other contributors.",
+            "downloadLocation": "git://code.qt.io/qt/qtimageformats.git",
+            "externalRefs": [
+                {
+                    "referenceCategory": "PACKAGE_MANAGER",
+                    "referenceLocator": "pkg:github/qt/qtimageformats?library_name=QWbmpPlugin#src/plugins/imageformats/wbmp",
+                    "referenceType": "purl"
+                },
+                {
+                    "referenceCategory": "PACKAGE_MANAGER",
+                    "referenceLocator": "pkg:generic/TheQtCompany/qtimageformats-QWbmpPlugin?vcs_url=https://code.qt.io/qt/qtimageformats.git&library_name=QWbmpPlugin#src/plugins/imageformats/wbmp",
+                    "referenceType": "purl"
+                },
+                {
+                    "referenceCategory": "SECURITY",
+                    "referenceLocator": "cpe:2.3:a:qt:qt:6.12.0:*:*:*:*:*:*:*",
+                    "referenceType": "cpe23Type"
+                },
+                {
+                    "referenceCategory": "SECURITY",
+                    "referenceLocator": "cpe:2.3:a:qt:qtimageformats:6.12.0:*:*:*:*:*:*:*",
+                    "referenceType": "cpe23Type"
+                }
+            ],
+            "filesAnalyzed": true,
+            "licenseConcluded": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "licenseDeclared": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "name": "QWbmpPlugin",
+            "packageVerificationCode": {
+                "packageVerificationCodeValue": "e26ef462c5d3d5df0bdeae69e317af4a353af8ec"
+            },
+            "primaryPackagePurpose": "LIBRARY",
+            "supplier": "Organization: TheQtCompany",
+            "versionInfo": "6.12.0"
+        },
+        {
+            "SPDXID": "SPDXRef-Package-qtimageformats-qt-3rdparty-sources-QTiffPlugin-Attribution-libtiff-c78f33b066dc",
+            "comment": "\nCMake target name: QTiffPlugin_Attribution_libtiff\n    Information extracted from:\n     /src_dir/qtimageformats/src/3rdparty/libtiff/qt_attribution.json\n    Entry index: 0\n    Id: libtiff\n    Name: TIFF Software Distribution (libtiff)\n    Qt usage: Used in the qtiff image plugin if no system libtiff is found.\n    License: libtiff License\n    License file: COPYRIGHT\n",
+            "copyrightText": "Copyright (c) 1988-1997 Sam Leffler\nCopyright (c) 1991-1997 Silicon Graphics, Inc.",
+            "downloadLocation": "https://download.osgeo.org/libtiff/tiff-4.7.2.tar.gz",
+            "externalRefs": [
+                {
+                    "referenceCategory": "PACKAGE_MANAGER",
+                    "referenceLocator": "pkg:gitlab/libtiff/libtiff@v4.7.2",
+                    "referenceType": "purl"
+                },
+                {
+                    "referenceCategory": "PACKAGE_MANAGER",
+                    "referenceLocator": "pkg:github/qt/qtimageformats?library_name=QTiffPlugin_Attribution_libtiff",
+                    "referenceType": "purl"
+                },
+                {
+                    "referenceCategory": "PACKAGE_MANAGER",
+                    "referenceLocator": "pkg:generic/TheQtCompany/qtimageformats-QTiffPlugin_Attribution_libtiff?vcs_url=https://code.qt.io/qt/qtimageformats.git&library_name=QTiffPlugin_Attribution_libtiff",
+                    "referenceType": "purl"
+                },
+                {
+                    "referenceCategory": "SECURITY",
+                    "referenceLocator": "cpe:2.3:a:libtiff:libtiff:4.7.2:*:*:*:*:*:*:*",
+                    "referenceType": "cpe23Type"
+                }
+            ],
+            "filesAnalyzed": false,
+            "licenseConcluded": "libtiff",
+            "licenseDeclared": "NOASSERTION",
+            "name": "QTiffPlugin_Attribution_libtiff",
+            "primaryPackagePurpose": "LIBRARY",
+            "supplier": "Organization: TheQtCompany",
+            "versionInfo": "4.7.2"
+        },
+        {
+            "SPDXID": "SPDXRef-Package-qtimageformats-qt-plugin-QTiffPlugin-c78f33b066dc",
+            "comment": "\nCMake target name: QTiffPlugin\n",
+            "copyrightText": "Copyright (C) The Qt Company Ltd. and other contributors.",
+            "downloadLocation": "git://code.qt.io/qt/qtimageformats.git",
+            "externalRefs": [
+                {
+                    "referenceCategory": "PACKAGE_MANAGER",
+                    "referenceLocator": "pkg:github/qt/qtimageformats?library_name=QTiffPlugin#src/plugins/imageformats/tiff",
+                    "referenceType": "purl"
+                },
+                {
+                    "referenceCategory": "PACKAGE_MANAGER",
+                    "referenceLocator": "pkg:generic/TheQtCompany/qtimageformats-QTiffPlugin?vcs_url=https://code.qt.io/qt/qtimageformats.git&library_name=QTiffPlugin#src/plugins/imageformats/tiff",
+                    "referenceType": "purl"
+                },
+                {
+                    "referenceCategory": "SECURITY",
+                    "referenceLocator": "cpe:2.3:a:qt:qt:6.12.0:*:*:*:*:*:*:*",
+                    "referenceType": "cpe23Type"
+                },
+                {
+                    "referenceCategory": "SECURITY",
+                    "referenceLocator": "cpe:2.3:a:qt:qtimageformats:6.12.0:*:*:*:*:*:*:*",
+                    "referenceType": "cpe23Type"
+                }
+            ],
+            "filesAnalyzed": true,
+            "licenseConcluded": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "licenseDeclared": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "name": "QTiffPlugin",
+            "packageVerificationCode": {
+                "packageVerificationCodeValue": "eff19029e9b43bf0eadf9717dcb35c3a50e5e88f"
+            },
+            "primaryPackagePurpose": "LIBRARY",
+            "supplier": "Organization: TheQtCompany",
+            "versionInfo": "6.12.0"
+        },
+        {
+            "SPDXID": "SPDXRef-Package-qtimageformats-qt-3rdparty-sources-QWebpPlugin-Attribution-libwebp-c78f33b066dc",
+            "comment": "\nCMake target name: QWebpPlugin_Attribution_libwebp\n    Information extracted from:\n     /src_dir/qtimageformats/src/3rdparty/libwebp/qt_attribution.json\n    Entry index: 0\n    Id: libwebp\n    Name: WebP (libwebp)\n    Description: WebP is a new image format that provides lossless and lossy compression for images on the web.\n    Qt usage: Used in the qwebp image plugin if no system libwebp is found.\n    License: BSD 3-clause \"New\" or \"Revised\" License\n    License file: COPYING\n",
+            "copyrightText": "Copyright (c) 2010, Google Inc. All rights reserved.",
+            "downloadLocation": "https://storage.googleapis.com/downloads.webmproject.org/releases/webp/libwebp-1.6.0.tar.gz",
+            "externalRefs": [
+                {
+                    "referenceCategory": "PACKAGE_MANAGER",
+                    "referenceLocator": "pkg:github/webmproject/libwebp@v1.6.0",
+                    "referenceType": "purl"
+                },
+                {
+                    "referenceCategory": "PACKAGE_MANAGER",
+                    "referenceLocator": "pkg:github/qt/qtimageformats?library_name=QWebpPlugin_Attribution_libwebp",
+                    "referenceType": "purl"
+                },
+                {
+                    "referenceCategory": "PACKAGE_MANAGER",
+                    "referenceLocator": "pkg:generic/TheQtCompany/qtimageformats-QWebpPlugin_Attribution_libwebp?vcs_url=https://code.qt.io/qt/qtimageformats.git&library_name=QWebpPlugin_Attribution_libwebp",
+                    "referenceType": "purl"
+                },
+                {
+                    "referenceCategory": "SECURITY",
+                    "referenceLocator": "cpe:2.3:a:webmproject:libwebp:1.6.0:*:*:*:*:*:*:*",
+                    "referenceType": "cpe23Type"
+                }
+            ],
+            "filesAnalyzed": false,
+            "licenseConcluded": "BSD-3-Clause",
+            "licenseDeclared": "NOASSERTION",
+            "name": "QWebpPlugin_Attribution_libwebp",
+            "primaryPackagePurpose": "LIBRARY",
+            "supplier": "Organization: TheQtCompany",
+            "versionInfo": "1.6.0"
+        },
+        {
+            "SPDXID": "SPDXRef-Package-qtimageformats-qt-plugin-QWebpPlugin-c78f33b066dc",
+            "comment": "\nCMake target name: QWebpPlugin\n",
+            "copyrightText": "Copyright (C) The Qt Company Ltd. and other contributors.",
+            "downloadLocation": "git://code.qt.io/qt/qtimageformats.git",
+            "externalRefs": [
+                {
+                    "referenceCategory": "PACKAGE_MANAGER",
+                    "referenceLocator": "pkg:github/qt/qtimageformats?library_name=QWebpPlugin#src/plugins/imageformats/webp",
+                    "referenceType": "purl"
+                },
+                {
+                    "referenceCategory": "PACKAGE_MANAGER",
+                    "referenceLocator": "pkg:generic/TheQtCompany/qtimageformats-QWebpPlugin?vcs_url=https://code.qt.io/qt/qtimageformats.git&library_name=QWebpPlugin#src/plugins/imageformats/webp",
+                    "referenceType": "purl"
+                },
+                {
+                    "referenceCategory": "SECURITY",
+                    "referenceLocator": "cpe:2.3:a:qt:qt:6.12.0:*:*:*:*:*:*:*",
+                    "referenceType": "cpe23Type"
+                },
+                {
+                    "referenceCategory": "SECURITY",
+                    "referenceLocator": "cpe:2.3:a:qt:qtimageformats:6.12.0:*:*:*:*:*:*:*",
+                    "referenceType": "cpe23Type"
+                }
+            ],
+            "filesAnalyzed": true,
+            "licenseConcluded": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "licenseDeclared": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "name": "QWebpPlugin",
+            "packageVerificationCode": {
+                "packageVerificationCodeValue": "4ff0593fb6f98091467da5540d95a984ebaf5aed"
+            },
+            "primaryPackagePurpose": "LIBRARY",
+            "supplier": "Organization: TheQtCompany",
+            "versionInfo": "6.12.0"
+        },
+        {
+            "SPDXID": "SPDXRef-Package-qtimageformats-qt-plugin-QICNSPlugin-c78f33b066dc",
+            "comment": "\nCMake target name: QICNSPlugin\n",
+            "copyrightText": "Copyright (C) The Qt Company Ltd. and other contributors.",
+            "downloadLocation": "git://code.qt.io/qt/qtimageformats.git",
+            "externalRefs": [
+                {
+                    "referenceCategory": "PACKAGE_MANAGER",
+                    "referenceLocator": "pkg:github/qt/qtimageformats?library_name=QICNSPlugin#src/plugins/imageformats/icns",
+                    "referenceType": "purl"
+                },
+                {
+                    "referenceCategory": "PACKAGE_MANAGER",
+                    "referenceLocator": "pkg:generic/TheQtCompany/qtimageformats-QICNSPlugin?vcs_url=https://code.qt.io/qt/qtimageformats.git&library_name=QICNSPlugin#src/plugins/imageformats/icns",
+                    "referenceType": "purl"
+                },
+                {
+                    "referenceCategory": "SECURITY",
+                    "referenceLocator": "cpe:2.3:a:qt:qt:6.12.0:*:*:*:*:*:*:*",
+                    "referenceType": "cpe23Type"
+                },
+                {
+                    "referenceCategory": "SECURITY",
+                    "referenceLocator": "cpe:2.3:a:qt:qtimageformats:6.12.0:*:*:*:*:*:*:*",
+                    "referenceType": "cpe23Type"
+                }
+            ],
+            "filesAnalyzed": true,
+            "licenseConcluded": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "licenseDeclared": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "name": "QICNSPlugin",
+            "packageVerificationCode": {
+                "packageVerificationCodeValue": "78f56f1db3d8a7e0ef1960a3e9ae24263af8b6d2"
+            },
+            "primaryPackagePurpose": "LIBRARY",
+            "supplier": "Organization: TheQtCompany",
+            "versionInfo": "6.12.0"
+        },
+        {
+            "SPDXID": "SPDXRef-Package-qtimageformats-system-build-tool-CMake-c78f33b066dc",
+            "comment": "\nCMake target name: qtimageformatsSbomBuildToolCMake\n",
+            "copyrightText": "NOASSERTION",
+            "downloadLocation": "NOASSERTION",
+            "filesAnalyzed": false,
+            "licenseConcluded": "NOASSERTION",
+            "licenseDeclared": "NOASSERTION",
+            "name": "CMake",
+            "primaryPackagePurpose": "OTHER",
+            "supplier": "Person: Anonymous",
+            "versionInfo": "4.3.2"
+        },
+        {
+            "SPDXID": "SPDXRef-Package-qtimageformats-system-build-tool-CMake-generator-Ninja-Multi-Config-c78f33b066dc",
+            "comment": "\nCMake target name: qtimageformatsSbomBuildToolCMakeGenerator\n",
+            "copyrightText": "NOASSERTION",
+            "downloadLocation": "NOASSERTION",
+            "filesAnalyzed": false,
+            "licenseConcluded": "NOASSERTION",
+            "licenseDeclared": "NOASSERTION",
+            "name": "CMake generator Ninja Multi-Config",
+            "primaryPackagePurpose": "OTHER",
+            "supplier": "Person: Anonymous",
+            "versionInfo": "1.10.2"
+        },
+        {
+            "SPDXID": "SPDXRef-Package-qtimageformats-system-build-tool-Compiler-MSVC-c78f33b066dc",
+            "comment": "\nCMake target name: qtimageformatsSbomBuildToolCompiler\n",
+            "copyrightText": "NOASSERTION",
+            "downloadLocation": "NOASSERTION",
+            "filesAnalyzed": false,
+            "licenseConcluded": "NOASSERTION",
+            "licenseDeclared": "NOASSERTION",
+            "name": "Compiler MSVC",
+            "primaryPackagePurpose": "OTHER",
+            "summary": "The compiler as identified by CMake, running on 'Windows' (AMD64)",
+            "supplier": "Person: Anonymous",
+            "versionInfo": "19.44.35227.0"
+        },
+        {
+            "SPDXID": "SPDXRef-Package-qtimageformats-system-build-tool-Linker-MSVC-c78f33b066dc",
+            "comment": "\nCMake target name: qtimageformatsSbomBuildToolLinker\n",
+            "copyrightText": "NOASSERTION",
+            "downloadLocation": "NOASSERTION",
+            "filesAnalyzed": false,
+            "licenseConcluded": "NOASSERTION",
+            "licenseDeclared": "NOASSERTION",
+            "name": "Linker MSVC",
+            "primaryPackagePurpose": "OTHER",
+            "supplier": "Person: Anonymous",
+            "versionInfo": "14.44.35227.0"
+        }
+    ],
+    "files": [
+        {
+            "SPDXID": "SPDXRef-PackagedFile-qt-plugin-QTgaPlugin-RelWithDebInfo-c78f33b066dc",
+            "checksums": [
+                {
+                    "algorithm": "SHA1",
+                    "checksumValue": "f5db7b1c20abd22df35e00b3a1a8c6a2f0daf931"
+                }
+            ],
+            "copyrightText": "Copyright (C) The Qt Company Ltd. and other contributors.",
+            "fileName": "./plugins/imageformats/qtga.dll",
+            "fileTypes": [
+                "BINARY"
+            ],
+            "licenseConcluded": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "licenseInfoInFiles": [
+                "NOASSERTION"
+            ]
+        },
+        {
+            "SPDXID": "SPDXRef-PackagedFile-qt-plugin-QTgaPlugin-Debug-c78f33b066dc",
+            "checksums": [
+                {
+                    "algorithm": "SHA1",
+                    "checksumValue": "c53767d5675fda770265d199ce686ecb41acb40d"
+                }
+            ],
+            "copyrightText": "Copyright (C) The Qt Company Ltd. and other contributors.",
+            "fileName": "./plugins/imageformats/qtgad.dll",
+            "fileTypes": [
+                "BINARY"
+            ],
+            "licenseConcluded": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "licenseInfoInFiles": [
+                "NOASSERTION"
+            ]
+        },
+        {
+            "SPDXID": "SPDXRef-PackagedFile-qt-plugin-QWbmpPlugin-RelWithDebInfo-c78f33b066dc",
+            "checksums": [
+                {
+                    "algorithm": "SHA1",
+                    "checksumValue": "a40acfea4bc4fdc7381960f7273ad53f8568abc8"
+                }
+            ],
+            "copyrightText": "Copyright (C) The Qt Company Ltd. and other contributors.",
+            "fileName": "./plugins/imageformats/qwbmp.dll",
+            "fileTypes": [
+                "BINARY"
+            ],
+            "licenseConcluded": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "licenseInfoInFiles": [
+                "NOASSERTION"
+            ]
+        },
+        {
+            "SPDXID": "SPDXRef-PackagedFile-qt-plugin-QWbmpPlugin-Debug-c78f33b066dc",
+            "checksums": [
+                {
+                    "algorithm": "SHA1",
+                    "checksumValue": "1314c4200d600200932d2922db4d240a90cdf4cd"
+                }
+            ],
+            "copyrightText": "Copyright (C) The Qt Company Ltd. and other contributors.",
+            "fileName": "./plugins/imageformats/qwbmpd.dll",
+            "fileTypes": [
+                "BINARY"
+            ],
+            "licenseConcluded": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "licenseInfoInFiles": [
+                "NOASSERTION"
+            ]
+        },
+        {
+            "SPDXID": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "checksums": [
+                {
+                    "algorithm": "SHA1",
+                    "checksumValue": "8df10d1540f2db68234be7525f2cf5d75d9062b2"
+                }
+            ],
+            "copyrightText": "Copyright (C) The Qt Company Ltd. and other contributors.",
+            "fileName": "./plugins/imageformats/qtiff.dll",
+            "fileTypes": [
+                "BINARY"
+            ],
+            "licenseConcluded": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "licenseInfoInFiles": [
+                "NOASSERTION"
+            ]
+        },
+        {
+            "SPDXID": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "checksums": [
+                {
+                    "algorithm": "SHA1",
+                    "checksumValue": "20227acf4d5116d9a0f01f9bdf1930a72f98b424"
+                }
+            ],
+            "copyrightText": "Copyright (C) The Qt Company Ltd. and other contributors.",
+            "fileName": "./plugins/imageformats/qtiffd.dll",
+            "fileTypes": [
+                "BINARY"
+            ],
+            "licenseConcluded": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "licenseInfoInFiles": [
+                "NOASSERTION"
+            ]
+        },
+        {
+            "SPDXID": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "checksums": [
+                {
+                    "algorithm": "SHA1",
+                    "checksumValue": "24726a68ba7dead631d72230c15a68802e1ba0d4"
+                }
+            ],
+            "copyrightText": "Copyright (C) The Qt Company Ltd. and other contributors.",
+            "fileName": "./plugins/imageformats/qwebp.dll",
+            "fileTypes": [
+                "BINARY"
+            ],
+            "licenseConcluded": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "licenseInfoInFiles": [
+                "NOASSERTION"
+            ]
+        },
+        {
+            "SPDXID": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "checksums": [
+                {
+                    "algorithm": "SHA1",
+                    "checksumValue": "aec51b3407f7797907feedfac36c6ced6abbc6f9"
+                }
+            ],
+            "copyrightText": "Copyright (C) The Qt Company Ltd. and other contributors.",
+            "fileName": "./plugins/imageformats/qwebpd.dll",
+            "fileTypes": [
+                "BINARY"
+            ],
+            "licenseConcluded": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "licenseInfoInFiles": [
+                "NOASSERTION"
+            ]
+        },
+        {
+            "SPDXID": "SPDXRef-PackagedFile-qt-plugin-QICNSPlugin-RelWithDebInfo-c78f33b066dc",
+            "checksums": [
+                {
+                    "algorithm": "SHA1",
+                    "checksumValue": "37b66f10c8acd030fc8457faa20165e4f78fc3c6"
+                }
+            ],
+            "copyrightText": "Copyright (C) The Qt Company Ltd. and other contributors.",
+            "fileName": "./plugins/imageformats/qicns.dll",
+            "fileTypes": [
+                "BINARY"
+            ],
+            "licenseConcluded": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "licenseInfoInFiles": [
+                "NOASSERTION"
+            ]
+        },
+        {
+            "SPDXID": "SPDXRef-PackagedFile-qt-plugin-QICNSPlugin-Debug-c78f33b066dc",
+            "checksums": [
+                {
+                    "algorithm": "SHA1",
+                    "checksumValue": "c23dd74c1311906b2ae8992800ede0321a8853aa"
+                }
+            ],
+            "copyrightText": "Copyright (C) The Qt Company Ltd. and other contributors.",
+            "fileName": "./plugins/imageformats/qicnsd.dll",
+            "fileTypes": [
+                "BINARY"
+            ],
+            "licenseConcluded": "LicenseRef-Qt-Commercial OR LGPL-3.0-only OR GPL-2.0-only OR GPL-3.0-only",
+            "licenseInfoInFiles": [
+                "NOASSERTION"
+            ]
+        }
+    ],
+    "relationships": [
+        {
+            "spdxElementId": "SPDXRef-DOCUMENT",
+            "relatedSpdxElement": "SPDXRef-Package-qtimageformats-c78f33b066dc",
+            "relationshipType": "DESCRIBES"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-system-build-tool-CMake-c78f33b066dc",
+            "comment": "SPDXRef-Package-qtimageformats-c78f33b066dc is built using CMake version 4.3.2",
+            "relatedSpdxElement": "SPDXRef-Package-qtimageformats-c78f33b066dc",
+            "relationshipType": "BUILD_DEPENDENCY_OF"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-system-build-tool-CMake-generator-Ninja-Multi-Config-c78f33b066dc",
+            "comment": "SPDXRef-Package-qtimageformats-c78f33b066dc is built using generator CMAKE_GENERATOR: 'Ninja Multi-Config' and CMAKE_MAKE_PROGRAM: 'ninja.exe' version '1.10.2'",
+            "relatedSpdxElement": "SPDXRef-Package-qtimageformats-c78f33b066dc",
+            "relationshipType": "BUILD_DEPENDENCY_OF"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-system-build-tool-Compiler-MSVC-c78f33b066dc",
+            "comment": "SPDXRef-Package-qtimageformats-c78f33b066dc is built by compiler: 'MSVC' version: '19.44.35227.0' frontend variant: 'MSVC'",
+            "relatedSpdxElement": "SPDXRef-Package-qtimageformats-c78f33b066dc",
+            "relationshipType": "BUILD_DEPENDENCY_OF"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-system-build-tool-Linker-MSVC-c78f33b066dc",
+            "comment": "SPDXRef-Package-qtimageformats-c78f33b066dc is built by linker 'MSVC' version '14.44.35227.0' frontend variant: 'MSVC'",
+            "relatedSpdxElement": "SPDXRef-Package-qtimageformats-c78f33b066dc",
+            "relationshipType": "BUILD_DEPENDENCY_OF"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-c78f33b066dc",
+            "relatedSpdxElement": "SPDXRef-Package-qtimageformats-qt-plugin-QTgaPlugin-c78f33b066dc",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-qt-plugin-QTgaPlugin-c78f33b066dc",
+            "relatedSpdxElement": "DocumentRef-qtbase-b62004158ac8:SPDXRef-Package-qtbase-qt-module-Core-b62004158ac8",
+            "relationshipType": "DEPENDS_ON"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-qt-plugin-QTgaPlugin-c78f33b066dc",
+            "relatedSpdxElement": "DocumentRef-qtbase-b62004158ac8:SPDXRef-Package-qtbase-qt-module-Gui-b62004158ac8",
+            "relationshipType": "DEPENDS_ON"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-qt-plugin-QTgaPlugin-c78f33b066dc",
+            "relatedSpdxElement": "DocumentRef-qtbase-b62004158ac8:SPDXRef-Package-qtbase-qt-module-PlatformPluginInternal-b62004158ac8",
+            "relationshipType": "DEPENDS_ON"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-qt-plugin-QTgaPlugin-c78f33b066dc",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-plugin-QTgaPlugin-RelWithDebInfo-c78f33b066dc",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-qt-plugin-QTgaPlugin-c78f33b066dc",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-plugin-QTgaPlugin-RelWithDebInfo-c78f33b066dc",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTgaPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/plugins/imageformats/tga/main.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTgaPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/plugins/imageformats/tga/qtgafile.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTgaPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/plugins/imageformats/tga/qtgafile.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTgaPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/plugins/imageformats/tga/qtgahandler.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTgaPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/plugins/imageformats/tga/qtgahandler.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-qt-plugin-QTgaPlugin-c78f33b066dc",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-plugin-QTgaPlugin-Debug-c78f33b066dc",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-qt-plugin-QTgaPlugin-c78f33b066dc",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-plugin-QTgaPlugin-Debug-c78f33b066dc",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTgaPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/plugins/imageformats/tga/main.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTgaPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/plugins/imageformats/tga/qtgafile.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTgaPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/plugins/imageformats/tga/qtgafile.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTgaPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/plugins/imageformats/tga/qtgahandler.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTgaPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/plugins/imageformats/tga/qtgahandler.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-c78f33b066dc",
+            "relatedSpdxElement": "SPDXRef-Package-qtimageformats-qt-plugin-QWbmpPlugin-c78f33b066dc",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-qt-plugin-QWbmpPlugin-c78f33b066dc",
+            "relatedSpdxElement": "DocumentRef-qtbase-b62004158ac8:SPDXRef-Package-qtbase-qt-module-Core-b62004158ac8",
+            "relationshipType": "DEPENDS_ON"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-qt-plugin-QWbmpPlugin-c78f33b066dc",
+            "relatedSpdxElement": "DocumentRef-qtbase-b62004158ac8:SPDXRef-Package-qtbase-qt-module-Gui-b62004158ac8",
+            "relationshipType": "DEPENDS_ON"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-qt-plugin-QWbmpPlugin-c78f33b066dc",
+            "relatedSpdxElement": "DocumentRef-qtbase-b62004158ac8:SPDXRef-Package-qtbase-qt-module-PlatformPluginInternal-b62004158ac8",
+            "relationshipType": "DEPENDS_ON"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-qt-plugin-QWbmpPlugin-c78f33b066dc",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-plugin-QWbmpPlugin-RelWithDebInfo-c78f33b066dc",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-qt-plugin-QWbmpPlugin-c78f33b066dc",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-plugin-QWbmpPlugin-RelWithDebInfo-c78f33b066dc",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWbmpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/plugins/imageformats/wbmp/main.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWbmpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/plugins/imageformats/wbmp/qwbmphandler.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWbmpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/plugins/imageformats/wbmp/qwbmphandler_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-qt-plugin-QWbmpPlugin-c78f33b066dc",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-plugin-QWbmpPlugin-Debug-c78f33b066dc",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-qt-plugin-QWbmpPlugin-c78f33b066dc",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-plugin-QWbmpPlugin-Debug-c78f33b066dc",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWbmpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/plugins/imageformats/wbmp/main.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWbmpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/plugins/imageformats/wbmp/qwbmphandler.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWbmpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/plugins/imageformats/wbmp/qwbmphandler_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-c78f33b066dc",
+            "relatedSpdxElement": "SPDXRef-Package-qtimageformats-qt-3rdparty-sources-QTiffPlugin-Attribution-libtiff-c78f33b066dc",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-c78f33b066dc",
+            "relatedSpdxElement": "SPDXRef-Package-qtimageformats-qt-plugin-QTiffPlugin-c78f33b066dc",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-qt-plugin-QTiffPlugin-c78f33b066dc",
+            "relatedSpdxElement": "DocumentRef-qtbase-b62004158ac8:SPDXRef-Package-qtbase-qt-module-Core-b62004158ac8",
+            "relationshipType": "DEPENDS_ON"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-qt-plugin-QTiffPlugin-c78f33b066dc",
+            "relatedSpdxElement": "DocumentRef-qtbase-b62004158ac8:SPDXRef-Package-qtbase-qt-module-Gui-b62004158ac8",
+            "relationshipType": "DEPENDS_ON"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-qt-plugin-QTiffPlugin-c78f33b066dc",
+            "relatedSpdxElement": "DocumentRef-qtbase-b62004158ac8:SPDXRef-Package-qtbase-qt-module-PlatformPluginInternal-b62004158ac8",
+            "relationshipType": "DEPENDS_ON"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-qt-plugin-QTiffPlugin-c78f33b066dc",
+            "relatedSpdxElement": "SPDXRef-Package-qtimageformats-qt-3rdparty-sources-QTiffPlugin-Attribution-libtiff-c78f33b066dc",
+            "relationshipType": "DEPENDS_ON"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-qt-plugin-QTiffPlugin-c78f33b066dc",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-qt-plugin-QTiffPlugin-c78f33b066dc",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/plugins/imageformats/tiff/main.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/plugins/imageformats/tiff/qtiffhandler.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/plugins/imageformats/tiff/qtiffhandler_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_aux.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_close.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_codec.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_color.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_compress.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_dir.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_dirinfo.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_dirread.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_dirwrite.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_dumpmode.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_error.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_extension.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_fax3.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_fax3sm.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_flush.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_getimage.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_hash_set.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_luv.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_lzw.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_next.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_open.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_packbits.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_pixarlog.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_predict.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_print.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_read.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_strip.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_swab.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_thunder.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_tile.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_version.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_warning.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_write.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_zip.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/t4.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tiff.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_config.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tiffconf.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_dir.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tiffio.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_fax3.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tiffiop.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_hash_set.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tiffvers.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_predict.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/uvcode.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_jpeg.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_win32.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-qt-plugin-QTiffPlugin-c78f33b066dc",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-qt-plugin-QTiffPlugin-c78f33b066dc",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/plugins/imageformats/tiff/main.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/plugins/imageformats/tiff/qtiffhandler.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/plugins/imageformats/tiff/qtiffhandler_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_aux.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_close.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_codec.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_color.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_compress.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_dir.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_dirinfo.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_dirread.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_dirwrite.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_dumpmode.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_error.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_extension.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_fax3.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_fax3sm.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_flush.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_getimage.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_hash_set.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_luv.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_lzw.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_next.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_open.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_packbits.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_pixarlog.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_predict.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_print.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_read.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_strip.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_swab.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_thunder.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_tile.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_version.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_warning.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_write.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_zip.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/t4.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tiff.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_config.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tiffconf.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_dir.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tiffio.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_fax3.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tiffiop.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_hash_set.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tiffvers.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_predict.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/uvcode.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_jpeg.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QTiffPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libtiff/libtiff/tif_win32.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-c78f33b066dc",
+            "relatedSpdxElement": "SPDXRef-Package-qtimageformats-qt-3rdparty-sources-QWebpPlugin-Attribution-libwebp-c78f33b066dc",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-c78f33b066dc",
+            "relatedSpdxElement": "SPDXRef-Package-qtimageformats-qt-plugin-QWebpPlugin-c78f33b066dc",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-qt-plugin-QWebpPlugin-c78f33b066dc",
+            "relatedSpdxElement": "DocumentRef-qtbase-b62004158ac8:SPDXRef-Package-qtbase-qt-module-Core-b62004158ac8",
+            "relationshipType": "DEPENDS_ON"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-qt-plugin-QWebpPlugin-c78f33b066dc",
+            "relatedSpdxElement": "DocumentRef-qtbase-b62004158ac8:SPDXRef-Package-qtbase-qt-module-Gui-b62004158ac8",
+            "relationshipType": "DEPENDS_ON"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-qt-plugin-QWebpPlugin-c78f33b066dc",
+            "relatedSpdxElement": "DocumentRef-qtbase-b62004158ac8:SPDXRef-Package-qtbase-qt-module-PlatformPluginInternal-b62004158ac8",
+            "relationshipType": "DEPENDS_ON"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-qt-plugin-QWebpPlugin-c78f33b066dc",
+            "relatedSpdxElement": "SPDXRef-Package-qtimageformats-qt-3rdparty-sources-QWebpPlugin-Attribution-libwebp-c78f33b066dc",
+            "relationshipType": "DEPENDS_ON"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-qt-plugin-QWebpPlugin-c78f33b066dc",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-qt-plugin-QWebpPlugin-c78f33b066dc",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/plugins/imageformats/webp/main.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/plugins/imageformats/webp/qwebphandler.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/plugins/imageformats/webp/qwebphandler_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/sharpyuv/sharpyuv.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/sharpyuv/sharpyuv_cpu.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/sharpyuv/sharpyuv_csp.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/sharpyuv/sharpyuv_dsp.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/sharpyuv/sharpyuv_gamma.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/sharpyuv/sharpyuv_sse2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dec/alpha_dec.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dec/buffer_dec.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dec/frame_dec.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dec/idec_dec.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dec/io_dec.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dec/quant_dec.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dec/tree_dec.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dec/vp8_dec.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dec/vp8l_dec.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dec/webp_dec.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/demux/anim_decode.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/demux/demux.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/alpha_processing.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/alpha_processing_mips_dsp_r2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/alpha_processing_sse2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/alpha_processing_sse41.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/cost.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/cost_mips32.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/cost_mips_dsp_r2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/cost_neon.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/cost_sse2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/cpu.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/dec.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/dec_clip_tables.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/dec_mips32.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/dec_mips_dsp_r2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/dec_msa.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/dec_sse2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/dec_sse41.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/enc_mips32.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/enc_mips_dsp_r2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/enc_msa.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/enc_sse2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/enc_sse41.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/filters.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/filters_mips_dsp_r2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/filters_msa.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/filters_sse2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/lossless.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/lossless_avx2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/lossless_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/lossless_enc_avx2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/lossless_enc_mips32.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/lossless_enc_mips_dsp_r2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/lossless_enc_msa.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/lossless_enc_sse2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/lossless_enc_sse41.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/lossless_mips_dsp_r2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/lossless_sse2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/lossless_sse41.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/rescaler.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/rescaler_mips32.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/rescaler_mips_dsp_r2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/rescaler_msa.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/rescaler_sse2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/ssim.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/ssim_sse2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/upsampling.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/upsampling_mips_dsp_r2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/upsampling_msa.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/upsampling_sse2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/upsampling_sse41.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/yuv.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/yuv_mips32.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/yuv_mips_dsp_r2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/yuv_sse2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/yuv_sse41.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/alpha_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/analysis_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/backward_references_cost_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/backward_references_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/config_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/cost_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/filter_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/frame_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/histogram_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/iterator_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/near_lossless_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/picture_csp_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/picture_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/picture_psnr_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/picture_rescale_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/picture_tools_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/predictor_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/quant_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/syntax_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/token_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/tree_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/vp8l_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/webp_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/mux/anim_encode.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/mux/muxedit.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/mux/muxinternal.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/mux/muxread.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/bit_reader_utils.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/bit_writer_utils.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/color_cache_utils.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/filters_utils.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/huffman_encode_utils.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/huffman_utils.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/palette.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/quant_levels_dec_utils.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/quant_levels_utils.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/random_utils.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/rescaler_utils.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/thread_utils.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/utils.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/sharpyuv/sharpyuv.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/sharpyuv/sharpyuv_cpu.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/sharpyuv/sharpyuv_csp.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/sharpyuv/sharpyuv_dsp.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/sharpyuv/sharpyuv_gamma.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dec/alphai_dec.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dec/common_dec.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dec/vp8i_dec.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dec/vp8li_dec.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dec/vp8_dec.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dec/webpi_dec.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/common_sse2.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/common_sse41.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/cpu.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/dsp.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/lossless.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/lossless_common.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/mips_macro.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/msa_macro.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/neon.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/quant.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/yuv.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/backward_references_enc.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/cost_enc.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/histogram_enc.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/vp8i_enc.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/vp8li_enc.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/mux/animi.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/mux/muxi.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/bit_reader_inl_utils.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/bit_reader_utils.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/bit_writer_utils.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/color_cache_utils.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/endian_inl_utils.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/filters_utils.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/huffman_encode_utils.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/huffman_utils.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/palette.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/quant_levels_dec_utils.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/quant_levels_utils.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/random_utils.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/rescaler_utils.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/thread_utils.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/utils.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/webp/config.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/webp/decode.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/webp/demux.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/webp/encode.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/webp/format_constants.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/webp/mux.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/webp/mux_types.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/webp/types.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-qt-plugin-QWebpPlugin-c78f33b066dc",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-qt-plugin-QWebpPlugin-c78f33b066dc",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/plugins/imageformats/webp/main.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/plugins/imageformats/webp/qwebphandler.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/plugins/imageformats/webp/qwebphandler_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/sharpyuv/sharpyuv.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/sharpyuv/sharpyuv_cpu.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/sharpyuv/sharpyuv_csp.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/sharpyuv/sharpyuv_dsp.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/sharpyuv/sharpyuv_gamma.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/sharpyuv/sharpyuv_sse2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dec/alpha_dec.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dec/buffer_dec.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dec/frame_dec.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dec/idec_dec.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dec/io_dec.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dec/quant_dec.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dec/tree_dec.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dec/vp8_dec.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dec/vp8l_dec.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dec/webp_dec.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/demux/anim_decode.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/demux/demux.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/alpha_processing.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/alpha_processing_mips_dsp_r2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/alpha_processing_sse2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/alpha_processing_sse41.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/cost.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/cost_mips32.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/cost_mips_dsp_r2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/cost_neon.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/cost_sse2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/cpu.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/dec.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/dec_clip_tables.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/dec_mips32.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/dec_mips_dsp_r2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/dec_msa.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/dec_sse2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/dec_sse41.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/enc_mips32.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/enc_mips_dsp_r2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/enc_msa.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/enc_sse2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/enc_sse41.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/filters.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/filters_mips_dsp_r2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/filters_msa.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/filters_sse2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/lossless.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/lossless_avx2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/lossless_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/lossless_enc_avx2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/lossless_enc_mips32.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/lossless_enc_mips_dsp_r2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/lossless_enc_msa.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/lossless_enc_sse2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/lossless_enc_sse41.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/lossless_mips_dsp_r2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/lossless_sse2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/lossless_sse41.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/rescaler.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/rescaler_mips32.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/rescaler_mips_dsp_r2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/rescaler_msa.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/rescaler_sse2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/ssim.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/ssim_sse2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/upsampling.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/upsampling_mips_dsp_r2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/upsampling_msa.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/upsampling_sse2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/upsampling_sse41.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/yuv.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/yuv_mips32.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/yuv_mips_dsp_r2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/yuv_sse2.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/yuv_sse41.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/alpha_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/analysis_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/backward_references_cost_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/backward_references_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/config_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/cost_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/filter_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/frame_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/histogram_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/iterator_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/near_lossless_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/picture_csp_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/picture_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/picture_psnr_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/picture_rescale_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/picture_tools_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/predictor_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/quant_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/syntax_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/token_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/tree_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/vp8l_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/webp_enc.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/mux/anim_encode.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/mux/muxedit.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/mux/muxinternal.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/mux/muxread.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/bit_reader_utils.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/bit_writer_utils.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/color_cache_utils.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/filters_utils.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/huffman_encode_utils.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/huffman_utils.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/palette.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/quant_levels_dec_utils.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/quant_levels_utils.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/random_utils.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/rescaler_utils.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/thread_utils.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/utils.c",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/sharpyuv/sharpyuv.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/sharpyuv/sharpyuv_cpu.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/sharpyuv/sharpyuv_csp.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/sharpyuv/sharpyuv_dsp.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/sharpyuv/sharpyuv_gamma.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dec/alphai_dec.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dec/common_dec.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dec/vp8i_dec.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dec/vp8li_dec.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dec/vp8_dec.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dec/webpi_dec.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/common_sse2.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/common_sse41.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/cpu.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/dsp.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/lossless.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/lossless_common.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/mips_macro.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/msa_macro.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/neon.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/quant.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/dsp/yuv.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/backward_references_enc.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/cost_enc.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/histogram_enc.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/vp8i_enc.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/enc/vp8li_enc.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/mux/animi.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/mux/muxi.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/bit_reader_inl_utils.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/bit_reader_utils.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/bit_writer_utils.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/color_cache_utils.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/endian_inl_utils.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/filters_utils.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/huffman_encode_utils.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/huffman_utils.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/palette.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/quant_levels_dec_utils.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/quant_levels_utils.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/random_utils.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/rescaler_utils.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/thread_utils.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/utils/utils.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/webp/config.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/webp/decode.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/webp/demux.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/webp/encode.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/webp/format_constants.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/webp/mux.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/webp/mux_types.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QWebpPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/3rdparty/libwebp/src/webp/types.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-c78f33b066dc",
+            "relatedSpdxElement": "SPDXRef-Package-qtimageformats-qt-plugin-QICNSPlugin-c78f33b066dc",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-qt-plugin-QICNSPlugin-c78f33b066dc",
+            "relatedSpdxElement": "DocumentRef-qtbase-b62004158ac8:SPDXRef-Package-qtbase-qt-module-Core-b62004158ac8",
+            "relationshipType": "DEPENDS_ON"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-qt-plugin-QICNSPlugin-c78f33b066dc",
+            "relatedSpdxElement": "DocumentRef-qtbase-b62004158ac8:SPDXRef-Package-qtbase-qt-module-Gui-b62004158ac8",
+            "relationshipType": "DEPENDS_ON"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-qt-plugin-QICNSPlugin-c78f33b066dc",
+            "relatedSpdxElement": "DocumentRef-qtbase-b62004158ac8:SPDXRef-Package-qtbase-qt-module-PlatformPluginInternal-b62004158ac8",
+            "relationshipType": "DEPENDS_ON"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-qt-plugin-QICNSPlugin-c78f33b066dc",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-plugin-QICNSPlugin-RelWithDebInfo-c78f33b066dc",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-qt-plugin-QICNSPlugin-c78f33b066dc",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-plugin-QICNSPlugin-RelWithDebInfo-c78f33b066dc",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QICNSPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/plugins/imageformats/icns/main.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QICNSPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/plugins/imageformats/icns/qicnshandler.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QICNSPlugin-RelWithDebInfo-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/plugins/imageformats/icns/qicnshandler_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-qt-plugin-QICNSPlugin-c78f33b066dc",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-plugin-QICNSPlugin-Debug-c78f33b066dc",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-Package-qtimageformats-qt-plugin-QICNSPlugin-c78f33b066dc",
+            "relatedSpdxElement": "SPDXRef-PackagedFile-qt-plugin-QICNSPlugin-Debug-c78f33b066dc",
+            "relationshipType": "CONTAINS"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QICNSPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/plugins/imageformats/icns/main.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QICNSPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/plugins/imageformats/icns/qicnshandler.cpp",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        },
+        {
+            "spdxElementId": "SPDXRef-PackagedFile-qt-plugin-QICNSPlugin-Debug-c78f33b066dc",
+            "comment": "/src_dir/qtimageformats/src/plugins/imageformats/icns/qicnshandler_p.h",
+            "relatedSpdxElement": "NOASSERTION",
+            "relationshipType": "GENERATED_FROM"
+        }
+    ]
+}

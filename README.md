@@ -19,7 +19,7 @@ This repository provides a high performance implementation designed for real-wor
   <img width="625" height="232" alt="backends" src="https://github.com/user-attachments/assets/4f82798b-d0e1-4ad7-8015-2ba506280575" />
 </p>
 
-This project implements and evaluates the performance (execution speed) of image watermarking algorithms on CPU versus GPU. It provides multiple implementations to enable comparisons between compute backends. Watermarks are generated as standard normal distributed matrices (μ=0, σ=1). For cryptographic robustness, a user password is hashed with ```SHA-256``` and this 256-bit value is used as a 256-bit key for the ```ChaCha20 block cipher```. The CSPRNG produces a deterministic stream of random bits. The chosen transform for normal distribution is ```Box-Muller transform```, computed with fixed polynomial approximations and explicit FMA operations and every backend produces the same watermark bit for bit. The GPU backends generate the watermark on the GPU, while the CPU backend uses AVX2/AVX-512 with OpenMP. The watermark strength follows the proposed Prediction Error (ME) mask, which is the main focus of the Thesis. The system supports both embedding and detection of watermarks in disk images and video streams. Video processing is handled via FFmpeg, enabling broad codec and container support, along with advanced features such as GPU-accelerated video decoding and encoding (CUDA only) and 10-bit/HDR (tonemapped) video support.
+This project implements and evaluates the performance (execution speed) of image watermarking algorithms on CPU versus GPU. It provides multiple implementations to enable comparisons between compute backends. Watermarks are generated as standard normal distributed matrices (μ=0, σ=1). For cryptographic robustness, a user password is hashed with ```SHA-256``` and this 256-bit value is used as a 256-bit key for the ```ChaCha20 block cipher```. The CSPRNG produces a deterministic stream of random bits. The chosen transform for normal distribution is ```Box-Muller transform```, computed with fixed polynomial approximations and explicit FMA operations and every backend produces the same watermark bit for bit. The GPU backends generate the watermark on the GPU, while the CPU backend uses AVX2/AVX-512 with OpenMP. The watermark strength follows the proposed Prediction Error (ME) mask, which is the main focus of the Thesis. The system supports both embedding and detection of watermarks in disk images and video streams. Video processing is handled via FFmpeg, enabling broad codec and container support, along with advanced features such as GPU-accelerated video decoding (CUDA backend) and NVENC encoding (all backends) and 10-bit/HDR (tonemapped) video support.
 
 The repository contains all required source code and dependencies needed to reproduce the benchmarks and experiments.
 
@@ -45,7 +45,7 @@ Get the latest binaries [here](https://github.com/kar-dim/Watermarking-Accelerat
 - The CLI (command line) application.
 - The embedded CUDA/OpenCL/Eigen implementations of the watermarking algorithms.
 - The Qt application for single-image watermarking, image batches, and backend benchmarking.
-- Some sample image and video files
+- Bundled benchmark images. Use your own files for video operations.
 
 The CLI application:
    - Embeds the proposed Prediction-Error mask once for a single image, writes the requested output file, and reports total image time including load, watermark setup, embed, and save.
@@ -94,7 +94,7 @@ For the repeated benchmark, use `Watermarking-CLI.exe --bench --benchmark_loops 
 Providing `--video.path` selects video processing. For example, to detect a watermark:
 
 ```powershell
-Watermarking-CLI.exe --video.path samples/videos/sample_1080p.mkv --video.mode detect --watermark_password "your-password"
+Watermarking-CLI.exe --video.path your-videos/input.mkv --video.mode detect --watermark_password "your-password"
 ```
 
 | Option | Description |
@@ -141,13 +141,18 @@ ffmpeg -y -f rawvideo
 
 **NOTE:** 10-bit video is supported: 10-bit SDR is converted to 8-bit before watermarking (`format=yuv420p` on the CPU decoder, `scale_cuda=format=nv12` on NVDEC), so each sample loses precision (10 to 8 bits). HDR 10-bit is tonemapped with the Mobius algorithm to SDR. If CPU decoder is used, then we use the FFmpeg's `tonemap=mobius` filter. For Hardware-accelerated decoder (NVDEC) a custom Mobius kernel pipeline is implemented, because currently it is impossible to do the tonemapping by FFmpeg provided filters. Encoding output is always 8-bit SDR.
 
+# License and Distribution
+
+The application uses [GPL version 3](LICENSE). The included FFmpeg build is GPL v3 or later and retains libx264 and libx265. Third-party components retain their own licenses. [The license inventory](LICENSES/README.md) and [third-party notices](THIRD_PARTY_NOTICES.md) contain the collected texts. The Sofia Sans font remains under [SIL OFL 1.1](Watermarking-UI/assets/fonts/OFL.txt).
+
 # How to Build
 
 This project is built using **Visual Studio** and consists of a **solution with various projects**.
+
 - Watermarking-Core: The Core of this project, implements the algorithms for each backend. It also implements a fast, efficient, secure and deterministic watermark generation: CUDA/OpenCL kernels on the GPU, AVX2/AVX-512 with OpenMP on the CPU, with identical results. It is built as a **static library**.
 - Watermarking-CLI: The sample command line application that interacts with the Core project to embed and detect watermark in images and video.
 - Watermarking-UI: The Qt image workflow and benchmark application. It uses the Core project for single-image embedding, image batches, and performance measurements.
-- Watermarking-Core-tests: GoogleTest suite for the Core project. Runs from the build output folder (the samples are copied there at build time).
+- Watermarking-Core-tests: GoogleTest suite for the Core project. Runs from the build output folder, using bundled image samples and generated temporary 10-bit video.
 
 ### Solution Configurations
 
@@ -155,35 +160,39 @@ The solution provides multiple build configurations, each targeting a specific b
 
 | Configuration    | Backend     | Notes                                       |
 |------------------|-------------|---------------------------------------------|
-| `CUDA_Release`     | CUDA        | Recommended for systems with NVIDIA GPUs. Faster than OpenCL backend, adds support for CUDA HW accelerated video decoding. Builds a fat binary with SASS and PTX for Turing (sm_75), Ampere (sm_80, sm_86), Ada (sm_89), Hopper (sm_90) and Blackwell (sm_120); other GPUs JIT from the closest PTX |
+| `CUDA_Release`     | CUDA        | Recommended for systems with NVIDIA GPUs. Faster than OpenCL backend, adds support for CUDA HW accelerated video decoding. Builds a fat binary with SASS and PTX for Turing (sm_75), Ampere (sm_80, sm_86), Ada (sm_89), Hopper (sm_90) and Blackwell (sm_120), other GPUs JIT from the closest PTX |
 | `CUDA_Debug`       | CUDA        | Use for debugging CUDA-specific code        |
 | `OPENCL_Release`   | OpenCL      | Recommended for systems without NVIDIA GPUs. Provides GPU acceleration across a wide range of hardware (NVIDIA, AMD, Intel, etc.) and delivers better performance than the CPU backend, though typically slower than the CUDA implementation |
+| `OPENCL_Debug`     | OpenCL      | Use for debugging the OpenCL implementation |
 | `EIGEN_Release`    | Eigen       | Optimized CPU-based implementation used for its maximum compatibility. Clang compiler is used (clang-cl) for maximum performance [<img width="48" height="48" alt="DragonMedium" src="https://github.com/user-attachments/assets/1a920f45-facc-44f6-bfd0-d6aa864cc4c2" />](https://clang.llvm.org/) |
 | `EIGEN_Debug`      | Eigen       | Use for debugging CPU implementation [<img width="48" height="48" alt="DragonMedium" src="https://github.com/user-attachments/assets/1a920f45-facc-44f6-bfd0-d6aa864cc4c2" />](https://clang.llvm.org/) |
 
 
 ## Build Instructions
 
-1. **Git** must be installed and **Git LFS** is required to download the large library binary dependencies. Install it with: `git lfs install`.
+1. Install **Git** and **Git LFS** for the large library binary dependencies, then run `git lfs install`.
 2. Clone this repository: `git clone https://github.com/kar-dim/Watermarking-Accelerated`.
-3. Open the `.sln` file in **Visual Studio 2022** (or later).
-4. In the **Solution Configurations** dropdown (top toolbar), select your configuration (e.g. `CUDA_Release`) or select `Batch Build` and select what configurations you want to build.
-5. Build the solution via **Build > Build Solution**.
+3. Install Visual Studio's C++ tools and a Windows SDK. CUDA/OpenCL projects select the **MSVC v145** toolset. Eigen projects select **LLVM/clang-cl** (`ClangCL`) with OpenMP. CUDA builds import the **CUDA Toolkit 13.4** Visual Studio build customizations. For the GUI, install **Qt 6.12.0, msvc2022_64** and configure the Qt VS Tools version entry as `6.12.0_msvc2022_64`.
+4. Open `Watermarking-Thesis.sln` in Visual Studio with those tools installed.
+5. In the **Solution Configurations** dropdown (top toolbar), select your configuration (e.g. `CUDA_Release`) or use **Batch Build** to select multiple configurations.
+6. Build the solution via **Build > Build Solution**.
 
-We bundle all necessary DLLs with the prebuilt binaries so the application runs out-of-the-box as a fully self-contained bundle with no need to install the Visual C++ Redistributable.
+MSBuild automatically imports [Directory.Build.targets](Directory.Build.targets) for the projects. Before compilation, it runs the repository's `format.bat` to format project sources. Pass `/p:WatermarkingFormatOnBuild=false` to disable this step. Executables also receive the shared UTF-8 manifest.
+
 
 | Backend | Dependencies |
 |---------|--------------|
 | **All** |	`Microsoft Visual C++ CRT (msvcp140*.dll, vcruntime140*.dll, concrt140*.dll, etc.)`, `FFmpeg libav dll`, `zlib1.dll`, `libpng16.dll`, `jpeg62.dll`, `tiff.dll`, `libwebp.lib` (static lib) |
-| **CUDA** | `nvjpeg64_13.dll` (from CUDA Toolkit) |
-| **OpenCL** | `OpenCL.dll` (system drivers)|
+| **CUDA** | `nvjpeg64_13.dll` (from CUDA Toolkit), `vcomp140.dll` (Microsoft OpenMP) |
+| **OpenCL** | `OpenCL.dll` (system drivers), `vcomp140.dll` (Microsoft OpenMP) |
 | **Eigen** | `libomp.dll` (clang's OpenMP) |
+| **GUI (all backends)** | Qt 6.12.0 DLLs, platform/image-format plugins and translations, deployed by `windeployqt --no-opengl-sw` |
 
 **NOTES:**
 - OpenCL implementation: The [OpenCL Headers](https://github.com/KhronosGroup/OpenCL-Headers), [OpenCL C++ Bindings](https://github.com/KhronosGroup/OpenCL-CLHPP) and [OpenCL Library file](https://github.com/KhronosGroup/OpenCL-SDK) are already included and configured for this project.
-- CUDA implementation: NVIDIA CUDA Toolkit is required for building. Minimum supported GPUs with Compute Capability 7.5 (sm_75) or newer, CUDA Toolkit 12.4 or newer preferred.
+- CUDA implementation: The projects are configured for CUDA Toolkit **13.4**. Release kernels target Compute Capability 7.5 (sm_75) and newer. `CUDA_Debug` currently targets sm_89 only for faster builds.
 - Image libraries ([libjpeg-turbo](https://github.com/libjpeg-turbo/libjpeg-turbo), [libpng](https://github.com/pnggroup/libpng), [zlib-ng compat](https://github.com/zlib-ng/zlib-ng), [libtiff](https://gitlab.com/libtiff/libtiff) and [libwebp](https://github.com/webmproject/libwebp)) are included and utilized internally by CImg for loading and saving of images for all backends.
-- FFmpeg and Microsoft Visual C++ runtime DLLs are copied automatically after build. Pre-built binaries already include them, making the application fully self-contained without requiring `vc_redist.x64.exe`.
+- FFmpeg and image-library DLLs are copied from the vendored dependencies. Microsoft Visual C++ runtime DLLs are copied from Visual Studio's REDIST directory when available. Release CUDA/OpenCL builds also copy `vcomp140.dll`. Eigen builds copy `libomp.dll` from the configured LLVM installation. OpenCL and NVIDIA GPU drivers are supplied by the target system.
 - File and folder names with non-ASCII characters (for example Greek) work in the CLI and the Qt application: every executable runs with the UTF-8 process code page (```utf8.manifest```, Windows 10 version 1903 or newer).
 
 # Libraries/Tools Used
@@ -234,5 +243,3 @@ Preview | Detail
 **Single image comparison**<br>![Single image comparison](readme_pictures/6.png) | **Zoomed comparison**<br>![Zoomed single image comparison](readme_pictures/7.png)
 **Batch in progress**<br>![Batch image queue in progress](readme_pictures/8.png) | **Batch complete**<br>![Completed batch and summary](readme_pictures/9.png)
 **Benchmark in progress**<br>![Benchmark in progress](readme_pictures/10.png) | **Benchmark score**<br>![Completed benchmark score](readme_pictures/11.png)
-
- 

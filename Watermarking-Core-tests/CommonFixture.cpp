@@ -72,8 +72,6 @@ const fs::path grayImage = "samples/images/512_gray.jpg";
 const fs::path alphaImage = "samples/images/4k_argb.png";
 // 720p.png stored rotated 90 degrees counter-clockwise with EXIF orientation 6
 const fs::path exifImage = "samples/images/720p_exif6.jpg";
-// small (1.9 MB / 693 frame) clip, it also tests the 10-bit to 8-bit filter graph
-const fs::path shortVideo = "samples/videos/sample_1080p_10bit.mkv";
 
 // Render digests in the form used by the published SHA-256 test vectors
 std::string hexDigest(const std::array<uint8_t, 32>& digest) {
@@ -418,8 +416,8 @@ VideoSettings makeVideoSettings(const std::string& input) {
     return settings;
 }
 
-// lossless uniform frame, with equivalent normalized samples at either input depth
-void writeUniformVideo(const fs::path& path, const bool deep, const AVColorTransferCharacteristic transfer) {
+// HDR fixtures use one uniform frame; the SDR regression clip uses 100 textured frames.
+void writeVideoFixture(const fs::path& path, const bool deep, const AVColorTransferCharacteristic transfer, const bool textured = false) {
     using namespace video_utils;
     AVFormatContext* rawOutput = nullptr;
     checkAv(avformat_alloc_output_context2(&rawOutput, nullptr, "matroska", path.string().c_str()), "Allocate fixture muxer");
@@ -428,7 +426,8 @@ void writeUniformVideo(const fs::path& path, const bool deep, const AVColorTrans
     AVCodecContextPtr encoder(avcodec_alloc_context3(codec));
     if (!encoder)
         throw std::runtime_error("Allocate fixture encoder");
-    encoder->width = encoder->height = 16;
+    encoder->width = textured ? 320 : 16;
+    encoder->height = textured ? 180 : 16;
     encoder->time_base = {1, 30};
     encoder->framerate = {30, 1};
     encoder->pix_fmt = deep ? AV_PIX_FMT_YUV420P10LE : AV_PIX_FMT_YUV420P;
@@ -451,7 +450,8 @@ void writeUniformVideo(const fs::path& path, const bool deep, const AVColorTrans
     if (!frame)
         throw std::runtime_error("Allocate fixture frame");
     frame->format = encoder->pix_fmt;
-    frame->width = frame->height = 16;
+    frame->width = encoder->width;
+    frame->height = encoder->height;
     frame->pts = 0;
     frame->duration = 1;
     frame->sample_aspect_ratio = {1, 1};
@@ -460,32 +460,59 @@ void writeUniformVideo(const fs::path& path, const bool deep, const AVColorTrans
     frame->color_trc = encoder->color_trc;
     frame->colorspace = encoder->colorspace;
     checkAv(av_frame_get_buffer(frame.get(), 32), "Allocate fixture pixels");
-    for (int plane = 0; plane < 3; ++plane) {
-        const int side = plane == 0 ? 16 : 8;
-        for (int row = 0; row < side; ++row)
-            for (int col = 0; col < side; ++col) {
-                auto* line = frame->data[plane] + row * frame->linesize[plane];
-                if (deep)
-                    reinterpret_cast<uint16_t*>(line)[col] = 512;
-                else
-                    line[col] = 128;
-            }
-    }
     AVPacketPtr packet(av_packet_alloc());
     if (!packet)
         throw std::runtime_error("Allocate fixture packet");
-    checkAv(avcodec_send_frame(encoder.get(), frame.get()), "Encode fixture frame");
-    checkAv(avcodec_send_frame(encoder.get(), nullptr), "Flush fixture encoder");
-    int status;
-    while ((status = avcodec_receive_packet(encoder.get(), packet.get())) >= 0) {
-        av_packet_rescale_ts(packet.get(), encoder->time_base, stream->time_base);
-        packet->stream_index = stream->index;
-        checkAv(av_interleaved_write_frame(output.get(), packet.get()), "Write fixture packet");
+    const auto drain = [&] {
+        int status;
+        while ((status = avcodec_receive_packet(encoder.get(), packet.get())) >= 0) {
+            av_packet_rescale_ts(packet.get(), encoder->time_base, stream->time_base);
+            packet->stream_index = stream->index;
+            checkAv(av_interleaved_write_frame(output.get(), packet.get()), "Write fixture packet");
+        }
+        if (status != AVERROR_EOF && status != AVERROR(EAGAIN))
+            checkAv(status, "Drain fixture encoder");
+    };
+    for (int index = 0; index < (textured ? 100 : 1); ++index) {
+        checkAv(av_frame_make_writable(frame.get()), "Make fixture frame writable");
+        frame->pts = index;
+        for (int plane = 0; plane < 3; ++plane) {
+            const int width = plane == 0 ? frame->width : frame->width / 2;
+            const int height = plane == 0 ? frame->height : frame->height / 2;
+            for (int row = 0; row < height; ++row)
+                for (int col = 0; col < width; ++col) {
+                    const int value = textured && plane == 0 ? 64 + ((col * 3 + row * 2 + index * 7) % 128) : 128;
+                    auto* line = frame->data[plane] + row * frame->linesize[plane];
+                    if (deep)
+                        reinterpret_cast<uint16_t*>(line)[col] = static_cast<uint16_t>(value * 4);
+                    else
+                        line[col] = static_cast<uint8_t>(value);
+                }
+        }
+        checkAv(avcodec_send_frame(encoder.get(), frame.get()), "Encode fixture frame");
+        drain();
     }
-    if (status != AVERROR_EOF)
-        checkAv(status, "Drain fixture encoder");
+    checkAv(avcodec_send_frame(encoder.get(), nullptr), "Flush fixture encoder");
+    drain();
     checkAv(av_write_trailer(output.get()), "Write fixture trailer");
     checkAv(avio_closep(&output->pb), "Close fixture file");
+}
+
+const fs::path& shortVideoFixture() {
+    struct Fixture {
+        fs::path directory = fs::temp_directory_path() / ("watermarking-video-fixture-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        fs::path path = directory / "textured-10bit.mkv";
+        Fixture() {
+            fs::create_directories(directory);
+            writeVideoFixture(path, true, AVCOL_TRC_BT709, true);
+        }
+        ~Fixture() {
+            std::error_code error;
+            fs::remove_all(directory, error);
+        }
+    };
+    static const Fixture fixture;
+    return fixture.path;
 }
 
 // Inspect the first decoded sample and transfer tag to verify HDR conversion
@@ -1509,7 +1536,7 @@ TEST_F(WatermarkTest, SavesJpegsFromSeveralThreadsAtOnce) {
 }
 
 TEST_F(WatermarkTest, RejectsHighBitDepthVideoDetection) {
-    VideoSettings settings = makeVideoSettings(shortVideo.string());
+    VideoSettings settings = makeVideoSettings(shortVideoFixture().string());
     settings.psnr = defaultPsnr;
     settings.encodeOptions.clear();
 
@@ -1521,13 +1548,13 @@ TEST_F(WatermarkTest, RejectsHighBitDepthVideoDetection) {
 // thread and the frame conversion kernels
 TEST_F(WatermarkTest, EmbedsIntoVideoAndDetectsFromTheEncodedFile) {
     const fs::path output = tempDir / "watermarked.mkv";
-    VideoSettings embedSettings = makeVideoSettings(shortVideo.string());
+    VideoSettings embedSettings = makeVideoSettings(shortVideoFixture().string());
     embedSettings.encodeOutputPath = output.string();
 
     VideoHandle embedSession = initVideo(embedSettings);
     const int embeddedFrames = embedVideo(embedSession.get());
     embedSession.reset(); // close the muxer so the file is complete before we read it back
-    ASSERT_GT(embeddedFrames, 0);
+    ASSERT_EQ(embeddedFrames, 100);
     ASSERT_TRUE(fs::exists(output));
     ASSERT_GT(fs::file_size(output), 0U);
 
@@ -1546,7 +1573,7 @@ TEST_F(WatermarkTest, EmbedsIntoVideoAndDetectsFromTheEncodedFile) {
 
 TEST_F(WatermarkTest, EmbedsOnlyOnTheRequestedVideoInterval) {
     const fs::path output = tempDir / "interval.mkv";
-    VideoSettings embedSettings = makeVideoSettings(shortVideo.string());
+    VideoSettings embedSettings = makeVideoSettings(shortVideoFixture().string());
     embedSettings.watermarkInterval = 50;
     embedSettings.encodeOutputPath = output.string();
 
@@ -1569,8 +1596,8 @@ TEST_F(WatermarkTest, EmbedsOnlyOnTheRequestedVideoInterval) {
 }
 
 TEST_F(WatermarkTest, RefusesToOverwriteTheInputVideo) {
-    VideoSettings settings = makeVideoSettings(shortVideo.string());
-    settings.encodeOutputPath = shortVideo.string();
+    VideoSettings settings = makeVideoSettings(shortVideoFixture().string());
+    settings.encodeOutputPath = shortVideoFixture().string();
     VideoHandle session = initVideo(settings);
     EXPECT_THROW(embedVideo(session.get()), std::runtime_error);
 }
@@ -1583,7 +1610,7 @@ TEST_F(WatermarkTest, FailedVideoHeaderPreservesExistingOutput) {
         std::ofstream file(output, std::ios::binary);
         file << sentinel;
     }
-    auto settings = makeVideoSettings(shortVideo.string());
+    auto settings = makeVideoSettings(shortVideoFixture().string());
     settings.encodeOptions = "-c:v libx264 -preset ultrafast -tag:v BAD!";
     settings.encodeOutputPath = output.string();
     auto video = initVideo(settings);
@@ -1649,7 +1676,7 @@ TEST_F(WatermarkTest, OutputReplacementFailurePreservesTheDestinationAndCleansTe
 TEST_F(WatermarkTest, ReplacesExistingMp4OnlyAfterFaststartFinalization) {
     const auto input = tempDir / "input.mkv";
     const auto output = tempDir / "existing.mp4";
-    writeUniformVideo(input, false, AVCOL_TRC_BT709);
+    writeVideoFixture(input, false, AVCOL_TRC_BT709);
     {
         std::ofstream sentinel(output);
         sentinel << "old destination";
@@ -1671,7 +1698,7 @@ TEST_F(WatermarkTest, ToneMapsBothEightAndTenBitPqAndHlg) {
         for (const bool deep : {false, true}) {
             const auto input = tempDir / std::format("hdr-{}-{}.mkv", static_cast<int>(transfer), deep);
             const auto output = tempDir / std::format("sdr-{}-{}.mkv", static_cast<int>(transfer), deep);
-            writeUniformVideo(input, deep, transfer);
+            writeVideoFixture(input, deep, transfer);
             auto settings = makeVideoSettings(input.string());
             settings.encodeOptions = "-c:v ffv1";
             settings.encodeOutputPath = output.string();
@@ -1745,7 +1772,7 @@ TEST(VideoMuxTest, EmptyAudioStreamDoesNotRetainTheWholeVideo) {
 }
 
 TEST_F(WatermarkTest, RejectsAnEncoderThatDisagreesWithTheSelectedBackend) {
-    VideoSettings settings = makeVideoSettings(shortVideo.string());
+    VideoSettings settings = makeVideoSettings(shortVideoFixture().string());
     settings.useHwEncoder = false;
     settings.encodeOptions = "-c:v hevc_nvenc"; // hardware encoder while the pipeline is set to software
     settings.encodeOutputPath = (tempDir / "mismatch.mkv").string();
@@ -1754,7 +1781,7 @@ TEST_F(WatermarkTest, RejectsAnEncoderThatDisagreesWithTheSelectedBackend) {
 }
 
 TEST_F(WatermarkTest, RejectsAnEncodeOptionsStringWithoutAnEncoder) {
-    VideoSettings settings = makeVideoSettings(shortVideo.string());
+    VideoSettings settings = makeVideoSettings(shortVideoFixture().string());
     settings.encodeOptions = "-preset ultrafast -crf 20";
     settings.encodeOutputPath = (tempDir / "nocodec.mkv").string();
     VideoHandle session = initVideo(settings);

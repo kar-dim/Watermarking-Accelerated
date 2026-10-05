@@ -370,3 +370,6 @@ FodyWeavers.xsd
 /readme_pictures/cuda.csv
 /readme_pictures/eigen.csv
 /readme_pictures/opencl.csv
+
+# Local video samples are not redistributed
+/samples/videos/
