@@ -11,12 +11,11 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
-#include <future>
 #include <iomanip>
 #include <iostream>
 #include <map>
 #include <omp.h>
-#include <queue>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -283,22 +282,12 @@ static int testForImageBatch(const Settings& options, const int p, const float p
 
     // only create the below if we are embedding!
     fs::path outputDir;
-    struct PendingSave {
-        fs::path inputFile;
-        std::future<void> future;
-    };
-    std::vector<ExportHandle> exportPool;
-    // async future destructors join before the buffers they write from are released, including on exceptions
-    std::queue<PendingSave> saveTasks;
-    size_t bufferIndex = 0;
-    size_t maxParallelSaves = 0;
+    // background saves, one per thread (it waits for its saves before the session is released)
+    std::optional<ImageSaver> saver;
     if (isEmbed) {
         outputDir = inputDir / "watermark_output";
         fs::create_directories(outputDir);
-        maxParallelSaves = omp_get_max_threads();
-        // preallocate exactly enough buffers for the max concurrent threads
-        for (size_t i = 0; i < maxParallelSaves; i++)
-            exportPool.push_back(createReusableExportBuffer());
+        saver.emplace(static_cast<size_t>(omp_get_max_threads()));
     }
 
     // get the valid images of the directory, if no valid image files are found, throw an error
@@ -311,67 +300,43 @@ static int testForImageBatch(const Settings& options, const int p, const float p
     int successCount = 0;
     float corr = 0.0f;
 
-    // Pop before calling get(): failed future must NOT remain at the front
-    // else it will "poison" every later attempt to drain the queue
-    const auto completeOldestSave = [&]() {
-        PendingSave pending = std::move(saveTasks.front());
-        saveTasks.pop();
-        try {
-            pending.future.get();
-            cout << success(std::format(" [OK] {}\n", pending.inputFile.filename().string()));
+    // reports the finished saves (in the order they finished)
+    const auto reportSaves = [&](const std::vector<SaveResult>& results) {
+        for (const auto& [index, error] : results) {
+            const string fileName = validFiles[index].filename().string();
+            if (!error.empty()) {
+                cout << err(std::format(" [FAILED] {} - Save error: {}\n", fileName, cleanError(error)));
+                continue;
+            }
+            cout << success(std::format(" [OK] {}\n", fileName));
             ++successCount;
-        } catch (const std::exception& e) { cout << err(std::format(" [FAILED] {} - Save error: {}\n", pending.inputFile.filename().string(), cleanError(e.what()))); }
+        }
     };
 
     // start the batch process (begin timer)
     const auto batchStart = std::chrono::high_resolution_clock::now();
-    // preload the first image
-    const int selectedDevice = getCurrentDeviceIndex();
-    std::future<PreloadedHandle> prefetchTask = std::async(std::launch::async, preloadImageFromDisk, validFiles[0].string(), selectedDevice, false);
+    // the next images load in the background while the current one is processed
+    ImagePrefetcher images(validFiles, getCurrentDeviceIndex());
     for (size_t i = 0; i < validFiles.size(); i++) {
-        bool nextPrefetchStarted = false;
         try {
-            auto currentImage = prefetchTask.get();
-            // spawn background thread to read the next image
-            if (i + 1 < validFiles.size()) {
-                prefetchTask = std::async(std::launch::async, preloadImageFromDisk, validFiles[i + 1].string(), selectedDevice, false);
-                nextPrefetchStarted = true;
-            }
             // give the buffer to the watermark engine (may trigger lazy init)
-            bindPreloadedImage(session.get(), std::move(currentImage));
+            bindPreloadedImage(session.get(), images.next());
             // embed
             if (isEmbed) {
                 embedImage(session.get());
-
-                // if we have too many active saves, wait for the oldest one to finish
-                const fs::path outFile = outputDir / validFiles[i].filename();
-                if (saveTasks.size() >= maxParallelSaves)
-                    completeOldestSave();
-                // get the next available buffer from the pool and do a zero copy allocation into it
-                auto* currentBuffer = exportPool[bufferIndex].get();
-                exportForSave(session.get(), currentBuffer);
-                // launch the heavy save to disk task in the background and cycle to the next buffer
-                saveTasks.push(PendingSave{validFiles[i], std::async(std::launch::async, flushToDiskAsync, currentBuffer, outFile.string())});
-                bufferIndex = (bufferIndex + 1) % maxParallelSaves;
+                // waits for a free save slot when all are busy, the export moves (CPU) or copies (GPU) the output into the slot's buffer
+                saver->save(session.get(), (outputDir / validFiles[i].filename()).string(), i);
+                reportSaves(saver->takeFinished());
             } else { // detect
                 corr = detectLoadedImage(session.get());
                 cout << success(std::format(" [OK] Correlation: {:.2f}, {}\n", corr, validFiles[i].filename().string()));
                 ++successCount;
             }
-
-        } catch (const std::exception& e) {
-            cout << err(std::format(" [FAILED] {} - Error: {}\n", validFiles[i].filename().string(), cleanError(e.what())));
-            // If the current prefetch failed before the next one was launched,
-            // keep the pipeline moving. Do not launch the same prefetch twice.
-            if (!nextPrefetchStarted && i + 1 < validFiles.size())
-                prefetchTask = std::async(std::launch::async, preloadImageFromDisk, validFiles[i + 1].string(), selectedDevice, false);
-        }
+        } catch (const std::exception& e) { cout << err(std::format(" [FAILED] {} - Error: {}\n", validFiles[i].filename().string(), cleanError(e.what()))); }
     }
     // finish any pending saves before exiting
-    if (isEmbed) {
-        while (!saveTasks.empty())
-            completeOldestSave();
-    }
+    if (saver)
+        reportSaves(saver->finish());
     // stop batch process (and timer)
     const auto batchEnd = std::chrono::high_resolution_clock::now();
     const double totalBatchTime = std::chrono::duration<double>(batchEnd - batchStart).count();

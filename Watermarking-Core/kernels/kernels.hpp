@@ -270,18 +270,17 @@ WM_INLINE void predictionErrorTile(__local const float* restrict region, const f
         error[o] = pixel[o] - dot[o];
 }
 
-// Loads 4 consecutive rows using float4 when aligned or scalar reads otherwise
+// Loads 4 consecutive rows with one vector load when all are inside the column (vload4 needs only element alignment), scalar reads otherwise
 WM_INLINE float4 loadRows4(const __global float* restrict input, const int x, const int y0, const int height) {
     const int idx = (x * height) + y0;
-    if ((height & 3) == 0)
-        return y0 < height ? vload4(0, input + idx) : (float4)(0.0f);
+    if (y0 + 3 < height)
+        return vload4(0, input + idx);
     return (float4)(y0 < height ? input[idx] : 0.0f, y0 + 1 < height ? input[idx + 1] : 0.0f, y0 + 2 < height ? input[idx + 2] : 0.0f, y0 + 3 < height ? input[idx + 3] : 0.0f);
 }
 WM_INLINE void storeRows4(__global float* restrict output, const int x, const int y0, const int height, const float4 value) {
     const int idx = (x * height) + y0;
-    if ((height & 3) == 0) {
-        if (y0 < height)
-            vstore4(value, 0, output + idx);
+    if (y0 + 3 < height) {
+        vstore4(value, 0, output + idx);
         return;
     }
     if (y0 < height) output[idx] = value.x;
@@ -291,17 +290,16 @@ WM_INLINE void storeRows4(__global float* restrict output, const int x, const in
 }
 WM_INLINE float4 loadRows4Half(const __global half* restrict input, const int x, const int y0, const int height) {
     const int idx = (x * height) + y0;
-    if ((height & 3) == 0)
-        return y0 < height ? vload_half4(0, input + idx) : (float4)(0.0f);
+    if (y0 + 3 < height)
+        return vload_half4(0, input + idx);
     return (float4)(y0 < height ? vload_half(idx, input) : 0.0f, y0 + 1 < height ? vload_half(idx + 1, input) : 0.0f, y0 + 2 < height ? vload_half(idx + 2, input) : 0.0f,
         y0 + 3 < height ? vload_half(idx + 3, input) : 0.0f);
 }
 WM_INLINE void storeRows4Half(__global half* restrict output, const int x, const int y0, const int height, const float4 value) {
     const int idx = (x * height) + y0;
     __global ushort* restrict bits = (__global ushort*)output;
-    if ((height & 3) == 0) {
-        if (y0 < height)
-            vstore4((ushort4)(toHalfBits(value.x), toHalfBits(value.y), toHalfBits(value.z), toHalfBits(value.w)), 0, bits + idx);
+    if (y0 + 3 < height) {
+        vstore4((ushort4)(toHalfBits(value.x), toHalfBits(value.y), toHalfBits(value.z), toHalfBits(value.w)), 0, bits + idx);
         return;
     }
     if (y0 < height) bits[idx] = toHalfBits(value.x);
@@ -497,13 +495,12 @@ __kernel void apply_watermark_rgb(__global const uchar* restrict input, __global
 {
     const float strength = embedStrength(sumSq, strengthNumerator);
     const int stride = get_global_size(0);
-    const int planeVectors = planeElements % 4 == 0 ? planeElements / 4 : 0;
+    // vload4 / vstore4 need only element alignment: the planes do not have to start at a multiple of 4 pixels
+    const int planeVectors = planeElements / 4;
     for (int v = get_global_id(0); v < planeVectors; v += stride) {
         const float4 us = vload_half4(v, u) * strength;
-        for (int c = 0; c < 3; c++) {
-            const int vectorIndex = v + c * planeVectors;
-            vstore4(toPixels4(convert_float4(vload4(vectorIndex, input)) + us), vectorIndex, output);
-        }
+        for (int c = 0; c < 3; c++)
+            vstore4(toPixels4(convert_float4(vload4(v, input + c * planeElements)) + us), v, output + c * planeElements);
     }
     for (int i = planeVectors * 4 + get_global_id(0); i < planeElements; i += stride) {
         const float us = vload_half(i, u) * strength;
@@ -518,7 +515,7 @@ __kernel void apply_watermark_gray(__global const float* restrict input, __globa
 {
     const float strength = embedStrength(sumSq, strengthNumerator);
     const int stride = get_global_size(0);
-    const int planeVectors = planeElements % 4 == 0 ? planeElements / 4 : 0;
+    const int planeVectors = planeElements / 4;
     for (int v = get_global_id(0); v < planeVectors; v += stride)
         vstore4(toPixels4(vload4(v, input) + vload_half4(v, u) * strength), v, output);
     for (int i = planeVectors * 4 + get_global_id(0); i < planeElements; i += stride)
@@ -634,8 +631,8 @@ WM_INLINE void reduceShiftSums(const float* restrict sums, const int num, __glob
 WM_INLINE void sumColumnRun(const __global float* restrict input, const int c, const int r0, const int width, const int height, float* restrict sums, const int dc0, const int dc1,
     const int cols, const int validCols)
 {
-    const bool alignedColumns = (height & 3) == 0;
-    const bool interiorRun = alignedColumns && r0 >= PAD && r0 + INTERIOR_RUN <= height - PAD;
+    // vload4 needs only element alignment: the vector loads work for any column height
+    const bool interiorRun = r0 >= PAD && r0 + INTERIOR_RUN <= height - PAD;
     // Scale task values while zeroing pixels outside inner image rows
     float a[2 * INTERIOR_RUN];
     #pragma unroll
@@ -662,7 +659,7 @@ WM_INLINE void sumColumnRun(const __global float* restrict input, const int c, c
         }
     }
 
-    const bool fastWindow = alignedColumns && r0 - HALO >= 0 && r0 + INTERIOR_RUN + HALO <= height;
+    const bool fastWindow = r0 - HALO >= 0 && r0 + INTERIOR_RUN + HALO <= height;
     #pragma unroll
     for (int k = dc0; k < dc1 + cols - 1; k++) {
         const __global float* colB = input + ((size_t)clamp(c + k, 0, width - 1) * height);

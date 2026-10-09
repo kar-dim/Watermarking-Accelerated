@@ -1,9 +1,13 @@
 #pragma once
 
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <filesystem>
+#include <future>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <utility>
 #include <vector>
@@ -73,6 +77,56 @@ float detectLoadedImage(const ImageSession* session);
 float detectEmbeddedBuffer(const ImageSession* session);
 void saveImage(const ImageSession* session, const std::string& outPath);
 void saveImageExact(const ImageSession* session, const std::string& outPath);
+
+// loads the images of a batch in their order on up to "depth" background threads. Depth 0 picks it from the CPU thread count
+class ImagePrefetcher {
+  public:
+    ImagePrefetcher(std::vector<std::filesystem::path> files, int deviceIndex, size_t depth = 0);
+    ImagePrefetcher(const ImagePrefetcher&) = delete;
+    ImagePrefetcher& operator=(const ImagePrefetcher&) = delete;
+    // the next image, its load error is rethrown here (the loads of the images after it keep running)
+    PreloadedHandle next();
+
+  private:
+    std::vector<std::filesystem::path> files;
+    int deviceIndex;
+    size_t launched = 0;
+    // the futures join on destruction, before the files they read are released
+    std::deque<std::future<PreloadedHandle>> pending;
+    void launch();
+};
+
+struct SaveResult {
+    size_t id;
+    std::string error;
+};
+
+// saves embedded images in the background on up to "maxSaves" threads, each with its own export buffer. maxSaves 0 picks it from the CPU thread count
+class ImageSaver {
+  public:
+    explicit ImageSaver(size_t maxSaves = 0);
+    // waits for the saves still running
+    ~ImageSaver();
+    ImageSaver(const ImageSaver&) = delete;
+    ImageSaver& operator=(const ImageSaver&) = delete;
+    // waits while every slot is busy, then exports the session output and writes it to outPath in the background
+    void save(ImageSession* session, const std::string& outPath, size_t id);
+    // the saves that finished since the last call, in the order they finished
+    std::vector<SaveResult> takeFinished();
+    // waits for all saves, then returns the ones that finished since the last call
+    std::vector<SaveResult> finish();
+
+  private:
+    struct Slot {
+        ExportHandle buffer;
+        std::future<void> task;
+    };
+    std::vector<Slot> saveSlots;
+    std::vector<size_t> freeSlots;
+    std::vector<SaveResult> finished;
+    std::mutex mutex;
+    std::condition_variable slotFreed;
+};
 ExportHandle createReusableExportBuffer();
 // on the Eigen backend this transfers the session output to the export buffer
 // call embedImage again before reading, detecting, or saving the session output

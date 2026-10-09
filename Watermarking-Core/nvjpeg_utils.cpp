@@ -1,6 +1,7 @@
 #include "CudaArray.hpp"
 #include "CudaCheck.hpp"
 #include "nvjpeg_utils.hpp"
+#include "utils.hpp"
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
@@ -41,9 +42,8 @@ using EncoderParams = Owned<nvjpegEncoderParams, nvjpegEncoderParamsDestroy>;
 
 // interpolated chroma upsampling, like libjpeg's (fancy upsampling)
 constexpr unsigned int kHandleFlags = NVJPEG_FLAGS_UPSAMPLING_WITH_INTERPOLATION;
-// codec object sets per device, decoder is on the critical path (batch prefetch, UI), a second decoder exists
-// when two loads overlap. ONE encoder is enough, more encoders would require more VRAM for no gains
-constexpr int kMaxDecoders = 2;
+// codec object sets per device, decoders are on the critical path (batch prefetch, UI): one per image the batch loads at once.
+// ONE encoder is enough, more encoders would require more VRAM for no gains
 constexpr int kMaxEncoders = 1;
 
 bool succeeded(const nvjpegStatus_t status) { return status == NVJPEG_STATUS_SUCCESS; }
@@ -138,9 +138,11 @@ struct EncodeWorker {
 };
 
 // up to "maxWorkers" workers, created on demand and reused
-template <typename Worker, int maxWorkers>
+template <typename Worker>
 class WorkerPool {
   public:
+    explicit WorkerPool(const int maxWorkers) : maxWorkers(maxWorkers) {}
+
     // gives the worker back on destruction, empty when the worker could not be created
     class Lease {
       public:
@@ -171,6 +173,7 @@ class WorkerPool {
     }
 
   private:
+    const int maxWorkers;
     std::mutex mutex;
     std::condition_variable available;
     std::vector<std::unique_ptr<Worker>> idle;
@@ -191,8 +194,8 @@ class WorkerPool {
 struct DeviceCodec {
     Handle handle;
     bool hardwareDecoder = false;
-    WorkerPool<DecodeWorker, kMaxDecoders> decoders;
-    WorkerPool<EncodeWorker, kMaxEncoders> encoders;
+    WorkerPool<DecodeWorker> decoders{InternalUtils::batchLoadThreads()};
+    WorkerPool<EncodeWorker> encoders{kMaxEncoders};
 };
 
 // the nvJPEG objects of each device, destroyed with their device selected

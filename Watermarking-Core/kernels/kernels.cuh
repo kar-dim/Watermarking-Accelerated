@@ -491,15 +491,42 @@ __device__ __forceinline__ void reduceShiftSums(const float (&sums)[NUM], uint64
     }
 }
 
-// Accumulates shift sums for RUN rows across COLS neighboring columns
-template <int p, int RUN, int DC0, int DC1, int NUM, int COLS = 1>
+// Loads N consecutive floats with aligned float4 loads, OFF is the misalignment of "span" in floats (the 16-byte chunks also cover
+// up to 3 floats before and after the span)
+template <int OFF, int N>
+__device__ __forceinline__ void loadSpanChunks(const float* __restrict__ span, float (&out)[N]) {
+    const float4* chunks = reinterpret_cast<const float4*>(span - OFF);
+#pragma unroll
+    for (int q = 0; q < (OFF + N + 3) / 4; q++) {
+        const float4 f = chunks[q];
+        const float v[4] = {f.x, f.y, f.z, f.w};
+#pragma unroll
+        for (int i = 0; i < 4; i++)
+            if ((4 * q) + i - OFF >= 0 && (4 * q) + i - OFF < N)
+                out[(4 * q) + i - OFF] = v[i];
+    }
+}
+// Same, for a column span at any float alignment (column heights that are not a multiple of 4)
+template <int N>
+__device__ __forceinline__ void loadSpan(const float* __restrict__ span, float (&out)[N]) {
+    switch ((reinterpret_cast<uintptr_t>(span) / sizeof(float)) & 3) {
+    case 0: loadSpanChunks<0>(span, out); break;
+    case 1: loadSpanChunks<1>(span, out); break;
+    case 2: loadSpanChunks<2>(span, out); break;
+    default: loadSpanChunks<3>(span, out); break;
+    }
+}
+
+// Accumulates shift sums for RUN rows across COLS neighboring columns, ALIGNED: the column height is a multiple of 4 (16-byte aligned columns)
+template <int p, bool ALIGNED, int RUN, int DC0, int DC1, int NUM, int COLS = 1>
 __device__ __forceinline__ void sumColumnRun(const float* __restrict__ input, const int c, const int r0, const int width, const int height, float (&sums)[NUM], const int validCols = COLS) {
     using L = MeShiftLayout<p>;
     constexpr int HALO = 8; // >= maxShift, a multiple of 4 for aligned float4 loads
     constexpr int WINDOW = RUN + (2 * HALO);
     static_assert(HALO >= L::maxShift, "the halo must cover the largest shift");
-    const bool alignedColumns = (height & 3) == 0;
-    const bool interiorRun = alignedColumns && r0 >= L::pad && r0 + RUN <= height - L::pad;
+    // misaligned columns are read in whole 16-byte chunks, the vector loads need 3 more rows of the same column after the span (the last column ends the buffer)
+    constexpr int chunkSlack = ALIGNED ? 0 : 3;
+    const bool interiorRun = r0 >= L::pad && r0 + RUN <= height - L::pad && r0 + RUN + chunkSlack <= height;
 
     // Scale task values while zeroing pixels outside inner image rows
     float a[COLS][RUN];
@@ -508,14 +535,14 @@ __device__ __forceinline__ void sumColumnRun(const float* __restrict__ input, co
         const float* colA = input + (static_cast<size_t>(clamp(c + j, 0, width - 1)) * height);
         const float scale = j < validCols ? L::productScale : 0.0f;
         if (interiorRun) {
+            float run[RUN];
+            if constexpr (ALIGNED)
+                loadSpanChunks<0>(colA + r0, run);
+            else
+                loadSpan(colA + r0, run);
 #pragma unroll
-            for (int v = 0; v < RUN; v += 4) {
-                const float4 f = *reinterpret_cast<const float4*>(colA + r0 + v);
-                a[j][v + 0] = f.x * scale;
-                a[j][v + 1] = f.y * scale;
-                a[j][v + 2] = f.z * scale;
-                a[j][v + 3] = f.w * scale;
-            }
+            for (int t = 0; t < RUN; t++)
+                a[j][t] = run[t] * scale;
         } else {
 #pragma unroll
             for (int t = 0; t < RUN; t++) {
@@ -525,20 +552,16 @@ __device__ __forceinline__ void sumColumnRun(const float* __restrict__ input, co
         }
     }
 
-    const bool fastWindow = alignedColumns && r0 - HALO >= 0 && r0 + RUN + HALO <= height;
+    const bool fastWindow = r0 - HALO >= 0 && r0 + RUN + HALO + chunkSlack <= height;
 #pragma unroll
     for (int k = DC0; k < DC1 + COLS - 1; k++) {
         const float* colB = input + (static_cast<size_t>(clamp(c + k, 0, width - 1)) * height);
         float w[WINDOW];
         if (fastWindow) {
-#pragma unroll
-            for (int v = 0; v < WINDOW; v += 4) {
-                const float4 f = *reinterpret_cast<const float4*>(colB + r0 - HALO + v);
-                w[v + 0] = f.x;
-                w[v + 1] = f.y;
-                w[v + 2] = f.z;
-                w[v + 3] = f.w;
-            }
+            if constexpr (ALIGNED)
+                loadSpanChunks<0>(colB + r0 - HALO, w);
+            else
+                loadSpan(colB + r0 - HALO, w);
         } else {
 #pragma unroll
             for (int v = 0; v < WINDOW; v++)
@@ -628,8 +651,9 @@ __device__ __forceinline__ void forColumnShiftGroup(const int group, Work&& work
         forColumnShiftGroup<p, G + 1>(group, work);
 }
 
-// Single-launch kernel computing all inner and border shift sums
-template <int p>
+// Single-launch kernel computing all inner and border shift sums. Separate kernels for aligned and misaligned columns (see sumColumnRun): the
+// misaligned loads would cost the aligned kernel registers
+template <int p, bool ALIGNED>
 __global__ void __launch_bounds__(256, 2) me_shift_sums(const float* __restrict__ input, const float* __restrict__ borderRowsCopy, uint64_t* __restrict__ shiftSums, const int width, const int height,
     const int interiorBlocks, const int borderBlocksPerLine) {
     using L = MeShiftLayout<p>;
@@ -658,7 +682,7 @@ __global__ void __launch_bounds__(256, 2) me_shift_sums(const float* __restrict_
             const int stride = (interiorBlocks / G) * blockDim.x;
             for (int task = groupBlock * blockDim.x + threadIdx.x; task < totalTasks; task += stride) {
                 const int c = COLS * (task / runsPerColumn);
-                sumColumnRun<p, RUN, DC0, DC1, NUM, COLS>(input, L::pad + c, (task % runsPerColumn) * RUN, width, height, sums, min(COLS, interiorColumns - c));
+                sumColumnRun<p, ALIGNED, RUN, DC0, DC1, NUM, COLS>(input, L::pad + c, (task % runsPerColumn) * RUN, width, height, sums, min(COLS, interiorColumns - c));
             }
             reduceShiftSums<NUM>(sums, shiftSums + SHIFT0, 1, warpSums);
         } else {
@@ -672,7 +696,7 @@ __global__ void __launch_bounds__(256, 2) me_shift_sums(const float* __restrict_
                 if (isBorderRow)
                     sumRowRun<p, RUN, DC0, DC1>(L::copyBorderRows ? borderRowsCopy : input, fixedCoord, run * RUN, width, height, sums);
                 else
-                    sumColumnRun<p, RUN, DC0, DC1>(input, fixedCoord, run * RUN, width, height, sums);
+                    sumColumnRun<p, ALIGNED, RUN, DC0, DC1>(input, fixedCoord, run * RUN, width, height, sums);
             }
             uint64_t* output = shiftSums + (isBorderRow ? L::borderRowsOffset : L::borderColsOffset) + (SHIFT0 * L::borderSize) + border;
             reduceShiftSums<NUM>(sums, output, L::borderSize, warpSums);
@@ -956,14 +980,30 @@ __global__ void apply_watermark_fused(const T* __restrict__ input, const __half*
     const float strength = embedStrength(sumSq, strengthNumerator);
     const int stride = blockDim.x * gridDim.x;
     const int first = blockIdx.x * blockDim.x + threadIdx.x;
-    const int planeVectors = planeElements % 4 == 0 ? planeElements / 4 : 0;
-    for (int v = first; v < planeVectors; v += stride) {
-        const float4 uv = toFloat4(reinterpret_cast<const Half4*>(u)[v]);
-        const float4 us = make_float4(uv.x * strength, uv.y * strength, uv.z * strength, uv.w * strength);
-        for (int c = 0; c < numChannels; c++) {
-            const int vectorIndex = v + c * planeVectors;
-            const float4 in = loadPixels4(input, vectorIndex);
-            reinterpret_cast<uchar4*>(output)[vectorIndex] = make_uchar4(toPixel(in.x + us.x), toPixel(in.y + us.y), toPixel(in.z + us.z), toPixel(in.w + us.w));
+    const int planeVectors = planeElements / 4;
+    if (planeElements % 4 == 0) {
+        for (int v = first; v < planeVectors; v += stride) {
+            const float4 uv = toFloat4(reinterpret_cast<const Half4*>(u)[v]);
+            const float4 us = make_float4(uv.x * strength, uv.y * strength, uv.z * strength, uv.w * strength);
+            for (int c = 0; c < numChannels; c++) {
+                const int vectorIndex = v + c * planeVectors;
+                const float4 in = loadPixels4(input, vectorIndex);
+                reinterpret_cast<uchar4*>(output)[vectorIndex] = make_uchar4(toPixel(in.x + us.x), toPixel(in.y + us.y), toPixel(in.z + us.z), toPixel(in.w + us.w));
+            }
+        }
+    } else {
+        // only the first plane starts 4-pixel aligned, the next ones are written per pixel
+        for (int v = first; v < planeVectors; v += stride) {
+            const float4 uv = toFloat4(reinterpret_cast<const Half4*>(u)[v]);
+            const float us[4] = {uv.x * strength, uv.y * strength, uv.z * strength, uv.w * strength};
+            const float4 in = loadPixels4(input, v);
+            reinterpret_cast<uchar4*>(output)[v] = make_uchar4(toPixel(in.x + us[0]), toPixel(in.y + us[1]), toPixel(in.z + us[2]), toPixel(in.w + us[3]));
+            for (int c = 1; c < numChannels; c++) {
+                const int pixelIdx = 4 * v + c * planeElements;
+#pragma unroll
+                for (int i = 0; i < 4; i++)
+                    output[pixelIdx + i] = toPixel(static_cast<float>(input[pixelIdx + i]) + us[i]);
+            }
         }
     }
     for (int i = planeVectors * 4 + first; i < planeElements; i += stride) {

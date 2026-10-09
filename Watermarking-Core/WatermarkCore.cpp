@@ -22,6 +22,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -118,6 +119,19 @@ void exportForSave(ImageSession* s, ExportedImage* p) {
 namespace {
 // saveImage and flushToDiskAsync add it to the file name (before the extension)
 constexpr const char* kWatermarkedSuffix = "W_ME";
+
+// batch load and save threads run next to the processing thread and to each other: their CImg / conversion loops stay serial instead of each
+// thread starting its own OpenMP team (the setting is per thread and the async worker threads are reused, so it is restored)
+class SerialOpenMPScope {
+  public:
+    SerialOpenMPScope() : previous(omp_get_max_threads()) { omp_set_num_threads(1); }
+    ~SerialOpenMPScope() { omp_set_num_threads(previous); }
+    SerialOpenMPScope(const SerialOpenMPScope&) = delete;
+    SerialOpenMPScope& operator=(const SerialOpenMPScope&) = delete;
+
+  private:
+    int previous;
+};
 
 // NaN and infinity would reach the pixels through the watermark strength
 void checkPsnr(const float psnr) {
@@ -517,6 +531,91 @@ PreloadedHandle preloadImageFromDisk(const string& imagePath, const int deviceIn
     return p;
 }
 
+ImagePrefetcher::ImagePrefetcher(std::vector<std::filesystem::path> files, const int deviceIndex, const size_t depth) : files(std::move(files)), deviceIndex(deviceIndex) {
+    const size_t loads = depth > 0 ? depth : static_cast<size_t>(batchLoadThreads());
+    for (size_t i = 0; i < loads; i++)
+        launch();
+}
+
+PreloadedHandle ImagePrefetcher::next() {
+    if (pending.empty())
+        throw std::logic_error("No images left to load");
+    std::future<PreloadedHandle> image = std::move(pending.front());
+    pending.pop_front();
+    launch();
+    return image.get();
+}
+
+ImageSaver::ImageSaver(const size_t maxSaves) {
+    const size_t count = maxSaves > 0 ? maxSaves : std::max(std::thread::hardware_concurrency(), 1u);
+    saveSlots.resize(count);
+    for (size_t i = 0; i < count; i++) {
+        saveSlots[i].buffer = createReusableExportBuffer();
+        freeSlots.push_back(count - 1 - i);
+    }
+}
+
+// the save tasks use the mutex and the lists, they must end before the members are destroyed
+ImageSaver::~ImageSaver() {
+    for (auto& slot : saveSlots)
+        if (slot.task.valid())
+            slot.task.wait();
+}
+
+void ImageSaver::save(ImageSession* session, const string& outPath, const size_t id) {
+    std::unique_lock lock(mutex);
+    slotFreed.wait(lock, [&] { return !freeSlots.empty(); });
+    const size_t index = freeSlots.back();
+    freeSlots.pop_back();
+    lock.unlock();
+    Slot& slot = saveSlots[index];
+    try {
+        // the previous save of this slot has finished (it freed the slot), this joins its thread
+        if (slot.task.valid())
+            slot.task.get();
+        exportForSave(session, slot.buffer.get());
+        slot.task = std::async(std::launch::async, [this, index, id, outPath] {
+            string error;
+            try {
+                flushToDiskAsync(saveSlots[index].buffer.get(), outPath);
+            } catch (const std::exception& e) { error = *e.what() ? e.what() : "Unknown save error"; } catch (...) {
+                error = "Unknown save error";
+            }
+            {
+                std::lock_guard finishedLock(mutex);
+                finished.push_back(SaveResult{id, std::move(error)});
+                freeSlots.push_back(index);
+            }
+            slotFreed.notify_all();
+        });
+    } catch (...) {
+        std::lock_guard freeLock(mutex);
+        freeSlots.push_back(index);
+        throw;
+    }
+}
+
+std::vector<SaveResult> ImageSaver::takeFinished() {
+    std::lock_guard lock(mutex);
+    return std::exchange(finished, {});
+}
+
+std::vector<SaveResult> ImageSaver::finish() {
+    std::unique_lock lock(mutex);
+    slotFreed.wait(lock, [&] { return freeSlots.size() == saveSlots.size(); });
+    return std::exchange(finished, {});
+}
+
+void ImagePrefetcher::launch() {
+    if (launched < files.size()) {
+        pending.push_back(std::async(std::launch::async, [path = files[launched].string(), device = deviceIndex] {
+            const SerialOpenMPScope serial;
+            return preloadImageFromDisk(path, device, false);
+        }));
+        launched++;
+    }
+}
+
 // used to get the current image dimensions
 std::pair<int, int> getImageDims(const ImageSession* s) { return {s->currentRows, s->currentCols}; }
 OriginalPixelData takeOriginalPixelData(ImageSession* s) {
@@ -613,7 +712,10 @@ void saveImage(const ImageSession* s, const string& outPath) {
 }
 
 // same as saveImage, but used as a separate step to allow for asynchronous saving (in batched mode)
-void flushToDiskAsync(ExportedImage* handle, const string& outPath) { InternalUtils::saveImage(outPath, kWatermarkedSuffix, handle->finalPixels, handle->alpha); }
+void flushToDiskAsync(ExportedImage* handle, const string& outPath) {
+    const SerialOpenMPScope serial;
+    InternalUtils::saveImage(outPath, kWatermarkedSuffix, handle->finalPixels, handle->alpha);
+}
 
 void saveImageExact(const ImageSession* s, const string& outPath) {
     checkOutput(s);

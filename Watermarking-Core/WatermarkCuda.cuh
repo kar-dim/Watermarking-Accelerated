@@ -17,7 +17,9 @@
 
 // CUDA graph of one pipeline (embed or detect): recorded once and replayed with ONE launch while its buffers and kernel arguments (the
 // key) stay the same, recorded again when they change (the existing graph is updated in place when possible). It is recorded on its own
-// stream: capture is per stream, work that another thread puts on the compute stream (the image prefetch uploads) would end up in the graph or break the capture
+// stream: capture is per stream, work that another thread puts on the compute stream (the image prefetch uploads) would end up in the graph or break the capture.
+// Capture streams and instantiated graphs are reused (see CudaStreamManager): a new pipeline of the same "kind" (one per image size) updates the graph
+// of a released one instead of instantiating its own
 class PipelineGraph {
   public:
     struct Key {
@@ -28,36 +30,36 @@ class PipelineGraph {
         bool operator==(const Key&) const = default;
     };
 
-    PipelineGraph() = default;
+    explicit PipelineGraph(const int kind) : kind(kind) {}
     PipelineGraph(const PipelineGraph&) = delete;
     PipelineGraph& operator=(const PipelineGraph&) = delete;
-    ~PipelineGraph() {
-        if (exec)
-            cudaGraphExecDestroy(exec);
-        if (captureStream)
-            cudaStreamDestroy(captureStream);
-    }
+    ~PipelineGraph() { CudaStreamManager::getInstance().releaseGraph(device, kind, exec); }
 
     // records the kernels that "enqueue" puts on the stream it receives (when the key changed), then launches the graph on "stream"
     template <typename Enqueue>
     void launch(cudaStream_t stream, const Key& newKey, Enqueue&& enqueue) {
         if (!exec || !(newKey == key)) {
-            if (!captureStream)
-                CUDA_CHECK(cudaStreamCreateWithFlags(&captureStream, cudaStreamNonBlocking));
+            auto& manager = CudaStreamManager::getInstance();
+            if (!exec) {
+                CUDA_CHECK(cudaGetDevice(&device));
+                exec = manager.acquireGraph(kind);
+            }
+            const cudaStream_t captureStream = manager.acquireCaptureStream();
             cudaGraph_t graph = nullptr;
-            CUDA_CHECK(cudaStreamBeginCapture(captureStream, cudaStreamCaptureModeThreadLocal));
             try {
+                CUDA_CHECK(cudaStreamBeginCapture(captureStream, cudaStreamCaptureModeThreadLocal));
                 enqueue(captureStream);
             } catch (...) {
                 if (cudaStreamEndCapture(captureStream, &graph) == cudaSuccess && graph)
                     cudaGraphDestroy(graph);
-                // failed captures must not stay on the stream and the next capture starts on a new one
+                // failed captures must not stay on the stream: it is not reused
                 cudaStreamDestroy(captureStream);
-                captureStream = nullptr;
                 (void)cudaGetLastError();
                 throw;
             }
-            CUDA_CHECK(cudaStreamEndCapture(captureStream, &graph));
+            const cudaError_t captured = cudaStreamEndCapture(captureStream, &graph);
+            manager.releaseCaptureStream(device, captureStream);
+            CUDA_CHECK(captured);
             cudaGraphExecUpdateResultInfo updateInfo;
             if (exec && cudaGraphExecUpdate(exec, graph, &updateInfo) != cudaSuccess) {
                 // different kernels (another output layout or channel count): create a new graph
@@ -74,7 +76,8 @@ class PipelineGraph {
     }
 
   private:
-    cudaStream_t captureStream = nullptr;
+    int kind;
+    int device = 0;
     cudaGraphExec_t exec = nullptr;
     Key key{};
 };
@@ -93,7 +96,7 @@ class WatermarkCuda final : public WatermarkBase {
         borderBlocksPerLine = (((std::max(this->baseRows, this->baseCols) + L::interiorRun - 1) / L::interiorRun) + shiftBlockSize - 1) / shiftBlockSize;
         // the inner sums use as many blocks as fit on the GPU at once, NEVER more than tasks, one set of blocks per column shift
         // group. When there are few border blocks, room is left for them so they run together with the inner blocks, not after them
-        const int residentBlocks = static_cast<int>(cuda_utils::gridSizeMeCalculate(me_shift_sums<p>, shiftBlockSize));
+        const int residentBlocks = static_cast<int>(cuda_utils::gridSizeMeCalculate(shiftSumsKernel(), shiftBlockSize));
         const int borderBlocks = borderBlocksPerLine * 2 * L::borderSize * L::shiftGroups;
         const int interiorSlots = 4 * borderBlocks <= residentBlocks ? residentBlocks - borderBlocks : residentBlocks;
         const int interiorTasks = ((this->baseRows + L::interiorRun - 1) / L::interiorRun) * ((this->baseCols - 2 * L::pad + L::interiorCols - 1) / L::interiorCols);
@@ -115,9 +118,9 @@ class WatermarkCuda final : public WatermarkBase {
         uNormPartial = ImageBuffer(corrNumBlocks, stream);
         zNormPartial = ImageBuffer(corrNumBlocks, stream);
         corrBlockCounter = CudaArray<unsigned int>::zeros(1, stream);
-        float* pinned = nullptr;
-        CUDA_CHECK(cudaHostAlloc(&pinned, sizeof(float), cudaHostAllocMapped));
-        correlationHost.reset(pinned);
+        int device = 0;
+        CUDA_CHECK(cudaGetDevice(&device));
+        correlationHost = std::unique_ptr<float, PinnedDeleter>(CudaStreamManager::getInstance().acquirePinnedFloat(), PinnedDeleter{device});
     }
 
     // RGB embedding: computes the strengthened watermark u from the luma (ME mask), then adds it to all channels of the 8-bit image
@@ -171,12 +174,18 @@ class WatermarkCuda final : public WatermarkBase {
     ImageBuffer zNormPartial;
     CudaArray<unsigned int> corrBlockCounter;
     struct PinnedDeleter {
-        void operator()(float* ptr) const { cudaFreeHost(ptr); }
+        int device;
+        void operator()(float* ptr) const { CudaStreamManager::getInstance().releasePinnedFloat(device, ptr); }
     };
     std::unique_ptr<float, PinnedDeleter> correlationHost;
 
-    PipelineGraph embedGraph;
-    PipelineGraph detectGraph;
+    // the graphs of one kind have the same kernels: same pipeline, p and shift sums kernel (see shiftSumsKernel)
+    int graphKind(const int pipeline) const { return (((p * 2) + pipeline) * 2) + (this->baseRows % 4 == 0 ? 1 : 0); }
+    PipelineGraph embedGraph{graphKind(0)};
+    PipelineGraph detectGraph{graphKind(1)};
+
+    // the shift sums kernel for this column height (vector loads of 16-byte aligned columns when it is a multiple of 4)
+    auto shiftSumsKernel() const { return this->baseRows % 4 == 0 ? me_shift_sums<p, true> : me_shift_sums<p, false>; }
 
     // embedding: the watermark is added to the 8-bit "inputImage" (RGB), or to the luma when inputImage is null
     void embed(const ImageBuffer& inputGrayImage, const uint8_t* inputImage, const int channels, ImageOutputBuffer& output, const Layout outputLayout) {
@@ -238,8 +247,8 @@ class WatermarkCuda final : public WatermarkBase {
             me_copy_border_rows<p><<<(borderCopySize + shiftBlockSize - 1) / shiftBlockSize, shiftBlockSize, 0, graphStream>>>(imageData, borderRowsCopy.data(), this->baseCols, this->baseRows);
             CUDA_CHECK(cudaGetLastError());
         }
-        me_shift_sums<p>
-            <<<shiftSumsBlocks, shiftBlockSize, 0, graphStream>>>(imageData, borderRowsCopy.data(), shiftSums.data(), this->baseCols, this->baseRows, shiftInteriorBlocks, borderBlocksPerLine);
+        shiftSumsKernel()<<<shiftSumsBlocks, shiftBlockSize, 0, graphStream>>>(
+            imageData, borderRowsCopy.data(), shiftSums.data(), this->baseCols, this->baseRows, shiftInteriorBlocks, borderBlocksPerLine);
         CUDA_CHECK(cudaGetLastError());
         me_build_system<p>
             <<<(solverSystemSize + buildBlockSize - 1) / buildBlockSize, buildBlockSize, 0, graphStream>>>(imageData, shiftSums.data(), solverSystem.data(), this->baseCols, this->baseRows);

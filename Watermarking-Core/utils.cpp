@@ -12,8 +12,10 @@
 #include <fstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
+#include <zlib.h>
 
 #if defined(_USE_GPU_)
 #include <cstring>
@@ -59,13 +61,119 @@ bool hasJpegExtension(const string& path) {
     return extension == "jpg" || extension == "jpeg";
 }
 
+// 24-bit BMP file as CImg's save_bmp but more optimized and faster and without CImg overhead
+void saveBmp(const Gray8BufferIO& image, const string& path) {
+    constexpr size_t chunkBytes = size_t{1} << 20;
+    const unsigned int width = image.width();
+    const unsigned int height = image.height();
+    const unsigned int align = (4 - (3 * width) % 4) % 4;
+    const unsigned int rowBytes = (3 * width) + align;
+    const unsigned int bufferSize = rowBytes * height;
+    const unsigned int fileSize = 54 + bufferSize;
+    const auto putLE32 = [](uint8_t* destination, const unsigned int value) {
+        for (int byte = 0; byte < 4; byte++)
+            destination[byte] = static_cast<uint8_t>(value >> (8 * byte));
+    };
+    uint8_t header[54] = {'B', 'M'};
+    putLE32(header + 0x02, fileSize);
+    header[0x0A] = 0x36;
+    header[0x0E] = 0x28;
+    putLE32(header + 0x12, width);
+    putLE32(header + 0x16, height);
+    header[0x1A] = 1;
+    header[0x1C] = 24;
+    putLE32(header + 0x22, bufferSize);
+    header[0x27] = 0x1;
+    header[0x2B] = 0x1;
+
+    std::ofstream file(path, std::ofstream::binary);
+    checkError(!file.write(reinterpret_cast<const char*>(header), sizeof(header)), "Unable to write the image file: " + path);
+    const int channels = image.spectrum();
+    // the row padding bytes are never written, they stay zero
+    const size_t chunkRows = std::max<size_t>(chunkBytes / rowBytes, 1);
+    std::vector<uint8_t> chunk(chunkRows * rowBytes, 0);
+    size_t filledRows = 0;
+    // bottom-up rows of BGR pixels
+    for (int y = static_cast<int>(height) - 1; y >= 0; y--) {
+        uint8_t* row = chunk.data() + (filledRows * rowBytes);
+        const uint8_t* red = image.data(0, y, 0, 0);
+        const uint8_t* green = channels >= 2 ? image.data(0, y, 0, 1) : red;
+        const uint8_t* blue = channels >= 3 ? image.data(0, y, 0, 2) : red;
+        for (unsigned int x = 0; x < width; x++) {
+            row[(3 * x) + 0] = channels == 2 ? 0 : blue[x];
+            row[(3 * x) + 1] = green[x];
+            row[(3 * x) + 2] = red[x];
+        }
+        if (++filledRows == chunkRows || y == 0) {
+            checkError(!file.write(reinterpret_cast<const char*>(chunk.data()), static_cast<std::streamsize>(filledRows * rowBytes)), "Unable to write the image file: " + path);
+            filledRows = 0;
+        }
+    }
+    file.close();
+    checkError(!file, "Unable to write the image file: " + path);
+}
+
+// libpng output to the file stream
+void writePngBytes(png_structp png, png_bytep data, const png_size_t length) {
+    auto* file = static_cast<std::ofstream*>(png_get_io_ptr(png));
+    if (!file->write(reinterpret_cast<const char*>(data), static_cast<std::streamsize>(length)))
+        png_error(png, "write failed");
+}
+void flushPng(png_structp) {}
+
+// writes the 8-bit PNG of the planes, row by row, libpng reports errors with longjmp: only trivially destructible objects live here
+bool writePngRows(png_structp png, png_infop info, const uint8_t* const* planes, const int channels, const png_uint_32 width, const png_uint_32 height, uint8_t* row) {
+    if (setjmp(png_jmpbuf(png)))
+        return false;
+    const int colorType = channels == 1 ? PNG_COLOR_TYPE_GRAY : channels == 2 ? PNG_COLOR_TYPE_GRAY_ALPHA : channels == 3 ? PNG_COLOR_TYPE_RGB : PNG_COLOR_TYPE_RGB_ALPHA;
+    png_set_IHDR(png, info, width, height, 8, colorType, PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
+    // the "up" filter with run-length deflate: about 5x faster than libpng's defaults (all filters, full deflate) for files ~15% larger
+    png_set_filter(png, PNG_FILTER_TYPE_BASE, PNG_FILTER_UP);
+    png_set_compression_strategy(png, Z_RLE);
+    png_write_info(png, info);
+    for (png_uint_32 y = 0; y < height; y++) {
+        const size_t rowOffset = static_cast<size_t>(y) * width;
+        for (int channel = 0; channel < channels; channel++) {
+            const uint8_t* plane = planes[channel] + rowOffset;
+            for (png_uint_32 x = 0; x < width; x++)
+                row[(static_cast<size_t>(x) * channels) + channel] = plane[x];
+        }
+        png_write_row(png, row);
+    }
+    png_write_end(png, info);
+    return true;
+}
+
+// the same PNG as CImg's save_png (8-bit gray, gray + alpha, RGB or RGBA, not interlaced), with faster compression settings (CImg has no option for them)
+void savePng(const Gray8BufferIO& image, const string& path) {
+    const int channels = std::min(image.spectrum(), 4);
+    std::ofstream file(path, std::ofstream::binary);
+    checkError(!file, "Unable to write the image file: " + path);
+    png_structp png = png_create_write_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
+    png_infop info = png ? png_create_info_struct(png) : nullptr;
+    if (!info) {
+        png_destroy_write_struct(&png, nullptr);
+        throw std::runtime_error("Unable to initialize the PNG encoder for: " + path);
+    }
+    const uint8_t* planes[4] = {};
+    for (int channel = 0; channel < channels; channel++)
+        planes[channel] = image.data(0, 0, 0, channel);
+    std::vector<uint8_t> row(static_cast<size_t>(image.width()) * channels);
+    png_set_write_fn(png, &file, writePngBytes, flushPng);
+    const bool written = writePngRows(png, info, planes, channels, image.width(), image.height(), row.data());
+    png_destroy_write_struct(&png, &info);
+    checkError(!written, "Unable to write the image file: " + path);
+    file.close();
+    checkError(!file, "Unable to write the image file: " + path);
+}
+
 // save a CImg image selecting the correct encoder by file extension
 void saveCimgByExtension(const Gray8BufferIO& cimgToSave, const string& path) {
     const string extension = lowercaseExtension(path);
     if (extension == "png")
-        cimgToSave.save_png(path.c_str());
+        savePng(cimgToSave, path);
     else if (extension == "bmp")
-        cimgToSave.save_bmp(path.c_str());
+        saveBmp(cimgToSave, path);
     else if (hasJpegExtension(path))
         cimgToSave.save_jpeg(path.c_str());
     else if (extension == "webp")
@@ -411,6 +519,8 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile, const bool cap
 #endif
     return buf;
 }
+
+int InternalUtils::batchLoadThreads() { return std::clamp(static_cast<int>(std::thread::hardware_concurrency()) / 4, 2, 8); }
 
 ImageBuffer InternalUtils::castToFloatGray(const ImageOutputBuffer& buffer, const bool isRGB) {
 #if defined(_USE_CUDA_)

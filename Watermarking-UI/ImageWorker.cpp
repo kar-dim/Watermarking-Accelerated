@@ -4,8 +4,7 @@
 #include <chrono>
 #include <exception>
 #include <filesystem>
-#include <future>
-#include <queue>
+#include <optional>
 #include <stdexcept>
 #include <utility>
 #include <omp.h>
@@ -58,23 +57,18 @@ void BatchImageWorker::run() {
     int failed = 0;
     QString fatalError;
 
-    struct PendingSave {
-        int index;
-        std::future<void> task;
-    };
-    std::vector<ExportHandle> exportBuffers;
-    std::queue<PendingSave> saves;
-    // Drain the oldest pending asynchronous disk save and notify the UI
-    const auto completeOldestSave = [&]() {
-        PendingSave pending = std::move(saves.front());
-        saves.pop();
-        try {
-            pending.task.get();
-            ++succeeded;
-            emit itemState(pending.index, "Done", "Saved");
-        } catch (const std::exception& error) {
-            ++failed;
-            emit itemState(pending.index, "Error", QString::fromUtf8(error.what()));
+    // background saves, one per thread
+    std::optional<ImageSaver> saver;
+    // notify the UI of the finished saves (in the order they finished)
+    const auto reportSaves = [&](const std::vector<SaveResult>& results) {
+        for (const auto& [index, error] : results) {
+            if (error.empty()) {
+                ++succeeded;
+                emit itemState(static_cast<int>(index), "Done", "Saved");
+            } else {
+                ++failed;
+                emit itemState(static_cast<int>(index), "Error", QString::fromStdString(error));
+            }
         }
     };
 
@@ -85,36 +79,18 @@ void BatchImageWorker::run() {
         if (embed_)
             fs::create_directories(outputDir_);
         auto session = createImageSession(options_.password.toStdString(), options_.p, options_.psnr);
-
-        if (embed_) {
-            const size_t poolSize = std::min(files_.size(), static_cast<size_t>(omp_get_max_threads()));
-            for (size_t index = 0; index < poolSize; ++index)
-                exportBuffers.push_back(createReusableExportBuffer());
-        }
-        size_t nextBuffer = 0;
-        // Preload the next image while the current image uses the selected device
-        const int device = getCurrentDeviceIndex();
-        const auto prefetch = [this, device](const size_t index) { return std::async(std::launch::async, [path = files_[index], device] { return preloadImageFromDisk(path.string(), device); }); };
-        std::future<PreloadedHandle> nextImage = prefetch(0);
+        if (embed_)
+            saver.emplace(std::min(files_.size(), static_cast<size_t>(omp_get_max_threads())));
+        // the next images load in the background while the current image uses the selected device
+        ImagePrefetcher images(files_, getCurrentDeviceIndex());
         for (size_t index = 0; index < files_.size() && !isInterruptionRequested(); ++index) {
             emit itemState(static_cast<int>(index), "Working", "");
-            bool nextStarted = false;
             try {
-                auto image = nextImage.get();
-                if (index + 1 < files_.size()) {
-                    nextImage = prefetch(index + 1);
-                    nextStarted = true;
-                }
-                bindPreloadedImage(session.get(), std::move(image));
+                bindPreloadedImage(session.get(), images.next());
                 if (embed_) {
                     embedImage(session.get());
-                    if (saves.size() == exportBuffers.size())
-                        completeOldestSave();
-                    ExportedImage* buffer = exportBuffers[nextBuffer].get();
-                    exportForSave(session.get(), buffer);
-                    const fs::path outputPath = outputDir_ / files_[index].filename();
-                    saves.push(PendingSave{static_cast<int>(index), std::async(std::launch::async, flushToDiskAsync, buffer, outputPath.string())});
-                    nextBuffer = (nextBuffer + 1) % exportBuffers.size();
+                    saver->save(session.get(), (outputDir_ / files_[index].filename()).string(), index);
+                    reportSaves(saver->takeFinished());
                 } else {
                     const float correlation = detectLoadedImage(session.get());
                     ++succeeded;
@@ -123,15 +99,13 @@ void BatchImageWorker::run() {
             } catch (const std::exception& error) {
                 ++failed;
                 emit itemState(static_cast<int>(index), "Error", QString::fromUtf8(error.what()));
-                if (index + 1 < files_.size() && !nextStarted)
-                    nextImage = prefetch(index + 1);
             }
         }
     } catch (const std::exception& error) { fatalError = QString::fromUtf8(error.what()); }
 
     // Ensure all background save operations complete before finishing
-    while (!saves.empty())
-        completeOldestSave();
+    if (saver)
+        reportSaves(saver->finish());
 
     const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
     emit summaryReady(succeeded, failed, seconds, isInterruptionRequested(), fatalError);
