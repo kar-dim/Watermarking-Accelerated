@@ -16,7 +16,7 @@ inline const std::string kernels = R"CLC(
 
 #define WM_INLINE static inline __attribute__((always_inline))
 
-#if !defined(WM_DISABLE_SUBGROUPS)
+#if !defined(WM_DISABLE_SUBGROUPS) && !defined(WM_WORK_GROUP_REDUCTIONS)
 #if defined(WM_INTEL_SUBGROUPS)
 #pragma OPENCL EXTENSION cl_intel_subgroups : enable
 #define WM_USE_SUBGROUPS 1
@@ -598,9 +598,26 @@ WM_INLINE float clampedPixel(const __global float* restrict input, const int r, 
     return input[((size_t)clamp(c, 0, width - 1) * height) + clamp(r, 0, height - 1)];
 }
 
-// Reduces work-item sums in local memory and updates global output with atomic adds
+// Reduces work-item sums through subgroups or local memory, then atomically adds fixed-point totals
 WM_INLINE void reduceShiftSums(const float* restrict sums, const int num, __global ulong* restrict output, const int stride, __local float* restrict scratch) {
     const int lid = get_local_id(0);
+#if defined(WM_USE_SUBGROUPS)
+    const uint subgroupCount = get_num_sub_groups();
+    // Every work-item participates, including padded shifts, each subgroup publishes one sum per shift, then the work-group combines only those subgroup totals.
+    #pragma unroll
+    for (int i = 0; i < MAX_GROUP_SHIFTS; i++) {
+        const float value = sub_group_reduce_add(i < num ? sums[i] : 0.0f);
+        if (get_sub_group_local_id() == 0)
+            scratch[(i * subgroupCount) + get_sub_group_id()] = value;
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+    for (int i = lid; i < num; i += WG_SIZE) {
+        float total = 0.0f;
+        for (uint s = 0; s < subgroupCount; s++)
+            total += scratch[(i * subgroupCount) + s];
+        atom_add(output + (i * stride), toScaledUlong(total));
+    }
+#else
     __local float* partial = scratch + (RED_CHUNK * WG_SIZE);
     #pragma unroll
     for (int base = 0; base < MAX_GROUP_SHIFTS; base += RED_CHUNK) {
@@ -625,6 +642,7 @@ WM_INLINE void reduceShiftSums(const float* restrict sums, const int num, __glob
             }
         }
     }
+#endif
 }
 
 // Accumulates shift sums for INTERIOR_RUN rows across neighboring columns
@@ -794,9 +812,8 @@ WM_INLINE void shiftSumsGroup(__global const float* restrict input, __global con
 
 // Single-launch kernel computing all inner and border shift sums
 __kernel __attribute__((reqd_work_group_size(WG_SIZE, 1, 1))) void me_shift_sums(__global const float* restrict input, __global const float* restrict borderRowsCopy,
-    __global ulong* restrict shiftSums, const int width, const int height, const int interiorBlocks, const int borderBlocksPerLine)
+    __global ulong* restrict shiftSums, const int width, const int height, const int interiorBlocks, const int borderBlocksPerLine, __local float* restrict scratch)
 {
-    __local float scratch[(RED_CHUNK * WG_SIZE) + (RED_CHUNK * RED_SLICES)];
     const int blockId = get_group_id(0);
     const bool isBorder = blockId >= interiorBlocks;
     const int localBlock = isBorder ? blockId - interiorBlocks : blockId;

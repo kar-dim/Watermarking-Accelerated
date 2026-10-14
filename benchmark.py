@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
-"""Run the CLI backends and generate readme_pictures benchmark figures."""
+"""Run the CLI backends and generate thesis_data benchmark figures."""
 
 from __future__ import annotations
 
 import argparse
 import csv
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parent
-BENCHMARK_DIR = ROOT / "readme_pictures"
+BENCHMARK_DIR = ROOT / "thesis_data"
 BACKENDS = {
     "eigen": ROOT / "x64" / "EIGEN_Release" / "Watermarking-CLI.exe",
     "cuda": ROOT / "x64" / "CUDA_Release" / "Watermarking-CLI.exe",
@@ -23,12 +24,15 @@ RESOLUTIONS = ("480p", "720p", "1080p", "4K")
 OPERATIONS = ("embed", "detect")
 
 
-def run_benchmarks(device_ids: dict[str, int | None], loops: int | None) -> None:
+def run_benchmarks(device_ids: dict[str, int | None], loops: int | None, backends: list[str], result_name: str | None) -> None:
     BENCHMARK_DIR.mkdir(exist_ok=True)
-    for backend, executable in BACKENDS.items():
+    for backend in backends:
+        executable = BACKENDS[backend]
         if not executable.is_file():
             raise FileNotFoundError(f"Missing {backend} Release CLI: {executable}")
         command = [str(executable), "--bench"]
+        if result_name is not None:
+            command.extend(("--benchmark_output_path", str(BENCHMARK_DIR / f"{result_name}.csv")))
         if loops is not None:
             command.extend(("--benchmark_loops", str(loops)))
         if device_ids.get(backend) is not None:
@@ -54,6 +58,18 @@ def read_results() -> dict[str, list[dict[str, str]]]:
             raise ValueError(f"Expected 32 rows in {csv_path}, found {len(rows)}")
         results[backend] = rows
     return results
+
+
+def list_gpus(backends: list[str]) -> None:
+    for backend in backends:
+        executable = BACKENDS[backend]
+        if not executable.is_file():
+            raise FileNotFoundError(f"Missing {backend} Release CLI: {executable}")
+        print(f"\n{BACKEND_LABELS[backend]} devices:", flush=True)
+        result = subprocess.run([str(executable), "--list-gpu"], cwd=ROOT, check=True, capture_output=True, text=True, encoding="utf-8")
+        print(result.stdout, end="", flush=True)
+        if result.stderr:
+            print(result.stderr, end="", file=sys.stderr, flush=True)
 
 
 def generate_figures(results: dict[str, list[dict[str, str]]]) -> None:
@@ -208,7 +224,8 @@ def generate_ui_figure() -> None:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     action = parser.add_mutually_exclusive_group(required=True)
-    action.add_argument("--run", action="store_true", help="run all three Release CLIs, then generate figures")
+    action.add_argument("--run", action="store_true", help="run the selected Release CLIs, then generate figures")
+    action.add_argument("--list-gpu", action="store_true", help="list device indices/names from the selected Release CLIs, then exit")
     action.add_argument("--figures", action="store_true", help="generate figures from existing CSV files only")
     action.add_argument(
         "--figure-ui-benchmarks",
@@ -220,6 +237,9 @@ def parse_args() -> argparse.Namespace:
     # CUDA and OpenCL number the GPUs differently, each backend gets its own index
     parser.add_argument("--cuda-device-id", type=int, help="GPU index for the CUDA benchmark (default: 0)")
     parser.add_argument("--opencl-device-id", type=int, help="GPU index for the OpenCL benchmark (default: 0)")
+    parser.add_argument("--backend", nargs="+", choices=tuple(BACKENDS), default=list(BACKENDS), help="backends to run/list (default: all three)")
+    parser.add_argument("--result-name", help="separate CSV stem for one backend, e.g. opencl_arc_a380 (requires --run --backend opencl)")
+    parser.add_argument("--no-figures", action="store_true", help="run benchmarks without regenerating CLI figures 1-4 (requires --run)")
     parser.add_argument("--loops", type=int, help="iterations per measurement for each backend (requires --run)")
     return parser.parse_args()
 
@@ -229,11 +249,23 @@ def main() -> int:
     try:
         if arguments.loops is not None and (not arguments.run or arguments.loops <= 0):
             raise ValueError("--loops requires --run and a positive integer")
+        if arguments.no_figures and not arguments.run:
+            raise ValueError("--no-figures requires --run")
+        if arguments.result_name is not None:
+            if not arguments.run or len(arguments.backend) != 1:
+                raise ValueError("--result-name requires --run and exactly one --backend")
+            if not re.fullmatch(re.escape(arguments.backend[0]) + r"_[A-Za-z0-9_-]+", arguments.result_name):
+                raise ValueError("--result-name must start with BACKEND_ and contain only letters, digits, underscores, or hyphens")
+        if arguments.list_gpu:
+            list_gpus(arguments.backend)
+            return 0
         if arguments.ui_figure:
             generate_ui_figure()
             return 0
         if arguments.run:
-            run_benchmarks({"cuda": arguments.cuda_device_id, "opencl": arguments.opencl_device_id}, arguments.loops)
+            run_benchmarks({"cuda": arguments.cuda_device_id, "opencl": arguments.opencl_device_id}, arguments.loops, arguments.backend, arguments.result_name)
+            if arguments.no_figures:
+                return 0
         generate_figures(read_results())
     except (FileNotFoundError, RuntimeError, ValueError, subprocess.CalledProcessError) as error:
         print(f"error: {error}", file=sys.stderr)

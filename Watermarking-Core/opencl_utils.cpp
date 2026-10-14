@@ -57,6 +57,22 @@ string openClStdOption(const cl::Device& device) {
     return "-cl-std=CL1.2";
 }
 
+string latestOpenClStdOption(const cl::Device& device) {
+    // Query language versions rather than inferring them from the device API version.
+    try {
+        cl_version newest = 0;
+        for (const auto& version : device.getInfo<CL_DEVICE_OPENCL_C_ALL_VERSIONS>()) {
+            if (std::string_view(version.name) == "OpenCL C")
+                newest = std::max(newest, version.version);
+        }
+        if (newest >= CL_MAKE_VERSION(3, 0, 0))
+            return "-cl-std=CL3.0";
+        if (newest >= CL_MAKE_VERSION(2, 0, 0))
+            return "-cl-std=CL2.0";
+    } catch (const cl::Error&) {}
+    return openClStdOption(device);
+}
+
 enum class SubgroupDialect { None, Core, Khronos, Intel };
 
 SubgroupDialect subgroupDialect(const cl::Device& device) {
@@ -71,10 +87,10 @@ SubgroupDialect subgroupDialect(const cl::Device& device) {
 }
 
 bool supportsWorkGroupCollectives(const cl::Device& device) {
-    const string reported = device.getInfo<CL_DEVICE_OPENCL_C_VERSION>();
-    if (reported.find("OpenCL C 2.") != string::npos)
+    const string standard = latestOpenClStdOption(device);
+    if (standard == "-cl-std=CL2.0")
         return true;
-    return reported.find("OpenCL C 3.") != string::npos && hasOpenCLCFeature(device, "__opencl_c_work_group_collective_functions");
+    return standard == "-cl-std=CL3.0" && hasOpenCLCFeature(device, "__opencl_c_work_group_collective_functions");
 }
 
 string subgroupBuildDefine(const SubgroupDialect dialect) {
@@ -149,17 +165,23 @@ cl::Program buildKernels(const int p) {
     cl::Device device = mgr.getDevice();
     try {
         const bool forcePortable = forcePortableReductionsRequested();
-        const bool useWorkGroupCollectives = !forcePortable && supportsWorkGroupCollectives(device);
-        const SubgroupDialect dialect = (forcePortable || useWorkGroupCollectives) ? SubgroupDialect::None : subgroupDialect(device);
+        const SubgroupDialect availableDialect = forcePortable ? SubgroupDialect::None : subgroupDialect(device);
+        // Prefer Intel's subgroup for shift sums acceleration. 
+        // On AMD and other devices prefer work-group path, tested on gfx1036: advertised Khronos subgroup
+        // reductions produced incorrect shift sums!
+        const bool useWorkGroupCollectives = !forcePortable && availableDialect != SubgroupDialect::Intel && supportsWorkGroupCollectives(device);
+        const SubgroupDialect dialect = useWorkGroupCollectives ? SubgroupDialect::None : availableDialect;
+        // Use the newer language only when the selected core feature requires it
+        const string standard = useWorkGroupCollectives || dialect == SubgroupDialect::Core ? latestOpenClStdOption(device) : openClStdOption(device);
         const string reductionOptions = forcePortable ? " -DWM_DISABLE_SUBGROUPS=1" : useWorkGroupCollectives ? " -DWM_WORK_GROUP_REDUCTIONS=1" : subgroupBuildDefine(dialect);
         const char* description = forcePortable ? "forced portable local-memory reductions" : useWorkGroupCollectives ? "work-group collective reductions" : subgroupDescription(dialect);
         for (int groupSize = static_cast<int>(std::min(256u, maxPow2WorkGroupSize(device))); groupSize >= 64; groupSize /= 2) {
-            const string baseOptions = openClStdOption(device) + " -DWINDOW_SIZE=" + std::to_string(p) + " -DWG_SIZE=" + std::to_string(groupSize);
+            const string baseOptions = standard + " -DWINDOW_SIZE=" + std::to_string(p) + " -DWG_SIZE=" + std::to_string(groupSize);
             string buildLog;
             cl::Program program(context, cl::Program::Sources{halfKernels, kernels});
             if (tryBuildProgram(program, device, baseOptions + reductionOptions, buildLog)) {
                 if (kernelsFit(program, device, groupSize)) {
-                    cout << "OpenCL kernel p=" << p << ": " << description << ", work-group size " << groupSize << " (" << openClStdOption(device) << ")\n";
+                    cout << "OpenCL kernel p=" << p << ": " << description << ", work-group size " << groupSize << " (" << standard << ")\n";
                     return program;
                 }
                 continue;

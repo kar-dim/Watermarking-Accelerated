@@ -23,7 +23,7 @@ This project implements and evaluates the performance (execution speed) of image
 
 The repository contains all required source code and dependencies needed to reproduce the benchmarks and experiments.
 
-- Comparative performance analysis between CPU and GPU implementations (see the [benchmark figures](readme_pictures/)). The CLI benchmark uses a configurable fixed loop count. The Qt Benchmark tab adapts its measurement time and loop count using the coefficient of variation, which helps stabilize FPS readings across devices.
+- Comparative performance analysis between CPU and GPU implementations (see the [benchmark figures](thesis_data/)). The CLI benchmark uses a configurable fixed loop count. The Qt Benchmark tab adapts its measurement time and loop count using the coefficient of variation, which helps stabilize FPS readings across devices.
 
 Implementations are optimized for maximum performance:
 - CPU implementation: Uses the ```Eigen``` library for linear algebra operations combined with efficient use of ```OpenMP``` multithreading (reductions, parallel loops). The application utilizes all available logical (or physical, specifically on video embedding) CPU cores for maximum performance. The project is configured to use ```clang``` compiler (clang-cl toolset) instead of MSVC, because it optimizes much better the heavily templated Eigen code.
@@ -87,6 +87,8 @@ For the repeated benchmark, use `Watermarking-CLI.exe --bench --benchmark_loops 
 | `--p` | Prediction window size: 3 (default), 5, 7, or 9. Images and frames must be at least `p x p` pixels. |
 | `--psnr` | Positive, finite embed PSNR in dB (default: 40). Higher values reduce watermark strength and can make detection harder. |
 | `--benchmark_loops` | Positive measured iteration count for `--bench` only. Defaults to 100 on Eigen and 1000 on GPU backends. |
+| `--benchmark_output_path` | CSV destination for `--bench` (default: `thesis_data/BACKEND.csv`). Use a separate file to preserve another device's results. |
+| `--list-gpu` | Print `index: GPU name` for this backend and exit before compute initialization or processing. Eigen reports that it has no GPU devices. |
 | `--gpu_device_id` | Zero-based CUDA/OpenCL GPU index (default: 0). An invalid index falls back to 0. |
 
 **Video-only options:**
@@ -223,23 +225,39 @@ The CLI benchmark sweep can be reproduced automatically from the repository root
 python benchmark.py --run
 ```
 
-This runs the CUDA and OpenCL Release CLIs with 1000 loops per measurement and the Eigen/CPU Release CLI with 100 loops. Pass `--loops N` to `benchmark.py --run` to set the same positive loop count for all three backends. Each CLI's ```--bench``` mode benchmarks ME embedding and detection for p=3,5,7,9 using the 480p, 720p, 1080p, and 4K sample images. Raw results are written to ```readme_pictures/cuda.csv```, ```readme_pictures/opencl.csv```, and ```readme_pictures/eigen.csv```, after which figures 1–4 are regenerated. To redraw the figures without rerunning the benchmarks, use ```python benchmark.py --figures```. A GPU can be selected with ```--cuda-device-id N``` and ```--opencl-device-id N``` when using ```--run``` (separate options because CUDA and OpenCL number the devices differently, OpenCL also lists integrated GPUs and enumerates GPU devices only).
+This runs the CUDA and OpenCL Release CLIs with 1000 loops per measurement and the Eigen/CPU Release CLI with 100 loops. Pass `--loops N` to `benchmark.py --run` to set the same positive loop count for all three backends. Each CLI's ```--bench``` mode benchmarks ME embedding and detection for p=3,5,7,9 using the 480p, 720p, 1080p, and 4K sample images. Raw results are written to ```thesis_data/cuda.csv```, ```thesis_data/opencl.csv```, and ```thesis_data/eigen.csv```, after which figures 1–4 are regenerated. To redraw the figures without rerunning the benchmarks, use ```python benchmark.py --figures```. A GPU can be selected with ```--cuda-device-id N``` and ```--opencl-device-id N``` when using ```--run``` (separate options because CUDA and OpenCL number the devices differently, OpenCL also lists integrated GPUs and enumerates GPU devices only).
+
+To list the OpenCL GPU names and their selection indices without running a benchmark:
+
+```powershell
+.\x64\OPENCL_Release\Watermarking-CLI.exe --list-gpu
+# Alternatively: python benchmark.py --list-gpu --backend opencl
+```
+
+Example usage to select the OpenCL device index = 1 (starts from 0) which is the "Intel(R) Arc(TM) A380 Graphics" in this example and produces the opencl_arc_a380.csv file and the figures:
+
+```powershell
+python benchmark.py --run --backend opencl --opencl-device-id 1 --result-name opencl_arc_a380 --no-figures
+python benchmark.py --ui-figure
+```
+
+The A380 sweep uses 1000 loops per measurement and writes [opencl_arc_a380.csv](thesis_data/opencl_arc_a380.csv). `--no-figures` keeps CLI figures 1–4 unchanged. The UI figure command updates only 5.png from `ui_bench.csv`, including the submitted A380 score of 18,552.
 
 p = 3            |  p = 5
 :-------------------------:|:-------------------------:
-![Benchmark 1](readme_pictures/1.png) | ![Benchmark 2](readme_pictures/2.png)
+![Benchmark 1](thesis_data/1.png) | ![Benchmark 2](thesis_data/2.png)
 p = 7            |  p = 9
-![Benchmark 3](readme_pictures/3.png) | ![Benchmark 4](readme_pictures/4.png)
+![Benchmark 3](thesis_data/3.png) | ![Benchmark 4](thesis_data/4.png)
 
 ## GUI Benchmark Results
 
-![GUI Benchmark Results](readme_pictures/5.png)
+![GUI Benchmark Results](thesis_data/5.png)
 
 
 ## GUI Screens
 
 Preview | Detail
 :-------------------------:|:-------------------------:
-**Single image comparison**<br>![Single image comparison](readme_pictures/6.png) | **Zoomed comparison**<br>![Zoomed single image comparison](readme_pictures/7.png)
-**Batch in progress**<br>![Batch image queue in progress](readme_pictures/8.png) | **Batch complete**<br>![Completed batch and summary](readme_pictures/9.png)
-**Benchmark in progress**<br>![Benchmark in progress](readme_pictures/10.png) | **Benchmark score**<br>![Completed benchmark score](readme_pictures/11.png)
+**Single image comparison**<br>![Single image comparison](thesis_data/6.png) | **Zoomed comparison**<br>![Zoomed single image comparison](thesis_data/7.png)
+**Batch in progress**<br>![Batch image queue in progress](thesis_data/8.png) | **Batch complete**<br>![Completed batch and summary](thesis_data/9.png)
+**Benchmark in progress**<br>![Benchmark in progress](thesis_data/10.png) | **Benchmark score**<br>![Completed benchmark score](thesis_data/11.png)

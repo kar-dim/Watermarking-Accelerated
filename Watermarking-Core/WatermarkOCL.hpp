@@ -64,7 +64,9 @@ class WatermarkOCL final : public WatermarkBase {
         const cl::Buffer borderCopy = copyBorderRows ? borderRowsCopy.clBuffer() : cl::Buffer();
         copyBorderRowsKernel = cl::Kernel(program, "me_copy_border_rows");
         shiftSumsKernel = cl::Kernel(program, "me_shift_sums");
-        setArgs(shiftSumsKernel, cl::Buffer(), borderCopy, shiftSums.clBuffer(), this->baseCols, this->baseRows, shiftInteriorBlocks, borderBlocksPerLine);
+        const size_t shiftScratch = reductionMode(program) == ReductionMode::Subgroup ? reductionScratchBytes(program, "me_shift_sums", cl::NDRange(groupSize), maxGroupShifts)
+                                                                                      : static_cast<size_t>(16 * groupSize + groupSize) * sizeof(float);
+        setArgs(shiftSumsKernel, cl::Buffer(), borderCopy, shiftSums.clBuffer(), this->baseCols, this->baseRows, shiftInteriorBlocks, borderBlocksPerLine, cl::Local(shiftScratch));
         buildSystemKernel = cl::Kernel(program, "me_build_system");
         setArgs(buildSystemKernel, cl::Buffer(), shiftSums.clBuffer(), solverSystem.clBuffer(), this->baseCols, this->baseRows);
         solveSystemKernel = cl::Kernel(program, "me_solve_system");
@@ -124,6 +126,17 @@ class WatermarkOCL final : public WatermarkBase {
     static constexpr int borderSize = 4 * pad;
     static constexpr int shiftSumsSize = numShifts * (1 + (2 * borderSize));
     static constexpr int shiftGroups = p >= 9 ? 3 : (p >= 7 ? 2 : 1);
+    static constexpr int firstShift(const int dc) { return dc == 0 ? 0 : (maxShift + 1) + ((dc - 1) * (2 * maxShift + 1)); }
+    static constexpr int maxGroupShifts = [] {
+        int largest = 0;
+        for (int group = 0; group < shiftGroups; ++group) {
+            const int firstDc = group * (maxShift + 1) / shiftGroups;
+            const int lastDc = (group + 1) * (maxShift + 1) / shiftGroups;
+            const int end = lastDc > maxShift ? numShifts : firstShift(lastDc);
+            largest = std::max(largest, end - firstShift(firstDc));
+        }
+        return largest;
+    }();
     static constexpr int interiorCols = p >= 7 ? 2 : 1;
     static constexpr int interiorRun = 8;
     static constexpr bool copyBorderRows = p >= 7;

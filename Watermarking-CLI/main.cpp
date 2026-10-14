@@ -70,6 +70,7 @@ constexpr std::array cliSettings = {
     OptionDefinition{"image",   "path"                },
     OptionDefinition{"image",   "output_path"         },
     OptionDefinition{"image",   "benchmark_loops"     },
+    OptionDefinition{"image",   "benchmark_output_path"},
     OptionDefinition{"video",   "mode"                },
     OptionDefinition{"video",   "path"                },
     OptionDefinition{"video",   "encode_output_path"  },
@@ -86,6 +87,7 @@ struct CommandLineOptions {
     std::map<string, string> settings;
     bool benchmark = false;
     bool benchmarkSave = false;
+    bool listGpus = false;
     bool help = false;
 };
 
@@ -129,6 +131,10 @@ CommandLineOptions parseCommandLine(const int argc, char* argv[]) {
             result.benchmark = true;
             continue;
         }
+        if (argument == "--list-gpu") {
+            result.listGpus = true;
+            continue;
+        }
         if (argument == "--bench-save") {
             result.benchmark = true;
             result.benchmarkSave = true;
@@ -168,8 +174,10 @@ Usage: Watermarking-CLI [options]
 Configure the application with command-line options. With no options, show help.
 
 Control options:
+  --list-gpu                 List GPU indices and names for this backend, then exit.
+                             No compute environment is started.
   --bench                    Benchmark ME embed/detect for p=3,5,7,9 and 480p..4K.
-                             Writes readme_pictures/{cuda,opencl,eigen}.csv.
+                             Writes thesis_data/{cuda,opencl,eigen}.csv.
                              Uses a fixed password unless one is supplied.
   --bench-save               Also save one embedded image per benchmark case.
   --no-pause                 Legacy flag; CLI commands never pause.
@@ -191,6 +199,8 @@ Image settings:
   --image.path PATH          Input image, or input directory for batch mode.
   --output_path FILE         Required destination file for single mode.
   --benchmark_loops N        Positive measured loop count for --bench only.
+  --benchmark_output_path FILE
+                             CSV destination (default: thesis_data/BACKEND.csv).
 
 Video settings:
   --video.mode MODE          embed or detect (default: embed).
@@ -443,9 +453,11 @@ static int runCliBenchmark(const Settings& settings, const float psnr, const boo
     checkError(watermarkPassword.empty(), "No valid watermark password specified!");
 
     // Create output folder and initialize benchmark CSV file
-    const fs::path outputDir = "readme_pictures";
+    const fs::path outputDir = "thesis_data";
     fs::create_directories(outputDir);
-    const fs::path outputPath = outputDir / (backend + ".csv");
+    const fs::path outputPath = settings.Get("image", "benchmark_output_path", (outputDir / (backend + ".csv")).string());
+    if (outputPath.has_parent_path())
+        fs::create_directories(outputPath.parent_path());
     std::ofstream output(outputPath, std::ios::trunc);
     if (!output)
         throw std::runtime_error("Could not write benchmark CSV: " + outputPath.string());
@@ -519,6 +531,18 @@ int main(const int argc, char* argv[]) {
         const CommandLineOptions commandLine = parseCommandLine(argc, argv);
         if (commandLine.help || argc == 1) {
             printHelp();
+            return EXIT_SUCCESS;
+        }
+        if (commandLine.listGpus) {
+            if (getBackendName() == "eigen") {
+                cout << "No GPU devices: this is the Eigen/CPU backend.\n";
+                return EXIT_SUCCESS;
+            }
+            const auto devices = getAvailableDevices();
+            if (devices.empty())
+                cout << "No GPU devices found.\n";
+            for (size_t i = 0; i < devices.size(); ++i)
+                cout << i << ": " << devices[i] << '\n';
             return EXIT_SUCCESS;
         }
         const Settings options(commandLine.settings);

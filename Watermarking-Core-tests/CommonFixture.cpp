@@ -602,8 +602,8 @@ struct ReductionPathResult {
 };
 
 // Compare both embedding and detection across OpenCL reduction paths
-ReductionPathResult runReductionPath() {
-    ImageHandle reductionSession = createImageSession(defaultPassword, defaultP, defaultPsnr);
+ReductionPathResult runReductionPath(const int order = defaultP) {
+    ImageHandle reductionSession = createImageSession(defaultPassword, order, defaultPsnr);
     loadImage(reductionSession.get(), colorImage.string());
     ReductionPathResult result;
     result.pixels = embedAndRead(reductionSession.get());
@@ -722,24 +722,133 @@ TEST(OpenCLReductionTest, AvailableDevicesMatchForcedPortableResults) {
         setPortableReductionOverride(false);
         ASSERT_TRUE(initializeEnvironment(static_cast<int>(deviceIndex))) << devices[deviceIndex];
         buildOpenCLKernels(); // every documented prediction order must compile on every device
-        const cl::Program selectedProgram = cl_utils::OpenCLKernelCache<defaultP>::getProgram();
-        const cl_utils::ReductionMode selectedMode = cl_utils::reductionMode(selectedProgram);
-        const ReductionPathResult selected = runReductionPath();
-        EXPECT_TRUE(std::isfinite(selected.correlation)) << devices[deviceIndex];
-        EXPECT_GT(selected.correlation, 0.5f) << devices[deviceIndex];
+        for (const int order : {3, 5, 7, 9}) {
+            SCOPED_TRACE(std::format("{} p={}", devices[deviceIndex], order));
+            setPortableReductionOverride(false);
+            const cl::Program selectedProgram = cl_utils::OpenCLKernelCache<defaultP>::getProgram();
+            const cl_utils::ReductionMode selectedMode = cl_utils::reductionMode(selectedProgram);
+            const ReductionPathResult selected = runReductionPath(order);
+            EXPECT_TRUE(std::isfinite(selected.correlation)) << devices[deviceIndex];
+            EXPECT_GT(selected.correlation, 0.5f) << devices[deviceIndex];
 
-        if (selectedMode == cl_utils::ReductionMode::Portable)
-            continue;
+            if (selectedMode == cl_utils::ReductionMode::Portable)
+                continue;
 
-        setPortableReductionOverride(true);
-        const cl::Program portableProgram = cl_utils::OpenCLKernelCache<defaultP>::getProgram();
-        ASSERT_EQ(cl_utils::reductionMode(portableProgram), cl_utils::ReductionMode::Portable) << devices[deviceIndex];
-        const ReductionPathResult portable = runReductionPath();
-        EXPECT_EQ(selected.pixels.width, portable.pixels.width) << devices[deviceIndex];
-        EXPECT_EQ(selected.pixels.height, portable.pixels.height) << devices[deviceIndex];
-        EXPECT_EQ(selected.pixels.channels, portable.pixels.channels) << devices[deviceIndex];
-        EXPECT_EQ(selected.pixels.pixels, portable.pixels.pixels) << devices[deviceIndex];
-        EXPECT_NEAR(selected.correlation, portable.correlation, 1.0e-4f) << devices[deviceIndex];
+            setPortableReductionOverride(true);
+            const cl::Program portableProgram = cl_utils::OpenCLKernelCache<defaultP>::getProgram();
+            ASSERT_EQ(cl_utils::reductionMode(portableProgram), cl_utils::ReductionMode::Portable) << devices[deviceIndex];
+            const ReductionPathResult portable = runReductionPath(order);
+            EXPECT_EQ(selected.pixels.width, portable.pixels.width) << devices[deviceIndex];
+            EXPECT_EQ(selected.pixels.height, portable.pixels.height) << devices[deviceIndex];
+            EXPECT_EQ(selected.pixels.channels, portable.pixels.channels) << devices[deviceIndex];
+            ASSERT_EQ(selected.pixels.pixels.size(), portable.pixels.pixels.size());
+            int maxDifference = 0;
+            size_t different = 0;
+            for (size_t i = 0; i < selected.pixels.pixels.size(); ++i) {
+                const int delta = std::abs(static_cast<int>(selected.pixels.pixels[i]) - portable.pixels.pixels[i]);
+                maxDifference = std::max(maxDifference, delta);
+                different += delta != 0;
+            }
+            std::cout << devices[deviceIndex] << ": " << different << " changed pixels, max difference " << maxDifference << ", correlation difference "
+                      << std::abs(selected.correlation - portable.correlation) << '\n';
+            // Different floating-point reduction trees can cross an 8-bit rounding
+            // boundary. Independent shift-sum references below check their accuracy.
+            EXPECT_LE(maxDifference, 1) << devices[deviceIndex];
+            EXPECT_NEAR(selected.correlation, portable.correlation, 1.0e-4f) << devices[deviceIndex];
+        }
+    }
+}
+
+// This is for some OpenCL devices that support subgroup reductions but have a different floating-point
+// reduction tree than the CPU reference. The sums of shifted pixels must match the double-precision reference.
+TEST(OpenCLReductionTest, ShiftSumsMatchDoublePrecisionReferenceOnEveryDevice) {
+    PortableReductionOverrideGuard restoreOverride;
+    const auto devices = getAvailableDevices();
+    ASSERT_FALSE(devices.empty());
+    for (size_t deviceIndex = 0; deviceIndex < devices.size(); ++deviceIndex) {
+        ASSERT_TRUE(initializeEnvironment(static_cast<int>(deviceIndex))) << devices[deviceIndex];
+        for (const bool portable : {false, true}) {
+            setPortableReductionOverride(portable);
+            for (const int order : {3, 5, 7, 9}) {
+                const auto program = [&] {
+                    switch (order) {
+                    case 3: return cl_utils::OpenCLKernelCache<3>::getProgram();
+                    case 5: return cl_utils::OpenCLKernelCache<5>::getProgram();
+                    case 7: return cl_utils::OpenCLKernelCache<7>::getProgram();
+                    default: return cl_utils::OpenCLKernelCache<9>::getProgram();
+                    }
+                }();
+                const int groupSize = cl_utils::workGroupSize(program);
+                const int pad = order / 2;
+                const int span = 2 * (order - 1) + 1;
+                const int numShifts = (span * span + 1) / 2;
+                const int borderSize = 4 * pad;
+                const int shiftSize = numShifts * (1 + 2 * borderSize);
+                const int shiftGroups = order >= 9 ? 3 : (order >= 7 ? 2 : 1);
+                const int interiorCols = order >= 7 ? 2 : 1;
+                auto& manager = OclQueueManager::getInstance();
+                for (const auto [width, height] : {
+                         std::pair{19, 17},
+                         std::pair{67, 65}
+                }) {
+                    SCOPED_TRACE(std::format("{} p={} {}x{} portable={}", devices[deviceIndex], order, width, height, portable));
+                    std::vector<float> input(width * height);
+                    uint32_t state = 2026;
+                    for (float& value : input) {
+                        state = state * 1664525u + 1013904223u;
+                        value = static_cast<float>(state >> 8) * (255.0f / 16777216.0f);
+                    }
+                    const OclArray<float> image(height, width, input.data(), manager.getQueueRaw());
+                    auto shifts = OclArray<uint64_t>::zeros(shiftSize, manager.getQueueRaw());
+                    OclArray<float> border(6 * pad * width, manager.getQueueRaw());
+                    if (order >= 7) {
+                        const auto copy = cl_utils::KernelBuilder(program, "me_copy_border_rows").args(image.clBuffer(), border.clBuffer(), width, height).build();
+                        manager.getQueue().enqueueNDRangeKernel(copy, cl::NullRange, cl::NDRange(cl_utils::roundUp(6 * pad * width, groupSize)), cl::NDRange(groupSize));
+                    }
+                    const int perLine = ((std::max(width, height) + 7) / 8 + groupSize - 1) / groupSize;
+                    const int tasks = ((height + 7) / 8) * ((width - 2 * pad + interiorCols - 1) / interiorCols);
+                    const int interior = std::max((tasks + groupSize - 1) / groupSize, 1) * shiftGroups;
+                    const int borderGroups = perLine * 2 * borderSize * shiftGroups;
+                    const size_t available = manager.getDevice().getInfo<CL_DEVICE_LOCAL_MEM_SIZE>();
+                    const size_t exactScratch = cl_utils::reductionMode(program) == cl_utils::ReductionMode::Subgroup
+                                                    ? cl_utils::reductionScratchBytes(program, "me_shift_sums", cl::NDRange(groupSize), numShifts)
+                                                    : static_cast<size_t>(17 * groupSize) * sizeof(float);
+                    ASSERT_LE(exactScratch, available);
+                    const auto kernel = cl_utils::KernelBuilder(program, "me_shift_sums")
+                                            .args(image.clBuffer(), border.clBuffer(), shifts.clBuffer(), width, height, interior, perLine, cl::Local(exactScratch))
+                                            .build();
+                    manager.getQueue().enqueueNDRangeKernel(kernel, cl::NullRange, cl::NDRange((interior + borderGroups) * groupSize), cl::NDRange(groupSize));
+                    std::vector<uint64_t> actual(shiftSize);
+                    shifts.toHost(actual.data());
+                    const auto pixel = [&](const int row, const int col) { return static_cast<double>(input[std::clamp(col, 0, width - 1) * height + std::clamp(row, 0, height - 1)]); };
+                    const auto borderCoord = [&](const int line, const int size) { return line < 2 * pad ? line - pad : size - 3 * pad + line; };
+                    int shift = 0;
+                    for (int dc = 0; dc < order; ++dc) {
+                        for (int dr = dc == 0 ? 0 : 1 - order; dr < order; ++dr, ++shift) {
+                            double reference = 0;
+                            for (int col = pad; col < width - pad; ++col)
+                                for (int row = pad; row < height - pad; ++row)
+                                    reference += pixel(row, col) * pixel(row + dr, col + dc);
+                            const auto compare = [&](const int index, const double sum) {
+                                const double expected = sum / (255.0 * 255.0);
+                                EXPECT_NEAR(static_cast<double>(actual[index]) * 1.0e-9, expected, std::max(2.0e-6, expected * 2.0e-6)) << "shift=" << shift << " index=" << index;
+                            };
+                            compare(shift, reference);
+                            for (int line = 0; line < borderSize; ++line) {
+                                double rowSum = 0, colSum = 0;
+                                const int row = borderCoord(line, height), col = borderCoord(line, width);
+                                for (int c = pad; c < width - pad; ++c)
+                                    rowSum += pixel(row, c) * pixel(row + dr, c + dc);
+                                for (int r = pad; r < height - pad; ++r)
+                                    colSum += pixel(r, col) * pixel(r + dr, col + dc);
+                                compare(numShifts + shift * borderSize + line, rowSum);
+                                compare(numShifts * (1 + borderSize) + shift * borderSize + line, colSum);
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 #endif
