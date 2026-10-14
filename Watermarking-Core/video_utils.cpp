@@ -591,7 +591,7 @@ void closeOutputFile(VideoSession* s) {
 
 // encode thread: pops items, encodes frames OR writes passthrough packets, it is the
 // only writer to outputFormatCtx so audio/subtitle remux and video encode never have race conditions
-// does NOT flush the encoder on exit — flushAndFinalize handles that after join()
+// does NOT flush the encoder on exit, flushAndFinalize handles that after join()
 void encodeWorker(VideoSession* s, EncodeQueue& queue, std::exception_ptr& encErr) noexcept {
     try {
         while (auto item = queue.pop()) {
@@ -668,7 +668,7 @@ AVFramePtr buildEncFrame(VideoSession* s, const FrameTiming& timing, const AVFra
     const int chromaH = height / 2;
     const int chromaW = width / 2;
     if (srcChromaFrame) {
-        // SW-decode: read U+V directly from the decoded frame — no hostFrame hop
+        // SW-decode: read U+V directly from the decoded frame, no hostFrame hop
         for (int y = 0; y < chromaH; y++) {
             std::memcpy(encFrame->data[1] + y * encFrame->linesize[1], srcChromaFrame->data[1] + y * srcChromaFrame->linesize[1], chromaW);
             std::memcpy(encFrame->data[2] + y * encFrame->linesize[2], srcChromaFrame->data[2] + y * srcChromaFrame->linesize[2], chromaW);
