@@ -275,13 +275,8 @@ AVCodecContextPtr openSoftwareDecoder(const AVCodecParameters* inputCodecParams,
         return nullptr;
     if (avcodec_parameters_to_context(ctx.get(), inputCodecParams) < 0)
         return nullptr;
+    // auto, libavcodec picks frame or slice threads itself
     ctx->thread_count = 0;
-    if (inputDecoder->capabilities & AV_CODEC_CAP_FRAME_THREADS)
-        ctx->thread_type = FF_THREAD_FRAME;
-    else if (inputDecoder->capabilities & AV_CODEC_CAP_SLICE_THREADS)
-        ctx->thread_type = FF_THREAD_SLICE;
-    else
-        ctx->thread_count = 1;
     ctx->pkt_timebase = pktTimebase; // give the decoder the stream timebase (silences "Invalid pkt_timebase", correct VFR timestamps)
     if (avcodec_open2(ctx.get(), inputDecoder, nullptr) < 0)
         return nullptr;

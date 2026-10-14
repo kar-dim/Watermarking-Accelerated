@@ -59,24 +59,24 @@ struct OptionDefinition {
 
 // Supported command-line options and their groups
 constexpr std::array cliSettings = {
-    OptionDefinition{"global",  "watermark_password"  },
-    OptionDefinition{"global",  "p"                   },
-    OptionDefinition{"global",  "psnr"                },
-    OptionDefinition{"global",  "display_fps"         },
-    OptionDefinition{"compute", "gpu_device_id"       },
-    OptionDefinition{"compute", "cuda_hw_decoder"     },
-    OptionDefinition{"compute", "cuda_hw_encoder"     },
-    OptionDefinition{"image",   "mode"                },
-    OptionDefinition{"image",   "path"                },
-    OptionDefinition{"image",   "output_path"         },
-    OptionDefinition{"image",   "benchmark_loops"     },
+    OptionDefinition{"global",  "watermark_password"   },
+    OptionDefinition{"global",  "p"                    },
+    OptionDefinition{"global",  "psnr"                 },
+    OptionDefinition{"global",  "display_fps"          },
+    OptionDefinition{"compute", "gpu_device_id"        },
+    OptionDefinition{"compute", "cuda_hw_decoder"      },
+    OptionDefinition{"compute", "cuda_hw_encoder"      },
+    OptionDefinition{"image",   "mode"                 },
+    OptionDefinition{"image",   "path"                 },
+    OptionDefinition{"image",   "output_path"          },
+    OptionDefinition{"image",   "benchmark_loops"      },
     OptionDefinition{"image",   "benchmark_output_path"},
-    OptionDefinition{"video",   "mode"                },
-    OptionDefinition{"video",   "path"                },
-    OptionDefinition{"video",   "encode_output_path"  },
-    OptionDefinition{"video",   "encode_codec_options"},
-    OptionDefinition{"video",   "hw_encode_options"   },
-    OptionDefinition{"video",   "watermark_interval"  }
+    OptionDefinition{"video",   "mode"                 },
+    OptionDefinition{"video",   "path"                 },
+    OptionDefinition{"video",   "encode_output_path"   },
+    OptionDefinition{"video",   "encode_codec_options" },
+    OptionDefinition{"video",   "hw_encode_options"    },
+    OptionDefinition{"video",   "watermark_interval"   }
 };
 
 // Builds a lookup key string from section and setting name

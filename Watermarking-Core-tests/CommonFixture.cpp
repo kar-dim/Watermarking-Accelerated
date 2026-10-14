@@ -721,8 +721,7 @@ TEST(OpenCLHalfTest, SelectedConversionMatchesHostAtEveryHalfAndRoundingBoundary
     for (uint32_t bits = 0; bits < 0x10000u; ++bits)
         values.push_back(HalfFloat::toFloat(static_cast<uint16_t>(bits)));
     for (uint32_t bits = 0; bits < 0x7C00u; ++bits) {
-        const float midpoint = bits == 0x7BFFu ? 65520.0f :
-            0.5f * (HalfFloat::toFloat(static_cast<uint16_t>(bits)) + HalfFloat::toFloat(static_cast<uint16_t>(bits + 1)));
+        const float midpoint = bits == 0x7BFFu ? 65520.0f : 0.5f * (HalfFloat::toFloat(static_cast<uint16_t>(bits)) + HalfFloat::toFloat(static_cast<uint16_t>(bits + 1)));
         for (const float value : {midpoint, -midpoint}) {
             values.push_back(value);
             values.push_back(std::nextafter(value, std::numeric_limits<float>::infinity()));
