@@ -48,6 +48,9 @@ cl::Program buildKernels(const int p);
 // probed workgroup size
 int workGroupSize(const cl::Program& program);
 
+// selected native half storage conversion, false when the integer fallback is used
+bool usesNativeHalfStorage(const cl::Program& program);
+
 // helper method to build utility opencl kernels from source (no WINDOW_SIZE dependency)
 cl::Program buildUtilityKernels();
 

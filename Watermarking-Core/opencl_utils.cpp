@@ -166,14 +166,20 @@ cl::Program buildKernels(const int p) {
     try {
         const bool forcePortable = forcePortableReductionsRequested();
         const SubgroupDialect availableDialect = forcePortable ? SubgroupDialect::None : subgroupDialect(device);
-        // Prefer Intel's subgroup for shift sums acceleration. 
+        // Prefer Intel's subgroup for shift sums acceleration.
         // On AMD and other devices prefer work-group path, tested on gfx1036: advertised Khronos subgroup
         // reductions produced incorrect shift sums!
         const bool useWorkGroupCollectives = !forcePortable && availableDialect != SubgroupDialect::Intel && supportsWorkGroupCollectives(device);
         const SubgroupDialect dialect = useWorkGroupCollectives ? SubgroupDialect::None : availableDialect;
+        // Native half storage passed rounding-boundary and pipeline checks on Intel.
+        // Other drivers retain the integer conversion, including AMD's contextual tie-rounding workaround.
+        const bool nativeHalfStorage = dialect == SubgroupDialect::Intel && device.getInfo<CL_DEVICE_VENDOR_ID>() == 0x8086 && hasExtension(device.getInfo<CL_DEVICE_EXTENSIONS>(), "cl_khr_fp16");
         // Use the newer language only when the selected core feature requires it
         const string standard = useWorkGroupCollectives || dialect == SubgroupDialect::Core ? latestOpenClStdOption(device) : openClStdOption(device);
-        const string reductionOptions = forcePortable ? " -DWM_DISABLE_SUBGROUPS=1" : useWorkGroupCollectives ? " -DWM_WORK_GROUP_REDUCTIONS=1" : subgroupBuildDefine(dialect);
+        const string reductionOptions = (forcePortable                ? " -DWM_DISABLE_SUBGROUPS=1"
+                                            : useWorkGroupCollectives ? " -DWM_WORK_GROUP_REDUCTIONS=1"
+                                                                      : subgroupBuildDefine(dialect)) +
+                                        string(nativeHalfStorage ? " -DWM_NATIVE_HALF_STORAGE=1" : "");
         const char* description = forcePortable ? "forced portable local-memory reductions" : useWorkGroupCollectives ? "work-group collective reductions" : subgroupDescription(dialect);
         for (int groupSize = static_cast<int>(std::min(256u, maxPow2WorkGroupSize(device))); groupSize >= 64; groupSize /= 2) {
             const string baseOptions = standard + " -DWINDOW_SIZE=" + std::to_string(p) + " -DWG_SIZE=" + std::to_string(groupSize);
@@ -205,6 +211,11 @@ cl::Program buildKernels(const int p) {
 int workGroupSize(const cl::Program& program) {
     const cl::Kernel kernel(program, "me_shift_sums");
     return static_cast<int>(kernel.getWorkGroupInfo<CL_KERNEL_COMPILE_WORK_GROUP_SIZE>(OclQueueManager::getInstance().getDevice())[0]);
+}
+
+bool usesNativeHalfStorage(const cl::Program& program) {
+    const auto& device = OclQueueManager::getInstance().getDevice();
+    return program.getBuildInfo<CL_PROGRAM_BUILD_OPTIONS>(device).find("-DWM_NATIVE_HALF_STORAGE=1") != string::npos;
 }
 
 cl::Program buildUtilityKernels() {

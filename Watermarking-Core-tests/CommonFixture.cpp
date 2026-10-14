@@ -8,6 +8,7 @@
 #if defined(_USE_OPENCL_)
 #include "../Watermarking-Core/OclArray.hpp"
 #include "../Watermarking-Core/opencl_utils.hpp"
+#include "../Watermarking-Core/kernels/half_kernels.hpp"
 #include <cstdlib>
 #include <optional>
 #elif defined(_USE_CUDA_)
@@ -713,6 +714,50 @@ TEST(WatermarkGenerationTest, DeviceWatermarkMatchesTheCpu) {
 #endif
 
 #if defined(_USE_OPENCL_)
+TEST(OpenCLHalfTest, SelectedConversionMatchesHostAtEveryHalfAndRoundingBoundary) {
+    PortableReductionOverrideGuard restoreOverride;
+    setPortableReductionOverride(false);
+    std::vector<float> values;
+    for (uint32_t bits = 0; bits < 0x10000u; ++bits)
+        values.push_back(HalfFloat::toFloat(static_cast<uint16_t>(bits)));
+    for (uint32_t bits = 0; bits < 0x7C00u; ++bits) {
+        const float midpoint = bits == 0x7BFFu ? 65520.0f :
+            0.5f * (HalfFloat::toFloat(static_cast<uint16_t>(bits)) + HalfFloat::toFloat(static_cast<uint16_t>(bits + 1)));
+        for (const float value : {midpoint, -midpoint}) {
+            values.push_back(value);
+            values.push_back(std::nextafter(value, std::numeric_limits<float>::infinity()));
+            values.push_back(std::nextafter(value, -std::numeric_limits<float>::infinity()));
+        }
+    }
+    uint32_t state = 2026;
+    for (int i = 0; i < 100000; ++i) {
+        state = state * 1664525u + 1013904223u;
+        values.push_back(std::bit_cast<float>(state));
+    }
+    std::vector<uint16_t> expected(values.size());
+    std::transform(values.begin(), values.end(), expected.begin(), HalfFloat::fromFloat);
+    forEachDevice([&](const std::string& name) {
+        auto& manager = OclQueueManager::getInstance();
+        const auto selected = cl_utils::OpenCLKernelCache<3>::getProgram();
+        const std::string options = cl_utils::usesNativeHalfStorage(selected) ? "-cl-std=CL1.2 -DWM_NATIVE_HALF_STORAGE=1" : "-cl-std=CL1.2";
+        cl::Program program(manager.getContext(), halfKernels + R"CLC(
+            __kernel void convert_test(__global const float* input, __global ushort* output, int n) {
+                int i = get_global_id(0);
+                if (i < n) output[i] = toHalfBits(input[i]);
+            }
+        )CLC");
+        program.build(manager.getDevice(), options.c_str());
+        const int count = static_cast<int>(values.size());
+        const OclArray<float> input(count, 1, values.data(), manager.getQueueRaw());
+        const OclArray<uint16_t> output(count, manager.getQueueRaw());
+        const auto kernel = cl_utils::KernelBuilder(program, "convert_test").args(input.clBuffer(), output.clBuffer(), count).build();
+        manager.getQueue().enqueueNDRangeKernel(kernel, cl::NullRange, cl::NDRange(cl_utils::roundUp(count, 64)), cl::NDRange(64));
+        std::vector<uint16_t> actual(values.size());
+        output.toHost(actual.data());
+        EXPECT_EQ(bitDifferences(actual, expected), "") << name;
+    });
+}
+
 TEST(OpenCLReductionTest, AvailableDevicesMatchForcedPortableResults) {
     PortableReductionOverrideGuard restoreOverride;
     const std::vector<std::string> devices = getAvailableDevices();
