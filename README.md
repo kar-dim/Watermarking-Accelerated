@@ -104,7 +104,6 @@ Watermarking-CLI.exe --video.path your-videos/input.mkv --video.mode detect --wa
 | `--video.mode` | `embed` (default) or `detect`. Both modes read `--video.path`: embedding re-encodes the watermarked video. |
 | `--video.path` | Input video filename. Uses the common password, p, PSNR, timing, and device options above. |
 | `--watermark_interval` | Embed or detect every Nth frame (N >= 1, default: 1). Other frames pass unchanged to the encoder when embedding, or are skipped when detecting. |
-| `--cuda_hw_decoder` | Use NVDEC with CPU fallback (`true`, default: CUDA only). The codec is selected from the input stream automatically. |
 | `--cuda_hw_encoder` | Use NVENC (`false` by default). Available on all backends with a compatible NVIDIA GPU. Uses `--hw_encode_options` instead of `--encode_codec_options`, Eigen/OpenCL incur host/device transfers. |
 | `--encode_output_path` | Required destination filename for video embedding. Use `--video.mode detect` to detect without writing a video. |
 | `--encode_codec_options` | Software encoder and quality options. Default: `-c:v libx265 -preset fast -crf 23`. Quote the whole value when passing it on the command line. |

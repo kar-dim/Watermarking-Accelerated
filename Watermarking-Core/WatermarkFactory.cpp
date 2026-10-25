@@ -1,4 +1,5 @@
 #include "buffer.hpp"
+#include "CheckedSize.hpp"
 #include "WatermarkBase.hpp"
 #include "WatermarkFactory.hpp"
 #include <memory>

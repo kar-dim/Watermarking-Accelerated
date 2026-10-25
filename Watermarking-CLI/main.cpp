@@ -64,7 +64,6 @@ constexpr std::array cliSettings = {
     OptionDefinition{"global",  "psnr"                 },
     OptionDefinition{"global",  "display_fps"          },
     OptionDefinition{"compute", "gpu_device_id"        },
-    OptionDefinition{"compute", "cuda_hw_decoder"      },
     OptionDefinition{"compute", "cuda_hw_encoder"      },
     OptionDefinition{"image",   "mode"                 },
     OptionDefinition{"image",   "path"                 },
@@ -191,7 +190,6 @@ Global settings:
 
 Compute settings:
   --gpu_device_id N          GPU device index (CUDA and OpenCL builds, defaults to 0).
-  --cuda_hw_decoder BOOL     Use NVDEC with CPU fallback (CUDA only; default: true).
   --cuda_hw_encoder BOOL     Use NVENC for video (all builds; default: false).
 
 Image settings:
@@ -399,7 +397,7 @@ static int testForVideo(const Settings& options, const string& videoFile, const 
     settings.p = p;
     settings.psnr = psnr;
     settings.watermarkInterval = static_cast<int>(options.GetInteger("video", "watermark_interval", 1));
-    settings.useHwDecoder = options.GetBoolean("compute", "cuda_hw_decoder", true);
+    settings.useHwDecoder = true;
     settings.useHwEncoder = options.GetBoolean("compute", "cuda_hw_encoder", false);
     settings.encodeOptions = settings.useHwEncoder ? options.Get("video", "hw_encode_options", "-c:v hevc_nvenc -preset p6 -tune hq -cq 26 -b:v 0")
                                                    : options.Get("video", "encode_codec_options", "-c:v libx265 -preset fast -crf 23");

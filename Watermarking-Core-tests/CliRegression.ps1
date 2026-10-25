@@ -61,7 +61,7 @@ foreach ($value in @('40garbage', 'nan', 'inf', '1e50')) {
     Invoke-Case "cli-number-$name" ($baseArguments + @('--psnr', $value)) 1 'Invalid number'
 }
 # Invalid booleans should fail parsing before a missing video is opened.
-Invoke-Case 'cli-boolean' @('--watermark_password', 'regression-password', '--video.path', 'missing-video.mkv', '--cuda_hw_decoder', 'maybe') 1 'Invalid boolean'
+Invoke-Case 'cli-boolean' @('--watermark_password', 'regression-password', '--video.path', 'missing-video.mkv', '--cuda_hw_encoder', 'maybe') 1 'Invalid boolean'
 # Benchmark defaults must reach sample loading without requiring a password option.
 Invoke-Case 'benchmark-defaults' @('--bench', '--benchmark_loops', '1') 1 'Benchmark image not found'
 Invoke-Case 'benchmark-invalid-loops' @('--bench', '--benchmark_loops', '0') 1 'benchmark_loops must be positive'
