@@ -1,0 +1,113 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="1120" viewBox="0 0 1280 1120" role="img" aria-labelledby="title description">
+<title id="title">Image watermarking</title>
+<desc id="description">Single images and folders use the same watermark code. CUDA and OpenCL run on the GPU, Eigen runs on the CPU. CUDA tries nvJPEG for supported JPEG files, CPU image libraries handle other inputs and fallback. Embedding saves an image, detection returns a correlation value. Qt supports single-image embed and detect, CLI single-image mode embeds.</desc>
+<defs>
+<radialGradient id="ambient" gradientUnits="userSpaceOnUse" cx="640" cy="392.0" r="880">
+<stop offset="0" stop-color="#173747" stop-opacity="0.35"/>
+<stop offset="1" stop-color="#173747" stop-opacity="0"/>
+</radialGradient>
+<pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+<path d="M 32 0 H 0 V 32" fill="none" stroke="#91c4df" stroke-opacity="0.035" stroke-width="1"/>
+</pattern>
+<filter id="glow" x="-50%" y="-50%" width="200%" height="200%" color-interpolation-filters="sRGB">
+<feGaussianBlur stdDeviation="2.4"/>
+</filter>
+<marker id="arrow-78a6bd" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 1 1 L 8 5 L 1 9" fill="none" stroke="#78a6bd" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+<marker id="arrow-52e69e" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 1 1 L 8 5 L 1 9" fill="none" stroke="#52e69e" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+<marker id="arrow-59d8f3" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 1 1 L 8 5 L 1 9" fill="none" stroke="#59d8f3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+<marker id="arrow-ffad85" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 1 1 L 8 5 L 1 9" fill="none" stroke="#ffad85" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+<marker id="arrow-c3a0ff" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 1 1 L 8 5 L 1 9" fill="none" stroke="#c3a0ff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+</defs>
+<rect x="1" y="1" width="1278" height="1118" rx="24" fill="#07131f" stroke="#203a4c"/>
+<rect x="2" y="2" width="1276" height="1116" rx="23" fill="url(#ambient)" stroke="none"/>
+<rect x="2" y="2" width="1276" height="1116" rx="23" fill="url(#grid)" stroke="none"/>
+<text x="44" y="48" font-family="Consolas, &#x27;Liberation Mono&#x27;, monospace" font-size="14" font-weight="400" text-anchor="start" letter-spacing="1.8" fill="#59d8f3">IMAGE MODE</text>
+<text x="44" y="94" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="34" font-weight="700" text-anchor="start" letter-spacing="0" fill="#edf7ff">Image watermarking</text>
+<text x="44" y="126" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="19" font-weight="400" text-anchor="start" letter-spacing="0" fill="#a3b9ca">One image or a folder, the same steps on your chosen backend</text>
+<rect x="40" y="464" width="1200" height="198" rx="18" fill="#0a1a26" stroke="#59d8f3" stroke-opacity="0.5" stroke-dasharray="3 7"/>
+<path d="M 320 264 L 320 286 Q 320 298 332 298 L 628 298 Q 640 298 640 310 L 640 326" fill="none" stroke="#78a6bd" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 320 264 L 320 286 Q 320 298 332 298 L 628 298 Q 640 298 640 310 L 640 326" fill="none" stroke="#78a6bd" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-78a6bd)"/>
+<path d="M 960 264 L 960 286 Q 960 298 948 298 L 640 298" fill="none" stroke="#78a6bd" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 960 264 L 960 286 Q 960 298 948 298 L 640 298" fill="none" stroke="#78a6bd" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 640 410 L 640 430 Q 640 442 628 442 L 252 442 Q 240 442 240 454 L 240 530" fill="none" stroke="#52e69e" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 640 410 L 640 430 Q 640 442 628 442 L 252 442 Q 240 442 240 454 L 240 530" fill="none" stroke="#52e69e" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-52e69e)"/>
+<path d="M 640 442 L 640 530" fill="none" stroke="#59d8f3" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 640 442 L 640 530" fill="none" stroke="#59d8f3" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-59d8f3)"/>
+<path d="M 640 442 L 1028 442 Q 1040 442 1040 454 L 1040 530" fill="none" stroke="#ffad85" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 640 442 L 1028 442 Q 1040 442 1040 454 L 1040 530" fill="none" stroke="#ffad85" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-ffad85)"/>
+<path d="M 240 616 L 240 690 Q 240 702 252 702 L 628 702 Q 640 702 640 714 L 640 730" fill="none" stroke="#78a6bd" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 240 616 L 240 690 Q 240 702 252 702 L 628 702 Q 640 702 640 714 L 640 730" fill="none" stroke="#78a6bd" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 1040 616 L 1040 690 Q 1040 702 1028 702 L 640 702" fill="none" stroke="#78a6bd" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 1040 616 L 1040 690 Q 1040 702 1028 702 L 640 702" fill="none" stroke="#78a6bd" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 640 616 L 640 730" fill="none" stroke="#78a6bd" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 640 616 L 640 730" fill="none" stroke="#78a6bd" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-78a6bd)"/>
+<path d="M 510 788 L 332 788 Q 320 788 320 800 L 320 890" fill="none" stroke="#52e69e" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 510 788 L 332 788 Q 320 788 320 800 L 320 890" fill="none" stroke="#52e69e" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-52e69e)"/>
+<path d="M 770 788 L 948 788 Q 960 788 960 800 L 960 890" fill="none" stroke="#c3a0ff" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 770 788 L 948 788 Q 960 788 960 800 L 960 890" fill="none" stroke="#c3a0ff" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-c3a0ff)"/>
+<g data-node="Single image" data-bounds="130 176 380 88">
+<rect x="130" y="176" width="380" height="88" rx="44.0" fill="none" stroke="#59d8f3" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="130" y="176" width="380" height="88" rx="44.0" fill="#0e2330" stroke="#59d8f3" stroke-width="1.6"/>
+<text x="320.0" y="216.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="22" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Single image</text>
+<text x="320.0" y="243.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">Qt embed or detect, CLI embed</text>
+</g>
+<g data-node="Image folder" data-bounds="770 176 380 88">
+<rect x="770" y="176" width="380" height="88" rx="44.0" fill="none" stroke="#59d8f3" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="770" y="176" width="380" height="88" rx="44.0" fill="#0e2330" stroke="#59d8f3" stroke-width="1.6"/>
+<text x="960.0" y="216.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="22" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Image folder</text>
+<text x="960.0" y="243.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">Qt or CLI, embed or detect</text>
+</g>
+<g data-node="Load and prepare pixels" data-bounds="420 326 440 84">
+<rect x="420" y="326" width="440" height="84" rx="11" fill="none" stroke="#78a6bd" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="420" y="326" width="440" height="84" rx="11" fill="#101f2c" stroke="#78a6bd" stroke-width="1.6"/>
+<text x="640.0" y="364.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="22" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Load and prepare pixels</text>
+<text x="640.0" y="391.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">Read the file, apply its rotation</text>
+</g>
+<g data-node="CUDA" data-bounds="76 530 328 86">
+<rect x="76" y="530" width="328" height="86" rx="11" fill="none" stroke="#52e69e" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="76" y="530" width="328" height="86" rx="11" fill="#0d2429" stroke="#52e69e" stroke-width="1.6"/>
+<text x="240.0" y="569.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="24" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">CUDA</text>
+<text x="240.0" y="596.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">GPU watermark, embed or detect</text>
+</g>
+<g data-node="OpenCL" data-bounds="476 530 328 86">
+<rect x="476" y="530" width="328" height="86" rx="11" fill="none" stroke="#59d8f3" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="476" y="530" width="328" height="86" rx="11" fill="#0e2330" stroke="#59d8f3" stroke-width="1.6"/>
+<text x="640.0" y="569.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="24" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">OpenCL</text>
+<text x="640.0" y="596.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">GPU watermark, embed or detect</text>
+</g>
+<g data-node="Eigen + OpenMP" data-bounds="876 530 328 86">
+<rect x="876" y="530" width="328" height="86" rx="11" fill="none" stroke="#ffad85" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="876" y="530" width="328" height="86" rx="11" fill="#1b1f27" stroke="#ffad85" stroke-width="1.6"/>
+<text x="1040.0" y="569.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="24" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Eigen + OpenMP</text>
+<text x="1040.0" y="596.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">CPU watermark, embed or detect</text>
+</g>
+<g data-node="decision" data-bounds="510.0 730.0 260 116" data-shape="diamond">
+<polygon points="640,730.0 770.0,788 640,846.0 510.0,788" fill="none" stroke="#59d8f3" stroke-width="3" opacity="0.3" filter="url(#glow)"/>
+<polygon points="640,730.0 770.0,788 640,846.0 510.0,788" fill="#0e2330" stroke="#59d8f3" stroke-width="1.7" stroke-linejoin="round"/>
+<text x="640" y="780.14" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="21" font-weight="600" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Embed</text>
+<text x="640" y="810.14" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="21" font-weight="600" text-anchor="middle" letter-spacing="0" fill="#edf7ff">or detect</text>
+</g>
+<rect x="372.8" y="762" width="62.400000000000006" height="24" rx="6" fill="#07131f" stroke="none"/>
+<text x="404" y="778" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="16" font-weight="500" text-anchor="middle" letter-spacing="0" fill="#52e69e">Embed</text>
+<rect x="840.56" y="762" width="70.88" height="24" rx="6" fill="#07131f" stroke="none"/>
+<text x="876" y="778" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="16" font-weight="500" text-anchor="middle" letter-spacing="0" fill="#c3a0ff">Detect</text>
+<g data-node="Save the image" data-bounds="110 890 420 88">
+<rect x="110" y="890" width="420" height="88" rx="44.0" fill="none" stroke="#52e69e" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="110" y="890" width="420" height="88" rx="44.0" fill="#0d2429" stroke="#52e69e" stroke-width="1.6"/>
+<text x="320.0" y="930.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="22" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Save the image</text>
+<text x="320.0" y="957.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">Single file or watermark_output/ folder</text>
+</g>
+<g data-node="Read the correlation" data-bounds="750 890 420 88">
+<rect x="750" y="890" width="420" height="88" rx="44.0" fill="none" stroke="#c3a0ff" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="750" y="890" width="420" height="88" rx="44.0" fill="#161e31" stroke="#c3a0ff" stroke-width="1.6"/>
+<text x="960.0" y="930.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="22" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Read the correlation</text>
+<text x="960.0" y="957.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">A detection result, no image to save</text>
+</g>
+<text x="44" y="1024" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="start" letter-spacing="0" fill="#a3b9ca">CUDA can read and write JPEGs with nvJPEG, other image formats use CPU libraries.</text>
+<text x="44" y="1054" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="start" letter-spacing="0" fill="#a3b9ca">Batches load and save in the background, the same password and image size give the same watermark.</text>
+<text x="44" y="1084" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="start" letter-spacing="0" fill="#a3b9ca">p sets the prediction window, PSNR sets the watermark strength.</text>
+<rect x="53" y="478" width="236" height="29" rx="4" fill="#0a1a26" stroke="none"/>
+<rect x="60" y="486" width="5" height="14" rx="2" fill="#59d8f3" stroke="none"/>
+<text x="78" y="498" font-family="Consolas, &#x27;Liberation Mono&#x27;, monospace" font-size="15" font-weight="600" text-anchor="start" letter-spacing="1" fill="#59d8f3">WATERMARK PROCESSING</text>
+<text x="1220" y="498" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="16" font-weight="400" text-anchor="end" letter-spacing="0" fill="#a3b9ca">One backend per build</text>
+</svg>

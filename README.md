@@ -39,6 +39,62 @@ The ME mask predicts every pixel from its p x p - 1 neighbors. The prediction co
 The trick: the sum for neighbors ```a``` and ```b``` only depends on how far apart they are (the shift ```b - a```), not on where they are in the window. The image multiplied by a copy of itself shifted by the same amount gives the same sum, only the few border rows and columns covered by each pair are different. So we compute **one sum per distinct shift** (13, 41, 85 and 145 sums for p=3, 5, 7, 9) over the inner image area, add the small border corrections, and build the whole system from these sums. For p=9 this is about 23x less math, and no matrix multiplication is needed. The system is then solved with a Cholesky decomposition (the sums are exact fixed point integers on the GPU, so the result is the same on every run), and the prediction error of each pixel is computed from the coefficients in shared memory tiles.
 
 
+# Architecture
+
+These flowcharts show the image and video paths, how video work is shared between threads, and how the Qt benchmark runs.
+
+[Images](#image-workflow) · [Video](#video-workflow) · [Video threads and queues](#video-threads-and-queues) · [Qt benchmark](#qt-benchmark-workflow)
+
+## Image workflow
+
+Single images and folders use the same watermark code. CUDA and OpenCL run on the GPU, Eigen runs on the CPU. Embedding saves an image, detection returns a correlation value.
+
+<p align="center">
+  <img src="thesis_data/diagrams/image-pipeline.svg" width="100%" alt="Image workflow: single or batch input, image decoding, CUDA or OpenCL GPU processing or Eigen CPU processing, then image encoding and saving for embedding or correlation results for detection." />
+</p>
+
+## Video workflow
+
+CUDA tries NVDEC, OpenCL tries D3D11VA and Intel QSV. If setup or the first-frame check fails, the app uses CPU decoding. CUDA and OpenCL process frames on the GPU, Eigen uses the CPU. Encoding is chosen separately, either CPU or the selected GPU's hardware encoder.
+
+<p align="center">
+  <img src="thesis_data/diagrams/video-pipeline.svg" width="100%" alt="Video workflow: NVDEC or D3D11VA and Intel QSV decoding with CPU fallback, 8-bit SDR frames, CUDA or OpenCL GPU watermarking or Eigen CPU watermarking, then CPU or NVENC, QSV or AMF encoding. Detection accepts 8-bit SDR input and ends before encoding." />
+</p>
+
+## Video threads and queues
+
+Video embedding uses a main thread and a separate thread for encoding and writing the file. The decode pump runs on the main thread, feeds FFmpeg, drains ready frames and schedules the watermark work. The encoder can work on earlier frames while the main loop handles later ones.
+
+An eight-item queue holds owned video frames and audio or subtitle packets. If it fills, the main thread waits. OpenCL hardware decoding also holds two frames ahead and starts GPU copies before those frames are used. Detection returns results without starting the encode thread.
+
+<p align="center">
+  <img src="thesis_data/diagrams/video-architecture.svg" width="100%" alt="Video threads and queues: the main thread runs the decode pump and schedules watermark work. Owned frames and audio or subtitle packets pass through an eight-item queue to a separate encode and write thread. OpenCL hardware decoding holds two frames ahead. GPU work can overlap across frames. Detection does not start the encode thread." />
+</p>
+
+See [Video Encoding Pipeline](#video-encoding-pipeline) for codec, color and frame handling details.
+
+## Qt benchmark workflow
+
+The Qt Benchmark tab tests embedding and detection across six bundled images, four prediction windows and eleven PSNR levels. Loading, pixel preparation and previews run outside the timers. The diagram shows how each step is timed and how the final score is calculated.
+
+<p align="center">
+  <img src="thesis_data/diagrams/ui-benchmark.svg" width="100%" alt="Qt benchmark workflow: prepare the selected backend and images, test 264 image, prediction-window and PSNR combinations, time embedding and detection, update the preview, and calculate the score from geometric-mean FPS." />
+</p>
+
+<details>
+<summary>Regenerate the diagrams</summary>
+
+Edit [tools/generate_diagrams.py](tools/generate_diagrams.py), then run these commands from the repository root with Python 3.10 or newer. No extra packages are needed.
+
+```powershell
+python tools/generate_diagrams.py
+python tools/generate_diagrams.py --check
+```
+
+See [diagram sources and notes](thesis_data/diagrams/README.md) for more detail.
+
+</details>
+
 # Run the pre-built binaries
 
 Get the latest binaries [here](https://github.com/kar-dim/Watermarking-Accelerated/releases) for Eigen, OpenCL or CUDA platform. The binaries contain:
@@ -240,23 +296,23 @@ This section includes performance comparisons between the three backends: CPU (E
 The CLI benchmark sweep can be reproduced automatically from the repository root:
 
 ```powershell
-python benchmark.py --run
+python tools/benchmark.py --run
 ```
 
-This runs the CUDA and OpenCL Release CLIs with 1000 loops per measurement and the Eigen/CPU Release CLI with 100 loops. Pass `--loops N` to `benchmark.py --run` to set the same positive loop count for all three backends. Each CLI's ```--bench``` mode benchmarks ME embedding and detection for p=3,5,7,9 using the 480p, 720p, 1080p, and 4K sample images. Raw results are written to ```thesis_data/cuda.csv```, ```thesis_data/opencl.csv```, and ```thesis_data/eigen.csv```, after which figures 1–4 are regenerated. To redraw the figures without rerunning the benchmarks, use ```python benchmark.py --figures```. A GPU can be selected with ```--cuda-device-id N``` and ```--opencl-device-id N``` when using ```--run``` (separate options because CUDA and OpenCL number the devices differently, OpenCL also lists integrated GPUs and enumerates GPU devices only).
+This runs the CUDA and OpenCL Release CLIs with 1000 loops per measurement and the Eigen/CPU Release CLI with 100 loops. Pass `--loops N` to `tools/benchmark.py --run` to set the same positive loop count for all three backends. Each CLI's ```--bench``` mode benchmarks ME embedding and detection for p=3,5,7,9 using the 480p, 720p, 1080p, and 4K sample images. Raw results are written to ```thesis_data/cuda.csv```, ```thesis_data/opencl.csv```, and ```thesis_data/eigen.csv```, after which figures 1–4 are regenerated. To redraw the figures without rerunning the benchmarks, use ```python tools/benchmark.py --figures```. A GPU can be selected with ```--cuda-device-id N``` and ```--opencl-device-id N``` when using ```--run``` (separate options because CUDA and OpenCL number the devices differently, OpenCL also lists integrated GPUs and enumerates GPU devices only).
 
 To list the OpenCL GPU names and their selection indices without running a benchmark:
 
 ```powershell
 .\x64\OPENCL_Release\Watermarking-CLI.exe --list-gpu
-# Alternatively: python benchmark.py --list-gpu --backend opencl
+# Alternatively: python tools/benchmark.py --list-gpu --backend opencl
 ```
 
 Example usage to select the OpenCL device index = 1 (starts from 0) which is the "Intel(R) Arc(TM) A380 Graphics" in this example and produces the opencl_arc_a380.csv file and the figures:
 
 ```powershell
-python benchmark.py --run --backend opencl --opencl-device-id 1 --result-name opencl_arc_a380 --no-figures
-python benchmark.py --ui-figure
+python tools/benchmark.py --run --backend opencl --opencl-device-id 1 --result-name opencl_arc_a380 --no-figures
+python tools/benchmark.py --ui-figure
 ```
 
 The A380 sweep uses 1000 loops per measurement and writes [opencl_arc_a380.csv](thesis_data/opencl_arc_a380.csv). `--no-figures` keeps CLI figures 1–4 unchanged. The UI figure command updates only 5.png from `ui_bench.csv`, including the submitted A380 score of 18,552.
@@ -268,6 +324,8 @@ p = 7            |  p = 9
 ![Benchmark 3](thesis_data/3.png) | ![Benchmark 4](thesis_data/4.png)
 
 ## GUI Benchmark Results
+
+See [Qt benchmark workflow](#qt-benchmark-workflow) for the measurement steps and score calculation.
 
 ![GUI Benchmark Results](thesis_data/5.png)
 

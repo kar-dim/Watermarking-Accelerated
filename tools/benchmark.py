@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[1]
 BENCHMARK_DIR = ROOT / "thesis_data"
 BACKENDS = {
     "eigen": ROOT / "x64" / "EIGEN_Release" / "Watermarking-CLI.exe",

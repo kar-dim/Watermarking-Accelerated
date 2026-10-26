@@ -1,0 +1,242 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="1630" viewBox="0 0 1280 1630" role="img" aria-labelledby="title description">
+<title id="title">Video watermarking</title>
+<desc id="description">FFmpeg reads the video. CUDA tries NVDEC, OpenCL tries D3D11VA and QSV on Intel. Both hardware paths test the first frame before use, unsupported decoding uses CPU decode and GPU upload. Eigen stays on the CPU. Frames become 8-bit SDR before luma watermarking. Supported HDR uses GPU Mobius, other HDR uses CPU filters. Detection accepts only 8-bit SDR input, returns correlation results and stops. Embedding uses CPU encoding by default, optional hardware encoding uses NVENC, QSV or AMF on the same GPU. FFmpeg joins video with compatible audio and subtitle streams.</desc>
+<defs>
+<radialGradient id="ambient" gradientUnits="userSpaceOnUse" cx="640" cy="570.5" r="880">
+<stop offset="0" stop-color="#173747" stop-opacity="0.35"/>
+<stop offset="1" stop-color="#173747" stop-opacity="0"/>
+</radialGradient>
+<pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+<path d="M 32 0 H 0 V 32" fill="none" stroke="#91c4df" stroke-opacity="0.035" stroke-width="1"/>
+</pattern>
+<filter id="glow" x="-50%" y="-50%" width="200%" height="200%" color-interpolation-filters="sRGB">
+<feGaussianBlur stdDeviation="2.4"/>
+</filter>
+<marker id="arrow-78a6bd" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 1 1 L 8 5 L 1 9" fill="none" stroke="#78a6bd" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+<marker id="arrow-52e69e" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 1 1 L 8 5 L 1 9" fill="none" stroke="#52e69e" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+<marker id="arrow-59d8f3" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 1 1 L 8 5 L 1 9" fill="none" stroke="#59d8f3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+<marker id="arrow-ffad85" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 1 1 L 8 5 L 1 9" fill="none" stroke="#ffad85" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+<marker id="arrow-c3a0ff" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 1 1 L 8 5 L 1 9" fill="none" stroke="#c3a0ff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+</defs>
+<rect x="1" y="1" width="1278" height="1628" rx="24" fill="#07131f" stroke="#203a4c"/>
+<rect x="2" y="2" width="1276" height="1626" rx="23" fill="url(#ambient)" stroke="none"/>
+<rect x="2" y="2" width="1276" height="1626" rx="23" fill="url(#grid)" stroke="none"/>
+<text x="44" y="48" font-family="Consolas, &#x27;Liberation Mono&#x27;, monospace" font-size="14" font-weight="400" text-anchor="start" letter-spacing="1.8" fill="#59d8f3">VIDEO MODE</text>
+<text x="44" y="94" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="34" font-weight="700" text-anchor="start" letter-spacing="0" fill="#edf7ff">Video watermarking</text>
+<text x="44" y="126" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="19" font-weight="400" text-anchor="start" letter-spacing="0" fill="#a3b9ca">Decode, prepare frames, watermark, then encode or read the detection result</text>
+<rect x="40" y="384" width="368" height="596" rx="18" fill="#0a1a23" stroke="#52e69e" stroke-opacity="0.5" stroke-dasharray="3 7"/>
+<rect x="456" y="384" width="368" height="596" rx="18" fill="#0a1a26" stroke="#59d8f3" stroke-opacity="0.5" stroke-dasharray="3 7"/>
+<rect x="872" y="384" width="368" height="596" rx="18" fill="#101823" stroke="#ffad85" stroke-opacity="0.5" stroke-dasharray="3 7"/>
+<path d="M 640 214 L 640 258" fill="none" stroke="#78a6bd" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 640 214 L 640 258" fill="none" stroke="#78a6bd" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-78a6bd)"/>
+<path d="M 640 334 L 640 346 Q 640 358 628 358 L 236 358 Q 224 358 224 370 L 224 448" fill="none" stroke="#52e69e" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 640 334 L 640 346 Q 640 358 628 358 L 236 358 Q 224 358 224 370 L 224 448" fill="none" stroke="#52e69e" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-52e69e)"/>
+<path d="M 640 358 L 640 448" fill="none" stroke="#59d8f3" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 640 358 L 640 448" fill="none" stroke="#59d8f3" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-59d8f3)"/>
+<path d="M 640 358 L 1044 358 Q 1056 358 1056 370 L 1056 448" fill="none" stroke="#ffad85" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 640 358 L 1044 358 Q 1056 358 1056 370 L 1056 448" fill="none" stroke="#ffad85" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-ffad85)"/>
+<path d="M 224 520 L 224 531 Q 224 542 213 542 L 154 542 Q 142 542 142 554 L 142 566" fill="none" stroke="#52e69e" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 224 520 L 224 531 Q 224 542 213 542 L 154 542 Q 142 542 142 554 L 142 566" fill="none" stroke="#52e69e" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-52e69e)"/>
+<path d="M 220 612 L 254 612" fill="none" stroke="#ffad85" stroke-width="4" opacity="0.15" filter="url(#glow)" stroke-dasharray="6 6"/>
+<path d="M 220 612 L 254 612" fill="none" stroke="#ffad85" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="6 6" marker-end="url(#arrow-ffad85)"/>
+<path d="M 142 658 L 142 682 Q 142 694 154 694 L 212 694 Q 224 694 224 706 L 224 724" fill="none" stroke="#52e69e" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 142 658 L 142 682 Q 142 694 154 694 L 212 694 Q 224 694 224 706 L 224 724" fill="none" stroke="#52e69e" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-52e69e)"/>
+<path d="M 323 650 L 323 682 Q 323 694 311 694 L 224 694" fill="none" stroke="#ffad85" stroke-width="4" opacity="0.15" filter="url(#glow)" stroke-dasharray="6 6"/>
+<path d="M 323 650 L 323 682 Q 323 694 311 694 L 224 694" fill="none" stroke="#ffad85" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="6 6"/>
+<path d="M 640 520 L 640 531 Q 640 542 629 542 L 570 542 Q 558 542 558 554 L 558 566" fill="none" stroke="#59d8f3" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 640 520 L 640 531 Q 640 542 629 542 L 570 542 Q 558 542 558 554 L 558 566" fill="none" stroke="#59d8f3" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-59d8f3)"/>
+<path d="M 636 612 L 670 612" fill="none" stroke="#ffad85" stroke-width="4" opacity="0.15" filter="url(#glow)" stroke-dasharray="6 6"/>
+<path d="M 636 612 L 670 612" fill="none" stroke="#ffad85" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="6 6" marker-end="url(#arrow-ffad85)"/>
+<path d="M 558 658 L 558 682 Q 558 694 570 694 L 628 694 Q 640 694 640 706 L 640 724" fill="none" stroke="#59d8f3" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 558 658 L 558 682 Q 558 694 570 694 L 628 694 Q 640 694 640 706 L 640 724" fill="none" stroke="#59d8f3" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-59d8f3)"/>
+<path d="M 739 650 L 739 682 Q 739 694 727 694 L 640 694" fill="none" stroke="#ffad85" stroke-width="4" opacity="0.15" filter="url(#glow)" stroke-dasharray="6 6"/>
+<path d="M 739 650 L 739 682 Q 739 694 727 694 L 640 694" fill="none" stroke="#ffad85" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" stroke-dasharray="6 6"/>
+<path d="M 1056 520 L 1056 724" fill="none" stroke="#ffad85" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 1056 520 L 1056 724" fill="none" stroke="#ffad85" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-ffad85)"/>
+<path d="M 224 804 L 224 866" fill="none" stroke="#52e69e" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 224 804 L 224 866" fill="none" stroke="#52e69e" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-52e69e)"/>
+<path d="M 224 946 L 224 988 Q 224 1000 236 1000 L 640 1000" fill="none" stroke="#78a6bd" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 224 946 L 224 988 Q 224 1000 236 1000 L 640 1000" fill="none" stroke="#78a6bd" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 640 804 L 640 866" fill="none" stroke="#59d8f3" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 640 804 L 640 866" fill="none" stroke="#59d8f3" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-59d8f3)"/>
+<path d="M 640 946 L 640 1000" fill="none" stroke="#78a6bd" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 640 946 L 640 1000" fill="none" stroke="#78a6bd" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 1056 804 L 1056 866" fill="none" stroke="#ffad85" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 1056 804 L 1056 866" fill="none" stroke="#ffad85" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-ffad85)"/>
+<path d="M 1056 946 L 1056 988 Q 1056 1000 1044 1000 L 640 1000" fill="none" stroke="#78a6bd" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 1056 946 L 1056 988 Q 1056 1000 1044 1000 L 640 1000" fill="none" stroke="#78a6bd" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 640 1000 L 640 1020" fill="none" stroke="#78a6bd" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 640 1000 L 640 1020" fill="none" stroke="#78a6bd" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-78a6bd)"/>
+<path d="M 760 1078 L 916 1078" fill="none" stroke="#c3a0ff" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 760 1078 L 916 1078" fill="none" stroke="#c3a0ff" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-c3a0ff)"/>
+<path d="M 640 1136 L 640 1194" fill="none" stroke="#78a6bd" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 640 1136 L 640 1194" fill="none" stroke="#78a6bd" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-78a6bd)"/>
+<path d="M 640 1194 L 236 1194 Q 224 1194 224 1206 L 224 1230" fill="none" stroke="#52e69e" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 640 1194 L 236 1194 Q 224 1194 224 1206 L 224 1230" fill="none" stroke="#52e69e" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-52e69e)"/>
+<path d="M 640 1194 L 640 1230" fill="none" stroke="#59d8f3" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 640 1194 L 640 1230" fill="none" stroke="#59d8f3" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-59d8f3)"/>
+<path d="M 640 1194 L 1044 1194 Q 1056 1194 1056 1206 L 1056 1230" fill="none" stroke="#ffad85" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 640 1194 L 1044 1194 Q 1056 1194 1056 1206 L 1056 1230" fill="none" stroke="#ffad85" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-ffad85)"/>
+<path d="M 224 1318 L 224 1338 Q 224 1350 236 1350 L 640 1350" fill="none" stroke="#78a6bd" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 224 1318 L 224 1338 Q 224 1350 236 1350 L 640 1350" fill="none" stroke="#78a6bd" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 1056 1318 L 1056 1338 Q 1056 1350 1044 1350 L 640 1350" fill="none" stroke="#78a6bd" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 1056 1318 L 1056 1338 Q 1056 1350 1044 1350 L 640 1350" fill="none" stroke="#78a6bd" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 640 1318 L 640 1384" fill="none" stroke="#78a6bd" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 640 1318 L 640 1384" fill="none" stroke="#78a6bd" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-78a6bd)"/>
+<g data-node="Input video" data-bounds="470 158 340 56">
+<rect x="470" y="158" width="340" height="56" rx="28.0" fill="none" stroke="#59d8f3" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="470" y="158" width="340" height="56" rx="28.0" fill="#0e2330" stroke="#59d8f3" stroke-width="1.6"/>
+<text x="640.0" y="193.48" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="22" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Input video</text>
+</g>
+<g data-node="Read the video stream" data-bounds="450 258 380 76">
+<rect x="450" y="258" width="380" height="76" rx="11" fill="none" stroke="#78a6bd" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="450" y="258" width="380" height="76" rx="11" fill="#101f2c" stroke="#78a6bd" stroke-width="1.6"/>
+<text x="640.0" y="292.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="22" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Read the video stream</text>
+<text x="640.0" y="319.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">Keep audio and subtitles for the output</text>
+</g>
+<g data-node="NVDEC decode" data-bounds="62 448 324 72">
+<rect x="62" y="448" width="324" height="72" rx="11" fill="none" stroke="#52e69e" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="62" y="448" width="324" height="72" rx="11" fill="#0d2429" stroke="#52e69e" stroke-width="1.6"/>
+<text x="224.0" y="480.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="22" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">NVDEC decode</text>
+<text x="224.0" y="507.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">NVIDIA hardware decoder</text>
+</g>
+<g data-node="D3D11VA decode" data-bounds="478 448 324 72">
+<rect x="478" y="448" width="324" height="72" rx="11" fill="none" stroke="#59d8f3" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="478" y="448" width="324" height="72" rx="11" fill="#0e2330" stroke="#59d8f3" stroke-width="1.6"/>
+<text x="640.0" y="480.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="22" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">D3D11VA decode</text>
+<text x="640.0" y="507.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">Intel can also try QSV</text>
+</g>
+<g data-node="CPU decode" data-bounds="894 448 324 72">
+<rect x="894" y="448" width="324" height="72" rx="11" fill="none" stroke="#ffad85" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="894" y="448" width="324" height="72" rx="11" fill="#1b1f27" stroke="#ffad85" stroke-width="1.6"/>
+<text x="1056.0" y="480.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="22" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">CPU decode</text>
+<text x="1056.0" y="507.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">FFmpeg software decoder</text>
+</g>
+<g data-node="decision" data-bounds="64.0 566.0 156 92" data-shape="diamond">
+<polygon points="142,566.0 220.0,612 142,658.0 64.0,612" fill="none" stroke="#52e69e" stroke-width="3" opacity="0.3" filter="url(#glow)"/>
+<polygon points="142,566.0 220.0,612 142,658.0 64.0,612" fill="#0d2429" stroke="#52e69e" stroke-width="1.7" stroke-linejoin="round"/>
+<text x="142" y="604.62" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="18" font-weight="600" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Frame</text>
+<text x="142" y="631.62" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="18" font-weight="600" text-anchor="middle" letter-spacing="0" fill="#edf7ff">ready</text>
+</g>
+<g data-node="CPU decode" data-bounds="254 574 138 76">
+<rect x="254" y="574" width="138" height="76" rx="11" fill="none" stroke="#ffad85" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="254" y="574" width="138" height="76" rx="11" fill="#1b1f27" stroke="#ffad85" stroke-width="1.6"/>
+<text x="323.0" y="608.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">CPU decode</text>
+<text x="323.0" y="635.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="15" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">Upload frames</text>
+</g>
+<rect x="138.075" y="666" width="43.85" height="23" rx="6" fill="#07131f" stroke="none"/>
+<text x="160" y="681" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="15" font-weight="500" text-anchor="middle" letter-spacing="0" fill="#52e69e">Yes</text>
+<rect x="219.05" y="585" width="35.9" height="23" rx="6" fill="#07131f" stroke="none"/>
+<text x="237" y="600" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="15" font-weight="500" text-anchor="middle" letter-spacing="0" fill="#ffad85">No</text>
+<g data-node="decision" data-bounds="480.0 566.0 156 92" data-shape="diamond">
+<polygon points="558,566.0 636.0,612 558,658.0 480.0,612" fill="none" stroke="#59d8f3" stroke-width="3" opacity="0.3" filter="url(#glow)"/>
+<polygon points="558,566.0 636.0,612 558,658.0 480.0,612" fill="#0e2330" stroke="#59d8f3" stroke-width="1.7" stroke-linejoin="round"/>
+<text x="558" y="604.62" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="18" font-weight="600" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Frame</text>
+<text x="558" y="631.62" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="18" font-weight="600" text-anchor="middle" letter-spacing="0" fill="#edf7ff">ready</text>
+</g>
+<g data-node="CPU decode" data-bounds="670 574 138 76">
+<rect x="670" y="574" width="138" height="76" rx="11" fill="none" stroke="#ffad85" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="670" y="574" width="138" height="76" rx="11" fill="#1b1f27" stroke="#ffad85" stroke-width="1.6"/>
+<text x="739.0" y="608.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">CPU decode</text>
+<text x="739.0" y="635.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="15" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">Upload frames</text>
+</g>
+<rect x="554.075" y="666" width="43.85" height="23" rx="6" fill="#07131f" stroke="none"/>
+<text x="576" y="681" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="15" font-weight="500" text-anchor="middle" letter-spacing="0" fill="#59d8f3">Yes</text>
+<rect x="635.05" y="585" width="35.9" height="23" rx="6" fill="#07131f" stroke="none"/>
+<text x="653" y="600" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="15" font-weight="500" text-anchor="middle" letter-spacing="0" fill="#ffad85">No</text>
+<rect x="1064.6" y="608" width="104.80000000000001" height="24" rx="6" fill="#07131f" stroke="none"/>
+<text x="1117" y="624" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="16" font-weight="500" text-anchor="middle" letter-spacing="0" fill="#ffad85">CPU frames</text>
+<g data-node="Make 8-bit SDR" data-bounds="62 724 324 80">
+<rect x="62" y="724" width="324" height="80" rx="11" fill="none" stroke="#52e69e" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="62" y="724" width="324" height="80" rx="11" fill="#0d2429" stroke="#52e69e" stroke-width="1.6"/>
+<text x="224.0" y="760.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="22" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Make 8-bit SDR</text>
+<text x="224.0" y="787.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="16" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">CUDA conversion and HDR tone map*</text>
+</g>
+<g data-node="Make 8-bit SDR" data-bounds="478 724 324 80">
+<rect x="478" y="724" width="324" height="80" rx="11" fill="none" stroke="#59d8f3" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="478" y="724" width="324" height="80" rx="11" fill="#0e2330" stroke="#59d8f3" stroke-width="1.6"/>
+<text x="640.0" y="760.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="22" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Make 8-bit SDR</text>
+<text x="640.0" y="787.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="16" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">GPU conversion and HDR tone map*</text>
+</g>
+<g data-node="Make 8-bit SDR" data-bounds="894 724 324 80">
+<rect x="894" y="724" width="324" height="80" rx="11" fill="none" stroke="#ffad85" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="894" y="724" width="324" height="80" rx="11" fill="#1b1f27" stroke="#ffad85" stroke-width="1.6"/>
+<text x="1056.0" y="760.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="22" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Make 8-bit SDR</text>
+<text x="1056.0" y="787.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">CPU filters and HDR tone map</text>
+</g>
+<rect x="499.355" y="823" width="281.29" height="25" rx="6" fill="#07131f" stroke="none"/>
+<text x="640" y="840" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="500" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">Watermark the selected frames</text>
+<g data-node="Watermark luma" data-bounds="62 866 324 80">
+<rect x="62" y="866" width="324" height="80" rx="11" fill="none" stroke="#52e69e" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="62" y="866" width="324" height="80" rx="11" fill="#0d2429" stroke="#52e69e" stroke-width="1.6"/>
+<text x="224.0" y="902.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="22" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Watermark luma</text>
+<text x="224.0" y="929.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">CUDA kernels</text>
+</g>
+<g data-node="Watermark luma" data-bounds="478 866 324 80">
+<rect x="478" y="866" width="324" height="80" rx="11" fill="none" stroke="#59d8f3" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="478" y="866" width="324" height="80" rx="11" fill="#0e2330" stroke="#59d8f3" stroke-width="1.6"/>
+<text x="640.0" y="902.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="22" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Watermark luma</text>
+<text x="640.0" y="929.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">OpenCL kernels</text>
+</g>
+<g data-node="Watermark luma" data-bounds="894 866 324 80">
+<rect x="894" y="866" width="324" height="80" rx="11" fill="none" stroke="#ffad85" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="894" y="866" width="324" height="80" rx="11" fill="#1b1f27" stroke="#ffad85" stroke-width="1.6"/>
+<text x="1056.0" y="902.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="22" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Watermark luma</text>
+<text x="1056.0" y="929.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">Eigen and OpenMP</text>
+</g>
+<g data-node="decision" data-bounds="520.0 1020.0 240 116" data-shape="diamond">
+<polygon points="640,1020.0 760.0,1078 640,1136.0 520.0,1078" fill="none" stroke="#59d8f3" stroke-width="3" opacity="0.3" filter="url(#glow)"/>
+<polygon points="640,1020.0 760.0,1078 640,1136.0 520.0,1078" fill="#0e2330" stroke="#59d8f3" stroke-width="1.7" stroke-linejoin="round"/>
+<text x="640" y="1070.14" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="21" font-weight="600" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Embed</text>
+<text x="640" y="1100.14" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="21" font-weight="600" text-anchor="middle" letter-spacing="0" fill="#edf7ff">or detect</text>
+</g>
+<rect x="799.56" y="1048" width="70.88" height="24" rx="6" fill="#07131f" stroke="none"/>
+<text x="835" y="1064" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="16" font-weight="500" text-anchor="middle" letter-spacing="0" fill="#c3a0ff">Detect</text>
+<g data-node="Correlation results" data-bounds="916 1040 284 76">
+<rect x="916" y="1040" width="284" height="76" rx="38.0" fill="none" stroke="#c3a0ff" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="916" y="1040" width="284" height="76" rx="38.0" fill="#161e31" stroke="#c3a0ff" stroke-width="1.6"/>
+<text x="1058.0" y="1074.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="21" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Correlation results</text>
+<text x="1058.0" y="1101.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="15" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">8-bit SDR input, detection ends here</text>
+</g>
+<rect x="640.8" y="1152" width="62.400000000000006" height="24" rx="6" fill="#07131f" stroke="none"/>
+<text x="672" y="1168" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="16" font-weight="500" text-anchor="middle" letter-spacing="0" fill="#52e69e">Embed</text>
+<rect x="413.76" y="1193" width="452.48" height="25" rx="6" fill="#07131f" stroke="none"/>
+<text x="640" y="1210" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="500" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">Choose an encoder, keep the same backend and GPU</text>
+<g data-node="CPU or NVENC" data-bounds="62 1230 324 88">
+<rect x="62" y="1230" width="324" height="88" rx="11" fill="none" stroke="#52e69e" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="62" y="1230" width="324" height="88" rx="11" fill="#0d2429" stroke="#52e69e" stroke-width="1.6"/>
+<text x="224.0" y="1270.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="22" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">CPU or NVENC</text>
+<text x="224.0" y="1297.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">Software or NVIDIA hardware</text>
+</g>
+<g data-node="CPU, QSV, AMF or NVENC" data-bounds="478 1230 324 88">
+<rect x="478" y="1230" width="324" height="88" rx="11" fill="none" stroke="#59d8f3" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="478" y="1230" width="324" height="88" rx="11" fill="#0e2330" stroke="#59d8f3" stroke-width="1.6"/>
+<text x="640.0" y="1270.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="20" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">CPU, QSV, AMF or NVENC</text>
+<text x="640.0" y="1297.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="16" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">Hardware follows the GPU vendor</text>
+</g>
+<g data-node="CPU encode" data-bounds="894 1230 324 88">
+<rect x="894" y="1230" width="324" height="88" rx="11" fill="none" stroke="#ffad85" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="894" y="1230" width="324" height="88" rx="11" fill="#1b1f27" stroke="#ffad85" stroke-width="1.6"/>
+<text x="1056.0" y="1270.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="22" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">CPU encode</text>
+<text x="1056.0" y="1297.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">Eigen uses software encoding</text>
+</g>
+<g data-node="Write the output video" data-bounds="420 1384 440 80">
+<rect x="420" y="1384" width="440" height="80" rx="40.0" fill="none" stroke="#59d8f3" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="420" y="1384" width="440" height="80" rx="40.0" fill="#0e2330" stroke="#59d8f3" stroke-width="1.6"/>
+<text x="640.0" y="1420.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="22" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Write the output video</text>
+<text x="640.0" y="1447.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">FFmpeg joins video, audio and subtitles</text>
+</g>
+<text x="44" y="1502" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="start" letter-spacing="0" fill="#a3b9ca">CPU encoding is the default, --hw_encoder enables GPU encoding. SDR keeps 4:2:0, 4:2:2 or 4:4:4 when supported.</text>
+<text x="44" y="1534" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="start" letter-spacing="0" fill="#a3b9ca">*GPU HDR supports limited-range BT.2020 PQ, 4:2:0, 10-bit input. Other HDR uses CPU filters.</text>
+<text x="44" y="1566" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="start" letter-spacing="0" fill="#a3b9ca">CPU SDR converts before upload, skipped frames still get needed conversion, HDR tone mapping outputs 8-bit 4:2:0.</text>
+<text x="44" y="1598" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="start" letter-spacing="0" fill="#a3b9ca">D3D11 frames use GPU copies and sharing for OpenCL. Watermarking changes luma (Y), the brightness plane.</text>
+<rect x="53" y="398" width="166" height="29" rx="4" fill="#0a1a23" stroke="none"/>
+<rect x="60" y="406" width="5" height="14" rx="2" fill="#52e69e" stroke="none"/>
+<text x="78" y="418" font-family="Consolas, &#x27;Liberation Mono&#x27;, monospace" font-size="15" font-weight="600" text-anchor="start" letter-spacing="1" fill="#52e69e">CUDA / NVIDIA</text>
+<rect x="469" y="398" width="156" height="29" rx="4" fill="#0a1a26" stroke="none"/>
+<rect x="476" y="406" width="5" height="14" rx="2" fill="#59d8f3" stroke="none"/>
+<text x="494" y="418" font-family="Consolas, &#x27;Liberation Mono&#x27;, monospace" font-size="15" font-weight="600" text-anchor="start" letter-spacing="1" fill="#59d8f3">OPENCL / GPU</text>
+<rect x="885" y="398" width="146" height="29" rx="4" fill="#101823" stroke="none"/>
+<rect x="892" y="406" width="5" height="14" rx="2" fill="#ffad85" stroke="none"/>
+<text x="910" y="418" font-family="Consolas, &#x27;Liberation Mono&#x27;, monospace" font-size="15" font-weight="600" text-anchor="start" letter-spacing="1" fill="#ffad85">EIGEN / CPU</text>
+</svg>

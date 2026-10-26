@@ -1,0 +1,180 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="1430" viewBox="0 0 1280 1430" role="img" aria-labelledby="title description">
+<title id="title">Video threads and queues</title>
+<desc id="description">Video embedding uses a main thread and a separate encode and mux thread. The decode pump runs on the main thread, reads packets, sends them to FFmpeg and drains decoded frames. That thread also prepares frames and submits CUDA or OpenCL watermark work, or runs Eigen on the CPU. OpenCL hardware decoding holds two frames ahead and stages GPU copies. Owned video frames and audio or subtitle packets pass through one queue with a maximum of eight items. A full queue makes the main thread wait. The encode thread checks frame copies when needed, encodes video frames and writes all output packets. After the worker is joined, the main thread flushes the encoder and finishes the file. Detection accepts 8-bit SDR input and returns results without starting the encode thread. FFmpeg and Eigen may also use CPU worker threads.</desc>
+<defs>
+<radialGradient id="ambient" gradientUnits="userSpaceOnUse" cx="640" cy="500.49999999999994" r="880">
+<stop offset="0" stop-color="#173747" stop-opacity="0.35"/>
+<stop offset="1" stop-color="#173747" stop-opacity="0"/>
+</radialGradient>
+<pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+<path d="M 32 0 H 0 V 32" fill="none" stroke="#91c4df" stroke-opacity="0.035" stroke-width="1"/>
+</pattern>
+<filter id="glow" x="-50%" y="-50%" width="200%" height="200%" color-interpolation-filters="sRGB">
+<feGaussianBlur stdDeviation="2.4"/>
+</filter>
+<marker id="arrow-78a6bd" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 1 1 L 8 5 L 1 9" fill="none" stroke="#78a6bd" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+<marker id="arrow-52e69e" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 1 1 L 8 5 L 1 9" fill="none" stroke="#52e69e" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+<marker id="arrow-59d8f3" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 1 1 L 8 5 L 1 9" fill="none" stroke="#59d8f3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+<marker id="arrow-ffad85" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 1 1 L 8 5 L 1 9" fill="none" stroke="#ffad85" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+<marker id="arrow-c3a0ff" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 1 1 L 8 5 L 1 9" fill="none" stroke="#c3a0ff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+</defs>
+<rect x="1" y="1" width="1278" height="1428" rx="24" fill="#07131f" stroke="#203a4c"/>
+<rect x="2" y="2" width="1276" height="1426" rx="23" fill="url(#ambient)" stroke="none"/>
+<rect x="2" y="2" width="1276" height="1426" rx="23" fill="url(#grid)" stroke="none"/>
+<text x="44" y="48" font-family="Consolas, &#x27;Liberation Mono&#x27;, monospace" font-size="14" font-weight="400" text-anchor="start" letter-spacing="1.8" fill="#59d8f3">VIDEO ARCHITECTURE</text>
+<text x="44" y="94" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="34" font-weight="700" text-anchor="start" letter-spacing="0" fill="#edf7ff">Video threads and queues</text>
+<text x="44" y="126" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="19" font-weight="400" text-anchor="start" letter-spacing="0" fill="#a3b9ca">Two application threads during embedding, GPU engines can work on different frames</text>
+<rect x="40" y="188" width="600" height="780" rx="18" fill="#0b1825" stroke="#78a6bd" stroke-opacity="0.5" stroke-dasharray="3 7"/>
+<rect x="880" y="188" width="360" height="780" rx="18" fill="#0b1825" stroke="#78a6bd" stroke-opacity="0.5" stroke-dasharray="3 7"/>
+<rect x="40" y="1160" width="1200" height="190" rx="18" fill="#0b1825" stroke="#78a6bd" stroke-opacity="0.5" stroke-dasharray="3 7"/>
+<path d="M 340 306 L 340 362" fill="none" stroke="#78a6bd" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 340 306 L 340 362" fill="none" stroke="#78a6bd" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-78a6bd)"/>
+<path d="M 340 448 L 340 510" fill="none" stroke="#78a6bd" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 340 448 L 340 510" fill="none" stroke="#78a6bd" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-78a6bd)"/>
+<path d="M 340 596 L 340 654" fill="none" stroke="#78a6bd" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 340 596 L 340 654" fill="none" stroke="#78a6bd" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-78a6bd)"/>
+<path d="M 340 740 L 340 798" fill="none" stroke="#78a6bd" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 340 740 L 340 798" fill="none" stroke="#78a6bd" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-78a6bd)"/>
+<path d="M 562 841 L 602 841 Q 614 841 614 829 L 614 736 Q 614 724 626 724 L 664 724" fill="none" stroke="#c3a0ff" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 562 841 L 602 841 Q 614 841 614 829 L 614 736 Q 614 724 626 724 L 664 724" fill="none" stroke="#c3a0ff" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-c3a0ff)"/>
+<path d="M 562 405 L 748 405 Q 760 405 760 417 L 760 660" fill="none" stroke="#c3a0ff" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 562 405 L 748 405 Q 760 405 760 417 L 760 660" fill="none" stroke="#c3a0ff" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-c3a0ff)"/>
+<path d="M 856 724 L 888 724 Q 900 724 900 712 L 900 426 Q 900 414 912 414 L 970 414" fill="none" stroke="#c3a0ff" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 856 724 L 888 724 Q 900 724 900 712 L 900 426 Q 900 414 912 414 L 970 414" fill="none" stroke="#c3a0ff" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-c3a0ff)"/>
+<path d="M 1060 462 L 1060 534" fill="none" stroke="#78a6bd" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 1060 462 L 1060 534" fill="none" stroke="#78a6bd" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-78a6bd)"/>
+<path d="M 1150 414 L 1210 414 Q 1222 414 1222 426 L 1222 885 Q 1222 894 1213 894 L 1204 894" fill="none" stroke="#c3a0ff" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 1150 414 L 1210 414 Q 1222 414 1222 426 L 1222 885 Q 1222 894 1213 894 L 1204 894" fill="none" stroke="#c3a0ff" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-c3a0ff)"/>
+<path d="M 1060 614 L 1060 682" fill="none" stroke="#78a6bd" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 1060 614 L 1060 682" fill="none" stroke="#78a6bd" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-78a6bd)"/>
+<path d="M 1060 780 L 1060 854" fill="none" stroke="#78a6bd" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 1060 780 L 1060 854" fill="none" stroke="#78a6bd" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-78a6bd)"/>
+<path d="M 1060 934 L 1060 1026" fill="none" stroke="#78a6bd" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 1060 934 L 1060 1026" fill="none" stroke="#78a6bd" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-78a6bd)"/>
+<path d="M 118 697 L 84 697 Q 72 697 72 709 L 72 988 Q 72 1000 84 1000 L 308 1000 Q 320 1000 320 1012 L 320 1026" fill="none" stroke="#c3a0ff" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 118 697 L 84 697 Q 72 697 72 709 L 72 988 Q 72 1000 84 1000 L 308 1000 Q 320 1000 320 1012 L 320 1026" fill="none" stroke="#c3a0ff" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-c3a0ff)"/>
+<g data-node="Input video" data-bounds="158 250 364 56">
+<rect x="158" y="250" width="364" height="56" rx="28.0" fill="none" stroke="#59d8f3" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="158" y="250" width="364" height="56" rx="28.0" fill="#0e2330" stroke="#59d8f3" stroke-width="1.6"/>
+<text x="340.0" y="285.48" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="22" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Input video</text>
+</g>
+<g data-node="Decode pump" data-bounds="118 362 444 86">
+<rect x="118" y="362" width="444" height="86" rx="11" fill="none" stroke="#78a6bd" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="118" y="362" width="444" height="86" rx="11" fill="#101f2c" stroke="#78a6bd" stroke-width="1.6"/>
+<text x="340.0" y="401.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="22" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Decode pump</text>
+<text x="340.0" y="428.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">Read packets, feed FFmpeg, drain frames</text>
+</g>
+<g data-node="Prepare the frame" data-bounds="118 510 444 86">
+<rect x="118" y="510" width="444" height="86" rx="11" fill="none" stroke="#78a6bd" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="118" y="510" width="444" height="86" rx="11" fill="#101f2c" stroke="#78a6bd" stroke-width="1.6"/>
+<text x="340.0" y="549.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="22" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Prepare the frame</text>
+<text x="340.0" y="576.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">Convert to 8-bit SDR, start needed copies</text>
+</g>
+<rect x="164.64" y="610" width="350.72" height="24" rx="6" fill="#07131f" stroke="none"/>
+<text x="340" y="626" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="16" font-weight="500" text-anchor="middle" letter-spacing="0" fill="#59d8f3">OpenCL HW decode holds two frames ahead</text>
+<g data-node="Watermark selected frames" data-bounds="118 654 444 86">
+<rect x="118" y="654" width="444" height="86" rx="11" fill="none" stroke="#78a6bd" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="118" y="654" width="444" height="86" rx="11" fill="#101f2c" stroke="#78a6bd" stroke-width="1.6"/>
+<text x="340.0" y="693.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="22" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Watermark selected frames</text>
+<text x="340.0" y="720.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">Submit CUDA or OpenCL work, or run Eigen</text>
+</g>
+<rect x="50.15" y="667" width="67.7" height="23" rx="6" fill="#07131f" stroke="none"/>
+<text x="84" y="682" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="15" font-weight="500" text-anchor="middle" letter-spacing="0" fill="#c3a0ff">Detect</text>
+<rect x="344.125" y="761" width="59.75" height="23" rx="6" fill="#07131f" stroke="none"/>
+<text x="374" y="776" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="15" font-weight="500" text-anchor="middle" letter-spacing="0" fill="#78a6bd">Embed</text>
+<g data-node="Hand off an owned frame" data-bounds="118 798 444 86">
+<rect x="118" y="798" width="444" height="86" rx="11" fill="none" stroke="#78a6bd" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="118" y="798" width="444" height="86" rx="11" fill="#101f2c" stroke="#78a6bd" stroke-width="1.6"/>
+<text x="340.0" y="837.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="22" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Hand off an owned frame</text>
+<text x="340.0" y="864.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">GPU surface or CPU buffer</text>
+</g>
+<text x="78" y="940" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="18" font-weight="400" text-anchor="start" letter-spacing="0" fill="#a3b9ca">The main loop continues while the encoder works.</text>
+<rect x="656" y="652" width="192" height="128" rx="11" fill="#161e31" stroke="#c3a0ff" stroke-opacity="0.25"/>
+<rect x="660" y="656" width="192" height="128" rx="11" fill="#161e31" stroke="#c3a0ff" stroke-opacity="0.45"/>
+<g data-node="Encode queue" data-bounds="664 660 192 128">
+<rect x="664" y="660" width="192" height="128" rx="11" fill="none" stroke="#c3a0ff" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="664" y="660" width="192" height="128" rx="11" fill="#161e31" stroke="#c3a0ff" stroke-width="1.6"/>
+<text x="760.0" y="720.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="19" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Encode queue</text>
+<text x="760.0" y="747.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="16" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">8 items max</text>
+</g>
+<rect x="682.16" y="626" width="155.68" height="24" rx="6" fill="#07131f" stroke="none"/>
+<text x="760" y="642" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="16" font-weight="500" text-anchor="middle" letter-spacing="0" fill="#c3a0ff">Frames + packets</text>
+<rect x="669.44" y="798" width="181.12" height="24" rx="6" fill="#07131f" stroke="none"/>
+<text x="760" y="814" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="16" font-weight="500" text-anchor="middle" letter-spacing="0" fill="#c3a0ff">If full, main waits</text>
+<rect x="677.92" y="374" width="164.16" height="24" rx="6" fill="#07131f" stroke="none"/>
+<text x="760" y="390" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="16" font-weight="500" text-anchor="middle" letter-spacing="0" fill="#c3a0ff">Audio / subtitles</text>
+<g data-node="decision" data-bounds="970.0 366.0 180 96" data-shape="diamond">
+<polygon points="1060,366.0 1150.0,414 1060,462.0 970.0,414" fill="none" stroke="#c3a0ff" stroke-width="3" opacity="0.3" filter="url(#glow)"/>
+<polygon points="1060,366.0 1150.0,414 1060,462.0 970.0,414" fill="#161e31" stroke="#c3a0ff" stroke-width="1.7" stroke-linejoin="round"/>
+<text x="1060" y="406.62" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="18" font-weight="600" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Frame or</text>
+<text x="1060" y="433.62" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="18" font-weight="600" text-anchor="middle" letter-spacing="0" fill="#edf7ff">packet</text>
+</g>
+<rect x="1062.8" y="486" width="62.400000000000006" height="24" rx="6" fill="#07131f" stroke="none"/>
+<text x="1094" y="502" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="16" font-weight="500" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">Frame</text>
+<rect x="1153.15" y="383" width="67.7" height="23" rx="6" fill="#07131f" stroke="none"/>
+<text x="1187" y="398" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="15" font-weight="500" text-anchor="middle" letter-spacing="0" fill="#c3a0ff">Packet</text>
+<g data-node="Wait for frame copy" data-bounds="916 534 288 80">
+<rect x="916" y="534" width="288" height="80" rx="11" fill="none" stroke="#78a6bd" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="916" y="534" width="288" height="80" rx="11" fill="#101f2c" stroke="#78a6bd" stroke-width="1.6"/>
+<text x="1060.0" y="570.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="20" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Wait for frame copy</text>
+<text x="1060.0" y="597.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="16" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">Only if a copy is still pending</text>
+</g>
+<g data-node="Encode the frame" data-bounds="916 682 288 98">
+<rect x="916" y="682" width="288" height="98" rx="11" fill="none" stroke="#78a6bd" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="916" y="682" width="288" height="98" rx="11" fill="#101f2c" stroke="#78a6bd" stroke-width="1.6"/>
+<text x="1060.0" y="727.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="21" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Encode the frame</text>
+<text x="1060.0" y="754.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">CPU or GPU encoder</text>
+</g>
+<g data-node="Write output packets" data-bounds="916 854 288 80">
+<rect x="916" y="854" width="288" height="80" rx="11" fill="none" stroke="#78a6bd" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="916" y="854" width="288" height="80" rx="11" fill="#101f2c" stroke="#78a6bd" stroke-width="1.6"/>
+<text x="1060.0" y="890.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="20" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Write output packets</text>
+<text x="1060.0" y="917.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="16" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">Video, audio and subtitles</text>
+</g>
+<rect x="1058.56" y="978" width="70.88" height="24" rx="6" fill="#07131f" stroke="none"/>
+<text x="1094" y="994" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="16" font-weight="500" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">At end</text>
+<g data-node="Finish the file" data-bounds="880 1026 360 76">
+<rect x="880" y="1026" width="360" height="76" rx="38.0" fill="none" stroke="#59d8f3" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="880" y="1026" width="360" height="76" rx="38.0" fill="#0e2330" stroke="#59d8f3" stroke-width="1.6"/>
+<text x="1060.0" y="1060.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="22" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Finish the file</text>
+<text x="1060.0" y="1087.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="16" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">Drain queue, join, flush, write trailer</text>
+</g>
+<g data-node="Detection results" data-bounds="40 1026 560 76">
+<rect x="40" y="1026" width="560" height="76" rx="38.0" fill="none" stroke="#c3a0ff" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="40" y="1026" width="560" height="76" rx="38.0" fill="#161e31" stroke="#c3a0ff" stroke-width="1.6"/>
+<text x="320.0" y="1060.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="22" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Detection results</text>
+<text x="320.0" y="1087.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">8-bit SDR input, no encode thread</text>
+</g>
+<g data-node="Decode a later frame" data-bounds="76 1228 328 80">
+<rect x="76" y="1228" width="328" height="80" rx="11" fill="none" stroke="#78a6bd" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="76" y="1228" width="328" height="80" rx="11" fill="#101f2c" stroke="#78a6bd" stroke-width="1.6"/>
+<text x="240.0" y="1264.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="21" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Decode a later frame</text>
+<text x="240.0" y="1291.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="16" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">NVDEC or D3D11VA / QSV</text>
+</g>
+<g data-node="Watermark a frame" data-bounds="476 1228 328 80">
+<rect x="476" y="1228" width="328" height="80" rx="11" fill="none" stroke="#78a6bd" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="476" y="1228" width="328" height="80" rx="11" fill="#101f2c" stroke="#78a6bd" stroke-width="1.6"/>
+<text x="640.0" y="1264.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="21" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Watermark a frame</text>
+<text x="640.0" y="1291.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="16" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">CUDA or OpenCL kernels</text>
+</g>
+<g data-node="Encode an earlier frame" data-bounds="876 1228 328 80">
+<rect x="876" y="1228" width="328" height="80" rx="11" fill="none" stroke="#78a6bd" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="876" y="1228" width="328" height="80" rx="11" fill="#101f2c" stroke="#78a6bd" stroke-width="1.6"/>
+<text x="1040.0" y="1264.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="21" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Encode an earlier frame</text>
+<text x="1040.0" y="1291.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="16" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">NVENC, QSV or AMF</text>
+</g>
+<text x="44" y="1384" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="start" letter-spacing="0" fill="#a3b9ca">The two thread groups show application threads, FFmpeg codecs and Eigen may also use CPU workers.</text>
+<text x="44" y="1414" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="start" letter-spacing="0" fill="#a3b9ca">During the loop, only the encode thread writes output. Final flushing runs on the main thread after joining it.</text>
+<rect x="53" y="202" width="146" height="29" rx="4" fill="#0b1825" stroke="none"/>
+<rect x="60" y="210" width="5" height="14" rx="2" fill="#78a6bd" stroke="none"/>
+<text x="78" y="222" font-family="Consolas, &#x27;Liberation Mono&#x27;, monospace" font-size="15" font-weight="600" text-anchor="start" letter-spacing="1" fill="#78a6bd">MAIN THREAD</text>
+<text x="620" y="222" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="16" font-weight="400" text-anchor="end" letter-spacing="0" fill="#a3b9ca">Decode and watermark loop</text>
+<rect x="893" y="202" width="166" height="29" rx="4" fill="#0b1825" stroke="none"/>
+<rect x="900" y="210" width="5" height="14" rx="2" fill="#78a6bd" stroke="none"/>
+<text x="918" y="222" font-family="Consolas, &#x27;Liberation Mono&#x27;, monospace" font-size="15" font-weight="600" text-anchor="start" letter-spacing="1" fill="#78a6bd">ENCODE THREAD</text>
+<text x="1220" y="222" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="16" font-weight="400" text-anchor="end" letter-spacing="0" fill="#a3b9ca">Embed only</text>
+<rect x="53" y="1174" width="236" height="29" rx="4" fill="#0b1825" stroke="none"/>
+<rect x="60" y="1182" width="5" height="14" rx="2" fill="#78a6bd" stroke="none"/>
+<text x="78" y="1194" font-family="Consolas, &#x27;Liberation Mono&#x27;, monospace" font-size="15" font-weight="600" text-anchor="start" letter-spacing="1" fill="#78a6bd">GPU WORK CAN OVERLAP</text>
+<text x="1220" y="1194" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="16" font-weight="400" text-anchor="end" letter-spacing="0" fill="#a3b9ca">Depends on the device, codec and copies</text>
+</svg>

@@ -1,0 +1,119 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="1390" viewBox="0 0 1280 1390" role="img" aria-labelledby="title description">
+<title id="title">The Qt benchmark</title>
+<desc id="description">The Qt Benchmark tab runs six images, four prediction windows and eleven PSNR levels, making 264 cases. Setup, loading, pixel preparation and previews are outside timing. Embedding and detection each warm up once and repeat until timing is stable or a time or run limit is reached. The UI shows each result, then moves to the next case. On completion, the score is round of ten times the square root of the product of the geometric-mean embed and detect FPS. Stopping the run produces no score.</desc>
+<defs>
+<radialGradient id="ambient" gradientUnits="userSpaceOnUse" cx="640" cy="486.49999999999994" r="880">
+<stop offset="0" stop-color="#173747" stop-opacity="0.35"/>
+<stop offset="1" stop-color="#173747" stop-opacity="0"/>
+</radialGradient>
+<pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+<path d="M 32 0 H 0 V 32" fill="none" stroke="#91c4df" stroke-opacity="0.035" stroke-width="1"/>
+</pattern>
+<filter id="glow" x="-50%" y="-50%" width="200%" height="200%" color-interpolation-filters="sRGB">
+<feGaussianBlur stdDeviation="2.4"/>
+</filter>
+<marker id="arrow-78a6bd" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 1 1 L 8 5 L 1 9" fill="none" stroke="#78a6bd" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+<marker id="arrow-52e69e" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 1 1 L 8 5 L 1 9" fill="none" stroke="#52e69e" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+<marker id="arrow-59d8f3" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 1 1 L 8 5 L 1 9" fill="none" stroke="#59d8f3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+<marker id="arrow-ffad85" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 1 1 L 8 5 L 1 9" fill="none" stroke="#ffad85" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+<marker id="arrow-c3a0ff" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 1 1 L 8 5 L 1 9" fill="none" stroke="#c3a0ff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
+</defs>
+<rect x="1" y="1" width="1278" height="1388" rx="24" fill="#07131f" stroke="#203a4c"/>
+<rect x="2" y="2" width="1276" height="1386" rx="23" fill="url(#ambient)" stroke="none"/>
+<rect x="2" y="2" width="1276" height="1386" rx="23" fill="url(#grid)" stroke="none"/>
+<text x="44" y="48" font-family="Consolas, &#x27;Liberation Mono&#x27;, monospace" font-size="14" font-weight="400" text-anchor="start" letter-spacing="1.8" fill="#59d8f3">QT BENCHMARK TAB</text>
+<text x="44" y="94" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="34" font-weight="700" text-anchor="start" letter-spacing="0" fill="#edf7ff">The Qt benchmark</text>
+<text x="44" y="126" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="19" font-weight="400" text-anchor="start" letter-spacing="0" fill="#a3b9ca">Measure watermark speed on the selected CPU or GPU, then build one score</text>
+<rect x="40" y="592" width="376" height="176" rx="18" fill="#0a1a23" stroke="#52e69e" stroke-opacity="0.5" stroke-dasharray="3 7"/>
+<rect x="864" y="592" width="376" height="176" rx="18" fill="#0a1a26" stroke="#59d8f3" stroke-opacity="0.5" stroke-dasharray="3 7"/>
+<path d="M 640 218 L 640 266" fill="none" stroke="#78a6bd" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 640 218 L 640 266" fill="none" stroke="#78a6bd" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-78a6bd)"/>
+<path d="M 640 346 L 640 432" fill="none" stroke="#78a6bd" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 640 346 L 640 432" fill="none" stroke="#78a6bd" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-78a6bd)"/>
+<path d="M 640 520 L 640 546 Q 640 558 628 558 L 240 558 Q 228 558 228 570 L 228 650" fill="none" stroke="#52e69e" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 640 520 L 640 546 Q 640 558 628 558 L 240 558 Q 228 558 228 570 L 228 650" fill="none" stroke="#52e69e" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-52e69e)"/>
+<path d="M 392 690 L 478 690" fill="none" stroke="#78a6bd" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 392 690 L 478 690" fill="none" stroke="#78a6bd" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-78a6bd)"/>
+<path d="M 802 690 L 888 690" fill="none" stroke="#59d8f3" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 802 690 L 888 690" fill="none" stroke="#59d8f3" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-59d8f3)"/>
+<path d="M 1052 730 L 1052 872 Q 1052 884 1040 884 L 860 884" fill="none" stroke="#78a6bd" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 1052 730 L 1052 872 Q 1052 884 1040 884 L 860 884" fill="none" stroke="#78a6bd" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-78a6bd)"/>
+<path d="M 640 926 L 640 980" fill="none" stroke="#78a6bd" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 640 926 L 640 980" fill="none" stroke="#78a6bd" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-78a6bd)"/>
+<path d="M 520 1038 L 32 1038 Q 20 1038 20 1026 L 20 488 Q 20 476 32 476 L 430 476" fill="none" stroke="#52e69e" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 520 1038 L 32 1038 Q 20 1038 20 1026 L 20 488 Q 20 476 32 476 L 430 476" fill="none" stroke="#52e69e" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-52e69e)"/>
+<path d="M 640 1096 L 640 1162" fill="none" stroke="#59d8f3" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
+<path d="M 640 1096 L 640 1162" fill="none" stroke="#59d8f3" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-59d8f3)"/>
+<g data-node="Start benchmark" data-bounds="470 162 340 56">
+<rect x="470" y="162" width="340" height="56" rx="28.0" fill="none" stroke="#59d8f3" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="470" y="162" width="340" height="56" rx="28.0" fill="#0e2330" stroke="#59d8f3" stroke-width="1.6"/>
+<text x="640.0" y="197.48" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="22" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Start benchmark</text>
+</g>
+<g data-node="Set up the test" data-bounds="430 266 420 80">
+<rect x="430" y="266" width="420" height="80" rx="11" fill="none" stroke="#78a6bd" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="430" y="266" width="420" height="80" rx="11" fill="#101f2c" stroke="#78a6bd" stroke-width="1.6"/>
+<text x="640.0" y="302.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="22" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Set up the test</text>
+<text x="640.0" y="329.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">Prepare the selected CPU or GPU</text>
+</g>
+<rect x="378.25" y="371" width="523.5" height="27" rx="6" fill="#07131f" stroke="none"/>
+<text x="640" y="390" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="19" font-weight="500" text-anchor="middle" letter-spacing="0" fill="#59d8f3">6 images × 4 p values × 11 PSNR levels = 264 cases</text>
+<g data-node="Prepare the next case" data-bounds="430 432 420 88">
+<rect x="430" y="432" width="420" height="88" rx="11" fill="none" stroke="#78a6bd" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="430" y="432" width="420" height="88" rx="11" fill="#101f2c" stroke="#78a6bd" stroke-width="1.6"/>
+<text x="640.0" y="472.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="22" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Prepare the next case</text>
+<text x="640.0" y="499.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">Load if needed, set p and PSNR</text>
+</g>
+<g data-node="Embed the watermark" data-bounds="64 650 328 80">
+<rect x="64" y="650" width="328" height="80" rx="11" fill="none" stroke="#52e69e" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="64" y="650" width="328" height="80" rx="11" fill="#0d2429" stroke="#52e69e" stroke-width="1.6"/>
+<text x="228.0" y="686.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="22" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Embed the watermark</text>
+<text x="228.0" y="713.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="16" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">Repeat, wait for GPU work, record FPS</text>
+</g>
+<g data-node="Prepare detection pixels" data-bounds="478 650 324 80">
+<rect x="478" y="650" width="324" height="80" rx="11" fill="none" stroke="#78a6bd" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="478" y="650" width="324" height="80" rx="11" fill="#101f2c" stroke="#78a6bd" stroke-width="1.6"/>
+<text x="640.0" y="686.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="21" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Prepare detection pixels</text>
+<text x="640.0" y="713.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="16" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">Convert once, outside the timers</text>
+</g>
+<g data-node="Detect the watermark" data-bounds="888 650 328 80">
+<rect x="888" y="650" width="328" height="80" rx="11" fill="none" stroke="#59d8f3" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="888" y="650" width="328" height="80" rx="11" fill="#0e2330" stroke="#59d8f3" stroke-width="1.6"/>
+<text x="1052.0" y="686.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="22" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Detect the watermark</text>
+<text x="1052.0" y="713.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="16" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">Repeat, read correlation, record FPS</text>
+</g>
+<rect x="591.84" y="616" width="96.32000000000001" height="24" rx="6" fill="#07131f" stroke="none"/>
+<text x="640" y="632" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="16" font-weight="500" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">Not timed</text>
+<text x="44" y="802" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="19" font-weight="400" text-anchor="start" letter-spacing="0" fill="#edf7ff">Warm up once outside the timer, then repeat each step until its timing is stable.</text>
+<text x="44" y="830" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="18" font-weight="400" text-anchor="start" letter-spacing="0" fill="#a3b9ca">Target: 50 ms and timing variation below 10%, budget: 250 ms, up to 300 runs.</text>
+<g data-node="Show the preview and results" data-bounds="420 846 440 80">
+<rect x="420" y="846" width="440" height="80" rx="11" fill="none" stroke="#78a6bd" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="420" y="846" width="440" height="80" rx="11" fill="#101f2c" stroke="#78a6bd" stroke-width="1.6"/>
+<text x="640.0" y="882.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="22" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Show the preview and results</text>
+<text x="640.0" y="909.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">Update progress, timing and correlation</text>
+</g>
+<g data-node="decision" data-bounds="520.0 980.0 240 116" data-shape="diamond">
+<polygon points="640,980.0 760.0,1038 640,1096.0 520.0,1038" fill="none" stroke="#59d8f3" stroke-width="3" opacity="0.3" filter="url(#glow)"/>
+<polygon points="640,980.0 760.0,1038 640,1096.0 520.0,1038" fill="#0e2330" stroke="#59d8f3" stroke-width="1.7" stroke-linejoin="round"/>
+<text x="640" y="1030.14" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="21" font-weight="600" text-anchor="middle" letter-spacing="0" fill="#edf7ff">More</text>
+<text x="640" y="1060.14" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="21" font-weight="600" text-anchor="middle" letter-spacing="0" fill="#edf7ff">cases</text>
+</g>
+<rect x="312.64" y="1007" width="138.72" height="24" rx="6" fill="#07131f" stroke="none"/>
+<text x="382" y="1023" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="16" font-weight="500" text-anchor="middle" letter-spacing="0" fill="#52e69e">Yes, next case</text>
+<rect x="657.52" y="1118" width="36.96" height="24" rx="6" fill="#07131f" stroke="none"/>
+<text x="676" y="1134" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="16" font-weight="500" text-anchor="middle" letter-spacing="0" fill="#59d8f3">No</text>
+<g data-node="Final score" data-bounds="390 1162 500 106">
+<rect x="390" y="1162" width="500" height="106" rx="53.0" fill="none" stroke="#52e69e" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
+<rect x="390" y="1162" width="500" height="106" rx="53.0" fill="#0d2429" stroke="#52e69e" stroke-width="1.6"/>
+<text x="640.0" y="1200.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="24" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Final score</text>
+<text x="640.0" y="1245.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="28" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">round(10 × √(E × D))</text>
+</g>
+<text x="44" y="1310" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="start" letter-spacing="0" fill="#a3b9ca">E and D are the geometric mean embed and detect FPS across all cases.</text>
+<text x="44" y="1340" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="start" letter-spacing="0" fill="#a3b9ca">Loading and previews are outside the timers, slow cases can use one or two runs, stopping gives no score.</text>
+<text x="44" y="1370" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="start" letter-spacing="0" fill="#a3b9ca">Images: 18×18, 512×512, 480p, 720p, 1080p, 4K. p: 3, 5, 7, 9. PSNR: 10–60 dB, step 5.</text>
+<rect x="53" y="606" width="146" height="29" rx="4" fill="#0a1a23" stroke="none"/>
+<rect x="60" y="614" width="5" height="14" rx="2" fill="#52e69e" stroke="none"/>
+<text x="78" y="626" font-family="Consolas, &#x27;Liberation Mono&#x27;, monospace" font-size="15" font-weight="600" text-anchor="start" letter-spacing="1" fill="#52e69e">TIMED EMBED</text>
+<rect x="877" y="606" width="156" height="29" rx="4" fill="#0a1a26" stroke="none"/>
+<rect x="884" y="614" width="5" height="14" rx="2" fill="#59d8f3" stroke="none"/>
+<text x="902" y="626" font-family="Consolas, &#x27;Liberation Mono&#x27;, monospace" font-size="15" font-weight="600" text-anchor="start" letter-spacing="1" fill="#59d8f3">TIMED DETECT</text>
+</svg>
