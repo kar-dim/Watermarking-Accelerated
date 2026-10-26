@@ -28,15 +28,6 @@ inline const std::string kernels = R"CLC(
 #endif
 #endif
 
-// Memory fence helpers for cross-workgroup synchronization
-#if defined(__OPENCL_C_VERSION__) && __OPENCL_C_VERSION__ >= 200 && (__OPENCL_C_VERSION__ < 300 || (defined(__opencl_c_atomic_scope_device) && defined(__opencl_c_atomic_order_acq_rel)))
-#define DEVICE_RELEASE_FENCE() atomic_work_item_fence(CLK_GLOBAL_MEM_FENCE, memory_order_release, memory_scope_device)
-#define DEVICE_ACQUIRE_FENCE() atomic_work_item_fence(CLK_GLOBAL_MEM_FENCE, memory_order_acquire, memory_scope_device)
-#else
-#define DEVICE_RELEASE_FENCE() mem_fence(CLK_GLOBAL_MEM_FENCE)
-#define DEVICE_ACQUIRE_FENCE() mem_fence(CLK_GLOBAL_MEM_FENCE)
-#endif
-
 // Work-group reduction macros for sum and maximum
 #if defined(WM_WORK_GROUP_REDUCTIONS)
 #define REDUCTION_SCRATCH_STRIDE 1
@@ -54,17 +45,6 @@ inline const std::string kernels = R"CLC(
             (ARR)[0] = _groupValue;                                  \
     } while (0)
 
-#define REDUCE_SUM_3(TID, START_OFFSET, ARR1, ARR2, ARR3, VALUE1, VALUE2, VALUE3) \
-    do {                                                                        \
-        const float _groupValue1 = work_group_reduce_add(VALUE1);                \
-        const float _groupValue2 = work_group_reduce_add(VALUE2);                \
-        const float _groupValue3 = work_group_reduce_add(VALUE3);                \
-        if ((TID) == 0) {                                                        \
-            (ARR1)[0] = _groupValue1;                                            \
-            (ARR2)[0] = _groupValue2;                                            \
-            (ARR3)[0] = _groupValue3;                                            \
-        }                                                                        \
-    } while (0)
 #elif defined(WM_USE_SUBGROUPS)
 #define REDUCTION_SCRATCH_STRIDE get_num_sub_groups()
 #define REDUCE_SUM(TID, START_OFFSET, ARR, VALUE)                               \
@@ -95,6 +75,33 @@ inline const std::string kernels = R"CLC(
         }                                                                       \
     } while (0)
 
+#else
+#define REDUCTION_SCRATCH_STRIDE \
+    (get_local_size(0) * get_local_size(1) * get_local_size(2))
+#define REDUCE_SUM(TID, START_OFFSET, ARR, VALUE)                       \
+    do {                                                                \
+        (ARR)[(TID)] = (VALUE);                                         \
+        barrier(CLK_LOCAL_MEM_FENCE);                                   \
+        for (int _s = (START_OFFSET); _s > 0; _s >>= 1) {               \
+            if ((TID) < _s) ARR[(TID)] += ARR[(TID) + _s];              \
+            barrier(CLK_LOCAL_MEM_FENCE);                               \
+        }                                                               \
+    } while (0)
+
+#define REDUCE_MAX(TID, START_OFFSET, ARR, VALUE)                       \
+    do {                                                                \
+        (ARR)[(TID)] = (VALUE);                                         \
+        barrier(CLK_LOCAL_MEM_FENCE);                                   \
+        for (int _s = (START_OFFSET); _s > 0; _s >>= 1) {               \
+            if ((TID) < _s) ARR[(TID)] = fmax(ARR[(TID)], ARR[(TID) + _s]); \
+            barrier(CLK_LOCAL_MEM_FENCE);                               \
+        }                                                               \
+    } while (0)
+
+#endif
+
+// deterministic reduction order, subgroup partials combined via explicit tree
+#if defined(WM_USE_SUBGROUPS)
 #define REDUCE_SUM_3(TID, START_OFFSET, ARR1, ARR2, ARR3, VALUE1, VALUE2, VALUE3) \
     do {                                                                        \
         const float _subgroupValue1 = sub_group_reduce_add(VALUE1);             \
@@ -122,28 +129,6 @@ inline const std::string kernels = R"CLC(
         }                                                                       \
     } while (0)
 #else
-#define REDUCTION_SCRATCH_STRIDE \
-    (get_local_size(0) * get_local_size(1) * get_local_size(2))
-#define REDUCE_SUM(TID, START_OFFSET, ARR, VALUE)                       \
-    do {                                                                \
-        (ARR)[(TID)] = (VALUE);                                         \
-        barrier(CLK_LOCAL_MEM_FENCE);                                   \
-        for (int _s = (START_OFFSET); _s > 0; _s >>= 1) {               \
-            if ((TID) < _s) ARR[(TID)] += ARR[(TID) + _s];              \
-            barrier(CLK_LOCAL_MEM_FENCE);                               \
-        }                                                               \
-    } while (0)
-
-#define REDUCE_MAX(TID, START_OFFSET, ARR, VALUE)                       \
-    do {                                                                \
-        (ARR)[(TID)] = (VALUE);                                         \
-        barrier(CLK_LOCAL_MEM_FENCE);                                   \
-        for (int _s = (START_OFFSET); _s > 0; _s >>= 1) {               \
-            if ((TID) < _s) ARR[(TID)] = fmax(ARR[(TID)], ARR[(TID) + _s]); \
-            barrier(CLK_LOCAL_MEM_FENCE);                               \
-        }                                                               \
-    } while (0)
-
 #define REDUCE_SUM_3(TID, START_OFFSET, ARR1, ARR2, ARR3, VALUE1, VALUE2, VALUE3) \
     do {                                                                \
         (ARR1)[(TID)] = (VALUE1);                                       \
@@ -394,15 +379,14 @@ __kernel __attribute__((reqd_work_group_size(WG_SIZE, 1, 1))) void me_error_sequ
 }
 
 // Correlation of the image prediction error e_u with the prediction error of |e_u| * w (the ME mask times the watermark, not divided by
-// max|e_u|: the correlation does not depend on the scale). Computes partial sums and writes the final result from the last finished work-group
+// correlation independent of scale, next queued kernel reduces partial sums
 __kernel __attribute__((reqd_work_group_size(WG_SIZE, 1, 1))) void calculate_error_sequence_and_partial_corr_fused(__global const float* restrict e_u,
     __global const half* restrict w, __global const float* restrict coeffs, __global float* restrict partialDots, __global float* restrict partialNormU,
-    __global float* restrict partialNormZ, volatile __global uint* restrict groupCounter, __global float* restrict correlation, const int width, const int height,
+    __global float* restrict partialNormZ, const int width, const int height,
     __global const int* restrict stopFlag, __local float* restrict reductionScratch)
 {
     __local float4 regionStorage[ET_SH_SIZE / 4];
     __local float* region = (__local float*)regionStorage;
-    __local int isLastGroup;
     float coef[NEIGHB_SIZE];
     fillErrorTile(e_u, w, 1, region, ET_TILE_SLOW0, ET_TILE_FAST0, width, height);
     loadCoefficients(coeffs, coef);
@@ -434,29 +418,27 @@ __kernel __attribute__((reqd_work_group_size(WG_SIZE, 1, 1))) void calculate_err
     }
 
     const int lid = get_local_id(0);
-    const int numGroups = get_num_groups(0) * get_num_groups(1);
     __local float* dotCache = reductionScratch;
-    __local float* normUCache = reductionScratch + REDUCTION_SCRATCH_STRIDE;
-    __local float* normZCache = reductionScratch + (2 * REDUCTION_SCRATCH_STRIDE);
+    __local float* normUCache = reductionScratch + WG_SIZE;
+    __local float* normZCache = reductionScratch + (2 * WG_SIZE);
     REDUCE_SUM_3(lid, WG_SIZE / 2, dotCache, normUCache, normZCache, threadDot, threadNormU, threadNormZ);
     if (lid == 0) {
         const int groupId = (get_group_id(1) * get_num_groups(0)) + get_group_id(0);
         partialDots[groupId] = dotCache[0];
         partialNormU[groupId] = normUCache[0];
         partialNormZ[groupId] = normZCache[0];
-        // Ensure group results are visible before atomic counter increment
-        DEVICE_RELEASE_FENCE();
-        isLastGroup = atomic_inc(groupCounter) == (uint)(numGroups - 1);
     }
-    barrier(CLK_LOCAL_MEM_FENCE);
-    if (!isLastGroup)
-        return;
+}
 
-    // Final work-group sums all group outputs and writes normalized correlation
-    DEVICE_ACQUIRE_FENCE();
-    volatile __global const float* dots = partialDots;
-    volatile __global const float* normsU = partialNormU;
-    volatile __global const float* normsZ = partialNormZ;
+// in-order queue boundary publishes partial sums, atomics limited to workgroup scope
+__kernel __attribute__((reqd_work_group_size(WG_SIZE, 1, 1))) void finalize_correlation(__global const float* restrict dots,
+    __global const float* restrict normsU, __global const float* restrict normsZ, __global float* restrict correlation,
+    const int numGroups, __local float* restrict reductionScratch)
+{
+    const int lid = get_local_id(0);
+    __local float* dotCache = reductionScratch;
+    __local float* normUCache = reductionScratch + WG_SIZE;
+    __local float* normZCache = reductionScratch + (2 * WG_SIZE);
     float totalDot = 0.0f;
     float totalNormU = 0.0f;
     float totalNormZ = 0.0f;
@@ -470,7 +452,6 @@ __kernel __attribute__((reqd_work_group_size(WG_SIZE, 1, 1))) void calculate_err
         const float normU = sqrt(normUCache[0]);
         const float normZ = sqrt(normZCache[0]);
         *correlation = (normU > 1e-12f && normZ > 1e-12f) ? (dotCache[0] / (normU * normZ)) : 0.0f;
-        *groupCounter = 0; // Reset counter for next launch
     }
 }
 
@@ -603,7 +584,7 @@ WM_INLINE void reduceShiftSums(const float* restrict sums, const int num, __glob
     const int lid = get_local_id(0);
 #if defined(WM_USE_SUBGROUPS)
     const uint subgroupCount = get_num_sub_groups();
-    // Every work-item participates, including padded shifts, each subgroup publishes one sum per shift, then the work-group combines only those subgroup totals.
+    // subgroups publish one sum per shift, workgroup combines subgroup totals
     #pragma unroll
     for (int i = 0; i < MAX_GROUP_SHIFTS; i++) {
         const float value = sub_group_reduce_add(i < num ? sums[i] : 0.0f);
@@ -760,7 +741,7 @@ WM_INLINE void sumRowRun(const __global float* restrict source, const int r, con
 
 // Copies top and bottom border rows into a contiguous row-major buffer: slots [0, 3 * PAD) hold the top image rows and slots
 // [3 * PAD, 6 * PAD) the bottom ones (borderCopyRow maps an image row to its slot). For small images (height < 6 * PAD) the two parts
-// overlap, some slots are then never read and their source row is clamped so it stays inside the image
+// clamp source row inside image bounds
 __kernel void me_copy_border_rows(__global const float* restrict input, __global float* restrict borderCopy, const int width, const int height) {
     const int total = BORDER_COPY_ROWS * width;
     for (int i = get_global_id(0); i < total; i += get_global_size(0)) {
@@ -1056,7 +1037,7 @@ __kernel __attribute__((reqd_work_group_size(WG_SIZE, 1, 1))) void me_solve_syst
         #pragma unroll
         for (int k = 0; k < NB; k++) {
             const float2 pivot = k == 0 ? sA[packedIndex(k0, k0)] : sPivot[k];
-            if (!(pivot.x > 1e-3f)) { // Exit early if matrix is not positive definite
+            if (!(pivot.x > 1e-3f)) { // exit early if matrix not positive definite
                 if (lid == 0)
                     *stopFlag = 1;
                 return;

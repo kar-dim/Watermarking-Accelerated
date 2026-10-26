@@ -11,7 +11,7 @@
 #include <unordered_map>
 
 /*!
- *  \brief  Helper utility functions related to OpenCL.
+ *  \brief  Utility functions for OpenCL operations
  *  \author Dimitris Karatzas
  */
 namespace cl_utils {

@@ -303,6 +303,8 @@
     <ClCompile Include="WatermarkFactory.cpp" Condition="'$(Configuration)|$(Platform)'=='EIGEN_Debug|x64'" />
     <ClCompile Include="WatermarkFactory.cpp" Condition="'$(Configuration)|$(Platform)'=='EIGEN_Release|x64'" />
     <ClCompile Include="video_utils.cpp" />
+    <ClCompile Include="OclVideoInterop.cpp" Condition="$(Configuration.StartsWith('OPENCL_'))" />
+    <ClCompile Include="OclHdrTonemap.cpp" Condition="$(Configuration.StartsWith('OPENCL_'))" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="buffer.hpp" />
@@ -348,6 +350,9 @@
     <ClInclude Include="half_float.hpp" />
     <ClInclude Include="simd.hpp" />
     <ClInclude Include="HdrTonemap.hpp" />
+    <ClInclude Include="HdrTonemapCurves.hpp" />
+    <ClInclude Include="OclHdrTonemap.hpp" />
+    <ClInclude Include="kernels\hdr_kernels.hpp" />
     <ClInclude Include="ImageEigenBuffer.hpp">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='CUDA_Debug|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='CUDA_Release|x64'">true</ExcludedFromBuild>
@@ -452,6 +457,8 @@
     <ClInclude Include="AvUtil.hpp" />
     <ClInclude Include="EncodeOptions.hpp" />
     <ClInclude Include="video_utils.hpp" />
+    <ClInclude Include="OclVideoInterop.hpp" />
+    <ClInclude Include="OclVideoDevice.hpp" />
     <ClInclude Include="WatermarkCrypto.hpp" />
     <ClInclude Include="WatermarkCuda.cuh">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='OPENCL_Release|x64'">true</ExcludedFromBuild>

@@ -61,7 +61,7 @@ bool hasJpegExtension(const string& path) {
     return extension == "jpg" || extension == "jpeg";
 }
 
-// 24-bit BMP file as CImg's save_bmp but more optimized and faster and without CImg overhead
+// 24-bit BMP export without CImg overhead
 void saveBmp(const Gray8BufferIO& image, const string& path) {
     constexpr size_t chunkBytes = size_t{1} << 20;
     const unsigned int width = image.width();
@@ -89,7 +89,7 @@ void saveBmp(const Gray8BufferIO& image, const string& path) {
     std::ofstream file(path, std::ofstream::binary);
     checkError(!file.write(reinterpret_cast<const char*>(header), sizeof(header)), "Unable to write the image file: " + path);
     const int channels = image.spectrum();
-    // the row padding bytes are never written, they stay zero
+    // row padding bytes remain zero
     const size_t chunkRows = std::max<size_t>(chunkBytes / rowBytes, 1);
     std::vector<uint8_t> chunk(chunkRows * rowBytes, 0);
     size_t filledRows = 0;
@@ -121,13 +121,13 @@ void writePngBytes(png_structp png, png_bytep data, const png_size_t length) {
 }
 void flushPng(png_structp) {}
 
-// writes the 8-bit PNG of the planes, row by row, libpng reports errors with longjmp: only trivially destructible objects live here
+// write 8-bit PNG, libpng errors longjmp, keep local objects trivially destructible
 bool writePngRows(png_structp png, png_infop info, const uint8_t* const* planes, const int channels, const png_uint_32 width, const png_uint_32 height, uint8_t* row) {
     if (setjmp(png_jmpbuf(png)))
         return false;
     const int colorType = channels == 1 ? PNG_COLOR_TYPE_GRAY : channels == 2 ? PNG_COLOR_TYPE_GRAY_ALPHA : channels == 3 ? PNG_COLOR_TYPE_RGB : PNG_COLOR_TYPE_RGB_ALPHA;
     png_set_IHDR(png, info, width, height, 8, colorType, PNG_INTERLACE_NONE, PNG_COMPRESSION_TYPE_DEFAULT, PNG_FILTER_TYPE_DEFAULT);
-    // the "up" filter with run-length deflate: about 5x faster than libpng's defaults (all filters, full deflate) for files ~15% larger
+    // up filter with run-length deflate for faster encoding
     png_set_filter(png, PNG_FILTER_TYPE_BASE, PNG_FILTER_UP);
     png_set_compression_strategy(png, Z_RLE);
     png_write_info(png, info);
@@ -144,7 +144,7 @@ bool writePngRows(png_structp png, png_infop info, const uint8_t* const* planes,
     return true;
 }
 
-// the same PNG as CImg's save_png (8-bit gray, gray + alpha, RGB or RGBA, not interlaced), with faster compression settings (CImg has no option for them)
+// PNG export with faster compression settings
 void savePng(const Gray8BufferIO& image, const string& path) {
     const int channels = std::min(image.spectrum(), 4);
     std::ofstream file(path, std::ofstream::binary);
@@ -167,7 +167,7 @@ void savePng(const Gray8BufferIO& image, const string& path) {
     checkError(!file, "Unable to write the image file: " + path);
 }
 
-// save a CImg image selecting the correct encoder by file extension
+// save image using encoder for file extension
 void saveCimgByExtension(const Gray8BufferIO& cimgToSave, const string& path) {
     const string extension = lowercaseExtension(path);
     if (extension == "png")
@@ -184,10 +184,10 @@ void saveCimgByExtension(const Gray8BufferIO& cimgToSave, const string& path) {
         throw std::runtime_error("Unsupported image format: " + extension);
 }
 
-// anything outside the EXIF orientations 1-8 is not rotated
+// unhandled orientations skip rotation
 int exifOrientation(const TinyEXIF::EXIFInfo& exif) { return exif.Orientation >= 1 && exif.Orientation <= 8 ? exif.Orientation : 1; }
 
-// decode the image file to 8 bits per sample
+// decode image file to 8 bits per sample
 Gray8BufferIO loadImage8(const string& imageFile) {
     // null for types it does not detect (the loader falls back to the extension)
     const char* detectedType = cimg_library::cimg::ftype(nullptr, imageFile.c_str());
@@ -201,23 +201,23 @@ Gray8BufferIO loadImage8(const string& imageFile) {
     else
         image.load(imageFile.c_str());
     checkError(bitsPerValue > 8, "Unsupported image: " + std::to_string(bitsPerValue) + " bits per sample, only 8-bit images are supported");
-    // JPEG has no alpha: 4 components are CMYK, which CImg returns unconverted (K would be taken as the alpha channel)
+    // convert CMYK JPEG to RGB, JPEG has no alpha channel
     checkError(fileType == "jpg" && image.spectrum() == 4, "Unsupported image: CMYK JPEG, only grayscale and RGB JPEG images are supported");
     InternalUtils::checkImageDimensions(image.height(), image.width());
     InternalUtils::checkedElements(image.height(), image.width(), image.spectrum());
     return image;
 }
 
-// zero out RGB channels where alpha is 0, branchless, exploiting CImg's planar layout (RRRR...GGGG...BBBB...)
+// zero RGB channels where alpha is 0
 void cimgAlphaZero(Gray8BufferIO& rgb, const uint8_t* A) {
     const int planeSize = rgb.width() * rgb.height();
     uint8_t* R = rgb.data();
     uint8_t* G = R + planeSize;
     uint8_t* B = G + planeSize;
-    // 32 pixels per step (clang does not vectorize the scalar loop!)
+    // 32 pixels per step
     constexpr int lanes = 32;
     const int blocks = planeSize / lanes;
-    // GPU builds load on the batch prefetch thread: no OpenMP region there (MSVC's OpenMP threads spin after each region, slowing the decoding and the host threads next to it
+    // serial execution avoids OpenMP spin delay on prefetch thread
 #if !defined(_USE_GPU_)
 #pragma omp parallel for schedule(static)
 #endif
@@ -257,10 +257,10 @@ void rotate(Gray8BufferIO& img, const int orientation) {
     }
 }
 
-// 8 samples of a plane (the low 8 bytes of the result)
+// 8 planar samples in low 8 bytes
 inline __m128i loadBytes(const uint8_t* source) { return _mm_loadl_epi64(reinterpret_cast<const __m128i*>(source)); }
 
-// this interleaves CImg's planar pixels for the preview without an intermediate image
+// interleave planar pixels for preview without intermediate copy
 void makeOriginalPreview(const uint8_t* source, uint8_t* preview, const size_t pixelCount, const int channels) {
     const size_t blocks = pixelCount / 8;
     const uint8_t* green = channels >= 3 ? source + pixelCount : source;
@@ -268,7 +268,7 @@ void makeOriginalPreview(const uint8_t* source, uint8_t* preview, const size_t p
     const uint8_t* alpha = channels == 4 ? blue + pixelCount : source;
     const __m128i zero = _mm_setzero_si128();
     const __m128i rgbMask = _mm_setr_epi8(0, 1, 2, 4, 5, 6, 8, 9, 10, 12, 13, 14, -1, -1, -1, -1);
-    // note: 1000000 is an heuristic threshold, seems good enough
+    // threshold for parallel interleaving
 #pragma omp parallel for if (pixelCount > 1000000) schedule(static)
     for (std::ptrdiff_t block = 0; block < static_cast<std::ptrdiff_t>(blocks); ++block) {
         const size_t offset = static_cast<size_t>(block) * 8;
@@ -294,7 +294,7 @@ void makeOriginalPreview(const uint8_t* source, uint8_t* preview, const size_t p
             }
         }
     }
-    // tail pixels (not multiple by AVX2 size (8))
+    // tail pixels
     for (size_t pixel = blocks * 8; pixel < pixelCount; ++pixel)
         for (int channel = 0; channel < channels; ++channel)
             preview[pixel * channels + channel] = source[static_cast<size_t>(channel) * pixelCount + pixel];
@@ -304,8 +304,7 @@ void makeOriginalPreview(const uint8_t* source, uint8_t* preview, const size_t p
 // GPU helpers for CImg (row-major) -> GPU array (column-major) conversion
 #if defined(_USE_GPU_)
 namespace {
-// orients (EXIF orientation) a row-major planar 8-bit image on the device (1 or 3 channels, the CImg layout): column-major 8-bit RGB planes (empty for
-// grayscale) and float luma. With "preview", the displayed row-major interleaved pixels (the original image preview) are downloaded into it
+// orients planar 8-bit image on device to column-major RGB and float luma
 std::pair<ImageOutputBuffer, ImageBuffer> orientOnDevice(const ImageOutputBuffer& source, const int orientation, std::vector<uint8_t>* preview) {
     const int channels = source.getChannels();
     const int srcRows = source.getRows();
@@ -334,7 +333,7 @@ std::pair<ImageOutputBuffer, ImageBuffer> orientOnDevice(const ImageOutputBuffer
     return {std::move(rgb), std::move(gray)};
 }
 
-// uploads the CImg image (1 or 3 channels) and orients it on the device
+// upload image and orient on device
 std::pair<ImageOutputBuffer, ImageBuffer> uploadOriented(const Gray8BufferIO& img, const int orientation, std::vector<uint8_t>* preview) {
 #if defined(_USE_CUDA_)
     const ImageOutputBuffer source(img.height(), img.width(), img.spectrum(), img.data(), CudaStreamManager::getInstance().getComputeStream());
@@ -348,7 +347,7 @@ std::pair<ImageOutputBuffer, ImageBuffer> uploadOriented(const Gray8BufferIO& im
 
 #if defined(_USE_CUDA_)
 namespace {
-// the whole file when it starts with the JPEG SOI marker (FF D8), empty otherwise
+// file buffer when header matches JPEG SOI marker
 std::vector<uint8_t> readJpegFile(const string& imageFile) {
     std::ifstream fileStream(imageFile, std::ifstream::binary | std::ifstream::ate);
     const std::streamoff size = fileStream ? static_cast<std::streamoff>(fileStream.tellg()) : 0;
@@ -370,12 +369,12 @@ void InternalUtils::saveImage(const string& imagePath, const string& suffix, con
     const int channels = watermark.getChannels();
     const bool hasAlpha = !alphaChannel.empty();
 #if defined(_USE_CUDA_)
-    // async saves can run on another host thread, select the buffer device first
+    // async save may run on another thread, activate device first
     CUDA_CHECK(cudaSetDevice(watermark.getDeviceIndex()));
     auto stream = CudaStreamManager::getInstance().getComputeStream();
     CudaArray<uint8_t> rowMajor(rows, cols, channels, stream);
     cuda_utils::launchColMajorToRowMajorU8Kernel(watermark.data(), rowMajor.data(), cols, rows, channels, stream);
-    // JPEG (no alpha) is encoded on the device, only the bitstream is downloaded, CImg saves it when nvJPEG fails
+    // encode JPEG on device, download bitstream and fall back to CImg on failure
     if (!hasAlpha && hasJpegExtension(watermarkedFile)) {
         if (const std::vector<uint8_t> jpeg = nvjpeg_utils::encode(rowMajor, stream); !jpeg.empty()) {
             std::ofstream file(watermarkedFile, std::ofstream::binary);
@@ -408,8 +407,7 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile, const bool cap
     auto& cols = buf.cols;
     auto& isRGB = buf.isRGB;
 #if defined(_USE_CUDA_)
-    // a JPEG file is read once, nvJPEG decodes it on the device and TinyEXIF parses the orientation from it
-    // if nvJPEG cannot decode, we take the CImg path below
+    // read JPEG once, nvJPEG decodes on device, fall back to CImg on error
     const std::vector<uint8_t> jpeg = readJpegFile(imageFile);
     if (!jpeg.empty()) {
         const cudaStream_t stream = CudaStreamManager::getInstance().getComputeStream();
@@ -430,12 +428,12 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile, const bool cap
     }
 #endif
     std::ifstream fileStream(imageFile, std::ifstream::binary);
-    TinyEXIF::EXIFInfo exif(fileStream); // parse EXIF for orientation
+    TinyEXIF::EXIFInfo exif(fileStream);
     auto cimgRgb = loadImage8(imageFile);
     const int channels = cimgRgb.spectrum();
     const int orientation = exifOrientation(exif);
 #if defined(_USE_GPU_)
-    // the upload kernel orients 1 and 3 channel images and writes their original preview
+    // upload kernel orients image and generates preview
     const bool hostImage = channels == 4;
     const int deviceOrientation = hostImage ? 1 : orientation;
     if (hostImage)
@@ -452,7 +450,7 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile, const bool cap
 
     if (captureOriginal && (channels == 1 || channels == 3 || channels == 4)) {
         buf.previewChannels = channels;
-        // Convert the CPU pixels for the single image preview
+        // convert CPU pixels for single image preview
         if (hostImage) {
             const size_t planeSize = static_cast<size_t>(rows) * cols;
             buf.originalPreview.resize(planeSize * channels);

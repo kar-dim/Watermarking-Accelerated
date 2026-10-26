@@ -48,7 +48,7 @@ struct AVDictDeleter {
 } // namespace video_utils::detail
 
 /*!
- *  \brief  Utility functions for video, including decoding, frames processing and writing.
+ *  \brief  Video processing structures and enumeration definitions
  *  \author Dimitris Karatzas
  */
 namespace video_utils {
@@ -62,5 +62,6 @@ using AVFilterGraphPtr = std::unique_ptr<AVFilterGraph, detail::AVDeleter<avfilt
 using AVBufferSrcParametersPtr = std::unique_ptr<AVBufferSrcParameters, detail::AVGenericDeleter>;
 using AVOutputFormatContextPtr = std::unique_ptr<AVFormatContext, detail::AVOutputFormatContextDeleter>;
 using AVDictionaryPtr = std::unique_ptr<AVDictionary, detail::AVDictDeleter>;
+using AVBufferPoolPtr = std::unique_ptr<AVBufferPool, detail::AVDeleter<av_buffer_pool_uninit>>;
 
 } // namespace video_utils

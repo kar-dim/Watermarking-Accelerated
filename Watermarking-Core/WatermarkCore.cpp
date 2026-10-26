@@ -62,7 +62,6 @@ using std::string;
 
 namespace WatermarkCore {
 
-// definition of the Image session structs and their deleters
 struct ImageSession {
     string watermarkPassword;
     int p;
@@ -99,7 +98,7 @@ void ExportedImageDeleter::operator()(ExportedImage* p) const { delete p; }
 
 ExportHandle createReusableExportBuffer() { return ExportHandle(new ExportedImage()); }
 
-// Move the CPU output into an idle export buffer, GPU builds clone device data
+// move CPU output into idle export buffer, GPU builds clone device data
 void exportForSave(ImageSession* s, ExportedImage* p) {
     checkOutput(s);
 #if defined(_USE_GPU_)
@@ -110,18 +109,16 @@ void exportForSave(ImageSession* s, ExportedImage* p) {
     std::swap(p->finalPixels, s->watermarkBuffer);
     s->outputReady = false;
 #endif
-    // Batch export consumes the alpha plane, the next image bind replaces the input buffer
+    // batch export consumes alpha plane, next image bind replaces input buffer
     p->alpha = std::move(s->imgBuffer.alphaChannel);
     s->detectionReady = false;
 }
 
-// INTERNAL HELPERS
 namespace {
-// saveImage and flushToDiskAsync add it to the file name (before the extension)
+// appended to filename before extension
 constexpr const char* kWatermarkedSuffix = "W_ME";
 
-// batch load and save threads run next to the processing thread and to each other: their CImg / conversion loops stay serial instead of each
-// thread starting its own OpenMP team (the setting is per thread and the async worker threads are reused, so it is restored)
+// async workers run serially to avoid nested OpenMP teams, restore setting when done
 class SerialOpenMPScope {
   public:
     SerialOpenMPScope() : previous(omp_get_max_threads()) { omp_set_num_threads(1); }
@@ -173,7 +170,6 @@ string getCUDADeviceName(int deviceIndex = -1) {
     return string(prop.name);
 }
 #endif
-// generic method taking the underlying ImageOutputBuffer directly
 SessionPixelData extractPixelData(const ImageOutputBuffer& buffer) {
     SessionPixelData result;
 #if defined(_USE_GPU_)
@@ -207,7 +203,6 @@ SessionPixelData extractPixelData(const ImageOutputBuffer& buffer) {
 }
 } // end anonymous namespace
 
-// main function to get the data from the image session buffer (column-wise) directly, it also fills the width, height and channels parameters for the caller
 SessionPixelData getSessionPixelData(const ImageSession* session) {
     checkOutput(session);
     return extractPixelData(session->watermarkBuffer);
@@ -215,7 +210,6 @@ SessionPixelData getSessionPixelData(const ImageSession* session) {
 
 #if defined(_USE_EIGEN_)
 namespace {
-// transpose 8 column-major byte columns into eight row vectors
 void transposePreviewBlock(const uint8_t* source, const size_t columnStride, __m128i rows[8]) {
     const __m128i c0 = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(source + 0 * columnStride));
     const __m128i c1 = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(source + 1 * columnStride));
@@ -247,9 +241,9 @@ void transposePreviewBlock(const uint8_t* source, const size_t columnStride, __m
     rows[7] = _mm_srli_si128(r67, 8);
 }
 
-// column-major planes (1 or 3) into a row-major interleaved display buffer
+// column-major planes into row-major interleaved display buffer
 void interleavePlanes(const uint8_t* red, const uint8_t* green, const uint8_t* blue, const int rows, const int cols, const int channels, uint8_t* destination, const size_t bytesPerLine) {
-    // small row tiles keeps cache lines HOT (while we read each planar column in order)
+    // small row tiles keep cache lines hot while reading planar columns
     constexpr int tileRows = 32;
     const __m128i zero = _mm_setzero_si128();
     const __m128i rgbMask = _mm_setr_epi8(0, 1, 2, 4, 5, 6, 8, 9, 10, 12, 13, 14, -1, -1, -1, -1);
@@ -284,7 +278,7 @@ void interleavePlanes(const uint8_t* red, const uint8_t* green, const uint8_t* b
                     }
                 }
             }
-            // tail columns that don't fit into 8x8 block scalar
+            // tail columns that do not fit 8x8 block
             for (; col < cols; ++col)
                 for (int lane = 0; lane < 8; ++lane) {
                     const size_t sourceIndex = static_cast<size_t>(col) * rows + row + lane;
@@ -296,7 +290,7 @@ void interleavePlanes(const uint8_t* red, const uint8_t* green, const uint8_t* b
                     }
                 }
         }
-        // tail rows that don't fit into 8x8 block should be scalar
+        // tail rows that do not fit 8x8 block
         for (; row < rowEnd; ++row)
             for (int col = 0; col < cols; ++col) {
                 const size_t sourceIndex = static_cast<size_t>(col) * rows + row;
@@ -325,7 +319,7 @@ PreviewFormat getSessionPreviewFormat(const ImageSession* session) {
 #endif
 }
 
-// Opaque GPU previews interleave on the device; RGBA previews also combine the preserved host alpha plane.
+// opaque GPU previews interleave on device, RGBA previews also combine host alpha plane
 void copySessionPreview(const ImageSession* session, uint8_t* destination, const size_t bytesPerLine) {
     const auto [width, height, channels] = getSessionPreviewFormat(session);
     if (width <= 0 || height <= 0 || (channels != 1 && channels != 3 && channels != 4) || !destination || bytesPerLine < static_cast<size_t>(width) * channels)
@@ -368,7 +362,6 @@ void copySessionPreview(const ImageSession* session, uint8_t* destination, const
 #endif
 }
 
-// initialization, including device setup, info display, and OpenMP thread pool initialization
 bool initializeEnvironment(const int deviceIndex) {
     bool deviceSetSuccess = true;
 #if defined(_USE_OPENCL_)
@@ -395,15 +388,16 @@ bool initializeEnvironment(const int deviceIndex) {
     cudaDeviceProp prop;
     CUDA_CHECK(cudaGetDeviceProperties(&prop, device));
     std::cout << "CUDA Device [" << device << "]: " << prop.name << " (Compute " << prop.major << "." << prop.minor << ")\n\n";
-    CudaStreamManager::getInstance().getComputeStream(); // initialize the selected device's stream and pool
+    CudaStreamManager::getInstance().getComputeStream(); // init device stream and pool
 #endif
+#if defined(_USE_EIGEN_)
 #pragma omp parallel
     {}
     std::cout << info("Using " + std::to_string(omp_get_max_threads()) + " parallel threads for Watermark calculations.\n");
+#endif
     return deviceSetSuccess;
 }
 
-// helper function to get the device name (GPU or CPU)
 string getDeviceName(const int deviceIndex) {
 #if defined(_USE_CUDA_)
     return getCUDADeviceName(deviceIndex);
@@ -433,7 +427,6 @@ string getDeviceName(const int deviceIndex) {
 #endif
 }
 
-// get the list of available GPU devices
 std::vector<string> getAvailableDevices() {
     std::vector<string> devices;
 #if defined(_USE_CUDA_)
@@ -489,7 +482,6 @@ void buildOpenCLKernels() {
     cl_utils::OpenCLKernelCache<9>::getProgram();
     cl_utils::UtilityKernelCache::getProgram();
 #endif
-    // NO-OP else
 }
 
 void updateSessionParams(ImageSession* s, const int p, const float psnr) {
@@ -497,7 +489,7 @@ void updateSessionParams(ImageSession* s, const int p, const float psnr) {
     checkPsnr(psnr);
     if (s->p == p && s->psnr == psnr)
         return;
-    // Construct before committing: validation or allocation failure leaves the old engine usable.
+    // construct before commit, failure leaves old engine usable
     if (s->watermarkObj && s->p != p)
         s->watermarkObj = createWatermarkObject(s->currentRows, s->currentCols, s->watermarkPassword, p, psnr);
     else if (s->watermarkObj)
@@ -508,7 +500,6 @@ void updateSessionParams(ImageSession* s, const int p, const float psnr) {
     s->detectionReady = false;
 }
 
-// creates a new session for image processing, initialized with the given parameters (no memory allocations yet)
 ImageHandle createImageSession(const string& watermarkPassword, const int p, const float psnr) {
     checkPredictionOrder(p);
     checkPsnr(psnr);
@@ -519,10 +510,9 @@ ImageHandle createImageSession(const string& watermarkPassword, const int p, con
     return session;
 }
 
-// used for disk images preloading, useful for scenarios where multiple images need to be processed in parallel, as it allows the loading step to be done in parallel
 PreloadedHandle preloadImageFromDisk(const string& imagePath, const int deviceIndex, const bool captureOriginal) {
 #if defined(_USE_CUDA_)
-    // Each prefetch thread must activate the GPU used by its owning session
+    // each prefetch thread must activate owning session GPU
     if (deviceIndex >= 0)
         CUDA_CHECK(cudaSetDevice(deviceIndex));
 #endif
@@ -555,7 +545,7 @@ ImageSaver::ImageSaver(const size_t maxSaves) {
     }
 }
 
-// the save tasks use the mutex and the lists, they must end before the members are destroyed
+// save tasks must end before members are destroyed
 ImageSaver::~ImageSaver() {
     for (auto& slot : saveSlots)
         if (slot.task.valid())
@@ -570,7 +560,7 @@ void ImageSaver::save(ImageSession* session, const string& outPath, const size_t
     lock.unlock();
     Slot& slot = saveSlots[index];
     try {
-        // the previous save of this slot has finished (it freed the slot), this joins its thread
+        // join thread once slot finishes
         if (slot.task.valid())
             slot.task.get();
         exportForSave(session, slot.buffer.get());
@@ -616,21 +606,18 @@ void ImagePrefetcher::launch() {
     }
 }
 
-// used to get the current image dimensions
 std::pair<int, int> getImageDims(const ImageSession* s) { return {s->currentRows, s->currentCols}; }
 OriginalPixelData takeOriginalPixelData(ImageSession* s) {
     return {std::move(s->imgBuffer.originalPreview), static_cast<int>(s->imgBuffer.cols), static_cast<int>(s->imgBuffer.rows), s->imgBuffer.previewChannels};
 }
 
-// binds a disk preloaded image buffer into the watermark session. It also lazily initializes the watermark object and buffers based on the dimensions of the loaded image, which is useful for
-// scenarios where multiple images of different dimensions need to be processed in parallel, as it avoids unnecessary allocations and initializations until the actual image data is available.
 void bindPreloadedImage(ImageSession* s, PreloadedHandle preloadedData) {
     if (!preloadedData)
         throw std::invalid_argument("No preloaded image supplied");
     const auto rows = preloadedData->buffer.rows;
     const auto cols = preloadedData->buffer.cols;
     const auto isRGB = preloadedData->buffer.isRGB;
-    // lazy initialization of the watermark object and buffers, only if dimensions change or not initialized yet
+    // lazy init when dimensions change or on first frame
     if (!s->watermarkObj || s->currentRows != rows || s->currentCols != cols || s->currentIsRGB != isRGB) {
         auto engine = createWatermarkObject(rows, cols, s->watermarkPassword, s->p, s->psnr);
 #if defined(_USE_EIGEN_)
@@ -648,11 +635,8 @@ void bindPreloadedImage(ImageSession* s, PreloadedHandle preloadedData) {
     s->detectionReady = false;
 }
 
-// combines the loading and binding steps, useful for single image processing without the need for preloading multiple images in parallel
 void loadImage(ImageSession* session, const string& imagePath, const bool captureOriginal) { bindPreloadedImage(session, preloadImageFromDisk(imagePath, -1, captureOriginal)); }
 
-// main function to embed the watermark into the loaded image, it calls the makeWatermark method of the watermark object,
-// which implements the actual embedding algorithm (ME mask)
 void embedImage(ImageSession* s) {
     checkLoaded(s);
     s->outputReady = false;
@@ -673,14 +657,11 @@ void finish() {
 #endif
 }
 
-// used as an intermediate step before detection, it prepares the image buffer in the correct format for the detection algorithm,
-// which is always a float buffer (grayscale), regardless of the original image format (RGB or grayscale)
-// used only when the input isn't already a float buffer, otherwise it is redundant
 void prepareDetectionImage(ImageSession* s) {
     checkOutput(s);
     s->detectionReady = false;
     s->detectGrayBuffer = InternalUtils::castToFloatGray(s->watermarkBuffer, s->imgBuffer.isRGB);
-    // sync so benchmarks measure completion, not just the async upload
+    // sync device to measure full completion instead of async upload
 #if defined(_USE_CUDA_)
     CUDA_CHECK(cudaStreamSynchronize(CudaStreamManager::getInstance().getComputeStream()));
 #elif defined(_USE_OPENCL_)
@@ -689,15 +670,11 @@ void prepareDetectionImage(ImageSession* s) {
     s->detectionReady = true;
 }
 
-// main function to detect the watermark from the loaded image, it calls the detectWatermark method of the watermark object,
-// which implements the actual detection algorithm (ME mask)
 float detectLoadedImage(const ImageSession* s) {
     checkLoaded(s);
     return s->watermarkObj->detectWatermark(s->imgBuffer.image);
 }
 
-// main function to detect the watermark from the embedded buffer. This is useful only when we for example embed and then directly detect (benchmark)
-// not used when we want to detect from the original loaded image, as in that case we need to prepare the detection buffer first (convert to float grayscale), which is done in prepareDetectionImage
 float detectEmbeddedBuffer(const ImageSession* s) {
     checkLoaded(s);
     if (!s->detectionReady)
@@ -705,13 +682,11 @@ float detectEmbeddedBuffer(const ImageSession* s) {
     return s->watermarkObj->detectWatermark(s->detectGrayBuffer);
 }
 
-// saves the image to disk
 void saveImage(const ImageSession* s, const string& outPath) {
     checkOutput(s);
     InternalUtils::saveImage(outPath, kWatermarkedSuffix, s->watermarkBuffer, s->imgBuffer.alphaChannel);
 }
 
-// same as saveImage, but used as a separate step to allow for asynchronous saving (in batched mode)
 void flushToDiskAsync(ExportedImage* handle, const string& outPath) {
     const SerialOpenMPScope serial;
     InternalUtils::saveImage(outPath, kWatermarkedSuffix, handle->finalPixels, handle->alpha);
@@ -722,12 +697,14 @@ void saveImageExact(const ImageSession* s, const string& outPath) {
     InternalUtils::saveImage(outPath, "", s->watermarkBuffer, s->imgBuffer.alphaChannel);
 }
 
-// definition of the Video session struct and its deleter
 void VideoSessionDeleter::operator()(VideoSession* s) const { delete s; }
 
-// initializes the video session by opening the video file, finding the video stream, opening the decoder, and initializing the watermark object and processing buffers based on the video dimensions
 VideoHandle initVideo(const VideoSettings& settings) {
     checkPsnr(settings.psnr);
+#if defined(_USE_EIGEN_)
+    if (settings.useHwEncoder)
+        throw std::invalid_argument("Eigen uses CPU video decoding and encoding, select the CUDA or OpenCL build for hardware encoding");
+#endif
     if (settings.watermarkInterval < 1)
         throw std::invalid_argument("Video watermark interval must be at least 1");
     av_log_set_level(AV_LOG_INFO);
@@ -742,29 +719,24 @@ VideoHandle initVideo(const VideoSettings& settings) {
     checkAv(session->videoStreamIndex, "No video stream found");
     session->videoStream = session->inputFormatCtx->streams[session->videoStreamIndex];
     session->useHwDecoder = false;
-    session->inputDecoderCtx = openDecoder(session->videoStream->codecpar, settings.useHwDecoder, session->useHwDecoder, session->videoStream->time_base);
+    session->inputDecoderCtx = openDecoder(session.get());
     checkError(!session->inputDecoderCtx.get(), "Could not open video decoder");
-    session->decodedFormat = session->useHwDecoder ? session->inputDecoderCtx->sw_pix_fmt : session->inputDecoderCtx->pix_fmt;
+    if (!session->useHwDecoder)
+        session->decodedFormat = session->inputDecoderCtx->pix_fmt;
     session->frameRate = av_guess_frame_rate(session->inputFormatCtx.get(), session->inputFormatCtx->streams[session->videoStreamIndex], nullptr);
     session->nominalFrameDuration = nominalFrameDuration(session->frameRate, session->videoStream->time_base);
+    // dimensions must fit chroma subsampling, checked with encoder, detection reads only luma
     const int height = session->videoStream->codecpar->height;
     const int width = session->videoStream->codecpar->width;
-    checkError((width & 1) != 0 || (height & 1) != 0, std::format("YUV 4:2:0 video requires even dimensions; input is {}x{}.", width, height));
     session->watermarkObj = createWatermarkObject(height, width, settings.watermarkPassword, settings.p, settings.psnr);
-#if !defined(_USE_EIGEN_)
-    session->hostFrame = std::make_unique<HostMemory<uint8_t>>(static_cast<size_t>(width) * height * 3 / 2);
-#endif
     return session;
 }
 
-// embed the watermark into the video using libav encoding
-// initializes the filter graph if needed (10-bit / HDR), opens the encoder and muxer,
-// processes all frames (video watermarked, audio/subtitles remuxed), then finalises the container
-// a failed embed discards its temporary file and preserves the destination
+// failed embed discards temporary file and preserves destination
 int embedVideo(VideoSession* s) {
     try {
-        const bool needsFilter = initFilterGraph(s);
         video_utils::initOutputEncoder(s);
+        const bool needsFilter = initFilterGraph(s);
         const int framesProcessed = videoDispatcher(s, VideoMode::EMBED, needsFilter);
         video_utils::flushAndFinalize(s);
         return framesProcessed;
@@ -774,11 +746,10 @@ int embedVideo(VideoSession* s) {
     }
 }
 
-// main function to detect the watermark from the video
 int detectVideo(VideoSession* s) {
     checkError(is10bit(s->inputDecoderCtx.get(), s->videoStream) || isHDR(s->inputDecoderCtx.get()),
-        "Video watermark detection supports only 8-bit SDR YUV 4:2:0 input. 10-bit and HDR detection are not supported.");
-    return videoDispatcher(s, VideoMode::DETECT, false);
+        "Video watermark detection supports only 8-bit SDR input. High-bit-depth and HDR detection are not supported.");
+    return videoDispatcher(s, VideoMode::DETECT, initFilterGraph(s));
 }
 
 void optimizeThreadsForVideoEmbedding() {

@@ -1,7 +1,9 @@
 #pragma once
 #include "OclMemPool.hpp"
+#include "OclVideoInterop.hpp"
 #include "opencl_init.h"
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -17,6 +19,7 @@
 class OclQueueManager {
     cl::Platform platform;
     cl::Device device;
+    std::shared_ptr<OclVideoInterop> videoInterop;
     cl::Context ctx;
     cl::CommandQueue queue;
     OclMemPool pool;
@@ -53,8 +56,9 @@ class OclQueueManager {
             throw std::runtime_error("OpenCL device index out of range: " + std::to_string(deviceIndex));
         if (mgr.liveAllocations != 0)
             throw std::runtime_error("Release all OpenCL image, session and export buffers before switching devices");
-        // Build the replacement first, initialization failure preserves the old context
-        cl::Context nextContext(gpus[deviceIndex].second);
+        // build replacement first, initialization failure preserves old context
+        auto nextInterop = OclVideoInterop::create(gpus[deviceIndex].first(), gpus[deviceIndex].second());
+        cl::Context nextContext = nextInterop ? cl::Context(nextInterop->context(), true) : cl::Context(gpus[deviceIndex].second);
         cl::CommandQueue nextQueue(nextContext, gpus[deviceIndex].second, 0);
         if (mgr.queue.get())
             mgr.queue.finish();
@@ -65,6 +69,7 @@ class OclQueueManager {
         mgr.device = gpus[deviceIndex].second;
         mgr.ctx = std::move(nextContext);
         mgr.queue = std::move(nextQueue);
+        mgr.videoInterop = std::move(nextInterop);
         mgr.pool.setCapacity(mgr.device.getInfo<CL_DEVICE_GLOBAL_MEM_SIZE>());
     }
 
@@ -87,7 +92,8 @@ class OclQueueManager {
     int getDeviceIndex() const { return deviceIndex; }
     uint32_t getContextGeneration() const { return contextGeneration; }
     OclMemPool& getPool() { return pool; }
-    // Program compilation reads several context/device properties, we hold one selection
+    const std::shared_ptr<OclVideoInterop>& getVideoInterop() const { return videoInterop; }
+    // program compilation reads context and device properties, hold one selection
     std::unique_lock<std::recursive_mutex> lockContext() { return std::unique_lock(stateMutex); }
 
     cl_mem acquireBuffer(const size_t bytes, const cl_command_queue ownerQueue) {

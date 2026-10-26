@@ -11,7 +11,7 @@
  */
 // Shared size checks for host buffers, GPU allocations and media dimensions
 namespace InternalUtils {
-// Check multiplication before computing allocation sizes.
+// check multiplication before computing allocation sizes
 inline size_t checkedProduct(const size_t a, const size_t b) {
     if (b != 0 && a > std::numeric_limits<size_t>::max() / b)
         throw std::length_error("Buffer byte count exceeds the supported range");

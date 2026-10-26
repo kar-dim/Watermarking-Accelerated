@@ -13,11 +13,11 @@ extern "C" {
 }
 
 /*!
- *  \brief  Utility functions for video, including decoding, frames processing and writing.
+ *  \brief  Video decoding, watermark processing and encoding utilities
  *  \author Dimitris Karatzas
  */
 namespace video_utils {
-// High-bit-depth and HDR helpers. Rejects every known format whose components exceed 8 bits
+// rejects formats whose components exceed 8 bits
 inline bool is10bit(const AVCodecContext* codecCtx, const AVStream* st) {
     const auto exceeds8Bits = [](const AVPixelFormat format) {
         if (format == AV_PIX_FMT_NONE)
@@ -30,16 +30,14 @@ inline bool is10bit(const AVCodecContext* codecCtx, const AVStream* st) {
 // PQ HDR10 or HLG HDR
 inline bool isHDR(const AVCodecContext* codecCtx) { return codecCtx->color_trc == AVCOL_TRC_SMPTE2084 || codecCtx->color_trc == AVCOL_TRC_ARIB_STD_B67; }
 
-// the video operation of videoDispatcher
 enum class VideoMode { EMBED, DETECT };
 
-// public API
-AVCodecContextPtr openDecoder(const AVCodecParameters* inputCodecParams, bool useHwDecoderRequested, bool& useHwDecoder, AVRational pktTimebase);
+AVCodecContextPtr openDecoder(WatermarkCore::VideoSession* session);
 int findVideoStream(const AVFormatContext* inputFormatCtx);
 bool initFilterGraph(WatermarkCore::VideoSession* s);
 int videoDispatcher(WatermarkCore::VideoSession* s, VideoMode op, bool needsFilter = false);
 void initOutputEncoder(WatermarkCore::VideoSession* s);
 void flushAndFinalize(WatermarkCore::VideoSession* s);
-// after a failed embed close and delete only the temporary output file
+// failed embed closes and deletes temporary output file
 void discardOutput(WatermarkCore::VideoSession* s) noexcept;
 } // namespace video_utils

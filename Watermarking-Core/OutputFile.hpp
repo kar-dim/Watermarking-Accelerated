@@ -14,7 +14,7 @@
  *  \author Dimitris Karatzas
  */
 
-// Preserve the destination while encoding into a temporary file beside it
+// preserve destination while encoding into temporary file beside it
 class OutputFile {
     std::filesystem::path temporary;
     std::filesystem::path destination;
@@ -25,7 +25,7 @@ class OutputFile {
     OutputFile& operator=(const OutputFile&) = delete;
     ~OutputFile() { discard(); }
 
-    // Reserve a unique file on the same filesystem so replacement can be atomic
+    // reserve unique file on same filesystem for atomic replacement
     void prepare(const std::string& outputPath) {
         if (!temporary.empty())
             throw std::logic_error("An output file is already in progress");
@@ -35,7 +35,7 @@ class OutputFile {
         for (int attempt = 0; attempt < 256; ++attempt) {
             auto candidate =
                 destination.parent_path() / (L".watermark-" + std::to_wstring(GetCurrentProcessId()) + L"-" + std::to_wstring(stamp) + L"-" + std::to_wstring(sequence.fetch_add(1)) + L".tmp");
-            // CREATE_NEW avoids claiming another encoder's temporary file
+            // CREATE_NEW avoids claiming another encoder temporary file
             const HANDLE file = CreateFileW(candidate.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
             if (file != INVALID_HANDLE_VALUE) {
                 temporary = std::move(candidate);
@@ -49,13 +49,13 @@ class OutputFile {
         throw std::runtime_error("Could not reserve a unique temporary output file");
     }
 
-    // FFmpeg expects the temporary filename in UTF-8
+    // FFmpeg expects temporary filename in UTF-8
     std::string path() const {
         const auto utf8 = temporary.u8string();
         return std::string(utf8.begin(), utf8.end());
     }
 
-    // Publish the completed file only after the encoder and muxer have closed it
+    // publish completed file after encoder and muxer close it
     void commit() {
         if (temporary.empty())
             throw std::logic_error("No output file to finalize");
@@ -64,7 +64,7 @@ class OutputFile {
         temporary.clear();
     }
 
-    // Destruction and failure cleanup remove only our temporary file
+    // failure cleanup removes only temporary file
     void discard() noexcept {
         if (!temporary.empty()) {
             std::error_code ignored;

@@ -6,7 +6,7 @@
 #include <variant>
 
 /*!
- *  \brief  Holds either an Eigen array or Eigen RGB array (uint8) by using std::variant. CPU implementation.
+ *  \brief  Holds either Eigen array or Eigen RGB array using std::variant
  *  \author Dimitris Karatzas
  */
 class ImageEigenOutputBuffer {

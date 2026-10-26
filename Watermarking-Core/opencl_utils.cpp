@@ -58,7 +58,7 @@ string openClStdOption(const cl::Device& device) {
 }
 
 string latestOpenClStdOption(const cl::Device& device) {
-    // Query language versions rather than inferring them from the device API version.
+    // query language versions rather than inferring from device API version
     try {
         cl_version newest = 0;
         for (const auto& version : device.getInfo<CL_DEVICE_OPENCL_C_ALL_VERSIONS>()) {
@@ -149,7 +149,7 @@ ReductionMode reductionMode(const cl::Program& program) {
     return ReductionMode::Portable;
 }
 
-// every kernel of the program can run workgroups of groupSize workitems on the device
+// every kernel of program can run workgroups of groupSize on device
 bool kernelsFit(cl::Program program, const cl::Device& device, const int groupSize) {
     std::vector<cl::Kernel> programKernels;
     program.createKernels(&programKernels);
@@ -166,15 +166,14 @@ cl::Program buildKernels(const int p) {
     try {
         const bool forcePortable = forcePortableReductionsRequested();
         const SubgroupDialect availableDialect = forcePortable ? SubgroupDialect::None : subgroupDialect(device);
-        // Prefer Intel's subgroup for shift sums acceleration.
-        // On AMD and other devices prefer work-group path, tested on gfx1036: advertised Khronos subgroup
-        // reductions produced incorrect shift sums!
+        // prefer Intel subgroup for shift sums acceleration
+        // on AMD and other devices prefer work-group path, Khronos subgroup reductions had bugs on some drivers
         const bool useWorkGroupCollectives = !forcePortable && availableDialect != SubgroupDialect::Intel && supportsWorkGroupCollectives(device);
         const SubgroupDialect dialect = useWorkGroupCollectives ? SubgroupDialect::None : availableDialect;
-        // Native half storage passed rounding-boundary and pipeline checks on Intel.
-        // Other drivers retain the integer conversion, including AMD's contextual tie-rounding workaround.
+        // native half storage passed rounding checks on Intel
+        // other drivers retain integer conversion, including AMD tie-rounding workaround
         const bool nativeHalfStorage = dialect == SubgroupDialect::Intel && device.getInfo<CL_DEVICE_VENDOR_ID>() == 0x8086 && hasExtension(device.getInfo<CL_DEVICE_EXTENSIONS>(), "cl_khr_fp16");
-        // Use the newer language only when the selected core feature requires it
+        // use newer language only when selected core feature requires it
         const string standard = useWorkGroupCollectives || dialect == SubgroupDialect::Core ? latestOpenClStdOption(device) : openClStdOption(device);
         const string reductionOptions = (forcePortable                ? " -DWM_DISABLE_SUBGROUPS=1"
                                             : useWorkGroupCollectives ? " -DWM_WORK_GROUP_REDUCTIONS=1"
@@ -250,7 +249,7 @@ cl::Program buildGenerationKernels() {
 }
 
 namespace {
-// work-group size of the one dimensional generation kernels
+// work-group size of one dimensional generation kernels
 int generationGroupSize() { return static_cast<int>(std::min(256u, maxPow2WorkGroupSize(OclQueueManager::getInstance().getDevice()))); }
 } // namespace
 
@@ -297,14 +296,14 @@ std::size_t reductionScratchBytes(const cl::Program& program, const char* kernel
                 scratchSlots = subgroupCount;
         }
     } catch (const cl::Error&) {
-        // A conservative work-item-sized allocation is valid for either kernel path.
+        // conservative work-item-sized allocation valid for either kernel path
     }
     return scratchSlots * valuesPerReduction * sizeof(float);
 }
 
 void launchOrientRowMajorToColMajor(const cl::Buffer& src, const cl::Buffer& rgbDst, const cl::Buffer& grayDst, const cl::Buffer& display, const int srcWidth, const int srcHeight, const int channels,
     const int orientation, cl::CommandQueue& queue) {
-    // 32x32 tiles, a 32x8 work-group covers one (4 rows per work-item)
+    // 32x32 tiles, 32x8 work-group covers one (4 rows per work-item)
     constexpr int tileSize = 32;
     constexpr int rowsPerItem = 4;
     const bool swapAxes = orientation >= 5;

@@ -126,7 +126,7 @@ WatermarkingUI::WatermarkingUI(QWidget* parent) : QMainWindow(parent) {
     setWindowTitle("Watermarking");
     setAcceptDrops(true);
     setMinimumSize(760, 520);
-    // Use 90% of the screen's work area height so larger screens get more preview space.
+    // scale to 90% of work area height to give larger screens more preview space
     QScreen* startupScreen = QGuiApplication::screenAt(QCursor::pos());
     if (startupScreen == nullptr)
         startupScreen = QGuiApplication::primaryScreen();

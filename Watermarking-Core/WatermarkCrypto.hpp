@@ -35,7 +35,7 @@ inline float logReference(const float x) {
     float m = std::bit_cast<float>((bits & 0x807FFFFFu) | 0x3F000000u);
     float e = static_cast<float>(static_cast<int>((bits & 0x7F800000u) >> 23) - 126);
 
-    // keep the mantissa near 1: if (m < sqrt(0.5)) { e -= 1; m = 2m - 1; } else { m -= 1; }
+    // keep mantissa near 1: when m < sqrt(0.5) decrease exponent and scale m, otherwise subtract 1
     const bool belowSqrtHalf = m < 0.707106781186547524f;
     e = belowSqrtHalf ? e - 1.0f : e;
     m = (belowSqrtHalf ? m + m : m) - 1.0f;
@@ -107,7 +107,7 @@ inline __m256 logAvx2(const __m256 x) {
     __m256 m = _mm256_or_ps(_mm256_and_ps(x, _mm256_castsi256_ps(_mm256_set1_epi32(0x807FFFFF))), _mm256_castsi256_ps(_mm256_set1_epi32(0x3F000000)));
     __m256 e = _mm256_cvtepi32_ps(_mm256_sub_epi32(_mm256_srli_epi32(_mm256_and_si256(bits, _mm256_set1_epi32(0x7F800000)), 23), _mm256_set1_epi32(126)));
 
-    // keep the mantissa near 1: if (m < sqrt(0.5)) { e -= 1; m = 2m - 1; } else { m -= 1; }
+    // keep mantissa near 1: when m < sqrt(0.5) decrease exponent and scale m, otherwise subtract 1
     const __m256 belowSqrtHalf = _mm256_cmp_ps(m, _mm256_set1_ps(0.707106781186547524f), _CMP_LT_OQ);
     e = _mm256_sub_ps(e, _mm256_and_ps(belowSqrtHalf, _mm256_set1_ps(1.0f)));
     m = _mm256_sub_ps(_mm256_add_ps(m, _mm256_and_ps(belowSqrtHalf, m)), _mm256_set1_ps(1.0f));
@@ -216,7 +216,7 @@ inline __m512 logAvx512(const __m512 x) {
     __m512 m = orPs(andPs(x, _mm512_castsi512_ps(_mm512_set1_epi32(0x807FFFFF))), _mm512_castsi512_ps(_mm512_set1_epi32(0x3F000000)));
     __m512 e = _mm512_cvtepi32_ps(_mm512_sub_epi32(_mm512_srli_epi32(_mm512_and_si512(bits, _mm512_set1_epi32(0x7F800000)), 23), _mm512_set1_epi32(126)));
 
-    // keep the mantissa near 1: if (m < sqrt(0.5)) { e -= 1; m = 2m - 1; } else { m -= 1; }
+    // keep mantissa near 1: when m < sqrt(0.5) decrease exponent and scale m, otherwise subtract 1
     const __mmask16 belowSqrtHalf = _mm512_cmp_ps_mask(m, _mm512_set1_ps(0.707106781186547524f), _CMP_LT_OQ);
     e = _mm512_sub_ps(e, _mm512_maskz_mov_ps(belowSqrtHalf, _mm512_set1_ps(1.0f)));
     m = _mm512_sub_ps(_mm512_add_ps(m, _mm512_maskz_mov_ps(belowSqrtHalf, m)), _mm512_set1_ps(1.0f));

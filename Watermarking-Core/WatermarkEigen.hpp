@@ -15,7 +15,7 @@
 #include <vector>
 
 /*!
- *  \brief  Watermark embedding and detection, Eigen (CPU) implementation.
+ *  \brief  Watermark embedding and detection, Eigen CPU implementation
  *  \author Dimitris Karatzas
  */
 template <int p>
@@ -43,7 +43,7 @@ class WatermarkEigen final : public WatermarkBase {
     WatermarkEigen<p>(const int rows, const int cols, WatermarkBuffer watermark, const float psnr)
         : WatermarkBase(rows, cols, std::move(watermark), psnr), errorSequence(rows, cols), u(rows, cols), predictionData(rows, cols) {}
 
-    // RGB embedding: the watermark is computed from the luma and added to each channel of the 8-bit image, flat images are copied unchanged
+    // RGB embedding: compute watermark from luma, flat images copied unchanged
     void makeWatermark(const ImageBuffer& inputGrayImage, const ImageOutputBuffer& inputImage, ImageOutputBuffer& output) override {
         const auto scale = computeStrengthenedWatermark(inputGrayImage.getGray());
         if (!output.matches(baseRows, baseCols, true))
@@ -60,7 +60,7 @@ class WatermarkEigen final : public WatermarkBase {
                 watermarkColumn(rgbIn[channel].col(col).data(), u.col(col).data(), *scale, rgbOut[channel].col(col).data());
     }
 
-    // grayscale embedding: the watermark is added to the luma itself. The row-major output is the transposed array, written in small tiles (to maximize cache hits)
+    // grayscale embedding: watermark added to luma, row-major output transposed in small tiles
     void makeWatermark(const ImageBuffer& inputGrayImage, ImageOutputBuffer& output, const Layout outputLayout) override {
         const auto& gray = inputGrayImage.getGray();
         const auto scale = computeStrengthenedWatermark(gray);
@@ -99,9 +99,9 @@ class WatermarkEigen final : public WatermarkBase {
         }
     }
 
-    // detection: correlation between the prediction error of the image and the prediction error of (mask * watermark)
+    // detection: correlation between image prediction error and watermark error
     float detectWatermark(const ImageBuffer& inputImage) override {
-        // u = |e| x w. The mask normally should be divided by max|e|: BUT the correlation does not change when u is scaled, the maximum is not needed!
+        // correlation is scale-invariant, max|e| division omitted
         if (!computePredictionErrorData<false>(inputImage.getGray()))
             return 0.0f;
         const auto& w = randomMatrix.getGray();
@@ -116,18 +116,18 @@ class WatermarkEigen final : public WatermarkBase {
   private:
     using Gray8 = Eigen::Array<uint8_t, Eigen::Dynamic, Eigen::Dynamic>;
 
-    // prediction error of the image, and the strengthened watermark u (embedding) or mask * watermark (detection)
+    // prediction error of image and watermark u or mask * watermark
     ArrayXXf errorSequence, u;
     PredictionErrorMatrixData<p> predictionData;
 
-    // watermarked output pixels: round (+ 0.5 then truncation) and clamp to [0, 255]
+    // watermarked output pixels: round and clamp to [0, 255]
     template <typename Expr>
     static auto toPixels(const Expr& values) {
         return (values + 0.5f).cwiseMax(0.0f).cwiseMin(255.0f).template cast<uint8_t>();
     }
 
-    // one watermarked column: output = input + strength * u. LOOP because the compiler vectorizes the 8-bit conversions here, Eigen's casts are NOT vectorized!
-    // ALSO __restrict and the local row count are needed, else the 8-bit stores could overwrite anything and the compiler would not vectorize...
+    // one watermarked column: output = input + strength * u
+    // __restrict and local row count prevent store aliasing for auto-vectorization
     template <typename T>
     void watermarkColumn(const T* __restrict input, const float* __restrict uColumn, const float strength, uint8_t* __restrict output) const {
         const int rows = baseRows;
@@ -138,11 +138,10 @@ class WatermarkEigen final : public WatermarkBase {
         }
     }
 
-    // pixel value, coords outside the image are clamped to the nearest edge pixel
+    // coordinates outside image clamp to edge pixel
     inline float clampedValue(const ArrayXXf& img, int r, int c, const int rows, const int cols) { return img(std::clamp(r, 0, rows - 1), std::clamp(c, 0, cols - 1)); }
 
-    // calls processor(i, j, neighbors) for every border pixel, with the (clamped) window neighbors
-    // must be called inside an existing omp parallel region (it uses "omp for")
+    // process border pixels with clamped window neighbors, caller must be in omp parallel region
     template <typename Processor>
     void processBorder(const ArrayXXf& image, Processor&& processor) {
         const int threadId = omp_get_thread_num();
@@ -177,8 +176,7 @@ class WatermarkEigen final : public WatermarkBase {
             processRect(startRow, endRow, endCol, baseCols);
     }
 
-    // computes u = mask * w (not yet scaled) and returns the scale factor, or nothing for flat images. The scale is applied later while
-    // writing the output pixels. The mask is |e| / max|e|, u and sum(u^2) are computed directly from the prediction error
+    // compute unscaled watermark u and return scale factor, 0 for flat frames
     std::optional<float> computeStrengthenedWatermark(const ArrayXXf& inputImage) {
         const auto maxAbsOpt = computePredictionErrorData<true>(inputImage);
         if (!maxAbsOpt || *maxAbsOpt <= 0.0f)
@@ -193,12 +191,12 @@ class WatermarkEigen final : public WatermarkBase {
             u(i) = uValue;
             sumSq += uValue * uValue;
         }
-        if (sumSq <= 1e-3f) // flat images / frames
+        if (sumSq <= 1e-3f) // flat image
             return std::nullopt;
         return strengthFactor / std::sqrt(sumSq / totalPixels);
     }
 
-    // computes the prediction coefficients and the prediction error of the image, optionally with its maximum absolute value (ME embedding)
+    // computes prediction coefficients and prediction error of image
     template <bool FindMax>
     std::optional<float> computePredictionErrorData(const ArrayXXf& image) {
         if (!predictionData.computeCoefficients(image.data()))

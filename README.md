@@ -19,7 +19,7 @@ This repository provides a high performance implementation designed for real-wor
   <img width="625" height="232" alt="backends" src="https://github.com/user-attachments/assets/4f82798b-d0e1-4ad7-8015-2ba506280575" />
 </p>
 
-This project implements and evaluates the performance (execution speed) of image watermarking algorithms on CPU versus GPU. It provides multiple implementations to enable comparisons between compute backends. Watermarks are generated as standard normal distributed matrices (μ=0, σ=1). For cryptographic robustness, a user password is hashed with ```SHA-256``` and this 256-bit value is used as a 256-bit key for the ```ChaCha20 block cipher```. The CSPRNG produces a deterministic stream of random bits. The chosen transform for normal distribution is ```Box-Muller transform```, computed with fixed polynomial approximations and explicit FMA operations and every backend produces the same watermark bit for bit. The GPU backends generate the watermark on the GPU, while the CPU backend uses AVX2/AVX-512 with OpenMP. The watermark strength follows the proposed Prediction Error (ME) mask, which is the main focus of the Thesis. The system supports both embedding and detection of watermarks in disk images and video streams. Video processing is handled via FFmpeg, enabling broad codec and container support, along with advanced features such as GPU-accelerated video decoding (CUDA backend) and NVENC encoding (all backends) and 10-bit/HDR (tonemapped) video support.
+This project implements and evaluates the performance (execution speed) of image watermarking algorithms on CPU versus GPU. It provides multiple implementations to enable comparisons between compute backends. Watermarks are generated as standard normal distributed matrices (μ=0, σ=1). For cryptographic robustness, a user password is hashed with ```SHA-256``` and this 256-bit value is used as a 256-bit key for the ```ChaCha20 block cipher```. The CSPRNG produces a deterministic stream of random bits. The chosen transform for normal distribution is ```Box-Muller transform```, computed with fixed polynomial approximations and explicit FMA operations and every backend produces the same watermark bit for bit. The GPU backends generate the watermark on the GPU, while the CPU backend uses AVX2/AVX-512 with OpenMP. The watermark strength follows the proposed Prediction Error (ME) mask, which is the main focus of the Thesis. The system supports both embedding and detection of watermarks in disk images and video streams. Video processing is handled via FFmpeg, enabling broad codec and container support, along with advanced features such as GPU-accelerated video decoding (CUDA and OpenCL backends) and hardware encoding (NVENC on CUDA and NVIDIA OpenCL, QSV/AMF on Intel/AMD OpenCL) and 10-bit/HDR (tonemapped) video support.
 
 The repository contains all required source code and dependencies needed to reproduce the benchmarks and experiments.
 
@@ -104,14 +104,31 @@ Watermarking-CLI.exe --video.path your-videos/input.mkv --video.mode detect --wa
 | `--video.mode` | `embed` (default) or `detect`. Both modes read `--video.path`: embedding re-encodes the watermarked video. |
 | `--video.path` | Input video filename. Uses the common password, p, PSNR, timing, and device options above. |
 | `--watermark_interval` | Embed or detect every Nth frame (N >= 1, default: 1). Other frames pass unchanged to the encoder when embedding, or are skipped when detecting. |
-| `--cuda_hw_encoder` | Use NVENC (`false` by default). Available on all backends with a compatible NVIDIA GPU. Uses `--hw_encode_options` instead of `--encode_codec_options`, Eigen/OpenCL incur host/device transfers. |
+| `--hw_encoder` | Use hardware encoding on CUDA/OpenCL (`false` by default). Uses `--hw_encode_options` instead of `--encode_codec_options`. The default encoder follows the selected GPU: NVENC on NVIDIA, QSV on Intel, AMF on AMD. Eigen uses CPU decoding and encoding. |
 | `--encode_output_path` | Required destination filename for video embedding. Use `--video.mode detect` to detect without writing a video. |
-| `--encode_codec_options` | Software encoder and quality options. Default: `-c:v libx265 -preset fast -crf 23`. Quote the whole value when passing it on the command line. |
-| `--hw_encode_options` | NVENC encoder and quality options, used only when `--cuda_hw_encoder true`. Default: `-c:v hevc_nvenc -preset p6 -tune hq -cq 26 -b:v 0`. Quote the whole value. Encoding and decoding can independently use hardware acceleration. |
+| `--encode_codec_options` | Software encoder and quality options. Default: `-c:v libx265 -preset medium -crf 20`. Quote the whole value when passing it on the command line. |
+| `--hw_encode_options` | Hardware encoder and quality options, used only when `--hw_encoder true`. Defaults are listed below. Quote the whole value. Encoding and decoding can independently use hardware acceleration. |
 
 # Video Encoding Pipeline
 
 The application uses the **FFmpeg libraries (libav\*)** directly, no `ffmpeg.exe` is required or invoked. It decodes the input, watermarks selected luma frames, re-encodes the video, and remuxes compatible audio and subtitle streams. Incompatible text subtitles may be transcoded and unsupported subtitles are dropped. Matroska attachments, chapters, and metadata are preserved where supported. Decoded frame PTS and durations are forwarded to the encoder and invalid output video DTS is repaired before muxing.
+
+Decoding is selected automatically: CUDA tries NVDEC, while OpenCL tries D3D11VA on the selected GPU and then QSV on Intel if the native decoder cannot handle the source. CUDA accepts SDR 4:2:0, 4:2:2 and 4:4:4 when the decoder supports the codec/profile on that GPU. High-bit-depth surfaces are reduced to 8 bits with `scale_cuda` (to NV12, NV16 or 8-bit 4:4:4), which resamples the chroma only when the output is 4:2:0.
+Both conversions (keeping the chroma and to 4:2:0) are tested on the first decoded frame before accepting the hardware path. Known H.264 High 4:4:4 misdecodes, including lossless 4:2:0 streams using that profile, use CPU decoding. The OpenCL hardware path requires D3D11 buffer sharing (`cl_khr_d3d11_sharing`, or `cl_nv_d3d11_sharing` on NVIDIA) and copies decoded frames into owned GPU resources. Each frame is copied as soon as it is decoded and processed two frames later, so decoding, the D3D11 copies and the OpenCL processing overlap; the encode thread waits for each encoder surface's copy before encoding it.
+For SDR, NV12 is packed directly and P010 samples are rounded to 8-bit during packing, preserving the source color matrix and range. The bundled FFmpeg's native HEVC decoder does not expose D3D11 for 4:2:2/4:4:4, but Intel's QSV decoder can supply YUY2/Y210 and AYUV/Y410 surfaces instead (validated on Arc A380 for 8/10-bit HEVC). The application maps the complete owning QSV frame to D3D11 and packs/converts its samples on the GPU, retaining chroma for compatible output or reducing it when the encoder requires 4:2:0. QSV preflight uses a separate decoder instance so delayed probe frames cannot enter the production stream. Unsupported decoder/profile/texture combinations still use CPU decoding. For 10-bit limited-range BT.2020 PQ HDR, full P010 precision is retained through the copy and OpenCL kernels apply Mobius tonemapping to both luma and chroma before watermarking.
+Unsupported codecs, formats, unavailable interop, or a failed hardware decode/conversion/copy probe fall back to CPU decoding and GPU upload.
+Frames for a software encoder come from a reused pool of pinned buffers, so GPU-processed planes are read back directly into the encoder frame.
+
+With hardware encoding enabled, Intel OpenCL derives QSV from the selected D3D11 device, AMD OpenCL sends D3D11 frames to AMF and NVIDIA OpenCL sends them to NVENC. QSV tries YUY2 for 4:2:2 and AYUV for 4:4:4 SDR, retaining the source chroma when the selected GPU/codec accepts those surfaces; unsupported native layouts retry NV12 and report the reduction. Watermarked luma and chroma stay on the GPU through encoding. Separate encoder surfaces prevent later processing from overwriting queued frames. Unselected 8-bit SDR NV12 frames use a direct D3D11 copy into the encoder pool. Other surface layouts use GPU packing/conversion to the negotiated encoder layout; unselected 10-bit/HDR frames still get converted.
+When hardware decoding is unavailable, CPU-decoded frames are uploaded to the same selected GPU for encoding. NVIDIA OpenCL without D3D11 sharing uses host staging for NVENC, matched to the selected physical GPU through UUID, Windows LUID or PCI identity rather than enumeration indices. Unavailable or ambiguous identity information is reported instead of choosing another adapter. Hardware encoder failures are reported without switching silently to software encoding. A decoding, copy or encoding failure after the first frame stops the embed and reports it: the temporary output is discarded and an existing destination file is left unchanged.
+
+| GPU | Default hardware options |
+|---|---|
+| NVIDIA | `-c:v hevc_nvenc -preset p2 -tune hq -cq 28 -b:v 0` |
+| Intel | `-c:v hevc_qsv -global_quality 20` |
+| AMD | `-c:v hevc_amf -quality balanced -rc cqp -qp_i 22 -qp_p 22 -g 120 -vbaq 0` |
+
+These are approximate quality matches; quality scales differ between encoders, and output quality and size depend on the video and GPU. B-frame selection is left to each encoder.
 
 You can customize the video codec and its quality settings via the ```encode_codec_options``` / ```hw_encode_options``` parameters described above.
 
@@ -121,7 +138,7 @@ The pipeline is functionally equivalent to the following FFmpeg CLI invocation. 
 
 ```
 ffmpeg -y -f rawvideo
-  -pix_fmt yuv420p
+  -pix_fmt <yuv420p|yuv422p|yuv444p>
   -s <width>x<height>
   -i -
   -i <input_video_file>
@@ -131,16 +148,18 @@ ffmpeg -y -f rawvideo
   <output_file>
 ```
 
-- `-f rawvideo -pix_fmt yuv420p`: Raw 8-bit planar YUV input from stdin (watermarked frames).
+- `-f rawvideo -pix_fmt <yuv420p|yuv422p|yuv444p>`: Raw 8-bit planar YUV input from stdin (watermarked frames), with the chroma resolution described below.
 - `-i -`: Watermarked video frames piped from the application.
 - `-i <input_video_file>`: **USER SUPPLIED** original source file (audio/subtitles remuxed from here).
-- `<encoder_options>`: **USER SUPPLIED** codec, preset, and quality flags from ```encode_codec_options``` (or ```hw_encode_options``` when NVENC is enabled).
+- `<encoder_options>`: **USER SUPPLIED** codec, preset, and quality flags from ```encode_codec_options``` (or ```hw_encode_options``` when hardware encoding is enabled).
 - `-c:s copy -c:a copy`: Audio and subtitle streams copied without re-encoding.
 - `-map 1:s? -map 0:v -map 1:a?`: Video from the watermarked stream, audio/subtitles from the original input.
 - Muxing uses FFmpeg's default interleave limit (10 seconds, `max_interleave_delta` ffmpeg option), keeping buffering finite for empty or sparse auxiliary streams. Encoder options cannot override this limit.
 - `<output_file>`: **USER SUPPLIED** — destination path set via ```encode_output_path```.
 
-**NOTE:** 10-bit video is supported: 10-bit SDR is converted to 8-bit before watermarking (`format=yuv420p` on the CPU decoder, `scale_cuda=format=nv12` on NVDEC), so each sample loses precision (10 to 8 bits). HDR 10-bit is tonemapped with the Mobius algorithm to SDR. If CPU decoder is used, then we use the FFmpeg's `tonemap=mobius` filter. For Hardware-accelerated decoder (NVDEC) a custom Mobius kernel pipeline is implemented, because currently it is impossible to do the tonemapping by FFmpeg provided filters. Encoding output is always 8-bit SDR.
+**NOTE:** Video is processed and encoded at 8 bits. Input may have up to 10 bits per sample: 10-bit SDR is reduced to 8 bits before watermarking (`format` on the CPU decoder, `scale_cuda` on NVDEC, or the interop packing shader on the OpenCL hardware path), each sample may lose precision (10 to 8 bits). Software encoders keep the source chroma resolution: 4:2:2 and 4:4:4 input gives 8-bit 4:2:2 and 4:4:4 output when the encoder accepts that format (for example libx264, libx265 and FFV1).
+With CUDA, NVENC is first opened with 4:2:2 (NV16) or 4:4:4 surfaces and keeps the chroma when the GPU encodes it, otherwise it reopens with 4:2:0. OpenCL QSV can also retain 4:2:2/4:4:4 through YUY2/AYUV surfaces, other unsupported hardware combinations receive 4:2:0 surfaces with the conversion reported. This encoding support is independent of decoder support: a source can use native QSV decoding, or CPU decoding when required, and still keep its chroma through GPU watermarking and QSV encoding. HDR is tonemapped to 4:2:0 and grayscale input is encoded as 4:2:0 with neutral chroma. Every conversion that drops chroma resolution is reported.
+Encoder options can change the encoded bitstream (for example NVENC `-highbitdepth 1` writes 10-bit HEVC), this is reported after the first packet and adds no precision to the 8-bit samples. The dimensions must be divisible by the chroma subsampling of the output (even for 4:2:0). Detection accepts 8-bit SDR input of any chroma layout and reads its luma without converting it. HDR video is tonemapped with the Mobius algorithm to SDR. CPU and GPU render it the same way, as FFmpeg's `zscale` + `tonemap=mobius` chain: linear BT.2020 light, highlight desaturation with BT.2020 luminance (the CPU chain tags the frames with the source matrix for `tonemap`, which would otherwise desaturate with R+G+B), Mobius on the brightest channel with the peak from the stream metadata (MaxCLL, else the mastering display peak, else 1000 nits), BT.709 primaries and BT.1886 gamma, with the chroma interpolated at the stream's chroma siting and filtered back to 4:2:0 with zimg's bilinear filter.
 
 # License and Distribution
 

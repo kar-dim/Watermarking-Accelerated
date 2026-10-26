@@ -22,16 +22,16 @@
 
 WatermarkBuffer WatermarkBase::generateWatermark(const std::string& watermarkPassword, const int rows, const int cols) {
     const int64_t numElements = static_cast<int64_t>(rows) * cols;
-    // the ChaCha20 start state (the SHA-256 key of the password), the block counter is set per block
+    // ChaCha20 start state from SHA-256 password key, counter set per block
     const std::array<uint32_t, 16> baseState = WatermarkCrypto::computeBaseState(watermarkPassword);
 #if defined(_USE_CUDA_)
-    // on the compute stream: the embedding and detection kernels of the watermark object run after it
+    // compute stream: embedding and detection kernels run after upload
     const cudaStream_t stream = CudaStreamManager::getInstance().getComputeStream();
     WatermarkBuffer watermark(rows, cols, stream);
     cuda_utils::launchGenerateWatermarkKernel(baseState, watermark.data(), numElements, stream);
     return watermark;
 #elif defined(_USE_OPENCL_)
-    // on the queue of the watermark object: its embedding and detection kernels run after it
+    // in-order queue: embedding and detection kernels run after upload
     auto& queueManager = OclQueueManager::getInstance();
     WatermarkBuffer watermark(rows, cols, queueManager.getQueueRaw());
     cl_utils::launchGenerateWatermarkKernel(baseState, watermark.clBuffer(), numElements, queueManager.getQueue());

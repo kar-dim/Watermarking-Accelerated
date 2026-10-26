@@ -32,29 +32,25 @@ namespace video_utils {
 
 using MediaLog = std::function<void(const std::string&)>;
 
-// human readable libav error string
 inline std::string avErrorText(const int avRet) {
     char buf[AV_ERROR_MAX_STRING_SIZE] = {0};
     av_strerror(avRet, buf, sizeof(buf));
     return buf;
 }
 
-// throws runtime_error containing formatted FFmpeg error description
 inline void checkAv(const int avRet, const std::string& what) {
     if (avRet < 0)
         throw std::runtime_error(what + ": " + avErrorText(avRet));
 }
 
-// retrieve PTS for a decoded frame (falls back to best_effort_timestamp if pts is missing)
 inline int64_t framePts(const AVFrame* f) { return (f->pts != AV_NOPTS_VALUE) ? f->pts : f->best_effort_timestamp; }
 
-// presentation timestamp and duration of one frame, in the stream time base
 struct FrameTiming {
     int64_t pts = 0;
     int64_t duration = 0;
 };
 
-// one frame at the nominal frame rate, in the stream time base (0 when the stream declares no rate)
+// one frame at nominal frame rate in stream time base, 0 when undeclared
 inline int64_t nominalFrameDuration(const AVRational frameRate, const AVRational timeBase) {
     if (frameRate.num <= 0 || frameRate.den <= 0)
         return 0;
@@ -82,7 +78,7 @@ inline bool enforceMonotonicDts(AVPacket* packet, int64_t& lastWrittenDts) {
     return repaired;
 }
 
-// libavcodec does not always carry AVFrame::duration into the packet, keyed by pts because encoders emit packets out of order
+// libavcodec does not always carry frame duration into packet, keyed by pts for reordered packets
 class PacketDurations {
   public:
     void remember(const AVFrame* frame) {
@@ -91,7 +87,7 @@ class PacketDurations {
         if (byPts_.size() > 4096)
             byPts_.erase(byPts_.begin());
     }
-    // our duration always wins: an encoder with B-frames fills in one nominal frame interval and loses the hold of the last frame
+    // caller duration wins over encoder B-frame interval
     void restore(AVPacket* packet) {
         const auto found = byPts_.find(packet->pts);
         if (found == byPts_.end())
@@ -104,7 +100,6 @@ class PacketDurations {
     std::map<int64_t, int64_t> byPts_;
 };
 
-// RAII wrapper for AVDictionary*
 class OptionDict {
   public:
     explicit OptionDict(AVDictionary* dict = nullptr) noexcept : m_dict(dict) {}
@@ -132,16 +127,15 @@ class OptionDict {
     AVDictionary* m_dict = nullptr;
 };
 
-// libav reads paths as UTF-8, std::filesystem must read the same bytes as UTF-8 too
+// libav and filesystem paths must match UTF-8 bytes
 inline std::filesystem::path pathFromUtf8(const std::string& path) { return std::filesystem::path(std::u8string(path.begin(), path.end())); }
 
-// checks if both paths point to the same physical file on disk to prevent overwriting
+// checks if both paths point to same physical file
 inline bool sameFileOnDisk(const std::filesystem::path& left, const std::filesystem::path& right) {
     std::error_code error;
     return std::filesystem::equivalent(left, right, error) && !error;
 }
 
-// checks if encoder supports the requested pixel format
 inline bool encoderSupportsPixFmt(const AVCodec* encoder, const AVPixelFormat want) {
     const void* configs = nullptr;
     if (avcodec_get_supported_config(nullptr, encoder, AV_CODEC_CONFIG_PIX_FORMAT, 0, &configs, nullptr) < 0 || !configs)

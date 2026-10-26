@@ -11,7 +11,7 @@
 #endif
 
 /*!
- *  \brief  Used only for video, holds pinned host memory for fast GPU<->CPU transfers, or simple heap memory for CPU implementation.
+ *  \brief  Pinned host memory for fast GPU-CPU transfers, or heap memory on CPU
  *  \author Dimitris Karatzas
  */
 template <typename T>

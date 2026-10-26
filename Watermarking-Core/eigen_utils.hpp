@@ -13,7 +13,7 @@ struct CImg;
 using Gray8BufferIO = cimg_library::CImg<uint8_t>;
 
 /*!
- *  \brief  Helper utility functions related to Eigen.
+ *  \brief  Utility functions for Eigen operations
  *  \author Dimitris Karatzas
  */
 namespace eigen_utils {

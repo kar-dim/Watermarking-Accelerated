@@ -3,7 +3,6 @@
 #include "AuxiliaryMux.hpp"
 #include "buffer.hpp"
 #include "HdrTonemap.hpp"
-#include "HostMemory.hpp"
 #include "OutputFile.hpp"
 #include "include/WatermarkCore.hpp"
 #include "video_defines.hpp"
@@ -11,6 +10,11 @@
 #include <cstdint>
 #include <memory>
 #include <utility>
+
+#if defined(_USE_OPENCL_)
+#include "OclVideoInterop.hpp"
+#include "OclHdrTonemap.hpp"
+#endif
 
 extern "C" {
 #include "libavformat/avformat.h"
@@ -27,49 +31,57 @@ namespace WatermarkCore {
  */
 struct VideoSession {
     VideoSettings settings;
-    // ffmpeg contexts and stream info
     video_utils::AVFormatContextPtr inputFormatCtx;
     video_utils::AVCodecContextPtr inputDecoderCtx;
     const AVStream* videoStream = nullptr;
     int videoStreamIndex = -1;
     bool useHwDecoder = false;
-    // the pixel format every decoded frame must have (the software format of a hardware frame)
+    // decoded frames held before processing, decoder surfaces must cover them
+    size_t decodeLookahead = 0;
+#if defined(_USE_OPENCL_)
+    // QSV direct mappings retain source frame without D3D11 frames descriptor
+    video_utils::AVBufferRefPtr openclMappedFrames;
+    std::unique_ptr<OclVideoFrame> openclVideoFrame;
+    std::unique_ptr<OclHdrTonemap> openclHdrTonemap;
+    std::unique_ptr<OclVideoOutput> openclVideoOutput;
+#endif
+    // software format every decoded frame must have
     AVPixelFormat decodedFormat = AV_PIX_FMT_NONE;
-    // guessed stream frame rate and one frame at that rate, used when a frame has no duration (NVDEC frames never have one)
+    // 8-bit planar YUV format of encoded frames, none in detection
+    AVPixelFormat outputFormat = AV_PIX_FMT_NONE;
+    // guessed stream frame rate used when frame has no duration
     AVRational frameRate{0, 1};
     int64_t nominalFrameDuration = 0;
-    // pts given to the next frame that has none
+    // pts for next frame without timestamp
     int64_t nextFramePts = 0;
-    // HDR metadata cached from the decoder
+    // HDR input tonemapped to SDR
     bool isHdr = false;
-    video_utils::MobiusParams mobius = video_utils::MobiusParams::fromHdrPeak(10.0f); // default 1000 nits (used by HDR CUDA kernels)
-    // watermarking related buffers and objects
     std::unique_ptr<WatermarkBase> watermarkObj;
-    std::unique_ptr<HostMemory<uint8_t>> hostFrame;
-    // optional filter graph context for 10-bit to 8-bit conversion and HDR to SDR tonemapping, initialized only when needed
+    // reused software encoder frame buffers, pinned on GPU builds for direct readback
+    video_utils::AVBufferPoolPtr encoderFramePool;
+    // optional filter graph for 10-bit conversion and tonemapping
     video_utils::AVFilterGraphPtr filterGraph;
     AVFilterContext* buffersrcCtx = nullptr;
     AVFilterContext* buffersinkCtx = nullptr;
-    // image buffers for processing the frames, reused for each frame to save memory allocations
+    // frame processing buffers reused per frame
     ImageBuffer inputFrame;
     ImageOutputBuffer watermarkedFrame;
-    // output encoding (embed mode only, initialized in embedVideo, null for detect)
-    OutputFile outputFile; // destroyed after the FFmpeg contexts have closed their handles
+    // output encoding in embed mode
+    OutputFile outputFile; // destroyed after FFmpeg contexts close handles
     video_utils::AVOutputFormatContextPtr outputFormatCtx;
     video_utils::AVCodecContextPtr outputEncoderCtx;
-    video_utils::AuxiliaryMux auxMux; // handles audio remux and subtitle transcoding
+    video_utils::AuxiliaryMux auxMux; // audio remux and subtitle transcode
     int outputVideoStreamIndex = -1;
     video_utils::PacketDurations frameDurations;
     int64_t lastWrittenVideoDts = AV_NOPTS_VALUE;
     bool reportedDtsRepair = false;
-    // the newest encoded packet is held back, so the last one in decode order can be stretched to the presentation end (MP4/MOV)
+    // newest encoded packet is held back to stretch last packet in decode order to presentation end
     video_utils::AVPacketPtr heldPacket;
     bool holdingPacket = false;
     bool stretchLastPacket = false;
     int64_t presentationEnd = AV_NOPTS_VALUE;
     int64_t firstReorderDelay = 0;
     uint64_t encodedPackets = 0;
-    // convenient getter for video properties
     inline std::pair<int, int> videoDims() const { return {videoStream->codecpar->height, videoStream->codecpar->width}; }
 };
 

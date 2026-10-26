@@ -25,6 +25,12 @@
     <ClCompile Include="video_utils.cpp">
       <Filter>Source Files\util</Filter>
     </ClCompile>
+    <ClCompile Include="OclHdrTonemap.cpp">
+      <Filter>Source Files\opencl</Filter>
+    </ClCompile>
+    <ClCompile Include="OclVideoInterop.cpp">
+      <Filter>Source Files\opencl</Filter>
+    </ClCompile>
     <CudaCompile Include="WatermarkFactory.cpp">
       <Filter>Source Files</Filter>
     </CudaCompile>
@@ -148,6 +154,12 @@
     <ClInclude Include="video_utils.hpp">
       <Filter>Header Files\util</Filter>
     </ClInclude>
+    <ClInclude Include="OclVideoDevice.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="OclVideoInterop.hpp">
+      <Filter>Header Files\opencl</Filter>
+    </ClInclude>
     <ClInclude Include="kernels\kernels.cuh">
       <Filter>Header Files\cuda</Filter>
     </ClInclude>
@@ -204,6 +216,15 @@
     </ClInclude>
     <ClInclude Include="CudaMemPool.hpp">
       <Filter>Header Files\cuda</Filter>
+    </ClInclude>
+    <ClInclude Include="HdrTonemapCurves.hpp">
+      <Filter>Header Files\util</Filter>
+    </ClInclude>
+    <ClInclude Include="OclHdrTonemap.hpp">
+      <Filter>Header Files\opencl</Filter>
+    </ClInclude>
+    <ClInclude Include="kernels\hdr_kernels.hpp">
+      <Filter>Header Files\opencl</Filter>
     </ClInclude>
     <ClInclude Include="HdrTonemap.hpp">
       <Filter>Header Files\util</Filter>

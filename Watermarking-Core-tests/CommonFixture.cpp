@@ -1,14 +1,26 @@
 #include "../Watermarking-Core/AuxiliaryMux.hpp"
 #include "../Watermarking-Core/AvUtil.hpp"
-#include "../Watermarking-Core/EncodeOptions.hpp"
 #include "../Watermarking-Core/CheckedSize.hpp"
-#include "../Watermarking-Core/OutputFile.hpp"
+#include "../Watermarking-Core/EncodeOptions.hpp"
 #include "../Watermarking-Core/half_float.hpp"
+#include "../Watermarking-Core/OutputFile.hpp"
 #include "../Watermarking-Core/WatermarkCrypto.hpp"
+#if defined(_USE_OPENCL_) || defined(_USE_CUDA_)
+#include "../Watermarking-Core/HdrTonemapCurves.hpp"
+#include "../Watermarking-Core/video_utils.hpp"
+#include "../Watermarking-Core/VideoProcessingContext.hpp"
+#endif
 #if defined(_USE_OPENCL_)
-#include "../Watermarking-Core/OclArray.hpp"
-#include "../Watermarking-Core/opencl_utils.hpp"
 #include "../Watermarking-Core/kernels/half_kernels.hpp"
+#include "../Watermarking-Core/OclArray.hpp"
+#include "../Watermarking-Core/OclVideoDevice.hpp"
+#include "../Watermarking-Core/opencl_utils.hpp"
+#pragma push_macro("small")
+#include <d3d11.h>
+extern "C" {
+#include "libavutil/hwcontext_d3d11va.h"
+}
+#pragma pop_macro("small")
 #include <cstdlib>
 #include <optional>
 #elif defined(_USE_CUDA_)
@@ -26,18 +38,21 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <deque>
 #include <filesystem>
 #include <format>
 #include <fstream>
 #include <future>
 #include <gtest/gtest.h>
 #include <iomanip>
+#include <initializer_list>
 #include <iterator>
 #include <limits>
 #include <regex>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <thread>
 #include <tuple>
@@ -53,7 +68,12 @@
 #endif
 
 extern "C" {
+#include "libavfilter/buffersink.h"
+#include "libavutil/common.h"
 #include "libavutil/dict.h"
+#include "libavutil/hwcontext.h"
+#include "libavutil/opt.h"
+#include "libavutil/pixdesc.h"
 }
 
 /*!
@@ -254,8 +274,7 @@ std::pair<int, int> orientedSource(const int x, const int y, const int storedWid
     }
 }
 
-// writes "displayed" (row-major interleaved, 1 or 3 channels) as a quality 100, 4:4:4 JPEG with the EXIF orientation tag, its pixels stored so that a viewer applying the
-// orientation shows "displayed"
+// writes displayed pixels as quality 100 4:4:4 JPEG with EXIF orientation tag
 void writeOrientedJpeg(const fs::path& path, const std::vector<uint8_t>& displayed, const int width, const int height, const int channels, const int orientation) {
     const bool swapAxes = orientation >= 5;
     const int storedWidth = swapAxes ? height : width;
@@ -320,8 +339,7 @@ std::vector<uint8_t> jpegTestPattern(const int width, const int height, const in
     return pixels;
 }
 
-// writes "pixels" (row-major interleaved; 1, 3 or 4 components: gray, RGB, CMYK) as a quality 90 JPEG, the first component sampled "sampling" times the others
-// in both directions (1: 4:4:4, 2: 4:2:0)
+// writes pixels (row-major interleaved, 1, 3 or 4 components) as quality 90 JPEG
 void writeJpeg(const fs::path& path, const std::vector<uint8_t>& pixels, const int width, const int height, const int components, const int sampling, const bool progressive) {
     std::vector<uint8_t> jpeg(pixels.size() * 2 + 65536);
     unsigned char* buffer = jpeg.data();
@@ -417,28 +435,44 @@ VideoSettings makeVideoSettings(const std::string& input) {
     return settings;
 }
 
-// HDR fixtures use one uniform frame; the SDR regression clip uses 100 textured frames.
-void writeVideoFixture(const fs::path& path, const bool deep, const AVColorTransferCharacteristic transfer, const bool textured = false) {
+// textured fixture sample on 8-bit scale, 10-bit fixtures store times 4 for exact 8-bit reduction
+int fixtureSample(const int plane, const int row, const int col, const int index) { return 64 + ((col * 3 + row * 2 + index * 7 + plane * 29) % 128); }
+
+// HDR fixtures use one uniform frame, SDR regression clip uses 100 textured frames
+void writeVideoFixture(const fs::path& path, const bool deep, const AVColorTransferCharacteristic transfer, const bool textured = false, const char* encoderName = nullptr,
+    const AVPixelFormat sourceFormat = AV_PIX_FMT_NONE, const AVColorRange colorRange = AVCOL_RANGE_MPEG, const std::initializer_list<std::pair<const char*, const char*>> encoderOverrides = {},
+    const bool coloredChroma = false, const std::pair<int, int> texturedSize = {320, 180}) {
     using namespace video_utils;
     AVFormatContext* rawOutput = nullptr;
     checkAv(avformat_alloc_output_context2(&rawOutput, nullptr, "matroska", path.string().c_str()), "Allocate fixture muxer");
     AVOutputFormatContextPtr output(rawOutput);
-    const AVCodec* codec = avcodec_find_encoder(AV_CODEC_ID_FFV1);
+    const AVCodec* codec = encoderName ? avcodec_find_encoder_by_name(encoderName) : avcodec_find_encoder(AV_CODEC_ID_FFV1);
     AVCodecContextPtr encoder(avcodec_alloc_context3(codec));
     if (!encoder)
         throw std::runtime_error("Allocate fixture encoder");
-    encoder->width = textured ? 320 : 16;
-    encoder->height = textured ? 180 : 16;
+    encoder->width = textured ? texturedSize.first : 16;
+    encoder->height = textured ? texturedSize.second : 16;
     encoder->time_base = {1, 30};
     encoder->framerate = {30, 1};
-    encoder->pix_fmt = deep ? AV_PIX_FMT_YUV420P10LE : AV_PIX_FMT_YUV420P;
-    encoder->color_range = AVCOL_RANGE_MPEG;
+    encoder->pix_fmt = sourceFormat != AV_PIX_FMT_NONE ? sourceFormat : (deep ? AV_PIX_FMT_YUV420P10LE : AV_PIX_FMT_YUV420P);
+    encoder->color_range = colorRange;
     encoder->color_primaries = transfer == AVCOL_TRC_BT709 ? AVCOL_PRI_BT709 : AVCOL_PRI_BT2020;
     encoder->color_trc = transfer;
     encoder->colorspace = transfer == AVCOL_TRC_BT709 ? AVCOL_SPC_BT709 : AVCOL_SPC_BT2020_NCL;
     if (output->oformat->flags & AVFMT_GLOBALHEADER)
         encoder->flags |= AV_CODEC_FLAG_GLOBAL_HEADER;
-    checkAv(avcodec_open2(encoder.get(), codec, nullptr), "Open fixture encoder");
+    AVDictionary* encoderOptions = nullptr;
+    if (encoderName && std::string_view(encoderName) == "libsvtav1") {
+        av_dict_set(&encoderOptions, "preset", "12", 0);
+        av_dict_set(&encoderOptions, "svtav1-params", "lp=2", 0);
+    }
+    if (encoderName && std::string_view(encoderName) == "libx265" && transfer == AVCOL_TRC_SMPTE2084)
+        av_dict_set(&encoderOptions, "x265-params", "hdr10=1:max-cll=4000,400", 0);
+    for (const auto& [key, value] : encoderOverrides)
+        av_dict_set(&encoderOptions, key, value, 0);
+    const int encoderStatus = avcodec_open2(encoder.get(), codec, &encoderOptions);
+    av_dict_free(&encoderOptions);
+    checkAv(encoderStatus, "Open fixture encoder");
     AVStream* stream = avformat_new_stream(output.get(), nullptr);
     if (!stream)
         throw std::runtime_error("Allocate fixture stream");
@@ -474,15 +508,16 @@ void writeVideoFixture(const fs::path& path, const bool deep, const AVColorTrans
         if (status != AVERROR_EOF && status != AVERROR(EAGAIN))
             checkAv(status, "Drain fixture encoder");
     };
+    const auto* descriptor = av_pix_fmt_desc_get(encoder->pix_fmt);
     for (int index = 0; index < (textured ? 100 : 1); ++index) {
         checkAv(av_frame_make_writable(frame.get()), "Make fixture frame writable");
         frame->pts = index;
         for (int plane = 0; plane < 3; ++plane) {
-            const int width = plane == 0 ? frame->width : frame->width / 2;
-            const int height = plane == 0 ? frame->height : frame->height / 2;
+            const int width = plane == 0 ? frame->width : AV_CEIL_RSHIFT(frame->width, descriptor->log2_chroma_w);
+            const int height = plane == 0 ? frame->height : AV_CEIL_RSHIFT(frame->height, descriptor->log2_chroma_h);
             for (int row = 0; row < height; ++row)
                 for (int col = 0; col < width; ++col) {
-                    const int value = textured && plane == 0 ? 64 + ((col * 3 + row * 2 + index * 7) % 128) : 128;
+                    const int value = textured && (plane == 0 || transfer != AVCOL_TRC_BT709 || coloredChroma) ? fixtureSample(plane, row, col, index) : 128;
                     auto* line = frame->data[plane] + row * frame->linesize[plane];
                     if (deep)
                         reinterpret_cast<uint16_t*>(line)[col] = static_cast<uint16_t>(value * 4);
@@ -517,7 +552,7 @@ const fs::path& shortVideoFixture() {
 }
 
 // Inspect the first decoded sample and transfer tag to verify HDR conversion
-std::pair<int, AVColorTransferCharacteristic> firstVideoLuma(const fs::path& path) {
+std::pair<int, AVColorTransferCharacteristic> firstVideoLuma(const fs::path& path, video_utils::AVFramePtr* decoded = nullptr) {
     using namespace video_utils;
     AVFormatContext* rawInput = nullptr;
     checkAv(avformat_open_input(&rawInput, path.string().c_str(), nullptr, nullptr), "Open test video");
@@ -542,12 +577,106 @@ std::pair<int, AVColorTransferCharacteristic> firstVideoLuma(const fs::path& pat
             checkAv(read, "Read test packet");
         if (read == AVERROR_EOF || packet->stream_index == index) {
             checkAv(avcodec_send_packet(decoder.get(), read == AVERROR_EOF ? nullptr : packet.get()), "Decode test packet");
-            if (avcodec_receive_frame(decoder.get(), frame.get()) == 0)
-                return {frame->data[0][0], parameters->color_trc};
+            if (avcodec_receive_frame(decoder.get(), frame.get()) == 0) {
+                if (frame->format != AV_PIX_FMT_YUV420P && frame->format != AV_PIX_FMT_YUV422P && frame->format != AV_PIX_FMT_YUV444P)
+                    throw std::runtime_error("Expected normalized 8-bit planar YUV output");
+                const auto result = std::pair{static_cast<int>(frame->data[0][0]), parameters->color_trc};
+                if (decoded)
+                    *decoded = std::move(frame);
+                return result;
+            }
         }
         if (read == AVERROR_EOF)
             throw std::runtime_error("Test video produced no frame");
         av_packet_unref(packet.get());
+    }
+}
+
+// every frame of an 8-bit planar YUV video, planes packed without row padding
+struct DecodedVideo {
+    AVPixelFormat format = AV_PIX_FMT_NONE;
+    AVColorRange range = AVCOL_RANGE_UNSPECIFIED;
+    int width = 0;
+    int height = 0;
+    int chromaWidth = 0;
+    int chromaHeight = 0;
+    std::vector<std::array<std::vector<uint8_t>, 3>> frames;
+};
+
+DecodedVideo decodeVideoPlanes(const fs::path& path) {
+    using namespace video_utils;
+    AVFormatContext* rawInput = nullptr;
+    checkAv(avformat_open_input(&rawInput, path.string().c_str(), nullptr, nullptr), "Open test video");
+    AVFormatContextPtr input(rawInput);
+    checkAv(avformat_find_stream_info(input.get(), nullptr), "Read test video streams");
+    const int index = av_find_best_stream(input.get(), AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
+    checkAv(index, "Find test video stream");
+    const auto* parameters = input->streams[index]->codecpar;
+    const auto* codec = avcodec_find_decoder(parameters->codec_id);
+    AVCodecContextPtr decoder(avcodec_alloc_context3(codec));
+    if (!decoder)
+        throw std::runtime_error("Allocate test decoder");
+    checkAv(avcodec_parameters_to_context(decoder.get(), parameters), "Copy test decoder parameters");
+    checkAv(avcodec_open2(decoder.get(), codec, nullptr), "Open test decoder");
+    AVPacketPtr packet(av_packet_alloc());
+    AVFramePtr frame(av_frame_alloc());
+    if (!packet || !frame)
+        throw std::runtime_error("Allocate test decode buffers");
+    DecodedVideo video;
+    const auto receive = [&] {
+        while (avcodec_receive_frame(decoder.get(), frame.get()) == 0) {
+            const auto* descriptor = av_pix_fmt_desc_get(static_cast<AVPixelFormat>(frame->format));
+            if (!descriptor || descriptor->nb_components != 3 || !(descriptor->flags & AV_PIX_FMT_FLAG_PLANAR) || descriptor->comp[0].depth != 8 || (descriptor->flags & AV_PIX_FMT_FLAG_RGB))
+                throw std::runtime_error("Expected 8-bit planar YUV frames");
+            if (video.frames.empty()) {
+                video.format = static_cast<AVPixelFormat>(frame->format);
+                video.range = frame->color_range;
+                video.width = frame->width;
+                video.height = frame->height;
+                video.chromaWidth = AV_CEIL_RSHIFT(frame->width, descriptor->log2_chroma_w);
+                video.chromaHeight = AV_CEIL_RSHIFT(frame->height, descriptor->log2_chroma_h);
+            }
+            if (frame->format != video.format || frame->width != video.width || frame->height != video.height)
+                throw std::runtime_error("Video frame layout changed");
+            auto& planes = video.frames.emplace_back();
+            for (int plane = 0; plane < 3; ++plane) {
+                const int width = plane == 0 ? video.width : video.chromaWidth, height = plane == 0 ? video.height : video.chromaHeight;
+                for (int row = 0; row < height; ++row)
+                    planes[plane].insert(planes[plane].end(), frame->data[plane] + row * frame->linesize[plane], frame->data[plane] + row * frame->linesize[plane] + width);
+            }
+        }
+    };
+    while (av_read_frame(input.get(), packet.get()) >= 0) {
+        if (packet->stream_index == index) {
+            checkAv(avcodec_send_packet(decoder.get(), packet.get()), "Decode test packet");
+            receive();
+        }
+        av_packet_unref(packet.get());
+    }
+    checkAv(avcodec_send_packet(decoder.get(), nullptr), "Flush test decoder");
+    receive();
+    return video;
+}
+
+// checks the watermarked output of a colored fixture: chroma as the source (8-bit scale), luma unchanged on the skipped frames,
+// tolerance covers the rounding of a 10-bit reduction
+void expectFixturePlanes(const DecodedVideo& video, const int interval, const int tolerance = 0) {
+    ASSERT_EQ(video.frames.size(), 100);
+    for (size_t index = 0; index < video.frames.size(); ++index) {
+        std::array<int, 2> maximumError{}; // luma, chroma
+        for (int plane = 0; plane < 3; ++plane) {
+            const int width = plane == 0 ? video.width : video.chromaWidth, height = plane == 0 ? video.height : video.chromaHeight;
+            for (int row = 0; row < height; ++row)
+                for (int col = 0; col < width; ++col) {
+                    const int error = std::abs(video.frames[index][plane][static_cast<size_t>(row) * width + col] - fixtureSample(plane, row, col, static_cast<int>(index)));
+                    maximumError[plane == 0 ? 0 : 1] = std::max(maximumError[plane == 0 ? 0 : 1], error);
+                }
+        }
+        EXPECT_LE(maximumError[1], tolerance) << "frame " << index;
+        if (index % interval == 0)
+            EXPECT_GT(maximumError[0], tolerance) << "frame " << index;
+        else
+            EXPECT_LE(maximumError[0], tolerance) << "frame " << index;
     }
 }
 
@@ -638,6 +767,92 @@ class WatermarkTest : public ::testing::Test {
 };
 
 #if defined(_USE_OPENCL_)
+TEST(VideoDeviceIdentityTest, MatchesPhysicalDevicesRatherThanEnumerationIndices) {
+    using namespace video_utils;
+    VideoDeviceIdentity first, second, unknown;
+    first.uuid = std::array<uint8_t, 16>{1};
+    second.uuid = std::array<uint8_t, 16>{2};
+    EXPECT_EQ(matchingVideoDevice(first, std::array{second, first}), 1U);
+    EXPECT_EQ(matchingVideoDevice(second, std::array{second, first}), 0U);
+    EXPECT_THROW(matchingVideoDevice(first, std::array{first, first}), std::runtime_error);
+    EXPECT_THROW(matchingVideoDevice(unknown, std::array{first, second}), std::runtime_error);
+    first = {};
+    first.luid = std::array<uint8_t, 8>{7};
+    first.nodeMask = 1;
+    second = first;
+    second.nodeMask = 2;
+    EXPECT_FALSE(sameVideoDevice(first, second));
+    EXPECT_EQ(matchingVideoDevice(first, std::array{second, first}), 1U);
+    first = {};
+    first.domain = 0;
+    first.bus = 3;
+    first.slot = 2;
+    first.function = 0;
+    second = first;
+    second.domain = 1;
+    EXPECT_EQ(matchingVideoDevice(first, std::array{second, first}), 1U);
+    first.domain.reset();
+    EXPECT_THROW(matchingVideoDevice(first, std::array{second, second}), std::runtime_error);
+}
+
+TEST(VideoDeviceIdentityTest, SelectedOpenCLNvidiaDeviceCanOpenHostStagedNvenc) {
+    using namespace video_utils;
+    int checked = 0;
+    const auto devices = getAvailableDevices();
+    for (size_t index = 0; index < devices.size(); ++index) {
+        ASSERT_TRUE(initializeEnvironment(static_cast<int>(index)));
+        const auto& device = OclQueueManager::getInstance().getDevice();
+        if (device.getInfo<CL_DEVICE_VENDOR_ID>() != 0x10de)
+            continue;
+        OptionDict options;
+        const int ordinal = bindHostNvencDevice(device(), options);
+        OptionDict conflicting;
+        av_dict_set(conflicting.ptr(), "gpu", std::to_string(ordinal + 1).c_str(), 0);
+        EXPECT_THROW(bindHostNvencDevice(device(), conflicting), std::runtime_error);
+        const auto* codec = avcodec_find_encoder_by_name("hevc_nvenc");
+        ASSERT_TRUE(codec);
+        AVCodecContextPtr encoder(avcodec_alloc_context3(codec));
+        ASSERT_TRUE(encoder);
+        encoder->width = 320;
+        encoder->height = 180;
+        encoder->pix_fmt = AV_PIX_FMT_YUV420P; // no hardware surfaces or interop context
+        encoder->time_base = {1, 30};
+        encoder->framerate = {30, 1};
+        av_dict_set(options.ptr(), "preset", "p2", 0);
+        ASSERT_GE(avcodec_open2(encoder.get(), codec, options.ptr()), 0);
+        int64_t actual = -1;
+        ASSERT_GE(av_opt_get_int(encoder->priv_data, "gpu", 0, &actual), 0);
+        EXPECT_EQ(actual, ordinal);
+        AVFramePtr frame(av_frame_alloc());
+        frame->format = encoder->pix_fmt;
+        frame->width = encoder->width;
+        frame->height = encoder->height;
+        ASSERT_GE(av_frame_get_buffer(frame.get(), 32), 0);
+        for (int plane = 0; plane < 3; ++plane)
+            for (int y = 0; y < (plane == 0 ? frame->height : frame->height / 2); ++y)
+                std::memset(frame->data[plane] + y * frame->linesize[plane], 128, plane == 0 ? frame->width : frame->width / 2);
+        AVPacketPtr packet(av_packet_alloc());
+        int packets = 0;
+        const auto receive = [&] {
+            while (avcodec_receive_packet(encoder.get(), packet.get()) >= 0) {
+                ++packets;
+                av_packet_unref(packet.get());
+            }
+        };
+        for (int i = 0; i < 4; ++i) {
+            frame->pts = i;
+            ASSERT_GE(avcodec_send_frame(encoder.get(), frame.get()), 0);
+            receive();
+        }
+        ASSERT_GE(avcodec_send_frame(encoder.get(), nullptr), 0);
+        receive();
+        EXPECT_EQ(packets, 4);
+        ++checked;
+    }
+    if (!checked)
+        GTEST_SKIP() << "No NVIDIA OpenCL GPU";
+}
+
 // Concurrent first use must publish complete programs for the active context
 TEST(OpenCLCacheTest, ConcurrentColdProgramBuildsShareAValidProgram) {
     initializeEnvironment(0);
@@ -796,15 +1011,14 @@ TEST(OpenCLReductionTest, AvailableDevicesMatchForcedPortableResults) {
             std::cout << devices[deviceIndex] << ": " << different << " changed pixels, max difference " << maxDifference << ", correlation difference "
                       << std::abs(selected.correlation - portable.correlation) << '\n';
             // Different floating-point reduction trees can cross an 8-bit rounding
-            // boundary. Independent shift-sum references below check their accuracy.
+            // boundary, shift-sum references verify accuracy
             EXPECT_LE(maxDifference, 1) << devices[deviceIndex];
             EXPECT_NEAR(selected.correlation, portable.correlation, 1.0e-4f) << devices[deviceIndex];
         }
     }
 }
 
-// This is for some OpenCL devices that support subgroup reductions but have a different floating-point
-// reduction tree than the CPU reference. The sums of shifted pixels must match the double-precision reference.
+// devices with subgroup reductions verify against double-precision reference
 TEST(OpenCLReductionTest, ShiftSumsMatchDoublePrecisionReferenceOnEveryDevice) {
     PortableReductionOverrideGuard restoreOverride;
     const auto devices = getAvailableDevices();
@@ -1154,7 +1368,7 @@ TEST(CudaBufferTest, FailedUploadReturnsItsAllocationToThePool) {
             EXPECT_THROW(CudaArray<float>(317, 631, static_cast<const float*>(nullptr), stream), std::runtime_error);
         else
             EXPECT_THROW(CudaArray<float>(317, 631, channels, static_cast<const float*>(nullptr), stream), std::runtime_error);
-        // Consume the intentional runtime error before unrelated kernel launch checks.
+        // consume intentional runtime error before next test
         cudaGetLastError();
         CudaArray<float> recovered(317, 631, channels, stream);
         EXPECT_EQ(recovered.data(), allocation);
@@ -1468,7 +1682,7 @@ TEST_F(WatermarkTest, RgbaPreviewMatchesSavedPixelsAndPreservesPadding) {
     EXPECT_EQ(mismatches, 0);
 }
 
-// every EXIF orientation of one displayed image (40x72: partial GPU tiles) loads upright, with the embedded pixels and the original preview of orientation 1.
+// EXIF orientations load upright, matching orientation 1 pixels and preview
 // The image is 8x8 blocks of one color, exact in a quality 100 4:4:4 JPEG
 TEST_F(WatermarkTest, ExifOrientationsLoadUpright) {
     // the fixture session belongs to device 0, every device gets its own sessions
@@ -1580,7 +1794,7 @@ TEST_F(WatermarkTest, RejectsHighBitDepthImages) {
     EXPECT_TRUE(original.pixels == expected);
 }
 
-// JPEG decoding: CImg (libjpeg) on the Eigen and OpenCL builds, nvJPEG on CUDA, within +-3 of libjpeg (different IDCT and upsampling rounding).
+// JPEG decoding matches libjpeg reference within +-3 rounding tolerance
 // The odd size has partial chroma blocks
 TEST_F(WatermarkTest, LoadsJpegVariantsLikeLibjpeg) {
 #if defined(_USE_CUDA_)
@@ -1696,6 +1910,1616 @@ TEST_F(WatermarkTest, RejectsHighBitDepthVideoDetection) {
     VideoHandle video = initVideo(settings);
     EXPECT_THROW(detectVideo(video.get()), std::runtime_error);
 }
+
+#if defined(_USE_OPENCL_) || defined(_USE_CUDA_)
+namespace {
+// the GPU HDR contract (FFmpeg's zscale + tonemap=mobius rendering) on the CPU: R'G'B' of a P010 luma sample and its interpolated 10-bit chroma
+std::array<float, 3> hdrReference(const uint16_t y, const std::array<float, 2>& chroma, const video_utils::MobiusParams& mobius) {
+    // the tables cover [0, 2], beyond 1 the curves are extended like zimg's
+    const auto curve = [](const float* table, const float value) {
+        const float position = std::clamp(value, 0.0f, 2.0f) * 1023.0f;
+        const int lower = static_cast<int>(position);
+        return std::fma(table[std::min(lower + 1, 2046)] - table[lower], position - lower, table[lower]);
+    };
+    const auto gamma = [&](const float value) { return curve(bt1886LUT, value); };
+    const auto pq = [&](const float value) { return curve(pqEotfLUT, value); };
+    const float Y = std::fma(static_cast<float>(y >> 6), 1.0f / 876.0f, -64.0f / 876.0f);
+    const float Cb = std::fma(chroma[0], 1.0f / 896.0f, -512.0f / 896.0f);
+    const float Cr = std::fma(chroma[1], 1.0f / 896.0f, -512.0f / 896.0f);
+    std::array<float, 3> rgb{pq(std::fma(1.4746f, Cr, Y)), pq(std::fma(-0.16455f, Cb, std::fma(-0.57135f, Cr, Y))), pq(std::fma(1.8814f, Cb, Y))};
+    const float luminance = std::fma(0.2627f, rgb[0], std::fma(0.6780f, rgb[1], 0.0593f * rgb[2]));
+    const float desaturation = std::max(luminance - 2.0f, 1.0e-6f) / std::max(luminance, 1.0e-6f);
+    for (auto& channel : rgb)
+        channel = std::fma(desaturation, luminance - channel, channel);
+    const float peak = std::max({rgb[0], rgb[1], rgb[2]});
+    const float mapped = peak <= 0.3f ? peak : mobius.k * (peak + mobius.a) / (peak + mobius.b);
+    for (auto& channel : rgb)
+        channel *= peak > 1.0e-6f ? mapped / peak : 0.0f;
+    return {gamma(std::fma(1.6605f, rgb[0], std::fma(-0.5876f, rgb[1], -0.0728f * rgb[2]))), gamma(std::fma(-0.1246f, rgb[0], std::fma(1.1329f, rgb[1], -0.0083f * rgb[2]))),
+        gamma(std::fma(-0.0182f, rgb[0], std::fma(-0.1006f, rgb[1], 1.1187f * rgb[2])))};
+}
+float reference709Luma(const std::array<float, 3>& rgb) { return std::fma(0.2126f, rgb[0], std::fma(0.7152f, rgb[1], 0.0722f * rgb[2])); }
+} // namespace
+
+// The GPU HDR conversion matches the CPU transcription of the contract: bilinear chroma at the siting (edges replicated), tonemapping per pixel,
+// zimg's 2:1 bilinear chroma filter and rounding. The 34x18 frame has partial GPU tiles
+TEST(GpuHdrTest, MatchesTheHdrContractForColoredPixelsPeaksAndChromaSitings) {
+    constexpr int width = 34, height = 18, pixels = width * height, chromaWidth = width / 2, chromaHeight = height / 2;
+    std::vector<uint16_t> source(pixels * 3 / 2), interleaved(pixels / 2);
+    for (int index = 0; index < pixels; ++index)
+        source[index] = static_cast<uint16_t>(((index * 37 + index / width * 71) % 1024) << 6);
+    for (int index = 0; index < pixels / 4; ++index) {
+        source[pixels + index] = interleaved[index * 2] = static_cast<uint16_t>(((index * 113 + 79) % 1024) << 6);
+        source[pixels + pixels / 4 + index] = interleaved[index * 2 + 1] = static_cast<uint16_t>(((index * 61 + 257) % 1024) << 6);
+    }
+    const auto chromaAt = [&](const int x, const int y, const video_utils::ChromaSiting& siting) {
+        const float u = (x - siting.x) * 0.5f, v = (y - siting.y) * 0.5f;
+        const int u0 = static_cast<int>(std::floor(u)), v0 = static_cast<int>(std::floor(v));
+        const auto sample = [&](const int plane, const int cx, const int cy) {
+            return static_cast<float>(source[pixels + plane * pixels / 4 + std::clamp(cy, 0, chromaHeight - 1) * chromaWidth + std::clamp(cx, 0, chromaWidth - 1)] >> 6);
+        };
+        std::array<float, 2> chroma{};
+        for (int plane = 0; plane < 2; ++plane) {
+            const float top = std::lerp(sample(plane, u0, v0), sample(plane, u0 + 1, v0), u - u0);
+            const float bottom = std::lerp(sample(plane, u0, v0 + 1), sample(plane, u0 + 1, v0 + 1), u - u0);
+            chroma[plane] = std::lerp(top, bottom, v - v0);
+        }
+        return chroma;
+    };
+    const auto weight = [](const int offset, const float site) { return std::max(0.0f, 1.0f - std::abs(offset - site) * 0.5f) * 0.5f; };
+    const auto devices = getAvailableDevices();
+    for (size_t deviceIndex = 0; deviceIndex < devices.size(); ++deviceIndex) {
+        ASSERT_TRUE(initializeEnvironment(static_cast<int>(deviceIndex)));
+        SCOPED_TRACE(devices[deviceIndex]);
+#if defined(_USE_OPENCL_)
+        auto& manager = OclQueueManager::getInstance();
+        cl::Buffer input(manager.getContext(), CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, source.size() * sizeof(uint16_t), source.data());
+        cl::Buffer floatOutput(manager.getContext(), CL_MEM_READ_WRITE, pixels * sizeof(float));
+        OclHdrTonemap converter(width, height, manager.getQueueRaw());
+#else
+        const auto stream = CudaStreamManager::getInstance().getComputeStream();
+        CudaArray<uint16_t> ySource(height, width, source.data(), stream), uvSource(height / 2, width, interleaved.data(), stream);
+        CudaArray<uint8_t> yOutput(height, width, stream), uvOutput(height / 2, width, stream);
+        CudaArray<float> floatOutput(height, width, stream);
+#endif
+        for (const auto siting : {
+                 video_utils::ChromaSiting{0.0f, 0.5f},
+                 video_utils::ChromaSiting{0.0f, 0.0f},
+                 video_utils::ChromaSiting{0.5f, 0.5f}
+        })
+            for (const float peak : {1.0f, 4.0f, 10.0f, 40.0f, 100.0f}) {
+                SCOPED_TRACE(std::format("siting ({}, {}) peak {}", siting.x, siting.y, peak));
+                const auto mobius = video_utils::MobiusParams::fromHdrPeak(peak);
+                std::vector<uint8_t> actual(pixels * 3 / 2);
+                std::vector<float> luma(pixels);
+#if defined(_USE_OPENCL_)
+                const auto& output = converter.convert(input, mobius, siting, floatOutput);
+                manager.getQueue().enqueueReadBuffer(output, CL_TRUE, 0, actual.size(), actual.data());
+                manager.getQueue().enqueueReadBuffer(floatOutput, CL_TRUE, 0, luma.size() * sizeof(float), luma.data());
+#else
+                cuda_utils::launchP010HdrToSdrKernel(
+                    ySource.data(), width * 2, uvSource.data(), width * 2, yOutput.data(), width, floatOutput.data(), uvOutput.data(), width, width, height, siting, mobius, stream);
+                yOutput.toHost(actual.data());
+                floatOutput.toHost(luma.data());
+                std::vector<uint8_t> uv(pixels / 2);
+                uvOutput.toHost(uv.data());
+                for (int index = 0; index < pixels / 4; ++index) {
+                    actual[pixels + index] = uv[index * 2];
+                    actual[pixels + pixels / 4 + index] = uv[index * 2 + 1];
+                }
+#endif
+                // reference R'G'B' -> Y and full resolution Cb/Cr of every pixel
+                std::vector<float> lumaReference(pixels), cbReference(pixels), crReference(pixels);
+                for (int y = 0; y < height; ++y)
+                    for (int x = 0; x < width; ++x) {
+                        const auto rgb = hdrReference(source[y * width + x], chromaAt(x, y, siting), mobius);
+                        const float Y = reference709Luma(rgb);
+                        lumaReference[y * width + x] = std::clamp(std::fma(Y, 219.0f, 16.0f), 0.0f, 255.0f);
+                        cbReference[y * width + x] = (rgb[2] - Y) * (1.0f / 1.8556f);
+                        crReference[y * width + x] = (rgb[0] - Y) * (1.0f / 1.5748f);
+                    }
+                int maximumByteError = 0;
+                float maximumFloatError = 0.0f;
+                for (int y = 0; y < height; ++y)
+                    for (int x = 0; x < width; ++x) {
+                        const float expected = lumaReference[y * width + x];
+                        maximumByteError = std::max(maximumByteError, std::abs(static_cast<int>(actual[y * width + x]) - static_cast<int>(std::lround(expected))));
+                        ASSERT_TRUE(std::isfinite(luma[x * height + y]));
+                        maximumFloatError = std::max(maximumFloatError, std::abs(luma[x * height + y] - expected));
+                    }
+                for (int cy = 0; cy < chromaHeight; ++cy)
+                    for (int cx = 0; cx < chromaWidth; ++cx) {
+                        float cb = 0.0f, cr = 0.0f;
+                        for (int dy = -1; dy <= 2; ++dy)
+                            for (int dx = -1; dx <= 2; ++dx) {
+                                const int x = std::clamp(2 * cx + dx, 0, width - 1), y = std::clamp(2 * cy + dy, 0, height - 1);
+                                const float tap = weight(dx, siting.x) * weight(dy, siting.y);
+                                cb += tap * cbReference[y * width + x];
+                                cr += tap * crReference[y * width + x];
+                            }
+                        const auto expectedU = std::lround(std::clamp(std::fma(cb, 224.0f, 128.0f), 0.0f, 255.0f));
+                        const auto expectedV = std::lround(std::clamp(std::fma(cr, 224.0f, 128.0f), 0.0f, 255.0f));
+                        maximumByteError = std::max({maximumByteError, std::abs(static_cast<int>(actual[pixels + cy * chromaWidth + cx]) - static_cast<int>(expectedU)),
+                            std::abs(static_cast<int>(actual[pixels + pixels / 4 + cy * chromaWidth + cx]) - static_cast<int>(expectedV))});
+                    }
+                EXPECT_LE(maximumByteError, 1);
+                EXPECT_LE(maximumFloatError, 0.02f);
+            }
+    }
+}
+#endif
+
+#if defined(_USE_OPENCL_)
+// manual timing of the HDR conversion of a 4K frame on every device: --gtest_also_run_disabled_tests --gtest_filter=*HdrConversionTiming*
+TEST(OpenCLVideoTest, DISABLED_HdrConversionTiming) {
+    constexpr int width = 3840, height = 2160, pixels = width * height;
+    std::vector<uint16_t> source(pixels * 3 / 2);
+    for (int index = 0; index < pixels * 3 / 2; ++index)
+        source[index] = static_cast<uint16_t>((index < pixels ? 300 + (index * 7 + index / width * 3) % 500 : 420 + (index * 5) % 180) << 6);
+    const auto devices = getAvailableDevices();
+    for (size_t deviceIndex = 0; deviceIndex < devices.size(); ++deviceIndex) {
+        ASSERT_TRUE(initializeEnvironment(static_cast<int>(deviceIndex)));
+        auto& manager = OclQueueManager::getInstance();
+        cl::Buffer input(manager.getContext(), CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, source.size() * sizeof(uint16_t), source.data());
+        cl::Buffer floatOutput(manager.getContext(), CL_MEM_READ_WRITE, pixels * sizeof(float));
+        OclHdrTonemap converter(width, height, manager.getQueueRaw());
+        const auto mobius = video_utils::MobiusParams::fromHdrPeak(10.0f);
+        for (const bool floatLuma : {false, true}) {
+            converter.convert(input, mobius, {0.0f, 0.5f}, floatLuma ? floatOutput : cl::Buffer{});
+            manager.getQueue().finish();
+            constexpr int runs = 50;
+            const auto start = std::chrono::steady_clock::now();
+            for (int run = 0; run < runs; ++run)
+                converter.convert(input, mobius, {0.0f, 0.5f}, floatLuma ? floatOutput : cl::Buffer{});
+            manager.getQueue().finish();
+            const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count() / runs;
+            std::cout << std::format("{}: {:.3f} ms per 4K frame{}\n", devices[deviceIndex], ms, floatLuma ? " (with float luma)" : "");
+        }
+    }
+}
+
+TEST(OpenCLVideoTest, PacksEncoderPlanesExactlyAndRetainsEarlierOutputSurfaces) {
+    using namespace video_utils;
+    const auto devices = getAvailableDevices();
+    int checked = 0;
+    for (size_t index = 0; index < devices.size(); ++index) {
+        ASSERT_TRUE(initializeEnvironment(static_cast<int>(index)));
+        auto& manager = OclQueueManager::getInstance();
+        const auto interop = manager.getVideoInterop();
+        if (!interop)
+            continue;
+        SCOPED_TRACE(devices[index]);
+        constexpr int width = 66, height = 34;
+        constexpr size_t pixels = width * height;
+        AVBufferRefPtr device(interop->createDevice());
+        AVBufferRefPtr frames(av_hwframe_ctx_alloc(device.get()));
+        ASSERT_TRUE(frames);
+        auto* context = reinterpret_cast<AVHWFramesContext*>(frames->data);
+        context->format = AV_PIX_FMT_D3D11;
+        context->sw_format = AV_PIX_FMT_NV12;
+        context->width = width;
+        context->height = height;
+        static_cast<AVD3D11VAFramesContext*>(context->hwctx)->BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_VIDEO_ENCODER;
+        ASSERT_GE(av_hwframe_ctx_init(frames.get()), 0);
+        auto output = interop->createOutput(frames.get(), manager.getQueueRaw());
+        AVFramePtr source(av_frame_alloc());
+        source->format = AV_PIX_FMT_YUV420P;
+        source->width = width;
+        source->height = height;
+        ASSERT_GE(av_frame_get_buffer(source.get(), 64), 0);
+        std::vector<uint8_t> planar(pixels * 3 / 2), replacement(pixels);
+        for (size_t position = 0; position < replacement.size(); ++position)
+            replacement[position] = static_cast<uint8_t>((position * 11 + 19) % 256);
+        for (int plane = 0; plane < 3; ++plane) {
+            const int planeWidth = plane == 0 ? width : width / 2, planeHeight = plane == 0 ? height : height / 2;
+            const size_t offset = plane == 0 ? 0 : pixels + (plane - 1) * pixels / 4;
+            for (int row = 0; row < planeHeight; ++row)
+                for (int col = 0; col < planeWidth; ++col)
+                    source->data[plane][row * source->linesize[plane] + col] = planar[offset + row * planeWidth + col] = static_cast<uint8_t>((row * 13 + col * 7 + plane * 73) % 256);
+        }
+        cl::Buffer packed(manager.getContext(), CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, planar.size(), planar.data());
+        cl::Buffer luma(manager.getContext(), CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, replacement.size(), replacement.data());
+        AVFramePtr first(output->copyFrom(source.get()));
+        AVFramePtr modified(output->copyFrom(packed, luma));
+        AVFramePtr copied(output->copyFrom(first.get()));
+        AVFramePtr uploaded(output->copyFrom(source.get(), luma));
+        const std::array<std::pair<const char*, AVFrame*>, 4> outputs{
+            {{"CPU upload", first.get()}, {"OpenCL buffer", modified.get()}, {"D3D11 copy", copied.get()}, {"CPU upload with luma", uploaded.get()}}
+        };
+        for (const auto& [name, frame] : outputs) {
+            SCOPED_TRACE(name);
+            output->waitUntilCopied(frame);
+            AVFramePtr readback(av_frame_alloc());
+            ASSERT_GE(av_hwframe_transfer_data(readback.get(), frame, 0), 0);
+            ASSERT_EQ(readback->format, AV_PIX_FMT_NV12);
+            int lumaError = 0, chromaError = 0;
+            for (int row = 0; row < height; ++row)
+                for (int col = 0; col < width; ++col) {
+                    const size_t offset = row * width + col;
+                    const int expected = frame == modified.get() || frame == uploaded.get() ? replacement[offset] : planar[offset];
+                    lumaError = std::max(lumaError, std::abs(static_cast<int>(readback->data[0][row * readback->linesize[0] + col]) - expected));
+                }
+            for (int row = 0; row < height / 2; ++row)
+                for (int col = 0; col < width; ++col) {
+                    const size_t offset = pixels + (col % 2) * pixels / 4 + row * (width / 2) + col / 2;
+                    chromaError = std::max(chromaError, std::abs(static_cast<int>(readback->data[1][row * readback->linesize[1] + col]) - planar[offset]));
+                }
+            EXPECT_EQ(lumaError, 0);
+            EXPECT_EQ(chromaError, 0);
+        }
+        ++checked;
+    }
+    if (!checked)
+        GTEST_SKIP() << "No OpenCL D3D11-sharing GPU";
+}
+
+TEST(OpenCLVideoTest, QsvPackedChromaSurfacesPreservePlanesAndEarlierFrames) {
+    using namespace video_utils;
+    const auto devices = getAvailableDevices();
+    int checked = 0;
+    for (size_t index = 0; index < devices.size(); ++index) {
+        ASSERT_TRUE(initializeEnvironment(static_cast<int>(index)));
+        auto& manager = OclQueueManager::getInstance();
+        const auto interop = manager.getVideoInterop();
+        if (!interop || manager.getDevice().getInfo<CL_DEVICE_VENDOR_ID>() != 0x8086)
+            continue;
+        AVBufferRefPtr d3d(interop->createDevice());
+        AVBufferRef* rawQsv = nullptr;
+        if (av_hwdevice_ctx_create_derived(&rawQsv, AV_HWDEVICE_TYPE_QSV, d3d.get(), 0) < 0)
+            continue;
+        AVBufferRefPtr qsv(rawQsv);
+        for (const auto format : {AV_PIX_FMT_YUV422P, AV_PIX_FMT_YUV444P}) {
+            SCOPED_TRACE(std::string(av_get_pix_fmt_name(format)) + " on " + devices[index]);
+            constexpr int width = 34, height = 18, pixels = width * height;
+            const int chromaWidth = format == AV_PIX_FMT_YUV444P ? width : width / 2;
+            const int chromaSamples = chromaWidth * height;
+            AVBufferRefPtr frames(av_hwframe_ctx_alloc(qsv.get()));
+            auto* fc = reinterpret_cast<AVHWFramesContext*>(frames->data);
+            fc->format = AV_PIX_FMT_QSV;
+            fc->sw_format = format == AV_PIX_FMT_YUV444P ? AV_PIX_FMT_VUYX : AV_PIX_FMT_YUYV422;
+            fc->width = width;
+            fc->height = height;
+            fc->initial_pool_size = 0;
+            if (av_hwframe_ctx_init(frames.get()) < 0)
+                continue;
+            auto output = interop->createOutput(frames.get(), manager.getQueueRaw());
+            AVFramePtr source(av_frame_alloc());
+            source->format = format;
+            source->width = width;
+            source->height = height;
+            ASSERT_GE(av_frame_get_buffer(source.get(), 64), 0);
+            std::vector<uint8_t> planar(pixels + 2 * chromaSamples), replacement(pixels);
+            for (int plane = 0; plane < 3; ++plane)
+                for (int row = 0; row < height; ++row)
+                    for (int col = 0; col < (plane == 0 ? width : chromaWidth); ++col) {
+                        const auto value = static_cast<uint8_t>((plane * 53 + row * 3 + col) % 256);
+                        source->data[plane][row * source->linesize[plane] + col] = value;
+                        planar[(plane == 0 ? 0 : pixels + (plane - 1) * chromaSamples) + row * (plane == 0 ? width : chromaWidth) + col] = value;
+                    }
+            for (int pixel = 0; pixel < pixels; ++pixel)
+                replacement[pixel] = static_cast<uint8_t>(255 - planar[pixel]);
+            cl::Buffer packed(manager.getContext(), CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, planar.size(), planar.data());
+            cl::Buffer luma(manager.getContext(), CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, replacement.size(), replacement.data());
+            AVFramePtr first(output->copyFrom(source.get())), modified(output->copyFrom(packed, luma));
+            source->format = format == AV_PIX_FMT_YUV444P ? AV_PIX_FMT_YUVJ444P : AV_PIX_FMT_YUVJ422P;
+            AVFramePtr uploaded(output->copyFrom(source.get(), luma));
+            output->waitUntilCopied(first.get());
+            AVFramePtr mapped(av_frame_alloc());
+            mapped->format = AV_PIX_FMT_D3D11;
+            ASSERT_GE(av_hwframe_map(mapped.get(), first.get(), AV_HWFRAME_MAP_READ | AV_HWFRAME_MAP_DIRECT), 0);
+            AVFramePtr copied(output->copyFrom(mapped.get()));
+            for (const auto* frame : {first.get(), modified.get(), uploaded.get(), copied.get()}) {
+                output->waitUntilCopied(frame);
+                AVFramePtr host(av_frame_alloc());
+                ASSERT_GE(av_hwframe_transfer_data(host.get(), frame, 0), 0);
+                ASSERT_EQ(host->format, fc->sw_format);
+                int maximumError = 0;
+                for (int row = 0; row < height; ++row)
+                    for (int col = 0; col < width; ++col) {
+                        const auto* pixel = host->data[0] + row * host->linesize[0] + col * (format == AV_PIX_FMT_YUV444P ? 4 : 2);
+                        const int y = format == AV_PIX_FMT_YUV444P ? pixel[2] : pixel[0];
+                        const int expectedY = frame == modified.get() || frame == uploaded.get() ? replacement[row * width + col] : planar[row * width + col];
+                        maximumError = std::max(maximumError, std::abs(y - expectedY));
+                        if (format == AV_PIX_FMT_YUV444P || col % 2 == 0) {
+                            const int cx = format == AV_PIX_FMT_YUV444P ? col : col / 2;
+                            const int u = pixel[1], v = format == AV_PIX_FMT_YUV444P ? pixel[0] : pixel[3];
+                            maximumError = std::max({maximumError, std::abs(u - planar[pixels + row * chromaWidth + cx]), std::abs(v - planar[pixels + chromaSamples + row * chromaWidth + cx])});
+                        }
+                    }
+                EXPECT_EQ(maximumError, 0);
+            }
+            ++checked;
+        }
+    }
+    if (!checked)
+        GTEST_SKIP() << "No QSV packed-chroma frame pool";
+}
+
+TEST(OpenCLVideoTest, PackedDecoderTexturesPreserveChromaAndConvertTo420) {
+    using namespace video_utils;
+    int checked = 0;
+    const auto devices = getAvailableDevices();
+    for (size_t index = 0; index < devices.size(); ++index) {
+        ASSERT_TRUE(initializeEnvironment(static_cast<int>(index)));
+        auto& manager = OclQueueManager::getInstance();
+        const auto interop = manager.getVideoInterop();
+        if (!interop)
+            continue;
+        AVBufferRefPtr device(interop->createDevice());
+        auto* dx = static_cast<AVD3D11VADeviceContext*>(reinterpret_cast<AVHWDeviceContext*>(device->data)->hwctx);
+        for (const auto textureFormat : {DXGI_FORMAT_YUY2, DXGI_FORMAT_Y210, DXGI_FORMAT_AYUV, DXGI_FORMAT_Y410}) {
+            SCOPED_TRACE(devices[index] + " DXGI " + std::to_string(textureFormat));
+            constexpr int width = 34, height = 18, pixels = width * height;
+            const bool is422 = textureFormat == DXGI_FORMAT_YUY2 || textureFormat == DXGI_FORMAT_Y210;
+            const int cw = is422 ? width / 2 : width;
+            const int pitch = width * (textureFormat == DXGI_FORMAT_YUY2 ? 2 : 4);
+            std::vector<uint8_t> data(static_cast<size_t>(pitch) * height);
+            for (int row = 0; row < height; ++row)
+                for (int col = 0; col < width; ++col) {
+                    const unsigned y = fixtureSample(0, row, col, 0), u = fixtureSample(1, row, is422 ? col / 2 : col, 0), v = fixtureSample(2, row, is422 ? col / 2 : col, 0);
+                    auto* pixel = data.data() + row * pitch;
+                    if (textureFormat == DXGI_FORMAT_YUY2) {
+                        pixel[col * 2] = static_cast<uint8_t>(y);
+                        pixel[col * 2 + 1] = static_cast<uint8_t>(col % 2 ? v : u);
+                    } else if (textureFormat == DXGI_FORMAT_Y210) {
+                        auto* words = reinterpret_cast<uint16_t*>(pixel);
+                        words[col * 2] = static_cast<uint16_t>(y << 8);
+                        words[col * 2 + 1] = static_cast<uint16_t>((col % 2 ? v : u) << 8);
+                    } else if (textureFormat == DXGI_FORMAT_AYUV) {
+                        pixel[col * 4] = static_cast<uint8_t>(v);
+                        pixel[col * 4 + 1] = static_cast<uint8_t>(u);
+                        pixel[col * 4 + 2] = static_cast<uint8_t>(y);
+                        pixel[col * 4 + 3] = 255;
+                    } else {
+                        reinterpret_cast<uint32_t*>(pixel)[col] = (u << 2) | (y << 12) | (v << 22) | (3u << 30);
+                    }
+                }
+            D3D11_TEXTURE2D_DESC desc{};
+            desc.Width = width;
+            desc.Height = height;
+            desc.MipLevels = desc.ArraySize = desc.SampleDesc.Count = 1;
+            desc.Format = textureFormat;
+            desc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+            D3D11_SUBRESOURCE_DATA initial{data.data(), static_cast<UINT>(pitch), 0};
+            ID3D11Texture2D* raw = nullptr;
+            if (FAILED(dx->device->CreateTexture2D(&desc, &initial, &raw)))
+                continue;
+            const auto release = [](ID3D11Texture2D* texture) { texture->Release(); };
+            std::unique_ptr<ID3D11Texture2D, decltype(release)> texture(raw, release);
+            D3D11_SHADER_RESOURCE_VIEW_DESC view{};
+            view.Format = textureFormat == DXGI_FORMAT_Y210 ? DXGI_FORMAT_R16G16B16A16_UINT : textureFormat == DXGI_FORMAT_Y410 ? DXGI_FORMAT_R10G10B10A2_UINT : DXGI_FORMAT_R8G8B8A8_UINT;
+            view.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+            view.Texture2D.MipLevels = 1;
+            ID3D11ShaderResourceView* supportedView = nullptr;
+            if (FAILED(dx->device->CreateShaderResourceView(texture.get(), &view, &supportedView)))
+                continue;
+            supportedView->Release();
+            AVFramePtr frame(av_frame_alloc());
+            frame->format = AV_PIX_FMT_D3D11;
+            frame->width = width;
+            frame->height = height;
+            frame->color_trc = AVCOL_TRC_BT709;
+            frame->data[0] = reinterpret_cast<uint8_t*>(texture.get());
+            for (const bool subsample : {false, true}) {
+                const auto format = subsample ? AV_PIX_FMT_YUV420P : is422 ? AV_PIX_FMT_YUV422P : AV_PIX_FMT_YUV444P;
+                const int outputWidth = subsample ? width / 2 : cw, outputHeight = subsample ? height / 2 : height;
+                auto copy = interop->createFrame(frame.get(), manager.getQueueRaw(), false, format);
+                const auto& buffer = copy->copyFrom(frame.get());
+                std::vector<uint8_t> actual(pixels + 2 * outputWidth * outputHeight);
+                manager.getQueue().enqueueReadBuffer(buffer, CL_TRUE, 0, actual.size(), actual.data());
+                int maximumError = 0;
+                for (int row = 0; row < height; ++row)
+                    for (int col = 0; col < width; ++col)
+                        maximumError = std::max(maximumError, std::abs(actual[row * width + col] - fixtureSample(0, row, col, 0)));
+                for (int plane = 1; plane < 3; ++plane)
+                    for (int row = 0; row < outputHeight; ++row)
+                        for (int col = 0; col < outputWidth; ++col) {
+                            int sum = 0;
+                            const int sx = cw / outputWidth, sy = height / outputHeight;
+                            for (int dy = 0; dy < sy; ++dy)
+                                for (int dx = 0; dx < sx; ++dx)
+                                    sum += fixtureSample(plane, row * sy + dy, col * sx + dx, 0);
+                            const int expected = (sum + sx * sy / 2) / (sx * sy);
+                            maximumError = std::max(maximumError, std::abs(actual[pixels + (plane - 1) * outputWidth * outputHeight + row * outputWidth + col] - expected));
+                        }
+                EXPECT_EQ(maximumError, 0);
+            }
+            ++checked;
+        }
+    }
+    if (!checked)
+        GTEST_SKIP() << "No compatible packed-video texture views";
+}
+
+TEST_F(WatermarkTest, HeldHardwareDecoderFrameIsNotOverwrittenByLaterFrames) {
+    using namespace video_utils;
+    session.reset();
+    const auto input = tempDir / "decoder-pool.mkv";
+    writeVideoFixture(input, false, AVCOL_TRC_BT709, true, "libx264");
+    const auto devices = getAvailableDevices();
+    int checked = 0;
+    for (size_t index = 0; index < devices.size(); ++index) {
+        ASSERT_TRUE(initializeEnvironment(static_cast<int>(index)));
+        auto settings = makeVideoSettings(input.string());
+        settings.useHwDecoder = true;
+        auto video = initVideo(settings);
+        if (!video->useHwDecoder)
+            continue;
+        SCOPED_TRACE(devices[index]);
+        AVFramePtr frame(av_frame_alloc()), held, before(av_frame_alloc()), after(av_frame_alloc());
+        AVPacketPtr packet(av_packet_alloc());
+        int frames = 0;
+        const auto drain = [&] {
+            int result;
+            while ((result = avcodec_receive_frame(video->inputDecoderCtx.get(), frame.get())) >= 0) {
+                ++frames;
+                if (!held) {
+                    held.reset(av_frame_clone(frame.get()));
+                    ASSERT_TRUE(held);
+                    ASSERT_GE(av_hwframe_transfer_data(before.get(), held.get(), 0), 0);
+                } else {
+                    EXPECT_FALSE(frame->data[0] == held->data[0] && frame->data[1] == held->data[1]);
+                }
+                av_frame_unref(frame.get());
+            }
+            EXPECT_TRUE(result == AVERROR(EAGAIN) || result == AVERROR_EOF);
+        };
+        while (av_read_frame(video->inputFormatCtx.get(), packet.get()) >= 0) {
+            if (packet->stream_index == video->videoStreamIndex) {
+                ASSERT_GE(avcodec_send_packet(video->inputDecoderCtx.get(), packet.get()), 0);
+                drain();
+            }
+            av_packet_unref(packet.get());
+        }
+        ASSERT_GE(avcodec_send_packet(video->inputDecoderCtx.get(), nullptr), 0);
+        drain();
+        ASSERT_EQ(frames, 100);
+        ASSERT_TRUE(held);
+        ASSERT_GE(av_hwframe_transfer_data(after.get(), held.get(), 0), 0);
+        for (int plane = 0; plane < 2; ++plane)
+            for (int row = 0; row < (plane == 0 ? held->height : held->height / 2); ++row)
+                ASSERT_EQ(std::memcmp(before->data[plane] + row * before->linesize[plane], after->data[plane] + row * after->linesize[plane], held->width), 0);
+        ++checked;
+    }
+    if (!checked)
+        GTEST_SKIP() << "No D3D11 hardware decoder";
+}
+
+TEST_F(WatermarkTest, HardwareVideoEncodersHandleGpuAndCpuDecodeAndWatermarkIntervals) {
+    session.reset();
+    const auto input = tempDir / "encode-source.mkv";
+    writeVideoFixture(input, false, AVCOL_TRC_BT709, true, "libx264");
+    const auto devices = getAvailableDevices();
+    for (size_t index = 0; index < devices.size(); ++index) {
+        ASSERT_TRUE(initializeEnvironment(static_cast<int>(index)));
+        auto& manager = OclQueueManager::getInstance();
+        if (!manager.getVideoInterop())
+            continue;
+        const auto vendor = manager.getDevice().getInfo<CL_DEVICE_VENDOR_ID>();
+        if (vendor != 0x8086 && vendor != 0x1002 && vendor != 0x10de)
+            continue;
+        const auto encoders = vendor == 0x8086   ? std::vector<std::string>{"h264_qsv", "hevc_qsv", "av1_qsv"}
+                              : vendor == 0x1002 ? std::vector<std::string>{"h264_amf", "hevc_amf"}
+                                                 : std::vector<std::string>{"h264_nvenc", "hevc_nvenc"};
+        for (const auto& name : encoders)
+            for (const bool hardwareDecode : {false, true}) {
+                SCOPED_TRACE(devices[index] + " " + name + (hardwareDecode ? " GPU decode" : " CPU decode"));
+                const auto output = tempDir / std::format("{}-{}-{}.mkv", index, name, hardwareDecode);
+                auto settings = makeVideoSettings(input.string());
+                settings.useHwDecoder = hardwareDecode;
+                settings.useHwEncoder = true;
+                settings.watermarkInterval = 7;
+                settings.encodeOptions = "-c:v " + name + " -g 30 -b:v 8M";
+                settings.encodeOutputPath = output.string();
+                auto video = initVideo(settings);
+                ASSERT_EQ(embedVideo(video.get()), 100);
+                ASSERT_TRUE(video->openclVideoOutput);
+                ASSERT_EQ(video->outputEncoderCtx->pix_fmt, vendor == 0x8086 ? AV_PIX_FMT_QSV : AV_PIX_FMT_D3D11);
+                video.reset();
+                EXPECT_EQ(firstVideoLuma(output).second, AVCOL_TRC_BT709);
+                settings.videoFile = output.string();
+                settings.useHwEncoder = false;
+                settings.useHwDecoder = false;
+                auto detection = initVideo(settings);
+                int frames = 0;
+                auto correlations = capturedCorrelations(detection.get(), frames);
+                EXPECT_EQ(frames, 100);
+                ASSERT_EQ(correlations.size(), 15);
+                std::sort(correlations.begin(), correlations.end());
+                EXPECT_GT(correlations[correlations.size() / 2], 0.5f);
+            }
+    }
+}
+
+TEST_F(WatermarkTest, HardwareEncoderDefaultsConvertTenBitAndHdrEvenOnSkippedFrames) {
+    session.reset();
+    const auto devices = getAvailableDevices();
+    for (const auto transfer : {AVCOL_TRC_BT709, AVCOL_TRC_SMPTE2084}) {
+        const auto input = tempDir / std::format("encode-tenbit-{}.mkv", static_cast<int>(transfer));
+        writeVideoFixture(input, true, transfer, true, "libx265");
+        for (size_t index = 0; index < devices.size(); ++index) {
+            ASSERT_TRUE(initializeEnvironment(static_cast<int>(index)));
+            auto& manager = OclQueueManager::getInstance();
+            if (!manager.getVideoInterop())
+                continue;
+            const auto vendor = manager.getDevice().getInfo<CL_DEVICE_VENDOR_ID>();
+            if (vendor != 0x8086 && vendor != 0x1002 && vendor != 0x10de)
+                continue;
+            SCOPED_TRACE(devices[index] + " transfer " + std::to_string(transfer));
+            auto settings = makeVideoSettings(input.string());
+            settings.useHwDecoder = settings.useHwEncoder = true;
+            settings.watermarkInterval = 7;
+            settings.encodeOptions.clear();
+            settings.encodeOutputPath = (tempDir / std::format("encoded-{}-{}.mkv", index, static_cast<int>(transfer))).string();
+            auto video = initVideo(settings);
+            ASSERT_EQ(embedVideo(video.get()), 100);
+            ASSERT_TRUE(video->openclVideoOutput);
+            const auto* encoder = video->outputEncoderCtx.get();
+            if (vendor == 0x10de) {
+                EXPECT_STREQ(encoder->codec->name, "hevc_nvenc");
+                EXPECT_EQ(encoder->pix_fmt, AV_PIX_FMT_D3D11);
+            } else if (vendor == 0x8086) {
+                EXPECT_STREQ(encoder->codec->name, "hevc_qsv");
+                EXPECT_EQ(encoder->flags & AV_CODEC_FLAG_QSCALE, 0);
+                EXPECT_EQ(encoder->global_quality, 20);
+                EXPECT_EQ(encoder->max_b_frames, -1);
+            } else {
+                EXPECT_STREQ(encoder->codec->name, "hevc_amf");
+                EXPECT_EQ(encoder->gop_size, 120);
+                int64_t qpI = 0, qpP = 0, quality = 0;
+                ASSERT_GE(av_opt_get_int(encoder->priv_data, "qp_i", 0, &qpI), 0);
+                ASSERT_GE(av_opt_get_int(encoder->priv_data, "qp_p", 0, &qpP), 0);
+                ASSERT_GE(av_opt_get_int(encoder->priv_data, "quality", 0, &quality), 0);
+                EXPECT_EQ(qpI, 22);
+                EXPECT_EQ(qpP, 22);
+                EXPECT_EQ(quality, 5); // AMF balanced preset
+            }
+            video.reset();
+            EXPECT_EQ(firstVideoLuma(settings.encodeOutputPath).second, AVCOL_TRC_BT709);
+            settings.videoFile = settings.encodeOutputPath;
+            settings.useHwEncoder = settings.useHwDecoder = false;
+            auto detection = initVideo(settings);
+            int frames = 0;
+            const auto correlations = capturedCorrelations(detection.get(), frames);
+            EXPECT_EQ(frames, 100);
+            EXPECT_EQ(correlations.size(), 15);
+        }
+    }
+}
+
+TEST_F(WatermarkTest, HardwareEncoderCannotSilentlyUseAnotherGpuOrOverwriteOutputOnFailure) {
+    session.reset();
+    const auto output = tempDir / "existing.mkv";
+    const std::string sentinel = "preserve existing output";
+    {
+        std::ofstream stream(output, std::ios::binary);
+        stream << sentinel;
+    }
+    const auto devices = getAvailableDevices();
+    for (size_t index = 0; index < devices.size(); ++index) {
+        ASSERT_TRUE(initializeEnvironment(static_cast<int>(index)));
+        const auto vendor = OclQueueManager::getInstance().getDevice().getInfo<CL_DEVICE_VENDOR_ID>();
+        if (vendor != 0x8086 && vendor != 0x1002 && vendor != 0x10de)
+            continue;
+        auto settings = makeVideoSettings(shortVideoFixture().string());
+        settings.useHwEncoder = true;
+        settings.encodeOutputPath = output.string();
+        settings.encodeOptions = vendor == 0x8086 ? "-c:v hevc_amf" : "-c:v hevc_qsv";
+        auto video = initVideo(settings);
+        EXPECT_THROW(embedVideo(video.get()), std::runtime_error);
+        video.reset();
+        const auto bytes = readBytes(output);
+        EXPECT_EQ(std::string(bytes.begin(), bytes.end()), sentinel);
+        settings.encodeOptions = "-c:v h264_mf -hw_encoding 0";
+        video = initVideo(settings);
+        EXPECT_THROW(embedVideo(video.get()), std::runtime_error);
+    }
+}
+
+TEST(OpenCLVideoTest, CopiesNv12PlanesWithoutChangingTheSourceSurface) {
+    using namespace video_utils;
+    const auto devices = getAvailableDevices();
+    size_t checked = 0;
+    for (size_t deviceIndex = 0; deviceIndex < devices.size(); ++deviceIndex) {
+        ASSERT_TRUE(initializeEnvironment(static_cast<int>(deviceIndex)));
+        auto& manager = OclQueueManager::getInstance();
+        const auto& interop = manager.getVideoInterop();
+        if (!interop)
+            continue;
+        SCOPED_TRACE(devices[deviceIndex]);
+        constexpr int width = 322, height = 182;
+        constexpr size_t lumaBytes = width * height;
+        AVBufferRefPtr device(interop->createDevice());
+        ASSERT_NE(device, nullptr);
+        AVBufferRefPtr frames(av_hwframe_ctx_alloc(device.get()));
+        ASSERT_NE(frames, nullptr);
+        auto* context = reinterpret_cast<AVHWFramesContext*>(frames->data);
+        context->format = AV_PIX_FMT_D3D11;
+        context->sw_format = AV_PIX_FMT_NV12;
+        context->width = width;
+        context->height = height;
+        context->initial_pool_size = 2;
+        ASSERT_GE(av_hwframe_ctx_init(frames.get()), 0);
+        AVFramePtr hardware(av_frame_alloc()), source(av_frame_alloc()), readback(av_frame_alloc());
+        ASSERT_GE(av_hwframe_get_buffer(frames.get(), hardware.get(), 0), 0);
+        auto copy = interop->createFrame(hardware.get(), manager.getQueueRaw());
+        source->format = AV_PIX_FMT_NV12;
+        source->width = width;
+        source->height = height;
+        ASSERT_GE(av_frame_get_buffer(source.get(), 32), 0);
+        for (int generation = 0; generation < 3; ++generation) {
+            std::vector<uint8_t> expected(lumaBytes * 3 / 2);
+            for (int row = 0; row < height; ++row)
+                for (int col = 0; col < width; ++col) {
+                    const uint8_t value = static_cast<uint8_t>(row * 7 + col * 3 + generation * 17);
+                    source->data[0][row * source->linesize[0] + col] = value;
+                    expected[row * width + col] = value;
+                }
+            for (int row = 0; row < height / 2; ++row)
+                for (int col = 0; col < width / 2; ++col) {
+                    const uint8_t u = static_cast<uint8_t>(row * 3 + col * 11 + generation * 19);
+                    const uint8_t v = static_cast<uint8_t>(row * 13 + col * 5 + generation * 23);
+                    source->data[1][row * source->linesize[1] + col * 2] = u;
+                    source->data[1][row * source->linesize[1] + col * 2 + 1] = v;
+                    expected[lumaBytes + row * (width / 2) + col] = u;
+                    expected[lumaBytes + lumaBytes / 4 + row * (width / 2) + col] = v;
+                }
+            ASSERT_GE(av_hwframe_transfer_data(hardware.get(), source.get(), 0), 0);
+            std::vector<uint8_t> actual(expected.size());
+            manager.getQueue().enqueueReadBuffer(copy->copyFrom(hardware.get()), CL_TRUE, 0, actual.size(), actual.data());
+            EXPECT_EQ(actual, expected);
+            av_frame_unref(readback.get());
+            ASSERT_GE(av_hwframe_transfer_data(readback.get(), hardware.get(), 0), 0);
+            for (int plane = 0; plane < 2; ++plane)
+                for (int row = 0; row < (plane == 0 ? height : height / 2); ++row)
+                    ASSERT_EQ(std::memcmp(source->data[plane] + row * source->linesize[plane], readback->data[plane] + row * readback->linesize[plane], width), 0);
+        }
+        ++checked;
+    }
+    if (checked == 0)
+        GTEST_SKIP() << "No OpenCL D3D11-sharing GPU is available";
+}
+
+TEST(OpenCLVideoTest, StagedFramesKeepTheirContentAndOrder) {
+    using namespace video_utils;
+    const auto devices = getAvailableDevices();
+    size_t checked = 0;
+    for (size_t deviceIndex = 0; deviceIndex < devices.size(); ++deviceIndex) {
+        ASSERT_TRUE(initializeEnvironment(static_cast<int>(deviceIndex)));
+        auto& manager = OclQueueManager::getInstance();
+        const auto& interop = manager.getVideoInterop();
+        if (!interop)
+            continue;
+        SCOPED_TRACE(devices[deviceIndex]);
+        constexpr int width = 322, height = 182, framesHeld = 3;
+        constexpr size_t lumaBytes = width * height;
+        AVBufferRefPtr device(interop->createDevice());
+        AVBufferRefPtr frames(av_hwframe_ctx_alloc(device.get()));
+        ASSERT_NE(frames, nullptr);
+        auto* context = reinterpret_cast<AVHWFramesContext*>(frames->data);
+        context->format = AV_PIX_FMT_D3D11;
+        context->sw_format = AV_PIX_FMT_NV12;
+        context->width = width;
+        context->height = height;
+        context->initial_pool_size = framesHeld;
+        // decoder surfaces, like the frames a D3D11 decoder stages
+        static_cast<AVD3D11VAFramesContext*>(context->hwctx)->BindFlags = D3D11_BIND_DECODER;
+        ASSERT_GE(av_hwframe_ctx_init(frames.get()), 0);
+        AVFramePtr source(av_frame_alloc());
+        source->format = AV_PIX_FMT_NV12;
+        source->width = width;
+        source->height = height;
+        ASSERT_GE(av_frame_get_buffer(source.get(), 32), 0);
+        const auto upload = [&](AVFrame* hardware, const int generation) {
+            for (int plane = 0; plane < 2; ++plane)
+                for (int row = 0; row < (plane == 0 ? height : height / 2); ++row)
+                    for (int col = 0; col < width; ++col)
+                        source->data[plane][row * source->linesize[plane] + col] = static_cast<uint8_t>(row * 5 + col * 3 + plane * 41 + generation * 29);
+            ASSERT_GE(av_hwframe_transfer_data(hardware, source.get(), 0), 0);
+        };
+        const auto expected = [&](const int generation) {
+            std::vector<uint8_t> packed(lumaBytes * 3 / 2);
+            for (int row = 0; row < height; ++row)
+                for (int col = 0; col < width; ++col)
+                    packed[row * width + col] = static_cast<uint8_t>(row * 5 + col * 3 + generation * 29);
+            for (int row = 0; row < height / 2; ++row)
+                for (int col = 0; col < width; ++col)
+                    packed[lumaBytes + (col % 2) * lumaBytes / 4 + row * (width / 2) + col / 2] = static_cast<uint8_t>(row * 5 + col * 3 + 41 + generation * 29);
+            return packed;
+        };
+        std::array<AVFramePtr, framesHeld> hardware;
+        for (int index = 0; index < framesHeld; ++index) {
+            hardware[index].reset(av_frame_alloc());
+            ASSERT_GE(av_hwframe_get_buffer(frames.get(), hardware[index].get(), 0), 0);
+            upload(hardware[index].get(), index);
+        }
+        auto copy = interop->createFrame(hardware[0].get(), manager.getQueueRaw());
+        for (const auto& frame : hardware)
+            copy->stage(frame.get());
+        // staging copied the surfaces: overwriting them afterwards does not change the queued frames
+        for (int index = 0; index < framesHeld; ++index)
+            upload(hardware[index].get(), index + framesHeld);
+        EXPECT_THROW(copy->copyFrom(hardware[1].get()), std::logic_error);
+        for (int index = 0; index < framesHeld; ++index) {
+            std::vector<uint8_t> actual(lumaBytes * 3 / 2);
+            manager.getQueue().enqueueReadBuffer(copy->copyFrom(hardware[index].get()), CL_TRUE, 0, actual.size(), actual.data());
+            EXPECT_EQ(actual, expected(index)) << "frame " << index;
+        }
+        // without staging, copyFrom copies the current surface
+        std::vector<uint8_t> actual(lumaBytes * 3 / 2);
+        manager.getQueue().enqueueReadBuffer(copy->copyFrom(hardware[1].get()), CL_TRUE, 0, actual.size(), actual.data());
+        EXPECT_EQ(actual, expected(1 + framesHeld));
+        ++checked;
+    }
+    if (checked == 0)
+        GTEST_SKIP() << "No OpenCL D3D11-sharing GPU is available";
+}
+
+TEST(OpenCLVideoTest, ConvertsP010PlanesWithoutChangingTheSourceSurface) {
+    using namespace video_utils;
+    size_t checked = 0;
+    const auto devices = getAvailableDevices();
+    for (size_t deviceIndex = 0; deviceIndex < devices.size(); ++deviceIndex) {
+        ASSERT_TRUE(initializeEnvironment(static_cast<int>(deviceIndex)));
+        auto& manager = OclQueueManager::getInstance();
+        const auto& interop = manager.getVideoInterop();
+        if (!interop)
+            continue;
+        SCOPED_TRACE(devices[deviceIndex]);
+        constexpr int width = 322, height = 182, allocationWidth = 352, allocationHeight = 192;
+        constexpr size_t lumaBytes = width * height;
+        AVBufferRefPtr device(interop->createDevice());
+        ASSERT_NE(device, nullptr);
+        AVBufferRefPtr frames(av_hwframe_ctx_alloc(device.get()));
+        auto* context = reinterpret_cast<AVHWFramesContext*>(frames->data);
+        context->format = AV_PIX_FMT_D3D11;
+        context->sw_format = AV_PIX_FMT_P010;
+        context->width = allocationWidth;
+        context->height = allocationHeight;
+        context->initial_pool_size = 2;
+        static_cast<AVD3D11VAFramesContext*>(context->hwctx)->BindFlags = D3D11_BIND_DECODER;
+        if (av_hwframe_ctx_init(frames.get()) < 0)
+            continue;
+        AVFramePtr firstSlice(av_frame_alloc()), hardware(av_frame_alloc()), source(av_frame_alloc()), readback(av_frame_alloc());
+        ASSERT_GE(av_hwframe_get_buffer(frames.get(), firstSlice.get(), 0), 0);
+        ASSERT_GE(av_hwframe_get_buffer(frames.get(), hardware.get(), 0), 0);
+        source->format = AV_PIX_FMT_P010;
+        source->width = allocationWidth;
+        source->height = allocationHeight;
+        ASSERT_GE(av_frame_get_buffer(source.get(), 32), 0);
+        hardware->width = width;
+        hardware->height = height;
+        auto copy = interop->createFrame(hardware.get(), manager.getQueueRaw());
+        auto rawCopy = interop->createFrame(hardware.get(), manager.getQueueRaw(), true);
+        for (const auto matrix : {AVCOL_SPC_BT709, AVCOL_SPC_SMPTE170M, AVCOL_SPC_BT2020_NCL}) {
+            for (const bool fullRange : {false, true}) {
+                SCOPED_TRACE(std::format("matrix={} full={}", static_cast<int>(matrix), fullRange));
+                for (int generation = 0; generation < 3; ++generation) {
+                    for (int plane = 0; plane < 2; ++plane)
+                        for (int row = 0; row < (plane == 0 ? allocationHeight : allocationHeight / 2); ++row)
+                            for (int col = 0; col < allocationWidth; ++col) {
+                                const int value = fullRange ? (row * 17 + col * 13 + generation * 73) % 1024 : 64 + (row * 17 + col * 13 + generation * 73) % (plane == 0 ? 877 : 897);
+                                reinterpret_cast<uint16_t*>(source->data[plane] + row * source->linesize[plane])[col] = static_cast<uint16_t>(value << 6);
+                            }
+                    hardware->width = allocationWidth;
+                    hardware->height = allocationHeight;
+                    ASSERT_GE(av_hwframe_transfer_data(hardware.get(), source.get(), 0), 0);
+                    hardware->width = width;
+                    hardware->height = height;
+                    hardware->colorspace = matrix;
+                    hardware->color_range = fullRange ? AVCOL_RANGE_JPEG : AVCOL_RANGE_MPEG;
+                    hardware->color_trc = AVCOL_TRC_BT709;
+                    std::vector<uint8_t> actual(lumaBytes * 3 / 2);
+                    manager.getQueue().enqueueReadBuffer(copy->copyFrom(hardware.get()), CL_TRUE, 0, actual.size(), actual.data());
+                    std::vector<uint16_t> raw(lumaBytes * 3 / 2);
+                    manager.getQueue().enqueueReadBuffer(rawCopy->copyFrom(hardware.get()), CL_TRUE, 0, raw.size() * sizeof(uint16_t), raw.data());
+                    std::array<int, 3> maximumError{};
+                    for (int plane = 0; plane < 3; ++plane) {
+                        const int planeWidth = plane == 0 ? width : width / 2;
+                        const int planeHeight = plane == 0 ? height : height / 2;
+                        const size_t offset = plane == 0 ? 0 : lumaBytes + (plane - 1) * lumaBytes / 4;
+                        for (int row = 0; row < planeHeight; ++row)
+                            for (int col = 0; col < planeWidth; ++col) {
+                                const auto* line = reinterpret_cast<const uint16_t*>(source->data[plane == 0 ? 0 : 1] + row * source->linesize[plane == 0 ? 0 : 1]);
+                                const int input = line[plane == 0 ? col : col * 2 + plane - 1] >> 6;
+                                ASSERT_EQ(raw[offset + row * planeWidth + col], line[plane == 0 ? col : col * 2 + plane - 1]);
+                                const int expected = std::min(255, (input + 2) / 4);
+                                maximumError[plane] = std::max(maximumError[plane], std::abs(static_cast<int>(actual[offset + row * planeWidth + col]) - expected));
+                            }
+                        EXPECT_EQ(maximumError[plane], 0) << "plane " << plane;
+                    }
+                    hardware->width = allocationWidth;
+                    hardware->height = allocationHeight;
+                    av_frame_unref(readback.get());
+                    ASSERT_GE(av_hwframe_transfer_data(readback.get(), hardware.get(), 0), 0);
+                    for (int plane = 0; plane < 2; ++plane)
+                        for (int row = 0; row < (plane == 0 ? allocationHeight : allocationHeight / 2); ++row)
+                            ASSERT_EQ(std::memcmp(source->data[plane] + row * source->linesize[plane], readback->data[plane] + row * readback->linesize[plane], allocationWidth * 2), 0);
+                    ++checked;
+                }
+            }
+        }
+    }
+    if (checked == 0)
+        GTEST_SKIP() << "No OpenCL D3D11-sharing GPU supports P010 input";
+}
+
+TEST_F(WatermarkTest, OpenCLHardwareVideoDecodeEmbedsAndDetectsWithCpuFallback) {
+    session.reset();
+    const auto input = tempDir / "h264.mkv";
+    writeVideoFixture(input, false, AVCOL_TRC_BT709, true, "libx264");
+    const auto devices = getAvailableDevices();
+    for (size_t deviceIndex = 0; deviceIndex < devices.size(); ++deviceIndex) {
+        ASSERT_TRUE(initializeEnvironment(static_cast<int>(deviceIndex)));
+        SCOPED_TRACE(devices[deviceIndex]);
+        auto settings = makeVideoSettings(input.string());
+        settings.useHwDecoder = true;
+        settings.watermarkInterval = 3;
+        settings.encodeOptions = "-c:v ffv1";
+        settings.encodeOutputPath = (tempDir / std::format("watermarked-{}.mkv", deviceIndex)).string();
+        {
+            auto session = initVideo(settings);
+            if (OclQueueManager::getInstance().getVideoInterop())
+                EXPECT_TRUE(session->useHwDecoder);
+            else
+                EXPECT_FALSE(session->useHwDecoder);
+            ASSERT_EQ(embedVideo(session.get()), 100);
+        }
+        settings.videoFile = settings.encodeOutputPath;
+        settings.encodeOutputPath.clear();
+        auto detected = initVideo(settings);
+        EXPECT_FALSE(detected->useHwDecoder) << "FFV1 must fall back to software decoding";
+        int frameCount = 0;
+        const auto correlations = capturedCorrelations(detected.get(), frameCount);
+        ASSERT_EQ(frameCount, 100);
+        ASSERT_EQ(correlations.size(), 34U);
+        auto sorted = correlations;
+        std::sort(sorted.begin(), sorted.end());
+        EXPECT_GT(sorted[sorted.size() / 2], 0.5f);
+        detected.reset();
+        settings.useHwDecoder = false;
+        auto software = initVideo(settings);
+        const auto baseline = capturedCorrelations(software.get(), frameCount);
+        EXPECT_EQ(correlations, baseline);
+        software.reset();
+        settings.videoFile = input.string();
+        settings.useHwDecoder = true;
+        auto hardware = initVideo(settings);
+        const auto hardwareCorrelations = capturedCorrelations(hardware.get(), frameCount);
+        hardware.reset();
+        settings.useHwDecoder = false;
+        auto reference = initVideo(settings);
+        const auto softwareCorrelations = capturedCorrelations(reference.get(), frameCount);
+        ASSERT_EQ(hardwareCorrelations.size(), softwareCorrelations.size());
+        for (size_t index = 0; index < hardwareCorrelations.size(); ++index)
+            EXPECT_NEAR(hardwareCorrelations[index], softwareCorrelations[index], 1.0e-5f);
+    }
+}
+TEST_F(WatermarkTest, OpenCLHardwareDecoderHandlesHevcAndAv1) {
+    session.reset();
+    for (const char* encoderName : {"libx265", "libsvtav1"}) {
+        const auto input = tempDir / (std::string(encoderName) + ".mkv");
+        writeVideoFixture(input, false, AVCOL_TRC_BT709, true, encoderName);
+        const auto devices = getAvailableDevices();
+        for (size_t deviceIndex = 0; deviceIndex < devices.size(); ++deviceIndex) {
+            ASSERT_TRUE(initializeEnvironment(static_cast<int>(deviceIndex)));
+            SCOPED_TRACE(std::string(encoderName) + " on " + devices[deviceIndex]);
+            auto settings = makeVideoSettings(input.string());
+            settings.useHwDecoder = true;
+            settings.watermarkInterval = 10;
+            auto hardware = initVideo(settings);
+            if (hardware->useHwDecoder)
+                EXPECT_EQ(hardware->inputDecoderCtx->pix_fmt, AV_PIX_FMT_D3D11);
+            int hardwareFrames = 0;
+            const auto actual = capturedCorrelations(hardware.get(), hardwareFrames);
+            hardware.reset();
+            settings.useHwDecoder = false;
+            auto software = initVideo(settings);
+            int softwareFrames = 0;
+            const auto expected = capturedCorrelations(software.get(), softwareFrames);
+            EXPECT_EQ(hardwareFrames, 100);
+            EXPECT_EQ(hardwareFrames, softwareFrames);
+            ASSERT_EQ(actual.size(), expected.size());
+            bool saved = false;
+            for (size_t index = 0; index < actual.size(); ++index) {
+                if (std::abs(actual[index] - expected[index]) > 1.0e-4f && !saved) {
+                    const auto directory = fs::temp_directory_path() / ("watermarking-decode-correlation-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+                    fs::create_directories(directory);
+                    fs::copy_file(input, directory / "input.mkv");
+                    std::ofstream details(directory / "details.txt");
+                    details << devices[deviceIndex] << '\n'
+                            << OclQueueManager::getInstance().getDevice().getInfo<CL_DRIVER_VERSION>() << '\n'
+                            << "Frame " << index * settings.watermarkInterval << "\nHardware " << std::setprecision(9) << actual[index] << "\nSoftware " << expected[index] << '\n';
+                    ADD_FAILURE() << "Decode correlation mismatch; original bitstream retained at " << directory.string();
+                    saved = true;
+                }
+                EXPECT_NEAR(actual[index], expected[index], 1.0e-4f);
+            }
+        }
+    }
+}
+
+// check pixels before detection to isolate failures to decoder, copies or reductions
+TEST_F(WatermarkTest, OpenCLAv1StagedLumaMatchesSoftwarePixelsAndDetectionIsRepeatable) {
+    using namespace video_utils;
+    session.reset();
+    const auto input = tempDir / "av1-pixels.mkv";
+    writeVideoFixture(input, false, AVCOL_TRC_BT709, true, "libsvtav1");
+    const auto reference = decodeVideoPlanes(input);
+    ASSERT_EQ(reference.frames.size(), 100);
+    const auto devices = getAvailableDevices();
+    int checked = 0;
+    for (size_t deviceIndex = 0; deviceIndex < devices.size(); ++deviceIndex) {
+        ASSERT_TRUE(initializeEnvironment(static_cast<int>(deviceIndex)));
+        SCOPED_TRACE(devices[deviceIndex]);
+        auto settings = makeVideoSettings(input.string());
+        settings.useHwDecoder = true;
+        auto video = initVideo(settings);
+        if (!video->useHwDecoder)
+            continue;
+        auto& manager = OclQueueManager::getInstance();
+        ASSERT_GT(video->decodeLookahead, 0U);
+        ImageBuffer luma(reference.height, reference.width, manager.getQueueRaw());
+        std::deque<AVFramePtr> held;
+        AVFramePtr frame(av_frame_alloc());
+        AVPacketPtr packet(av_packet_alloc());
+        size_t count = 0;
+        bool saved = false;
+        const auto consume = [&] {
+            const auto& packed = video->openclVideoFrame->copyFrom(held.front().get());
+            std::vector<uint8_t> pixels(static_cast<size_t>(reference.width) * reference.height);
+            manager.getQueue().enqueueReadBuffer(packed, CL_TRUE, 0, pixels.size(), pixels.data());
+            ASSERT_LT(count, reference.frames.size());
+            const auto& expected = reference.frames[count][0];
+            if (pixels != expected && !saved) {
+                const auto directory = fs::temp_directory_path() / ("watermarking-av1-mismatch-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+                fs::create_directories(directory);
+                fs::copy_file(input, directory / "input.mkv");
+                const auto write = [&](const char* name, const std::vector<uint8_t>& data) {
+                    std::ofstream stream(directory / name, std::ios::binary);
+                    stream.write(reinterpret_cast<const char*>(data.data()), static_cast<std::streamsize>(data.size()));
+                };
+                write("software.y", expected);
+                write("staged.y", pixels);
+                AVFramePtr direct(av_frame_alloc());
+                if (av_hwframe_transfer_data(direct.get(), held.front().get(), 0) >= 0) {
+                    std::vector<uint8_t> decoded(pixels.size());
+                    for (int y = 0; y < reference.height; ++y)
+                        std::memcpy(decoded.data() + y * reference.width, direct->data[0] + y * direct->linesize[0], reference.width);
+                    write("hardware.y", decoded);
+                }
+                std::ofstream details(directory / "details.txt");
+                details << devices[deviceIndex] << '\n'
+                        << manager.getDevice().getInfo<CL_DRIVER_VERSION>() << '\n'
+                        << "Frame " << count << ", size " << reference.width << 'x' << reference.height << '\n';
+                ADD_FAILURE() << "Decoded/staged AV1 luma differs from software. Artifacts: " << directory.string();
+                saved = true;
+            }
+            EXPECT_TRUE(pixels == expected) << "frame " << count;
+            cl_utils::launchPitchedToFloat(packed, luma.clBuffer(), reference.width, reference.height, reference.width, manager.getQueue());
+            const float first = video->watermarkObj->detectWatermark(luma);
+            const float second = video->watermarkObj->detectWatermark(luma);
+            // AMD driver can change float partial by an ulp when D3D11 shares GPU
+            EXPECT_NEAR(first, second, 1.0e-4f) << "Repeated detection on identical luma, frame " << count;
+            ++count;
+        };
+        const auto receive = [&] {
+            int status;
+            while ((status = avcodec_receive_frame(video->inputDecoderCtx.get(), frame.get())) >= 0) {
+                AVFramePtr owned(av_frame_clone(frame.get()));
+                ASSERT_TRUE(owned);
+                held.push_back(std::move(owned));
+                if (held.size() > video->decodeLookahead) {
+                    consume();
+                    held.pop_front();
+                }
+                video->openclVideoFrame->stage(held.back().get(), true);
+                av_frame_unref(frame.get());
+            }
+            EXPECT_TRUE(status == AVERROR(EAGAIN) || status == AVERROR_EOF);
+        };
+        while (av_read_frame(video->inputFormatCtx.get(), packet.get()) >= 0) {
+            if (packet->stream_index == video->videoStreamIndex) {
+                ASSERT_GE(avcodec_send_packet(video->inputDecoderCtx.get(), packet.get()), 0);
+                receive();
+            }
+            av_packet_unref(packet.get());
+        }
+        ASSERT_GE(avcodec_send_packet(video->inputDecoderCtx.get(), nullptr), 0);
+        receive();
+        for (; !held.empty(); held.pop_front())
+            consume();
+        EXPECT_EQ(count, reference.frames.size());
+        ++checked;
+    }
+    if (!checked)
+        GTEST_SKIP() << "No AV1 D3D11/OpenCL decoder";
+}
+
+// unsupported devices retain frames through software fallback
+TEST_F(WatermarkTest, OpenCLHardwareHdrToneMapsAllFramesAndPreservesDetectionIntervals) {
+    session.reset();
+    const auto input = tempDir / "hdr-main10.mkv";
+    writeVideoFixture(input, true, AVCOL_TRC_SMPTE2084, true, "libx265");
+    const auto devices = getAvailableDevices();
+    for (size_t deviceIndex = 0; deviceIndex < devices.size(); ++deviceIndex) {
+        ASSERT_TRUE(initializeEnvironment(static_cast<int>(deviceIndex)));
+        SCOPED_TRACE(devices[deviceIndex]);
+        auto settings = makeVideoSettings(input.string());
+        settings.useHwDecoder = true;
+        settings.watermarkInterval = 3;
+        settings.encodeOptions = "-c:v ffv1";
+        settings.encodeOutputPath = (tempDir / std::format("sdr-{}.mkv", deviceIndex)).string();
+        auto video = initVideo(settings);
+        if (OclQueueManager::getInstance().getVideoInterop()) {
+            EXPECT_TRUE(video->useHwDecoder);
+            EXPECT_TRUE(video->isHdr);
+        }
+        EXPECT_THROW(detectVideo(video.get()), std::runtime_error);
+        ASSERT_EQ(embedVideo(video.get()), 100);
+        video.reset();
+        video_utils::AVFramePtr pixels;
+        const auto [sample, transfer] = firstVideoLuma(settings.encodeOutputPath, &pixels);
+        EXPECT_EQ(transfer, AVCOL_TRC_BT709);
+        EXPECT_EQ(pixels->color_primaries, AVCOL_PRI_BT709);
+        EXPECT_EQ(pixels->colorspace, AVCOL_SPC_BT709);
+        EXPECT_EQ(pixels->color_range, AVCOL_RANGE_MPEG);
+        EXPECT_EQ(av_frame_get_side_data(pixels.get(), AV_FRAME_DATA_MASTERING_DISPLAY_METADATA), nullptr);
+        EXPECT_EQ(av_frame_get_side_data(pixels.get(), AV_FRAME_DATA_CONTENT_LIGHT_LEVEL), nullptr);
+        settings.videoFile = settings.encodeOutputPath;
+        settings.encodeOutputPath.clear();
+        auto detection = initVideo(settings);
+        int frames = 0;
+        auto correlations = capturedCorrelations(detection.get(), frames);
+        EXPECT_EQ(frames, 100);
+        ASSERT_EQ(correlations.size(), 34U);
+        std::sort(correlations.begin(), correlations.end());
+        EXPECT_GT(correlations[correlations.size() / 2], 0.5f);
+    }
+}
+
+TEST_F(WatermarkTest, OpenCLUnsupportedHdrFormatsKeepSoftwareToneMapping) {
+    session.reset();
+    for (const auto transfer : {AVCOL_TRC_ARIB_STD_B67, AVCOL_TRC_SMPTE2084}) {
+        const auto input = tempDir / std::format("hdr-fallback-{}.mkv", static_cast<int>(transfer));
+        const auto range = transfer == AVCOL_TRC_SMPTE2084 ? AVCOL_RANGE_JPEG : AVCOL_RANGE_MPEG;
+        writeVideoFixture(input, true, transfer, false, nullptr, AV_PIX_FMT_NONE, range);
+        auto settings = makeVideoSettings(input.string());
+        settings.useHwDecoder = true;
+        settings.encodeOptions = "-c:v ffv1";
+        settings.encodeOutputPath = (tempDir / std::format("fallback-sdr-{}.mkv", static_cast<int>(transfer))).string();
+        auto video = initVideo(settings);
+        EXPECT_FALSE(video->useHwDecoder);
+        EXPECT_FALSE(video->isHdr);
+        ASSERT_EQ(embedVideo(video.get()), 1);
+        video.reset();
+        EXPECT_EQ(firstVideoLuma(settings.encodeOutputPath).second, AVCOL_TRC_BT709);
+    }
+}
+
+TEST_F(WatermarkTest, OpenCLTenBitSdrConversionMatchesSoftwareOrFallsBack) {
+    session.reset();
+    for (const char* encoderName : {"libx265", "libsvtav1"}) {
+        SCOPED_TRACE(encoderName);
+        const auto input = tempDir / (std::string(encoderName) + "-main10.mkv");
+        writeVideoFixture(input, true, AVCOL_TRC_BT709, true, encoderName);
+        const auto devices = getAvailableDevices();
+        for (size_t deviceIndex = 0; deviceIndex < devices.size(); ++deviceIndex) {
+            ASSERT_TRUE(initializeEnvironment(static_cast<int>(deviceIndex)));
+            SCOPED_TRACE(devices[deviceIndex]);
+            std::array<int, 2> samples{};
+            for (const bool hardware : {false, true}) {
+                const auto output = tempDir / std::format("sdr10-{}-{}.mkv", deviceIndex, hardware);
+                auto settings = makeVideoSettings(input.string());
+                settings.useHwDecoder = hardware;
+                settings.encodeOptions = "-c:v ffv1";
+                settings.encodeOutputPath = output.string();
+                auto video = initVideo(settings);
+                if (video->useHwDecoder)
+                    EXPECT_EQ(video->decodedFormat, AV_PIX_FMT_P010);
+                ASSERT_EQ(embedVideo(video.get()), 100);
+                video.reset();
+                const auto [sample, transfer] = firstVideoLuma(output);
+                EXPECT_EQ(transfer, AVCOL_TRC_BT709);
+                samples[hardware ? 1 : 0] = sample;
+            }
+            EXPECT_NEAR(samples[0], samples[1], 2);
+        }
+    }
+}
+#endif
+
+#if defined(_USE_GPU_)
+// GPU HDR tonemapping renders like the CPU chain (FFmpeg zscale + tonemap=mobius with BT.2020 desaturation): the frames that are not watermarked
+// agree within the resampling and rounding differences of the two implementations
+TEST_F(WatermarkTest, GpuHdrRenderingMatchesTheCpuChain) {
+    session.reset();
+    const auto input = tempDir / "hdr-agreement.mkv";
+    writeVideoFixture(input, true, AVCOL_TRC_SMPTE2084, true, "libx265");
+    const auto devices = getAvailableDevices();
+    for (size_t deviceIndex = 0; deviceIndex < devices.size(); ++deviceIndex) {
+        SCOPED_TRACE(devices[deviceIndex]);
+        ASSERT_TRUE(initializeEnvironment(static_cast<int>(deviceIndex)));
+        std::array<DecodedVideo, 2> outputs;
+        bool gpuDecoded = true;
+        for (const bool hardware : {false, true}) {
+            auto settings = makeVideoSettings(input.string());
+            settings.useHwDecoder = hardware;
+            settings.watermarkInterval = 1000;
+            settings.encodeOptions = "-c:v ffv1";
+            settings.encodeOutputPath = (tempDir / std::format("hdr-agreement-{}-{}.mkv", deviceIndex, hardware)).string();
+            auto video = initVideo(settings);
+            gpuDecoded = !hardware || video->useHwDecoder;
+            if (!gpuDecoded)
+                break;
+            // force reference session through FFmpeg CPU chain
+            if (!hardware) {
+                ASSERT_FALSE(video->useHwDecoder);
+                video->isHdr = false;
+            } else {
+                ASSERT_TRUE(video->isHdr);
+            }
+            ASSERT_EQ(embedVideo(video.get()), 100);
+            bool cpuTonemap = false;
+            if (video->filterGraph)
+                for (unsigned index = 0; index < video->filterGraph->nb_filters; ++index)
+                    cpuTonemap |= std::string_view(video->filterGraph->filters[index]->filter->name) == "tonemap";
+            ASSERT_EQ(cpuTonemap, !hardware) << "The reference must run FFmpeg tonemap; the GPU case must not";
+            video.reset();
+            outputs[hardware ? 1 : 0] = decodeVideoPlanes(settings.encodeOutputPath);
+        }
+        if (!gpuDecoded)
+            continue;
+        ASSERT_EQ(outputs[0].frames.size(), 100);
+        ASSERT_EQ(outputs[1].frames.size(), 100);
+        for (int plane = 0; plane < 3; ++plane) {
+            int maximumError = 0;
+            double totalError = 0.0;
+            size_t samples = 0, beyondTwo = 0;
+            for (size_t index = 1; index < outputs[0].frames.size(); ++index)
+                for (size_t sample = 0; sample < outputs[0].frames[index][plane].size(); ++sample) {
+                    const int error = std::abs(outputs[0].frames[index][plane][sample] - outputs[1].frames[index][plane][sample]);
+                    maximumError = std::max(maximumError, error);
+                    totalError += error;
+                    beyondTwo += error > 2;
+                    ++samples;
+                }
+            const double meanError = totalError / static_cast<double>(samples), beyondTwoShare = static_cast<double>(beyondTwo) / static_cast<double>(samples);
+            std::cout << std::format("{} plane {}: max {}, mean {:.3f}, beyond 2: {} of {}\n", devices[deviceIndex], plane, maximumError, meanError, beyondTwo, samples);
+            // measured on a real 4K HDR10 clip: mean below 0.5 and 0.3% beyond 2. Steep edges of colors outside the gamut differ most (approximated powers)
+            EXPECT_LE(meanError, 0.2) << "plane " << plane;
+            EXPECT_LE(beyondTwoShare, 1.0e-2) << "plane " << plane;
+            EXPECT_LE(maximumError, 24) << "plane " << plane;
+        }
+    }
+}
+
+// CPU-decoded PQ HDR (FFV1) is uploaded and tonemapped by the GPU kernels: identical output to the same samples decoded in hardware (lossless HEVC)
+TEST_F(WatermarkTest, GpuTonemapsCpuDecodedHdrLikeHardwareDecodedHdr) {
+    session.reset();
+    const auto hevc = tempDir / "hdr-lossless.mkv", ffv1 = tempDir / "hdr-ffv1.mkv";
+    writeVideoFixture(hevc, true, AVCOL_TRC_SMPTE2084, true, "libx265", AV_PIX_FMT_NONE, AVCOL_RANGE_MPEG,
+        {
+            {"preset",      "ultrafast"         },
+            {"x265-params", "lossless=1:pools=2"}
+    });
+    writeVideoFixture(ffv1, true, AVCOL_TRC_SMPTE2084, true);
+    const auto devices = getAvailableDevices();
+    for (size_t deviceIndex = 0; deviceIndex < devices.size(); ++deviceIndex) {
+        SCOPED_TRACE(devices[deviceIndex]);
+        ASSERT_TRUE(initializeEnvironment(static_cast<int>(deviceIndex)));
+        std::array<DecodedVideo, 2> outputs;
+        bool hardwareDecoded = true;
+        for (const bool cpu : {false, true}) {
+            auto settings = makeVideoSettings((cpu ? ffv1 : hevc).string());
+            settings.useHwDecoder = true;
+            settings.watermarkInterval = 7;
+            settings.encodeOptions = "-c:v ffv1";
+            settings.encodeOutputPath = (tempDir / std::format("hdr-gpu-{}-{}.mkv", deviceIndex, cpu)).string();
+            auto video = initVideo(settings);
+            EXPECT_TRUE(video->isHdr);
+            if (cpu)
+                EXPECT_FALSE(video->useHwDecoder);
+            else
+                hardwareDecoded = video->useHwDecoder;
+            ASSERT_EQ(embedVideo(video.get()), 100);
+            video.reset();
+            outputs[cpu ? 1 : 0] = decodeVideoPlanes(settings.encodeOutputPath);
+        }
+        if (!hardwareDecoded)
+            continue;
+        ASSERT_EQ(outputs[0].frames.size(), 100);
+        ASSERT_EQ(outputs[1].frames.size(), 100);
+        for (size_t index = 0; index < outputs[0].frames.size(); ++index)
+            for (int plane = 0; plane < 3; ++plane)
+                EXPECT_TRUE(outputs[0].frames[index][plane] == outputs[1].frames[index][plane]) << "frame " << index << " plane " << plane;
+    }
+}
+
+// GPU decoding keeps 4:2:2/4:4:4 chroma like CPU decoding (or falls back to it): exact chroma and skipped-frame luma with a lossless encoder
+TEST_F(WatermarkTest, HardwareDecoderKeepsSdr422And444ChromaOrFallsBack) {
+    session.reset();
+    constexpr int interval = 10;
+    const auto devices = getAvailableDevices();
+    for (const auto format : {AV_PIX_FMT_YUV422P, AV_PIX_FMT_YUV444P, AV_PIX_FMT_YUV422P10LE, AV_PIX_FMT_YUV444P10LE}) {
+        const auto* descriptor = av_pix_fmt_desc_get(format);
+        const bool deep = descriptor->comp[0].depth > 8;
+        const auto input = tempDir / std::format("hevc-chroma-{}.mkv", static_cast<int>(format));
+        writeVideoFixture(input, deep, AVCOL_TRC_BT709, true, "libx265", format, AVCOL_RANGE_MPEG,
+            {
+                {"preset",      "ultrafast"         },
+                {"x265-params", "lossless=1:pools=2"}
+        },
+            true);
+        for (size_t deviceIndex = 0; deviceIndex < devices.size(); ++deviceIndex) {
+            SCOPED_TRACE(std::string(av_get_pix_fmt_name(format)) + " on " + devices[deviceIndex]);
+            ASSERT_TRUE(initializeEnvironment(static_cast<int>(deviceIndex)));
+            for (const bool hardware : {false, true}) {
+                SCOPED_TRACE(hardware ? "GPU decode" : "CPU decode");
+                const auto output = tempDir / std::format("hevc-chroma-out-{}-{}-{}.mkv", static_cast<int>(format), deviceIndex, hardware);
+                auto settings = makeVideoSettings(input.string());
+                settings.useHwDecoder = hardware;
+                settings.watermarkInterval = interval;
+                settings.encodeOptions = "-c:v ffv1";
+                settings.encodeOutputPath = output.string();
+                auto video = initVideo(settings);
+                if (!hardware)
+                    ASSERT_FALSE(video->useHwDecoder);
+                ASSERT_EQ(embedVideo(video.get()), 100);
+                video.reset();
+                EXPECT_EQ(firstVideoLuma(output).second, AVCOL_TRC_BT709);
+                const auto decoded = decodeVideoPlanes(output);
+                EXPECT_EQ(av_pix_fmt_desc_get(decoded.format)->log2_chroma_w, descriptor->log2_chroma_w);
+                EXPECT_EQ(av_pix_fmt_desc_get(decoded.format)->log2_chroma_h, descriptor->log2_chroma_h);
+                expectFixturePlanes(decoded, interval, deep ? 1 : 0);
+            }
+        }
+    }
+}
+#endif
+
+#if defined(_USE_CUDA_)
+// Exercise Blackwell's 4:2:2 surface layouts without requiring an NVDEC engine that can decode 4:2:2: NV12 for a 4:2:0 output, NV16 to keep the chroma
+TEST(CudaVideoTest, Converts422SurfacesToNv12OrNv16OnTheGpu) {
+    using namespace video_utils;
+    ASSERT_TRUE(initializeEnvironment(0));
+    AVBufferRef* rawDevice = nullptr;
+    AVDictionary* options = nullptr;
+    av_dict_set(&options, "current_ctx", "1", 0);
+    const int status = av_hwdevice_ctx_create(&rawDevice, AV_HWDEVICE_TYPE_CUDA, "0", options, 0);
+    av_dict_free(&options);
+    AVBufferRefPtr device(rawDevice);
+    ASSERT_GE(status, 0);
+    for (const auto format : {AV_PIX_FMT_NV16, AV_PIX_FMT_P210LE, AV_PIX_FMT_P216LE}) {
+        SCOPED_TRACE(av_get_pix_fmt_name(format));
+        constexpr int width = 320, height = 180;
+        const bool deep = format != AV_PIX_FMT_NV16;
+        AVBufferRefPtr frames(av_hwframe_ctx_alloc(device.get()));
+        ASSERT_TRUE(frames);
+        auto* context = reinterpret_cast<AVHWFramesContext*>(frames->data);
+        context->format = AV_PIX_FMT_CUDA;
+        context->sw_format = format;
+        context->width = width;
+        context->height = height;
+        ASSERT_GE(av_hwframe_ctx_init(frames.get()), 0);
+        AVFramePtr source(av_frame_alloc()), hardware(av_frame_alloc()), converted(av_frame_alloc()), result(av_frame_alloc());
+        ASSERT_TRUE(source && hardware && converted && result);
+        source->format = format;
+        source->width = width;
+        source->height = height;
+        ASSERT_GE(av_frame_get_buffer(source.get(), 32), 0);
+        for (int plane = 0; plane < 2; ++plane)
+            for (int row = 0; row < height; ++row)
+                for (int col = 0; col < width; ++col) {
+                    const int value = plane == 0 ? 64 + ((row + col) % 128) : (col % 2 == 0 ? 128 : 96);
+                    auto* line = source->data[plane] + row * source->linesize[plane];
+                    if (deep)
+                        reinterpret_cast<uint16_t*>(line)[col] = static_cast<uint16_t>((value * 4 + col % 4) << 6);
+                    else
+                        line[col] = static_cast<uint8_t>(value);
+                }
+        ASSERT_GE(av_hwframe_get_buffer(frames.get(), hardware.get(), 0), 0);
+        ASSERT_GE(av_hwframe_transfer_data(hardware.get(), source.get(), 0), 0);
+        hardware->pts = 0;
+        AVFormatContextPtr input(avformat_alloc_context());
+        ASSERT_TRUE(input);
+        auto* stream = avformat_new_stream(input.get(), nullptr);
+        ASSERT_NE(stream, nullptr);
+        stream->time_base = {1, 30};
+        for (const auto [output, surface] : {
+                 std::pair{AV_PIX_FMT_YUV420P, AV_PIX_FMT_NV12},
+                 std::pair{AV_PIX_FMT_YUV422P, AV_PIX_FMT_NV16}
+        }) {
+            SCOPED_TRACE(av_get_pix_fmt_name(surface));
+            VideoSession probe;
+            probe.videoStream = stream;
+            probe.useHwDecoder = true;
+            probe.decodedFormat = format;
+            probe.outputFormat = output;
+            probe.inputDecoderCtx.reset(avcodec_alloc_context3(nullptr));
+            ASSERT_TRUE(probe.inputDecoderCtx);
+            auto* decoder = probe.inputDecoderCtx.get();
+            decoder->width = width;
+            decoder->height = height;
+            decoder->pix_fmt = AV_PIX_FMT_CUDA;
+            decoder->sw_pix_fmt = format;
+            decoder->sample_aspect_ratio = {1, 1};
+            decoder->hw_frames_ctx = av_buffer_ref(frames.get());
+            // an NV16 surface already is the 4:2:2 output layout
+            if (format == surface) {
+                EXPECT_FALSE(initFilterGraph(&probe));
+                continue;
+            }
+            ASSERT_TRUE(initFilterGraph(&probe));
+            av_frame_unref(converted.get());
+            av_frame_unref(result.get());
+            ASSERT_GE(av_buffersrc_add_frame_flags(probe.buffersrcCtx, hardware.get(), AV_BUFFERSRC_FLAG_KEEP_REF), 0);
+            ASSERT_GE(av_buffersink_get_frame(probe.buffersinkCtx, converted.get()), 0);
+            ASSERT_GE(av_hwframe_transfer_data(result.get(), converted.get(), 0), 0);
+            ASSERT_EQ(result->format, surface);
+            for (int plane = 0; plane < 2; ++plane) {
+                int maximumError = 0;
+                for (int row = 0; row < (plane == 0 || surface == AV_PIX_FMT_NV16 ? height : height / 2); ++row)
+                    for (int col = 0; col < width; ++col) {
+                        const int expected = plane == 0 ? 64 + ((row + col) % 128) : (col % 2 == 0 ? 128 : 96);
+                        maximumError = std::max(maximumError, std::abs(static_cast<int>(result->data[plane][row * result->linesize[plane] + col]) - expected));
+                    }
+                EXPECT_LE(maximumError, 1) << "plane " << plane;
+            }
+        }
+    }
+}
+
+#endif
+
+#if defined(_USE_GPU_)
+TEST_F(WatermarkTest, HardwareDecoderRejectsLosslessH264EvenWith420PixelsOrAnIntraProfile) {
+    session.reset();
+    const auto devices = getAvailableDevices();
+    for (size_t deviceIndex = 0; deviceIndex < devices.size(); ++deviceIndex) {
+        ASSERT_TRUE(initializeEnvironment(static_cast<int>(deviceIndex)));
+        SCOPED_TRACE(devices[deviceIndex]);
+        for (const bool intra : {false, true}) {
+            const auto input = tempDir / std::format("h264-lossless-{}.mkv", intra);
+            writeVideoFixture(input, false, AVCOL_TRC_BT709, true, "libx264", intra ? AV_PIX_FMT_YUV444P : AV_PIX_FMT_YUV420P, AVCOL_RANGE_MPEG,
+                {
+                    {"qp", "0"               },
+                    {"g",  intra ? "1" : "30"}
+            });
+            auto settings = makeVideoSettings(input.string());
+            settings.useHwDecoder = true;
+            settings.watermarkInterval = 10;
+            auto video = initVideo(settings);
+            ASSERT_FALSE(video->useHwDecoder);
+            EXPECT_EQ(video->videoStream->codecpar->profile & ~AV_PROFILE_H264_INTRA, AV_PROFILE_H264_HIGH_444_PREDICTIVE);
+            int frames = 0;
+            const auto correlations = capturedCorrelations(video.get(), frames);
+            EXPECT_EQ(frames, 100);
+            EXPECT_EQ(correlations.size(), 10);
+        }
+    }
+}
+#endif
+
+#if defined(_USE_CUDA_)
+TEST_F(WatermarkTest, CpuDecodedFramesReachNvencThroughCudaSurfaces) {
+    // NVDEC misdecodes the High 4:4:4 Predictive profile of lossless H.264, these frames are decoded on the CPU
+    const auto input = tempDir / "nvenc-cpu-decode.mkv";
+    writeVideoFixture(input, false, AVCOL_TRC_BT709, true, "libx264", AV_PIX_FMT_YUV420P, AVCOL_RANGE_MPEG,
+        {
+            {"qp", "0"}
+    },
+        true);
+    auto settings = makeVideoSettings(input.string());
+    settings.useHwDecoder = settings.useHwEncoder = true;
+    settings.watermarkInterval = 7;
+    settings.encodeOptions = "-c:v hevc_nvenc -tune lossless";
+    settings.encodeOutputPath = (tempDir / "nvenc-cpu-decode-out.mkv").string();
+    auto video = initVideo(settings);
+    ASSERT_FALSE(video->useHwDecoder);
+    ASSERT_EQ(embedVideo(video.get()), 100);
+    EXPECT_EQ(video->outputEncoderCtx->pix_fmt, AV_PIX_FMT_CUDA);
+    video.reset();
+    // lossless NVENC keeps every chroma sample and the luma of the frames that are not watermarked
+    const auto source = decodeVideoPlanes(input).frames, encoded = decodeVideoPlanes(settings.encodeOutputPath).frames;
+    ASSERT_EQ(source.size(), 100);
+    ASSERT_EQ(encoded.size(), 100);
+    for (size_t index = 0; index < source.size(); ++index) {
+        SCOPED_TRACE(std::format("frame {}", index));
+        EXPECT_EQ(encoded[index][1], source[index][1]);
+        EXPECT_EQ(encoded[index][2], source[index][2]);
+        if (index % settings.watermarkInterval == 0)
+            EXPECT_NE(encoded[index][0], source[index][0]);
+        else
+            EXPECT_EQ(encoded[index][0], source[index][0]);
+    }
+    settings.videoFile = settings.encodeOutputPath;
+    settings.useHwEncoder = false;
+    auto detection = initVideo(settings);
+    int frames = 0;
+    auto correlations = capturedCorrelations(detection.get(), frames);
+    EXPECT_EQ(frames, 100);
+    ASSERT_EQ(correlations.size(), 15);
+    std::sort(correlations.begin(), correlations.end());
+    EXPECT_GT(correlations[correlations.size() / 2], 0.5f);
+}
+#endif
+
+// Software encoders keep the SDR chroma resolution: 8-bit and 10-bit sources give exact 8-bit chroma (the 10-bit fixture samples are multiples of 4),
+// skipped frames keep their luma, the range survives and detection reads the 4:2:2/4:4:4 luma without converting it
+TEST_F(WatermarkTest, SoftwareEncodersKeepSdrChromaResolution) {
+    constexpr int interval = 7;
+    for (const auto format : {AV_PIX_FMT_YUV420P, AV_PIX_FMT_YUV422P, AV_PIX_FMT_YUV444P, AV_PIX_FMT_YUV420P10LE, AV_PIX_FMT_YUV422P10LE, AV_PIX_FMT_YUV444P10LE})
+        for (const auto range : {AVCOL_RANGE_MPEG, AVCOL_RANGE_JPEG}) {
+            const auto* descriptor = av_pix_fmt_desc_get(format);
+            const bool deep = descriptor->comp[0].depth > 8;
+            SCOPED_TRACE(std::format("{} {}", av_get_pix_fmt_name(format), av_color_range_name(range)));
+            const auto input = tempDir / std::format("chroma-{}-{}.mkv", static_cast<int>(format), static_cast<int>(range));
+            const auto output = tempDir / std::format("chroma-out-{}-{}.mkv", static_cast<int>(format), static_cast<int>(range));
+            writeVideoFixture(input, deep, AVCOL_TRC_BT709, true, nullptr, format, range, {}, true);
+            auto settings = makeVideoSettings(input.string());
+            settings.watermarkInterval = interval;
+            settings.encodeOptions = "-c:v ffv1";
+            settings.encodeOutputPath = output.string();
+            auto video = initVideo(settings);
+            ASSERT_EQ(embedVideo(video.get()), 100);
+            video.reset();
+            const auto decoded = decodeVideoPlanes(output);
+            EXPECT_EQ(av_pix_fmt_desc_get(decoded.format)->log2_chroma_w, descriptor->log2_chroma_w);
+            EXPECT_EQ(av_pix_fmt_desc_get(decoded.format)->log2_chroma_h, descriptor->log2_chroma_h);
+            EXPECT_EQ(decoded.range, range);
+            expectFixturePlanes(decoded, interval, deep ? 1 : 0);
+            settings.videoFile = output.string();
+            auto detection = initVideo(settings);
+            int frames = 0;
+            auto correlations = capturedCorrelations(detection.get(), frames);
+            EXPECT_EQ(frames, 100);
+            ASSERT_EQ(correlations.size(), 15);
+            std::sort(correlations.begin(), correlations.end());
+            EXPECT_GT(correlations[correlations.size() / 2], 0.5f);
+        }
+}
+
+// an encoder that cannot keep the chroma resolution gets 4:2:0 and the conversion is reported
+TEST_F(WatermarkTest, EncodersWithoutTheSourceChromaReportTheConversion) {
+    const auto input = tempDir / "chroma-444.mkv";
+    writeVideoFixture(input, false, AVCOL_TRC_BT709, true, nullptr, AV_PIX_FMT_YUV444P, AVCOL_RANGE_MPEG, {}, true);
+    auto settings = makeVideoSettings(input.string());
+    settings.watermarkInterval = 50;
+    settings.encodeOptions = "-c:v libsvtav1 -preset 12";
+    settings.encodeOutputPath = (tempDir / "chroma-444-av1.mkv").string();
+    auto video = initVideo(settings);
+    testing::internal::CaptureStdout();
+    const int frames = embedVideo(video.get());
+    const std::string log = testing::internal::GetCapturedStdout();
+    EXPECT_EQ(frames, 100);
+    EXPECT_NE(log.find("Encoder 'libsvtav1' cannot keep this chroma resolution: the source chroma (yuv444p) is converted to yuv420p."), std::string::npos) << log;
+    video.reset();
+    EXPECT_EQ(decodeVideoPlanes(settings.encodeOutputPath).format, AV_PIX_FMT_YUV420P);
+}
+
+// odd dimensions need an output format without subsampling in that direction, detection reads only luma and accepts them
+TEST_F(WatermarkTest, OddDimensionsNeedAMatchingChromaLayout) {
+    constexpr int interval = 7;
+    for (const auto format : {AV_PIX_FMT_YUV444P, AV_PIX_FMT_YUV420P}) {
+        SCOPED_TRACE(av_get_pix_fmt_name(format));
+        const auto input = tempDir / std::format("odd-{}.mkv", static_cast<int>(format));
+        const auto output = tempDir / std::format("odd-out-{}.mkv", static_cast<int>(format));
+        writeVideoFixture(input, false, AVCOL_TRC_BT709, true, nullptr, format, AVCOL_RANGE_MPEG, {}, true, {321, 181});
+        auto settings = makeVideoSettings(input.string());
+        settings.watermarkInterval = interval;
+        settings.encodeOptions = "-c:v ffv1";
+        settings.encodeOutputPath = output.string();
+        auto video = initVideo(settings);
+        if (format == AV_PIX_FMT_YUV420P) {
+            EXPECT_THROW(embedVideo(video.get()), std::runtime_error);
+            EXPECT_FALSE(fs::exists(output));
+        } else {
+            ASSERT_EQ(embedVideo(video.get()), 100);
+            video.reset();
+            const auto decoded = decodeVideoPlanes(output);
+            EXPECT_EQ(decoded.format, AV_PIX_FMT_YUV444P);
+            EXPECT_EQ(decoded.width, 321);
+            EXPECT_EQ(decoded.height, 181);
+            expectFixturePlanes(decoded, interval);
+        }
+        settings.encodeOutputPath.clear();
+        auto detection = initVideo(settings);
+        int frames = 0;
+        const auto correlations = capturedCorrelations(detection.get(), frames);
+        EXPECT_EQ(frames, 100);
+        EXPECT_EQ(correlations.size(), 15);
+    }
+}
+
+#if defined(_USE_GPU_)
+// 4:2:2 and 4:4:4 sources with the default hardware encoder: NVENC CUDA surfaces keep the chroma when the GPU encodes it (a failed open retries with 4:2:0),
+// D3D11/QSV tries YUY2/AYUV surfaces, every required conversion is reported
+TEST_F(WatermarkTest, HardwareEncodingKeepsOrReportsTheChroma) {
+    session.reset();
+    const auto devices = getAvailableDevices();
+    for (size_t deviceIndex = 0; deviceIndex < devices.size(); ++deviceIndex) {
+        ASSERT_TRUE(initializeEnvironment(static_cast<int>(deviceIndex)));
+        SCOPED_TRACE(devices[deviceIndex]);
+        for (const auto format : {AV_PIX_FMT_YUV444P, AV_PIX_FMT_YUV422P, AV_PIX_FMT_YUV444P10LE, AV_PIX_FMT_YUV422P10LE}) {
+            SCOPED_TRACE(av_get_pix_fmt_name(format));
+            const auto input = tempDir / std::format("hardware-{}.mkv", static_cast<int>(format));
+            writeVideoFixture(input, av_pix_fmt_desc_get(format)->comp[0].depth > 8, AVCOL_TRC_BT709, true, nullptr, format, AVCOL_RANGE_MPEG, {}, true);
+            auto settings = makeVideoSettings(input.string());
+            settings.useHwEncoder = true;
+            settings.watermarkInterval = 7;
+            settings.encodeOptions.clear();
+            settings.encodeOutputPath = (tempDir / std::format("hardware-{}-out.mkv", static_cast<int>(format))).string();
+            auto video = initVideo(settings);
+            testing::internal::CaptureStdout();
+            const int frames = embedVideo(video.get());
+            const std::string log = testing::internal::GetCapturedStdout();
+            EXPECT_EQ(frames, 100);
+            const AVPixelFormat output = video->outputFormat;
+            video.reset();
+            EXPECT_EQ(decodeVideoPlanes(settings.encodeOutputPath).format, output);
+            if (output == AV_PIX_FMT_YUV420P)
+                EXPECT_NE(log.find(std::format(": the source chroma ({}) is converted to yuv420p.", av_get_pix_fmt_name(format))), std::string::npos) << log;
+            else
+                EXPECT_EQ(output, av_pix_fmt_desc_get(format)->log2_chroma_w == 0 ? AV_PIX_FMT_YUV444P : AV_PIX_FMT_YUV422P);
+        }
+    }
+}
+#endif
+
+#if defined(_USE_CUDA_)
+// an encoder option that changes the bitstream format is reported from the encoded stream: NVENC -highbitdepth writes 10-bit HEVC from the 8-bit frames
+TEST_F(WatermarkTest, EncodedFormatChangesAreReported) {
+    const auto input = tempDir / "depth-source.mkv";
+    writeVideoFixture(input, false, AVCOL_TRC_BT709, true, "libx264");
+    for (const bool promoted : {true, false}) {
+        auto settings = makeVideoSettings(input.string());
+        settings.useHwEncoder = true;
+        settings.watermarkInterval = 50;
+        settings.encodeOptions = promoted ? "-c:v hevc_nvenc -highbitdepth 1" : "-c:v hevc_nvenc -profile:v main10";
+        settings.encodeOutputPath = (tempDir / std::format("depth-{}.mkv", promoted)).string();
+        auto video = initVideo(settings);
+        testing::internal::CaptureStdout();
+        const int frames = embedVideo(video.get());
+        const std::string log = testing::internal::GetCapturedStdout();
+        EXPECT_EQ(frames, 100);
+        EXPECT_EQ(log.find("The encoded video is yuv420p10le while the watermarked frames are yuv420p") != std::string::npos, promoted) << log;
+    }
+}
+
+// lossless NVENC from 4:4:4 CUDA surfaces keeps every chroma sample, from NVDEC (HEVC) and from CPU decoding (FFV1)
+TEST_F(WatermarkTest, NvencKeeps444ChromaFromGpuAndCpuDecoding) {
+    constexpr int interval = 7;
+    for (const bool hevc : {true, false}) {
+        SCOPED_TRACE(hevc ? "HEVC source" : "FFV1 source");
+        const auto input = tempDir / (hevc ? "nvenc-444.mkv" : "nvenc-444-ffv1.mkv");
+        if (hevc)
+            writeVideoFixture(input, false, AVCOL_TRC_BT709, true, "libx265", AV_PIX_FMT_YUV444P, AVCOL_RANGE_MPEG,
+                {
+                    {"preset",      "ultrafast"         },
+                    {"x265-params", "lossless=1:pools=2"}
+            },
+                true);
+        else
+            writeVideoFixture(input, false, AVCOL_TRC_BT709, true, nullptr, AV_PIX_FMT_YUV444P, AVCOL_RANGE_MPEG, {}, true);
+        auto settings = makeVideoSettings(input.string());
+        settings.useHwDecoder = settings.useHwEncoder = true;
+        settings.watermarkInterval = interval;
+        settings.encodeOptions = "-c:v hevc_nvenc -tune lossless";
+        settings.encodeOutputPath = (tempDir / (hevc ? "nvenc-444-out.mkv" : "nvenc-444-ffv1-out.mkv")).string();
+        auto video = initVideo(settings);
+        if (!hevc)
+            ASSERT_FALSE(video->useHwDecoder);
+        ASSERT_EQ(embedVideo(video.get()), 100);
+        if (video->outputFormat != AV_PIX_FMT_YUV444P)
+            GTEST_SKIP() << "NVENC on this GPU does not encode HEVC 4:4:4";
+        video.reset();
+        const auto decoded = decodeVideoPlanes(settings.encodeOutputPath);
+        EXPECT_EQ(decoded.format, AV_PIX_FMT_YUV444P);
+        expectFixturePlanes(decoded, interval);
+    }
+}
+#endif
 
 // video embedding: covers the encoder/muxer setup, the filter graph, the encode
 // thread and the frame conversion kernels
@@ -1867,7 +3691,7 @@ TEST_F(WatermarkTest, ToneMapsBothEightAndTenBitPqAndHlg) {
     }
 }
 
-// Synthetic packets test muxer buffering; their payloads do not need to be decodable
+// synthetic packets test muxer buffering, payloads do not need to be decodable
 TEST(VideoMuxTest, EmptyAudioStreamDoesNotRetainTheWholeVideo) {
     using namespace video_utils;
     auto input = std::unique_ptr<AVFormatContext, decltype(&avformat_free_context)>(avformat_alloc_context(), avformat_free_context);
@@ -1940,6 +3764,24 @@ TEST_F(WatermarkTest, RejectsAnEncodeOptionsStringWithoutAnEncoder) {
     VideoHandle session = initVideo(settings);
     EXPECT_THROW(embedVideo(session.get()), std::runtime_error);
 }
+
+TEST_F(WatermarkTest, RejectsHybridHardwareEncodersWhenCpuEncodingIsSelected) {
+    for (const char* codec : {"h264_qsv", "h264_mf"}) {
+        auto settings = makeVideoSettings(shortVideoFixture().string());
+        settings.encodeOptions = std::string("-c:v ") + codec;
+        settings.encodeOutputPath = (tempDir / "hybrid-mismatch.mkv").string();
+        auto video = initVideo(settings);
+        EXPECT_THROW(embedVideo(video.get()), std::runtime_error);
+    }
+}
+
+#if defined(_USE_EIGEN_)
+TEST_F(WatermarkTest, EigenRejectsHardwareVideoEncodingBeforeOpeningInput) {
+    auto settings = makeVideoSettings("missing-input.mkv");
+    settings.useHwEncoder = true;
+    EXPECT_THROW(initVideo(settings), std::invalid_argument);
+}
+#endif
 
 // Repair invalid DTS values without changing timestamps that are already valid
 TEST(VideoTimestampTest, RepairsOnlyInvalidDecodeTimestamps) {

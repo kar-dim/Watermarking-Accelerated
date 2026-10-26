@@ -99,7 +99,7 @@ void BenchmarkWorker::run() {
         constexpr int maxIterations = 300;
         std::vector<double> samples;
         samples.reserve(maxIterations);
-        // the GUI keeps the latest preview until the next one arrives, so the step after it can reuse the other buffer
+        // GUI holds latest preview until next arrival, ping-pong buffer reused on subsequent step
         std::array<QImage, 2> previews;
 
         // auto-tuned performance lambda

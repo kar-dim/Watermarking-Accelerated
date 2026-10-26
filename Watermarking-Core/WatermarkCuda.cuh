@@ -15,11 +15,8 @@
 #include <utility>
 #include <vector>
 
-// CUDA graph of one pipeline (embed or detect): recorded once and replayed with ONE launch while its buffers and kernel arguments (the
-// key) stay the same, recorded again when they change (the existing graph is updated in place when possible). It is recorded on its own
-// stream: capture is per stream, work that another thread puts on the compute stream (the image prefetch uploads) would end up in the graph or break the capture.
-// Capture streams and instantiated graphs are reused (see CudaStreamManager): a new pipeline of the same "kind" (one per image size) updates the graph
-// of a released one instead of instantiating its own
+// CUDA graph recorded per pipeline and replayed per frame, capture stream isolates uploads
+// capture streams and instantiated graphs reused across same image dimensions
 class PipelineGraph {
   public:
     struct Key {
@@ -35,7 +32,7 @@ class PipelineGraph {
     PipelineGraph& operator=(const PipelineGraph&) = delete;
     ~PipelineGraph() { CudaStreamManager::getInstance().releaseGraph(device, kind, exec); }
 
-    // records the kernels that "enqueue" puts on the stream it receives (when the key changed), then launches the graph on "stream"
+    // records enqueue kernels on stream and launches graph
     template <typename Enqueue>
     void launch(cudaStream_t stream, const Key& newKey, Enqueue&& enqueue) {
         if (!exec || !(newKey == key)) {
@@ -52,7 +49,7 @@ class PipelineGraph {
             } catch (...) {
                 if (cudaStreamEndCapture(captureStream, &graph) == cudaSuccess && graph)
                     cudaGraphDestroy(graph);
-                // failed captures must not stay on the stream: it is not reused
+                // failed capture not reused, discard stream
                 cudaStreamDestroy(captureStream);
                 (void)cudaGetLastError();
                 throw;
@@ -62,7 +59,7 @@ class PipelineGraph {
             CUDA_CHECK(captured);
             cudaGraphExecUpdateResultInfo updateInfo;
             if (exec && cudaGraphExecUpdate(exec, graph, &updateInfo) != cudaSuccess) {
-                // different kernels (another output layout or channel count): create a new graph
+                // new output layout or channels requires new graph
                 (void)cudaGetLastError();
                 cudaGraphExecDestroy(exec);
                 exec = nullptr;
@@ -92,10 +89,9 @@ class WatermarkCuda final : public WatermarkBase {
     WatermarkCuda<p>(const int rows, const int cols, WatermarkBuffer watermark, const float psnr)
         : WatermarkBase(rows, cols, std::move(watermark), psnr), stream(CudaStreamManager::getInstance().getComputeStream()), coefficients(localSize, stream), stopFlag(FlagBuffer::zeros(1, stream)) {
         using L = MeShiftLayout<p>;
-        // border lines are summed in runs, one run per thread (borderBlocksPerLine blocks per line and column shift group)
+        // border lines summed in runs, one run per thread
         borderBlocksPerLine = (((std::max(this->baseRows, this->baseCols) + L::interiorRun - 1) / L::interiorRun) + shiftBlockSize - 1) / shiftBlockSize;
-        // the inner sums use as many blocks as fit on the GPU at once, NEVER more than tasks, one set of blocks per column shift
-        // group. When there are few border blocks, room is left for them so they run together with the inner blocks, not after them
+        // inner blocks fit GPU capacity, border blocks run concurrently
         const int residentBlocks = static_cast<int>(cuda_utils::gridSizeMeCalculate(shiftSumsKernel(), shiftBlockSize));
         const int borderBlocks = borderBlocksPerLine * 2 * L::borderSize * L::shiftGroups;
         const int interiorSlots = 4 * borderBlocks <= residentBlocks ? residentBlocks - borderBlocks : residentBlocks;
@@ -103,14 +99,14 @@ class WatermarkCuda final : public WatermarkBase {
         const int blocksPerGroup = std::min<int>(interiorSlots / L::shiftGroups, (interiorTasks + shiftBlockSize - 1) / shiftBlockSize);
         shiftInteriorBlocks = std::max(blocksPerGroup, 1) * L::shiftGroups;
         shiftSumsBlocks = shiftInteriorBlocks + borderBlocks;
-        // zeroed once, after that me_solve_system zeroes them after they are read
+        // zeroed once, me_solve_system zeroes after read
         shiftSums = CudaArray<uint64_t>::zeros(L::shiftSumsSize, stream);
         if constexpr (L::copyBorderRows)
             borderRowsCopy = CudaArray<float>(L::borderCopyRows * this->baseCols, stream);
         solverSystem = CudaArray<uint64_t>(solverSystemSize, stream);
         const dim3 errorGrid = ErrorTile<p>::grid(this->baseCols, this->baseRows);
         const int corrNumBlocks = errorGrid.x * errorGrid.y;
-        // per frame buffers live as long as the object (CUDA graphs need fixed pointers!)
+        // per frame buffers live with object, CUDA graphs require fixed pointers
         u = CudaArray<__half>(this->baseRows, this->baseCols, stream);
         sumSq = CudaArray<uint64_t>::zeros(2, stream);
         errorSeq = ImageBuffer(this->baseRows, this->baseCols, stream);

@@ -4,7 +4,7 @@
 #include <vector>
 
 /*!
- *  \brief  Helper struct to hold image buffers and metadata loaded from file (JPEG, PNG, TIFF, etc).
+ *  \brief  Image buffers and metadata loaded from file
  *  \author Dimitris Karatzas
  */
 struct ImageFileBuffer {

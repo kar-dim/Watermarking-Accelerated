@@ -40,11 +40,10 @@ namespace {
 
 inline std::string formatExecutionTime(const bool showFps, const double seconds) { return showFps ? std::format("FPS: {:.2f} FPS", 1.0 / seconds) : std::format("{:.6f} seconds", seconds); }
 
-// measures execution time for a passed function
 template <typename F>
 double executionTime(F&& func, int loops = 1, const bool warmup = true) {
     if (warmup)
-        func(); // warmup one time
+        func(); // warmup once
     auto start = std::chrono::high_resolution_clock::now();
     for (int i = 0; i < loops; i++)
         func();
@@ -57,14 +56,13 @@ struct OptionDefinition {
     std::string_view name;
 };
 
-// Supported command-line options and their groups
 constexpr std::array cliSettings = {
     OptionDefinition{"global",  "watermark_password"   },
     OptionDefinition{"global",  "p"                    },
     OptionDefinition{"global",  "psnr"                 },
     OptionDefinition{"global",  "display_fps"          },
     OptionDefinition{"compute", "gpu_device_id"        },
-    OptionDefinition{"compute", "cuda_hw_encoder"      },
+    OptionDefinition{"compute", "hw_encoder"           },
     OptionDefinition{"image",   "mode"                 },
     OptionDefinition{"image",   "path"                 },
     OptionDefinition{"image",   "output_path"          },
@@ -78,10 +76,8 @@ constexpr std::array cliSettings = {
     OptionDefinition{"video",   "watermark_interval"   }
 };
 
-// Builds a lookup key string from section and setting name
 string settingKey(const std::string_view section, const std::string_view name) { return string(section) + "." + string(name); }
 
-// Holds parsed command-line flags and option values
 struct CommandLineOptions {
     std::map<string, string> settings;
     bool benchmark = false;
@@ -90,11 +86,9 @@ struct CommandLineOptions {
     bool help = false;
 };
 
-// Resolves a command-line option name to an OptionDefinition
 OptionDefinition resolveOption(const std::string_view option) {
     const size_t separator = option.find('.');
     if (separator != std::string_view::npos) {
-        // Find exact match when section prefix is explicitly specified
         const std::string_view section = option.substr(0, separator);
         const std::string_view name = option.substr(separator + 1);
         for (const auto& definition : cliSettings)
@@ -103,7 +97,6 @@ OptionDefinition resolveOption(const std::string_view option) {
         throw std::runtime_error("Unknown command-line setting '--" + string(option) + "'");
     }
 
-    // Find unique match when no section prefix is provided
     const OptionDefinition* match = nullptr;
     for (const auto& definition : cliSettings) {
         if (definition.name != option)
@@ -117,7 +110,6 @@ OptionDefinition resolveOption(const std::string_view option) {
     return *match;
 }
 
-// Parses command-line arguments into flags and option values
 CommandLineOptions parseCommandLine(const int argc, char* argv[]) {
     CommandLineOptions result;
     for (int i = 1; i < argc; ++i) {
@@ -140,13 +132,12 @@ CommandLineOptions parseCommandLine(const int argc, char* argv[]) {
             continue;
         }
         if (argument == "--no-pause") {
-            // Keep accepting the legacy flag; CLI commands never pause
+            // keep accepting legacy flag, CLI commands never pause
             continue;
         }
         if (!argument.starts_with("--"))
             throw std::runtime_error("Unexpected positional argument '" + argument + "'");
 
-        // Parse key and value from arguments using equals sign or space separator
         const size_t equals = argument.find('=');
         const string option = argument.substr(2, equals == string::npos ? string::npos : equals - 2);
         string value;
@@ -158,14 +149,12 @@ CommandLineOptions parseCommandLine(const int argc, char* argv[]) {
             value = argv[++i];
         }
 
-        // Match the option to its definition and store its value
         const auto definition = resolveOption(option);
         result.settings[settingKey(definition.section, definition.name)] = std::move(value);
     }
     return result;
 }
 
-// Displays command-line usage and available options
 void printHelp() {
     cout << R"(
 Usage: Watermarking-CLI [options]
@@ -190,7 +179,7 @@ Global settings:
 
 Compute settings:
   --gpu_device_id N          GPU device index (CUDA and OpenCL builds, defaults to 0).
-  --cuda_hw_encoder BOOL     Use NVENC for video (all builds; default: false).
+  --hw_encoder BOOL          Use GPU video encoding (CUDA/OpenCL; default: false).
 
 Image settings:
   --image.mode MODE          single, batch_embed, or batch_detect (default: single).
@@ -205,7 +194,7 @@ Video settings:
   --video.path FILE          Input video; selects video mode when provided.
   --encode_output_path FILE  Destination video file for embed mode.
   --encode_codec_options STR Software encoder and options, e.g. -c:v libx265.
-  --hw_encode_options STR    NVENC encoder and options, e.g. -c:v hevc_nvenc.
+  --hw_encode_options STR    Hardware encoder/options, default follows selected GPU.
   --watermark_interval N     Embed or detect every Nth frame (N >= 1; default: 1).
 
 Every option also accepts its group-qualified spelling, for example
@@ -217,18 +206,15 @@ Example: Watermarking-CLI --image.path input.png --output_path output.png
 )";
 }
 
-// Typed access to command-line values with defaults for omitted options
 class Settings {
   public:
     explicit Settings(const std::map<string, string>& values) : values_(values) {}
 
-    // Use the caller's default when the option was not supplied
     string Get(const string& section, const string& name, const string& defaultValue) const {
         const auto value = values_.find(settingKey(section, name));
         return value == values_.end() ? defaultValue : value->second;
     }
 
-    // Reject overflow and trailing text in integer options
     long GetInteger(const string& section, const string& name, const long defaultValue) const {
         const string value = Get(section, name, std::to_string(defaultValue));
         errno = 0;
@@ -239,7 +225,6 @@ class Settings {
         return parsed;
     }
 
-    // Reject non-finite, out-of-range and partially parsed numbers
     float GetFloat(const string& section, const string& name, const float defaultValue) const {
         const string value = Get(section, name, std::to_string(defaultValue));
         errno = 0;
@@ -250,7 +235,6 @@ class Settings {
         return parsed;
     }
 
-    // Accept common boolean spellings without case sensitivity
     bool GetBoolean(const string& section, const string& name, const bool defaultValue) const {
         const string value = Get(section, name, defaultValue ? "true" : "false");
         string normalized = value;
@@ -266,7 +250,6 @@ class Settings {
     const std::map<string, string>& values_;
 };
 
-// Escapes and quotes a string for CSV formatting
 string csvString(const string& value) {
     string escaped = "\"";
     for (const char c : value)
@@ -279,7 +262,6 @@ string csvString(const string& value) {
  *  \brief  Helper functions for testing the watermark algorithms
  *  \author Dimitris Karatzas
  */
-// batch processing of images in a directory (for both embed and detect)
 static int testForImageBatch(const Settings& options, const int p, const float psnr, const bool isEmbed) {
     const string watermarkPassword = options.Get("global", "watermark_password", "");
     checkError(watermarkPassword.empty(), "No valid watermark password specified!");
@@ -288,9 +270,8 @@ static int testForImageBatch(const Settings& options, const int p, const float p
     if (!fs::exists(inputDir) || !fs::is_directory(inputDir))
         throw std::runtime_error("Error: Batch path is not a valid directory!");
 
-    // only create the below if we are embedding!
     fs::path outputDir;
-    // background saves, one per thread (it waits for its saves before the session is released)
+    // background saves, one per thread, waits for saves before releasing session
     std::optional<ImageSaver> saver;
     if (isEmbed) {
         outputDir = inputDir / "watermark_output";
@@ -298,17 +279,15 @@ static int testForImageBatch(const Settings& options, const int p, const float p
         saver.emplace(static_cast<size_t>(omp_get_max_threads()));
     }
 
-    // get the valid images of the directory, if no valid image files are found, throw an error
     const std::vector<fs::path> validFiles = getValidImageFiles(inputDir);
     checkError(validFiles.empty(), "No valid image files found in directory!");
     cout << info(std::format("Found {} images. Starting batch {}...\n\n", validFiles.size(), isEmbed ? "embedding" : "detection"));
 
-    // initialize the watermarking session once and reuse for all images in the batch
     auto session = createImageSession(watermarkPassword, p, psnr);
     int successCount = 0;
     float corr = 0.0f;
 
-    // reports the finished saves (in the order they finished)
+    // reports finished saves in completion order
     const auto reportSaves = [&](const std::vector<SaveResult>& results) {
         for (const auto& [index, error] : results) {
             const string fileName = validFiles[index].filename().string();
@@ -321,35 +300,29 @@ static int testForImageBatch(const Settings& options, const int p, const float p
         }
     };
 
-    // start the batch process (begin timer)
     const auto batchStart = std::chrono::high_resolution_clock::now();
-    // the next images load in the background while the current one is processed
+    // prefetch next image while current frame processes
     ImagePrefetcher images(validFiles, getCurrentDeviceIndex());
     for (size_t i = 0; i < validFiles.size(); i++) {
         try {
-            // give the buffer to the watermark engine (may trigger lazy init)
             bindPreloadedImage(session.get(), images.next());
-            // embed
             if (isEmbed) {
                 embedImage(session.get());
-                // waits for a free save slot when all are busy, the export moves (CPU) or copies (GPU) the output into the slot's buffer
+                // waits for free save slot, moves on CPU or copies on GPU
                 saver->save(session.get(), (outputDir / validFiles[i].filename()).string(), i);
                 reportSaves(saver->takeFinished());
-            } else { // detect
+            } else {
                 corr = detectLoadedImage(session.get());
                 cout << success(std::format(" [OK] Correlation: {:.2f}, {}\n", corr, validFiles[i].filename().string()));
                 ++successCount;
             }
         } catch (const std::exception& e) { cout << err(std::format(" [FAILED] {} - Error: {}\n", validFiles[i].filename().string(), cleanError(e.what()))); }
     }
-    // finish any pending saves before exiting
     if (saver)
         reportSaves(saver->finish());
-    // stop batch process (and timer)
     const auto batchEnd = std::chrono::high_resolution_clock::now();
     const double totalBatchTime = std::chrono::duration<double>(batchEnd - batchStart).count();
 
-    // print results summary
     checkError(successCount == 0, "No images were successfully processed. Please check the error messages above.");
     cout << info(std::format("\nBatch complete! Successfully processed {}/{} images.\n", successCount, validFiles.size()));
     cout << info("Total batch time: " + formatExecutionTime(false, totalBatchTime) + "\n");
@@ -357,7 +330,6 @@ static int testForImageBatch(const Settings& options, const int p, const float p
     return static_cast<size_t>(successCount) == validFiles.size() ? EXIT_SUCCESS : EXIT_FAILURE;
 }
 
-// embed one ME watermark and write the requested output image
 static int testForImageSingle(const Settings& options, const int p, const float psnr) {
     const string imageFile = options.Get("image", "path", "NO_IMAGE");
     checkError(imageFile == "NO_IMAGE", "No valid image file specified!");
@@ -381,15 +353,12 @@ static int testForImageSingle(const Settings& options, const int p, const float 
     return EXIT_SUCCESS;
 }
 
-// Video processing embeds or detects the watermark according to --video.mode,
-// and optionally encodes the output video with the embedded watermark (using hardware acceleration if specified and available)
 static int testForVideo(const Settings& options, const string& videoFile, const int p, const float psnr) {
     const bool showFps = options.GetBoolean("global", "display_fps", true);
     const string videoMode = options.Get("video", "mode", "embed");
     checkError(videoMode != "embed" && videoMode != "detect", "Invalid video mode. Must be 'embed' or 'detect'.");
     const bool isEmbed = videoMode == "embed";
 
-    // supply the relevant settings to the video session input struct
     VideoSettings settings;
     settings.videoFile = videoFile;
     settings.watermarkPassword = options.Get("global", "watermark_password", "");
@@ -398,22 +367,18 @@ static int testForVideo(const Settings& options, const string& videoFile, const 
     settings.psnr = psnr;
     settings.watermarkInterval = static_cast<int>(options.GetInteger("video", "watermark_interval", 1));
     settings.useHwDecoder = true;
-    settings.useHwEncoder = options.GetBoolean("compute", "cuda_hw_encoder", false);
-    settings.encodeOptions = settings.useHwEncoder ? options.Get("video", "hw_encode_options", "-c:v hevc_nvenc -preset p6 -tune hq -cq 26 -b:v 0")
-                                                   : options.Get("video", "encode_codec_options", "-c:v libx265 -preset fast -crf 23");
+    settings.useHwEncoder = options.GetBoolean("compute", "hw_encoder", false);
+    settings.encodeOptions = settings.useHwEncoder ? options.Get("video", "hw_encode_options", "") : options.Get("video", "encode_codec_options", "-c:v libx265 -preset medium -crf 20");
     settings.encodeOutputPath = options.Get("video", "encode_output_path", "");
 
-    // Video embedding also runs FFmpeg encoder threads. Limit Eigen/OpenMP to
-    // physical cores so the two thread pools do not oversubscribe the CPU
+    // encoder threads share CPU, limit OpenMP to physical cores to avoid oversubscription
     if (isEmbed)
         optimizeThreadsForVideoEmbedding();
 
-    // open video session
     VideoHandle session = initVideo(settings);
 
     int framesProcessed = 0;
     double totalTime = 0;
-    // embed and encode the video, or just detect the watermark from the input video
     if (isEmbed) {
         totalTime = executionTime([&]() { framesProcessed = embedVideo(session.get()); }, 1, false);
         cout << info("\nWatermark embedding total time: " + formatExecutionTime(false, totalTime) + "\n\n");
@@ -425,9 +390,7 @@ static int testForVideo(const Settings& options, const string& videoFile, const 
     return EXIT_SUCCESS;
 }
 
-// Runs ME mask benchmark across standard resolutions and prediction orders, writing CSV output
 static int runCliBenchmark(const Settings& settings, const float psnr, const bool saveImages) {
-    // Benchmark test image definition
     struct BenchmarkImage {
         const char* resolution;
         const char* path;
@@ -442,15 +405,14 @@ static int runCliBenchmark(const Settings& settings, const float psnr, const boo
 
     const string backend = getBackendName();
     const string device = getDeviceName();
-    // Use fewer iterations for CPU backend to keep benchmark duration reasonable
+    // fewer iterations on CPU to keep bench duration bounded
     const int defaultLoops = backend == "eigen" ? 100 : 1000;
     const int loops = settings.GetInteger("image", "benchmark_loops", defaultLoops);
     checkError(loops <= 0, "benchmark_loops must be positive.");
-    // fixed benchmark password keeps measurements independent of external configuration.
+    // fixed bench password keeps measurements independent of configuration
     const string watermarkPassword = settings.Get("global", "watermark_password", "benchmark-watermark-password");
     checkError(watermarkPassword.empty(), "No valid watermark password specified!");
 
-    // Create output folder and initialize benchmark CSV file
     const fs::path outputDir = "thesis_data";
     fs::create_directories(outputDir);
     const fs::path outputPath = settings.Get("image", "benchmark_output_path", (outputDir / (backend + ".csv")).string());
@@ -461,7 +423,6 @@ static int runCliBenchmark(const Settings& settings, const float psnr, const boo
         throw std::runtime_error("Could not write benchmark CSV: " + outputPath.string());
     output << "backend,device,p,resolution,operation,fps,seconds,loops,image\n" << std::setprecision(17);
 
-    // warm up before each measurement
     const int warmupLoops = std::max(loops / 10, 3);
     constexpr auto warmupMinDuration = std::chrono::milliseconds(250);
     const auto warmup = [warmupLoops, warmupMinDuration](const auto& func) {
@@ -471,16 +432,13 @@ static int runCliBenchmark(const Settings& settings, const float psnr, const boo
     };
 
     cout << info(std::format("CLI benchmark: {} on {} ({} loops per measurement, >= {} warmup loops and >= {} ms)\n", backend, device, loops, warmupLoops, warmupMinDuration.count()));
-    // Test each prediction order
     for (const int p : predictionOrders) {
         auto session = createImageSession(watermarkPassword, p, psnr);
-        // Test each resolution image
         for (const auto& image : images) {
             if (!fs::is_regular_file(image.path))
                 throw std::runtime_error("Benchmark image not found: " + string(image.path));
             loadImage(session.get(), image.path);
 
-            // Measure embedding execution time (after warming up clocks, caches and memory pools)
             const auto embedOnce = [&]() {
                 embedImage(session.get());
                 finish();
@@ -492,14 +450,12 @@ static int runCliBenchmark(const Settings& settings, const float psnr, const boo
                 fs::create_directories(imagesDir);
                 saveImageExact(session.get(), (imagesDir / std::format("p{}_{}.png", p, image.resolution)).string());
             }
-            // Measure detection execution time and correlation
             prepareDetectionImage(session.get());
             float correlation = 0.0f;
             const auto detectOnce = [&]() { correlation = detectEmbeddedBuffer(session.get()); };
             warmup(detectOnce);
             const double detectSeconds = executionTime(detectOnce, loops, false) / loops;
 
-            // Writes a single measurement record to CSV
             const auto writeResult = [&](const char* operation, const double seconds) {
                 output << csvString(backend) << ',' << csvString(device) << ',' << p << ',' << csvString(image.resolution) << ',' << csvString(operation) << ',' << 1.0 / seconds << ',' << seconds
                        << ',' << loops << ',' << csvString(image.path) << '\n';
@@ -517,7 +473,7 @@ static int runCliBenchmark(const Settings& settings, const float psnr, const boo
 /*!
  *  \brief  This is a project implementation of my Thesis with title:
  *			EFFICIENT IMPLEMENTATION OF WATERMARKING ALGORITHMS AND
- *			WATERMARK DETECTION IN IMAGE AND VIDEO USING GPU.
+ *			WATERMARK DETECTION IN IMAGE AND VIDEO USING GPU
  *  \author Dimitris Karatzas
  */
 int main(const int argc, char* argv[]) {
@@ -525,7 +481,6 @@ int main(const int argc, char* argv[]) {
     SetConsoleOutputCP(CP_UTF8);
     int exitCode = EXIT_SUCCESS;
     try {
-        // Parse command-line options before initializing the backend
         const CommandLineOptions commandLine = parseCommandLine(argc, argv);
         if (commandLine.help || argc == 1) {
             printHelp();
@@ -544,19 +499,16 @@ int main(const int argc, char* argv[]) {
             return EXIT_SUCCESS;
         }
         const Settings options(commandLine.settings);
-        // initialize backend data (GPU devices, OpenMP threads, etc.)
         initializeEnvironment(options.GetInteger("compute", "gpu_device_id", 0));
         const float psnr = options.GetFloat("global", "psnr", 40.0f);
         if (!std::isfinite(psnr) || psnr <= 0)
             throw std::runtime_error("PSNR must be a finite number greater than 0");
-        // Run standalone benchmark if requested
         if (commandLine.benchmark)
             return runCliBenchmark(options, psnr, commandLine.benchmarkSave);
 
         const int p = options.GetInteger("global", "p", 3);
         if (p != 3 && p != 5 && p != 7 && p != 9)
             throw std::runtime_error("p must be 3, 5, 7 or 9");
-        // test algorithms
         const string videoFile = options.Get("video", "path", "");
         const string imageMode = options.Get("image", "mode", "single");
         if (!videoFile.empty())
@@ -573,7 +525,6 @@ int main(const int argc, char* argv[]) {
         cout << err(string("Fatal error: ") + ex.what() + "\n");
         exitCode = EXIT_FAILURE;
     }
-    // flush first
     cout.flush();
     return exitCode;
 }

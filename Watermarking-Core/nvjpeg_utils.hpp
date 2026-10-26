@@ -7,7 +7,7 @@
 #include <vector>
 
 /*!
- *  \brief  GPU JPEG decoding and encoding (nvJPEG) for the CUDA builds. The codecs are created per device on first use.
+ *  \brief  GPU JPEG decoding and encoding (nvJPEG) on CUDA
  *			The hardware decoder/encoder when the device has one, else the GPU (GPU assisted Huffman) backends.
  *  \author Dimitris Karatzas
  */

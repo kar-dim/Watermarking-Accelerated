@@ -42,7 +42,7 @@ using EncoderParams = Owned<nvjpegEncoderParams, nvjpegEncoderParamsDestroy>;
 
 // interpolated chroma upsampling, like libjpeg's (fancy upsampling)
 constexpr unsigned int kHandleFlags = NVJPEG_FLAGS_UPSAMPLING_WITH_INTERPOLATION;
-// codec object sets per device, decoders are on the critical path (batch prefetch, UI): one per image the batch loads at once.
+// codec object sets per device, decoders are on critical path: one per concurrent batch load
 // ONE encoder is enough, more encoders would require more VRAM for no gains
 constexpr int kMaxEncoders = 1;
 

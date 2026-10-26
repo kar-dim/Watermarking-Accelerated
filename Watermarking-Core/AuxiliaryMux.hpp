@@ -28,12 +28,12 @@ struct AuxiliaryMuxSetup {
     int videoWidth = 0;
     int videoHeight = 0;
     MediaLog log;
-    AuxiliaryPacketSink sink; // if empty -> write straight into the output container
+    AuxiliaryPacketSink sink; // if empty, writes directly to output container
 };
 
 bool validateAudioStreams(const AVFormatContext* input, const std::string& outputPath, std::string& error);
 
-// Adds audio/subtitle streams before avformat_write_header(), then routes their packets while video is encoded
+// adds auxiliary streams before write header, routes packets during encode
 class AuxiliaryMux {
   public:
     AuxiliaryMux() = default;
@@ -54,7 +54,7 @@ class AuxiliaryMux {
         AVCodecContextPtr decoder;
         AVCodecContextPtr encoder;
         std::vector<std::uint8_t> encodeScratch;
-        std::uint64_t dropped = 0; // events that could not be decoded, timed or encoded
+        std::uint64_t dropped = 0; // dropped captions
     };
 
     bool copyStream(const AVStream* inputStream, unsigned inputIndex, std::string& error);

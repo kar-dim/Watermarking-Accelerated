@@ -7,7 +7,7 @@
 #include <vector>
 
 /*!
- *  \brief  Builds and solves the ME prediction system (Rx * coefficients = rx) using Eigen.
+ *  \brief  Builds and solves ME prediction system (Rx * coefficients = rx) using Eigen
  *
  *  Computes autocorrelation sums by spatial shift rather than looping over all window pairs per pixel.
  *  Sums unique shifts over the inner image, then adds border rows, border columns, and corners.
@@ -41,7 +41,7 @@ class PredictionErrorMatrixData {
 
     const int rows, cols;
     std::vector<ShiftSums> threadSums;
-    // Border columns are processed once, so threads write them directly
+    // border columns processed once, threads write directly
     std::vector<double> borderCols; // Inner row sums per shift and border column
     std::vector<double> corners;    // Corner sums per shift, border row, and border column
     WindowMatrix windowSums;

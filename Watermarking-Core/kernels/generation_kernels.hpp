@@ -29,7 +29,7 @@ WM_INLINE float logReference(const float x) {
     float m = as_float((bits & 0x807FFFFFu) | 0x3F000000u);
     float e = (float)((int)((bits & 0x7F800000u) >> 23) - 126);
 
-    // keep the mantissa near 1: if (m < sqrt(0.5)) { e -= 1; m = 2m - 1; } else { m -= 1; }
+    // keep mantissa near 1: when m < sqrt(0.5) decrease exponent and scale m, otherwise subtract 1
     const bool belowSqrtHalf = m < 0.707106781186547524f;
     e = belowSqrtHalf ? e - 1.0f : e;
     m = (belowSqrtHalf ? m + m : m) - 1.0f;

@@ -5,8 +5,8 @@
  *  \brief  OpenCL kernel source for deterministic IEEE 754 half-precision float conversions
  *  \author Dimitris Karatzas
  */
-// OpenCL float -> half rounding, the same bits as HalfFloat::fromFloat on the host and __float2half_rn in CUDA.
-// Intel's selected kernel variant uses native storage conversion, other drivers retain the integer fallback.
+// OpenCL float to half rounding, matching HalfFloat::fromFloat and __float2half_rn
+// native storage conversion on Intel, integer fallback on other drivers
 inline const std::string halfKernels = R"CLC(
 #if defined(WM_NATIVE_HALF_STORAGE)
 static inline __attribute__((always_inline)) ushort toHalfBits(const float value) {
@@ -18,8 +18,8 @@ static inline __attribute__((always_inline)) ushort toHalfBits(const float value
     return result;
 }
 #else
-// float -> half bits, round to nearest even (HalfFloat::fromFloat of the host), overflow to infinity.
-// NOTE: Integer code on purpose, some drivers like AMD are bugged and rounded exact ties AWAY from zero in vstore_half_rte (depending on the surrounding code)
+// float to half bits, round to nearest even, overflow to infinity
+// integer fallback avoids driver tie-rounding bugs in vstore_half_rte
 static inline __attribute__((always_inline)) ushort toHalfBits(const float value) {
     const uint bits = as_uint(value);
     const uint sign = (bits >> 16) & 0x8000u;

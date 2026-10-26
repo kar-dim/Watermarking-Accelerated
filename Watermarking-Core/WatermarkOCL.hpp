@@ -27,9 +27,7 @@ class WatermarkOCL final : public WatermarkBase {
         coefficients = ImageBuffer(localSize, rawQueue);
         stopFlag = FlagBuffer::zeros(1, rawQueue);
 
-        // shift sums grid: border lines are summed in runs, one run per workitem (borderBlocksPerLine groups per line and column shift
-        // group) and the inner sums use as many workgroups at once (of course NEVER more than tasks), one set per
-        // column shift group. When there are few border groups, room is left for them to run together with the inner groups
+        // shift sums grid: border runs run alongside inner shift sum workgroups
         borderBlocksPerLine = (((std::max(this->baseRows, this->baseCols) + interiorRun - 1) / interiorRun) + groupSize - 1) / groupSize;
         const int residentGroups = static_cast<int>(device.getInfo<CL_DEVICE_MAX_COMPUTE_UNITS>()) * residentGroupsPerUnit;
         const int borderBlocks = borderBlocksPerLine * 2 * borderSize * shiftGroups;
@@ -45,8 +43,7 @@ class WatermarkOCL final : public WatermarkBase {
         errorGlobal = cl::NDRange(static_cast<size_t>(tilesFast) * groupSize, tilesSlow);
         const int corrGroups = tilesFast * tilesSlow;
 
-        // buffers: the shift sums (zeroed once), the border rows copy, the solver system, u, [0] = sum(u^2) and [1] = max|e| float bits (ME only),
-        // the detection prediction error, the per group correlation sums, the last group ticket counter and the result
+        // buffers: shift sums, border rows, solver system, u, stats and correlation sums
         shiftSums = OclArray<uint64_t>::zeros(shiftSumsSize, rawQueue);
         if constexpr (copyBorderRows)
             borderRowsCopy = OclArray<float>(borderCopyRows * this->baseCols, rawQueue);
@@ -57,10 +54,9 @@ class WatermarkOCL final : public WatermarkBase {
         dotPartial = ImageBuffer(corrGroups, rawQueue);
         uNormPartial = ImageBuffer(corrGroups, rawQueue);
         zNormPartial = ImageBuffer(corrGroups, rawQueue);
-        corrGroupCounter = OclArray<uint32_t>::zeros(1, rawQueue);
         correlation = ImageBuffer(1, rawQueue);
 
-        // kernels, the input / output buffers are set per call
+        // kernels with per-call buffer bindings
         const cl::Buffer borderCopy = copyBorderRows ? borderRowsCopy.clBuffer() : cl::Buffer();
         copyBorderRowsKernel = cl::Kernel(program, "me_copy_border_rows");
         shiftSumsKernel = cl::Kernel(program, "me_shift_sums");
@@ -81,9 +77,10 @@ class WatermarkOCL final : public WatermarkBase {
         setArgs(meErrorKernel, cl::Buffer(), this->randomMatrix.clBuffer(), u.clBuffer(), coefficients.clBuffer(), sumSq.clBuffer(), this->baseCols, this->baseRows, stopFlag.clBuffer(),
             cl::Local(reductionScratchBytes(program, "me_error_sequence_u_sumsq_fused", errorLocal, 1)));
         corrKernel = cl::Kernel(program, "calculate_error_sequence_and_partial_corr_fused");
-        setArgs(corrKernel, errorSeq.clBuffer(), this->randomMatrix.clBuffer(), coefficients.clBuffer(), dotPartial.clBuffer(), uNormPartial.clBuffer(), zNormPartial.clBuffer(),
-            corrGroupCounter.clBuffer(), correlation.clBuffer(), this->baseCols, this->baseRows, stopFlag.clBuffer(),
-            cl::Local(reductionScratchBytes(program, "calculate_error_sequence_and_partial_corr_fused", errorLocal, 3)));
+        setArgs(corrKernel, errorSeq.clBuffer(), this->randomMatrix.clBuffer(), coefficients.clBuffer(), dotPartial.clBuffer(), uNormPartial.clBuffer(), zNormPartial.clBuffer(), this->baseCols,
+            this->baseRows, stopFlag.clBuffer(), cl::Local(3 * groupSize * sizeof(float)));
+        corrFinalizeKernel = cl::Kernel(program, "finalize_correlation");
+        setArgs(corrFinalizeKernel, dotPartial.clBuffer(), uNormPartial.clBuffer(), zNormPartial.clBuffer(), correlation.clBuffer(), corrGroups, cl::Local(3 * groupSize * sizeof(float)));
 
         applyGlobal = cl::NDRange(static_cast<size_t>(calculateLocalGroupsNumber((this->totalPixels + 3) / 4, groupSize)) * groupSize);
         applyRgbKernel = cl::Kernel(program, "apply_watermark_rgb");
@@ -91,24 +88,24 @@ class WatermarkOCL final : public WatermarkBase {
         applyRowMajorKernel = cl::Kernel(program, "apply_watermark_row_major");
     }
 
-    // RGB embedding: computes the strengthened watermark u from the luma (ME mask), then adds it to all channels of the 8-bit image
+    // RGB embedding: computes watermark u from luma mask, adds to all channels
     void makeWatermark(const ImageBuffer& inputGrayImage, const ImageOutputBuffer& inputImage, ImageOutputBuffer& output) override { embed(inputGrayImage, &inputImage, output, Layout::ColMajor); }
 
-    // grayscale embedding: computes the strengthened watermark u (ME mask), then adds it to the luma itself
+    // grayscale embedding: computes watermark u and adds to luma
     void makeWatermark(const ImageBuffer& inputGrayImage, ImageOutputBuffer& output, const Layout outputLayout) override { embed(inputGrayImage, nullptr, output, outputLayout); }
 
-    // detection: correlation between the prediction error of the image and the prediction error of (mask * watermark)
+    // detection: correlation between image prediction error and watermark error
     float detectWatermark(const ImageBuffer& inputImage) override {
         cl_utils::executeKernel(
             [&]() {
                 const cl::Buffer input = inputImage.clBuffer();
                 solvePredictionCoefficients(input);
-                // prediction error of the image (with its sign, the correlation needs it)
+                // prediction error of image with sign for correlation
                 errorSequenceKernel.setArg(0, input);
                 enqueue(errorSequenceKernel, errorGlobal, cl::NDRange(groupSize));
-                // prediction error of (mask x watermark), correlated with the image's prediction error, the last workgroup writes the result.
-                // The mask |e| is formed while loading, not divided by max|e| (the correlation does not depend on the scale)
+                // prediction error of mask * watermark, correlated with image prediction error
                 enqueue(corrKernel, errorGlobal, cl::NDRange(groupSize));
+                enqueue(corrFinalizeKernel, cl::NDRange(groupSize), cl::NDRange(groupSize));
             },
             "detectWatermark");
         const float result = correlation.scalar();
@@ -119,7 +116,7 @@ class WatermarkOCL final : public WatermarkBase {
     using WatermarkBase::alignUp;
 
     static constexpr int localSize = (p * p) - 1;
-    // shift sums layout, must match the kernel defines (kernels.hpp)
+    // shift sums layout, must match kernel defines in kernels.hpp
     static constexpr int pad = p / 2;
     static constexpr int maxShift = p - 1;
     static constexpr int numShifts = ((((2 * maxShift) + 1) * ((2 * maxShift) + 1)) + 1) / 2;
@@ -141,7 +138,7 @@ class WatermarkOCL final : public WatermarkBase {
     static constexpr int interiorRun = 8;
     static constexpr bool copyBorderRows = p >= 7;
     static constexpr int borderCopyRows = 6 * pad;
-    // the ME solver system (Rx packed lower triangular, then rx), exact ulong fixed point
+    // ME solver system (Rx packed lower triangular, then rx), exact fixed point
     static constexpr int solverSystemSize = ((localSize * (localSize + 1)) / 2) + localSize;
     // inner shift sums work-groups per compute unit
     static constexpr int residentGroupsPerUnit = 2;
@@ -163,31 +160,30 @@ class WatermarkOCL final : public WatermarkBase {
     ImageBuffer dotPartial;
     ImageBuffer uNormPartial;
     ImageBuffer zNormPartial;
-    OclArray<uint32_t> corrGroupCounter;
     ImageBuffer correlation;
 
     cl::Kernel copyBorderRowsKernel, shiftSumsKernel, buildSystemKernel, solveSystemKernel;
-    cl::Kernel errorSequenceKernel, meErrorKernel, corrKernel;
+    cl::Kernel errorSequenceKernel, meErrorKernel, corrKernel, corrFinalizeKernel;
     cl::Kernel applyRgbKernel, applyGrayKernel, applyRowMajorKernel;
 
-    // enqueues a kernel on the in-order queue
+    // enqueues kernel on in-order queue
     void enqueue(const cl::Kernel& kernel, const cl::NDRange& global, const cl::NDRange& local) { queue.enqueueNDRangeKernel(kernel, cl::NullRange, global, local); }
 
-    // embedding: the watermark is added to the 8-bit "inputImage" (RGB), or to the luma when inputImage is null
+    // watermark added to 8-bit RGB or luma when inputImage is null
     void embed(const ImageBuffer& inputGrayImage, const ImageOutputBuffer* inputImage, ImageOutputBuffer& output, const Layout outputLayout) {
         using namespace cl_utils;
         const int channels = inputImage ? inputImage->getChannels() : 1;
-        // the output buffer is reused, allocated again only when its size or channel count changes
+        // output buffer reused, reallocated only when dimensions or channels change
         if (output.empty() || output.getRows() != this->baseRows || output.getCols() != this->baseCols || output.getChannels() != channels)
             output = ImageOutputBuffer(this->baseRows, this->baseCols, channels, queue.get());
         executeKernel(
             [&]() {
                 const cl::Buffer gray = inputGrayImage.clBuffer();
-                // solve the prediction coefficients (this also zeroes the sums), then prediction error x watermark -> u, sum(u^2) and max|e|
+                // solve prediction coefficients and compute u, sum(u^2) and max|e|
                 solvePredictionCoefficients(gray);
                 meErrorKernel.setArg(0, gray);
                 enqueue(meErrorKernel, errorGlobal, cl::NDRange(groupSize));
-                // scale u by the strength and add it to each channel of the 8-bit image, or to the luma
+                // scale u by strength and add to channels or luma
                 cl::Kernel& apply = inputImage ? applyRgbKernel : (outputLayout == Layout::ColMajor ? applyGrayKernel : applyRowMajorKernel);
                 const cl::Buffer source = inputImage ? inputImage->clBuffer() : gray;
                 if (&apply == &applyRowMajorKernel) {
@@ -202,8 +198,7 @@ class WatermarkOCL final : public WatermarkBase {
             "makeWatermark");
     }
 
-    // prediction coefficients (+ stopFlag): all shift sums, build the system, solve it + zero the shift sums and the embedding sums
-    // For p >= 7 the border rows are copied first
+    // compute shift sums and solve prediction system, p >= 7 copies border rows first
     void solvePredictionCoefficients(const cl::Buffer& image) {
         const cl::NDRange local(groupSize);
         if constexpr (copyBorderRows) {

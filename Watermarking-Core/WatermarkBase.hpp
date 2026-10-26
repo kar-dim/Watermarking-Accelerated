@@ -7,7 +7,7 @@
 #include <utility>
 
 /*!
- *  \brief  Functions for watermark computation and detection, Base class.
+ *  \brief  Base class for watermark computation and detection
  *  \author Dimitris Karatzas
  */
 class WatermarkBase {
@@ -23,12 +23,11 @@ class WatermarkBase {
     float strengthNumerator;
 
   public:
-    // "watermark": the rows x cols watermark of the password, from generateWatermark (or from an object of the same size)
+    // rows x cols watermark of password, from generateWatermark or matching object
     WatermarkBase(const int rows, const int cols, WatermarkBuffer watermark, const float psnr)
         : baseRows(rows), baseCols(cols), totalPixels(InternalUtils::checkedElements(rows, cols)), randomMatrix(std::move(watermark)), strengthFactor(computeStrengthFactor(psnr)),
           strengthNumerator(strengthFactor * std::sqrt(static_cast<float>(totalPixels))) {}
 
-    // delete copy and move operations we don't wannt them
     WatermarkBase(const WatermarkBase&) = delete;
     WatermarkBase(WatermarkBase&&) = delete;
     WatermarkBase& operator=(const WatermarkBase&) = delete;
@@ -36,32 +35,26 @@ class WatermarkBase {
 
     virtual ~WatermarkBase() = default;
 
-    // layout of the 8-bit embedding output, column-major like every image plane of the backends, or row-major (the layout of video frames)
+    // layout of 8-bit embedding output, column-major for images, row-major for video
     enum class Layout { ColMajor, RowMajor };
 
-    // RGB embedding: the watermark computed from the luma "inputGrayImage" is added to each channel of the 8-bit column-major planar
-    // "inputImage", the output is column-major planar
+    // RGB embedding: watermark from luma added to each channel of 8-bit planar image
     virtual void makeWatermark(const ImageBuffer& inputGrayImage, const ImageOutputBuffer& inputImage, ImageOutputBuffer& output) = 0;
 
-    // grayscale embedding (grayscale images, video luma): the watermark is added to "inputGrayImage", the output is written in
-    // "outputLayout" (row-major video frames do NOT transpose later)
+    // grayscale embedding: watermark added to luma and written in outputLayout
     virtual void makeWatermark(const ImageBuffer& inputGrayImage, ImageOutputBuffer& output, const Layout outputLayout) = 0;
 
-    // the main mask detector function
     virtual float detectWatermark(const ImageBuffer& inputImage) = 0;
 
-    // the watermark: rows x cols standard normal values (rounded to half precision) generated from the password with ChaCha20 and the
-    // Box-Muller transform. The GPU backends generate it on the device, the bits are the same on every backend
-    // NOTE: keep the implementation in .cpp file, NVCC (cuda) hangs when it reads the generation code in the header
+    // watermark: rows x cols standard normal values generated with ChaCha20 and Box-Muller
+    // implementation lives in cpp file, nvcc hangs when parsing generation in header
     static WatermarkBuffer generateWatermark(const std::string& watermarkPassword, const int rows, const int cols);
 
-    // the watermark depends only on the password and the size: a new object of the same size (another p) takes it instead of
-    // generating it again. This object must not be used afterwards
+    // watermark reused across objects of same size and password, source invalidated
     bool hasSize(const int rows, const int cols) const { return baseRows == rows && baseCols == cols; }
     WatermarkBuffer releaseWatermark() { return std::move(randomMatrix); }
 
-    // PSNR affects only embedding strength. Updating it must not regenerate the
-    // deterministic watermark or rebuild prediction workspaces.
+    // PSNR affects only strength, updates do not regenerate watermark or workspaces
     void updatePsnr(const float psnr) {
         strengthFactor = computeStrengthFactor(psnr);
         strengthNumerator = strengthFactor * std::sqrt(static_cast<float>(totalPixels));

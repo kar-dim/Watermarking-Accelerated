@@ -13,11 +13,10 @@
 #include <vector>
 
 /*!
- *  \brief  Main interface for Watermarking operations, including image loading, embedding, detection, and video processing.
+ *  \brief  Main interface for Watermarking operations, including image loading, embedding, detection, and video processing
  *  \author Dimitris Karatzas
  */
 namespace WatermarkCore {
-// forward declarations of session structs and their deleters for RAII management
 struct ImageSession;
 struct VideoSession;
 struct PreloadedImage;
@@ -50,8 +49,7 @@ using ImageHandle = std::unique_ptr<ImageSession, ImageSessionDeleter>;
 using PreloadedHandle = std::unique_ptr<PreloadedImage, PreloadedImageDeleter>;
 using ExportHandle = std::unique_ptr<ExportedImage, ExportedImageDeleter>;
 
-// OpenCL device switches require releasing all live image/session/export buffers first
-// environment and params functions
+// OpenCL device switches require releasing live image, session and export buffers first
 bool initializeEnvironment(const int deviceIndex = 0);
 void updateSessionParams(ImageSession* session, const int p, const float psnr);
 bool isOpenCLBackend();
@@ -61,7 +59,6 @@ std::string getDeviceName(const int deviceIndex = -1);
 std::vector<std::string> getAvailableDevices();
 int getCurrentDeviceIndex();
 
-// image processing functions
 bool hasSupportedImageExtension(const std::filesystem::path& path);
 std::vector<std::filesystem::path> getValidImageFiles(const std::filesystem::path& inputDir);
 ImageHandle createImageSession(const std::string& watermarkPassword, const int p, const float psnr);
@@ -78,20 +75,20 @@ float detectEmbeddedBuffer(const ImageSession* session);
 void saveImage(const ImageSession* session, const std::string& outPath);
 void saveImageExact(const ImageSession* session, const std::string& outPath);
 
-// loads the images of a batch in their order on up to "depth" background threads. Depth 0 picks it from the CPU thread count
+// loads images in batch order on up to depth threads, 0 uses CPU core count
 class ImagePrefetcher {
   public:
     ImagePrefetcher(std::vector<std::filesystem::path> files, int deviceIndex, size_t depth = 0);
     ImagePrefetcher(const ImagePrefetcher&) = delete;
     ImagePrefetcher& operator=(const ImagePrefetcher&) = delete;
-    // the next image, its load error is rethrown here (the loads of the images after it keep running)
+    // load error rethrown on calling thread, subsequent loads continue
     PreloadedHandle next();
 
   private:
     std::vector<std::filesystem::path> files;
     int deviceIndex;
     size_t launched = 0;
-    // the futures join on destruction, before the files they read are released
+    // futures join before destruction
     std::deque<std::future<PreloadedHandle>> pending;
     void launch();
 };
@@ -101,19 +98,19 @@ struct SaveResult {
     std::string error;
 };
 
-// saves embedded images in the background on up to "maxSaves" threads, each with its own export buffer. maxSaves 0 picks it from the CPU thread count
+// background save queue on up to maxSaves threads, 0 uses CPU core count
 class ImageSaver {
   public:
     explicit ImageSaver(size_t maxSaves = 0);
-    // waits for the saves still running
+    // wait for in-flight saves
     ~ImageSaver();
     ImageSaver(const ImageSaver&) = delete;
     ImageSaver& operator=(const ImageSaver&) = delete;
-    // waits while every slot is busy, then exports the session output and writes it to outPath in the background
+    // waits for free slot, exports session output and writes outPath in background
     void save(ImageSession* session, const std::string& outPath, size_t id);
-    // the saves that finished since the last call, in the order they finished
+    // finished saves since last call in completion order
     std::vector<SaveResult> takeFinished();
-    // waits for all saves, then returns the ones that finished since the last call
+    // wait for all saves and return finished results
     std::vector<SaveResult> finish();
 
   private:
@@ -128,19 +125,17 @@ class ImageSaver {
     std::condition_variable slotFreed;
 };
 ExportHandle createReusableExportBuffer();
-// on the Eigen backend this transfers the session output to the export buffer
-// call embedImage again before reading, detecting, or saving the session output
-// this also transfers alpha ownership, bind a new image before exporting again
+// on Eigen transfers output to export buffer, call embedImage again before session reuse
+// transfers alpha ownership, bind new image before exporting again
 void exportForSave(ImageSession* session, ExportedImage* reusableBuffer);
 void flushToDiskAsync(ExportedImage* handle, const std::string& outPath);
 SessionPixelData getSessionPixelData(const ImageSession* session);
-// size and channels (1, 3 or 4 with preserved alpha) of the embedded output for copySessionPreview
+// size and channels (1, 3 or 4 with alpha) for copySessionPreview
 PreviewFormat getSessionPreviewFormat(const ImageSession* session);
-// copy the session output into a row-major interleaved display buffer (rows start every bytesPerLine, the padding is not touched)
+// copies output into row-major interleaved display buffer without touching padding
 void copySessionPreview(const ImageSession* session, uint8_t* destination, size_t bytesPerLine);
 void optimizeThreadsForVideoEmbedding();
 
-// video processing functions
 struct VideoSettings {
     std::string videoFile;
     std::string watermarkPassword;
@@ -149,6 +144,7 @@ struct VideoSettings {
     int watermarkInterval;
     bool useHwDecoder;
     bool useHwEncoder;
+    // empty string selects GPU default hardware encoder when useHwEncoder is true
     std::string encodeOptions;
     std::string encodeOutputPath;
 };

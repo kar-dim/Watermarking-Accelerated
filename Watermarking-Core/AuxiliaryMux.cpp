@@ -32,19 +32,17 @@ extern "C" {
 namespace video_utils {
 namespace {
 
-// mp4 and mov reject TrueHD audio muxing without experimental flags
+// mp4 and mov reject TrueHD without experimental flags
 bool muxerRefusesAsExperimental(const AVOutputFormat* format, const AVCodecID codec) {
     const std::string_view name = (format != nullptr && format->name != nullptr) ? format->name : "";
     return (name == "mp4" || name == "mov") && codec == AV_CODEC_ID_TRUEHD;
 }
 
-// readable codec descriptor name
 std::string codecName(const AVCodecID codec) {
     const AVCodecDescriptor* descriptor = avcodec_descriptor_get(codec);
     return (descriptor != nullptr && descriptor->name != nullptr) ? descriptor->name : "unknown";
 }
 
-// find compatible text subtitle encoder for target container
 AVCodecID pickContainerTextSubtitleCodec(const AVOutputFormat* format, const std::string& path) {
     const AVCodecID candidates[]{av_guess_codec(format, nullptr, path.c_str(), nullptr, AVMEDIA_TYPE_SUBTITLE), AV_CODEC_ID_MOV_TEXT, AV_CODEC_ID_SUBRIP, AV_CODEC_ID_ASS, AV_CODEC_ID_WEBVTT};
     for (const AVCodecID codec : candidates) {
@@ -56,7 +54,6 @@ AVCodecID pickContainerTextSubtitleCodec(const AVOutputFormat* format, const std
     return AV_CODEC_ID_NONE;
 }
 
-// update PlayRes header to match scaled video canvas so fonts do not blow up
 std::string retargetAssPlayResolution(const std::string& header, const int width, const int height) {
     std::string result;
     std::istringstream input(header);
@@ -74,7 +71,6 @@ std::string retargetAssPlayResolution(const std::string& header, const int width
     return result;
 }
 
-// duplicate chapter markers and metadata into output container
 bool copyChapters(const AVFormatContext* input, AVFormatContext* output) {
     if (input->nb_chapters == 0) {
         return true;
@@ -90,7 +86,6 @@ bool copyChapters(const AVFormatContext* input, AVFormatContext* output) {
     for (unsigned index = 0; index < input->nb_chapters; ++index) {
         const AVChapter* source = input->chapters[index];
         auto* destination = static_cast<AVChapter*>(av_mallocz(sizeof(AVChapter)));
-        // partial chapter tables silently lose markers, fail instead so the caller can report it
         if (destination == nullptr) {
             for (unsigned done = 0; done < copied; ++done) {
                 av_dict_free(&chapters[done]->metadata);
@@ -113,7 +108,6 @@ bool copyChapters(const AVFormatContext* input, AVFormatContext* output) {
 
 } // namespace
 
-// verify that target container accepts all input audio codecs
 bool validateAudioStreams(const AVFormatContext* input, const std::string& outputPath, std::string& error) {
     const AVOutputFormat* format = av_guess_format(nullptr, outputPath.c_str(), nullptr);
     if (format == nullptr) {
@@ -135,7 +129,6 @@ bool validateAudioStreams(const AVFormatContext* input, const std::string& outpu
     return true;
 }
 
-// configure audio and subtitle stream mapping for output container
 bool AuxiliaryMux::configure(const AuxiliaryMuxSetup& setup, std::string& error) {
     if (setup.input == nullptr || setup.output == nullptr || setup.output->oformat == nullptr) {
         error = "Auxiliary mux configuration received an invalid format context.";
@@ -171,7 +164,6 @@ bool AuxiliaryMux::configure(const AuxiliaryMuxSetup& setup, std::string& error)
         }
     }
 
-    // copy global metadata and chapter marks
     av_dict_copy(&output_->metadata, input_->metadata, 0);
     if (!copyChapters(input_, output_)) {
         error = "Could not allocate the output chapter table.";
@@ -180,7 +172,6 @@ bool AuxiliaryMux::configure(const AuxiliaryMuxSetup& setup, std::string& error)
     return true;
 }
 
-// clone stream parameters, metadata and disposition into output
 bool AuxiliaryMux::copyStream(const AVStream* inputStream, const unsigned inputIndex, std::string& error) {
     AVStream* outputStream = avformat_new_stream(output_, nullptr);
     if (outputStream == nullptr || avcodec_parameters_copy(outputStream->codecpar, inputStream->codecpar) < 0) {
@@ -195,15 +186,12 @@ bool AuxiliaryMux::copyStream(const AVStream* inputStream, const unsigned inputI
     return true;
 }
 
-// add or transcode subtitle stream for target container
 bool AuxiliaryMux::addSubtitle(const AVStream* inputStream, const unsigned inputIndex, const std::string& outputPath, const int videoWidth, const int videoHeight, std::string& error) {
     const AVCodecID sourceCodec = inputStream->codecpar->codec_id;
-    // copy directly if output container natively supports the subtitle codec
     if (avformat_query_codec(output_->oformat, sourceCodec, FF_COMPLIANCE_NORMAL) == 1) {
         return copyStream(inputStream, inputIndex, error);
     }
 
-    // drop incompatible non-text streams
     const AVCodecDescriptor* sourceDescriptor = avcodec_descriptor_get(sourceCodec);
     const AVCodecID destinationCodec = pickContainerTextSubtitleCodec(output_->oformat, outputPath);
     const AVCodec* decoder = avcodec_find_decoder(sourceCodec);
@@ -218,7 +206,6 @@ bool AuxiliaryMux::addSubtitle(const AVStream* inputStream, const unsigned input
         return drop("is not storable in this container and cannot be converted");
     }
 
-    // setup decoder and encoder contexts
     AVCodecContextPtr decoderContext(avcodec_alloc_context3(decoder));
     AVCodecContextPtr encoderContext(avcodec_alloc_context3(encoder));
     if (!decoderContext || !encoderContext || avcodec_parameters_to_context(decoderContext.get(), inputStream->codecpar) < 0) {
@@ -266,7 +253,6 @@ bool AuxiliaryMux::addSubtitle(const AVStream* inputStream, const unsigned input
     return true;
 }
 
-// route auxiliary packet to output stream with timestamp rescaling
 bool AuxiliaryMux::routePacket(AVPacket* packet, std::string& error) {
     if (!configured() || packet == nullptr || packet->stream_index < 0 || packet->stream_index >= static_cast<int>(inputToOutput_.size())) {
         error = "Auxiliary mux received a packet with an invalid stream index.";
@@ -292,11 +278,8 @@ bool AuxiliaryMux::routePacket(AVPacket* packet, std::string& error) {
     return emit(packet, error);
 }
 
-// decode, re-encode and timestamp (align) subtitle packet, events that cannot be converted are dropped
-// with one log line per stream, the rest of the subtitles and the video go on
 bool AuxiliaryMux::transcodeSubtitle(SubtitleTranscode& transcode, AVPacket* packet, std::string& error) {
     AVSubtitle subtitle{};
-    // frees the decoded subtitle on every return path (safe on an empty subtitle too)
     const struct SubtitleFree {
         AVSubtitle& subtitle;
         ~SubtitleFree() { avsubtitle_free(&subtitle); }
@@ -306,7 +289,6 @@ bool AuxiliaryMux::transcodeSubtitle(SubtitleTranscode& transcode, AVPacket* pac
         reportDroppedEvent(transcode, "decode failed: " + avErrorText(status));
         return true;
     }
-    // no subtitle event in this packet
     if (decoded == 0) {
         return true;
     }
@@ -321,11 +303,8 @@ bool AuxiliaryMux::transcodeSubtitle(SubtitleTranscode& transcode, AVPacket* pac
         return true;
     }
     subtitle.pts += av_rescale_q(subtitle.start_display_time, AVRational{1, 1000}, AV_TIME_BASE_Q);
-    // the display times are unsigned
     subtitle.end_display_time = subtitle.end_display_time > subtitle.start_display_time ? subtitle.end_display_time - subtitle.start_display_time : 0;
     subtitle.start_display_time = 0;
-    // encode into the reused scratch buffer first, then copy into a packet of exactly the produced size. 1 MiB is far more than one text
-    // event needs (mov_text stores at most 64 KiB per event)
     constexpr size_t scratchSize = 1 << 20;
     if (transcode.encodeScratch.empty()) {
         transcode.encodeScratch.resize(scratchSize);
@@ -335,7 +314,7 @@ bool AuxiliaryMux::transcodeSubtitle(SubtitleTranscode& transcode, AVPacket* pac
         reportDroppedEvent(transcode, "encode failed: " + avErrorText(bytes));
         return true;
     }
-    // the encoder produced nothing for this event (for example, an empty event)
+    // zero bytes means empty event, not an error
     if (bytes == 0) {
         return true;
     }
@@ -349,21 +328,20 @@ bool AuxiliaryMux::transcodeSubtitle(SubtitleTranscode& transcode, AVPacket* pac
     outputPacket->stream_index = transcode.outputStreamIndex;
     outputPacket->pts = av_rescale_q(subtitle.pts, AV_TIME_BASE_Q, outputTimeBase);
     outputPacket->dts = outputPacket->pts;
-    // some decoders report an unknown end as a huge display time, the input packet duration caps it
+    // decoder leaves subtitle.pts unset when packet has none, fall back to packet ts
     const int64_t displayed = av_rescale_q(subtitle.end_display_time, AVRational{1, 1000}, outputTimeBase);
     outputPacket->duration = packet->duration > 0 ? std::min(displayed, av_rescale_q(packet->duration, inputTimeBase, outputTimeBase)) : displayed;
     outputPacket->pos = -1;
     return emit(outputPacket.get(), error);
 }
 
-// one line per stream, the first reason is usually the reason for all of them
+// log once per stream
 void AuxiliaryMux::reportDroppedEvent(SubtitleTranscode& transcode, const std::string& reason) {
     if (transcode.dropped++ == 0 && log_) {
         log_(std::format("subtitle stream #{}: an event was dropped ({}), more may follow", transcode.inputStreamIndex, reason));
     }
 }
 
-// give the packet to sink (or write directly if no sink specified)
 bool AuxiliaryMux::emit(AVPacket* packet, std::string& error) {
     if (sink_) {
         if (!sink_(packet)) {
