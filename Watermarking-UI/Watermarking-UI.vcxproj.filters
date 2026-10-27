@@ -59,6 +59,9 @@
     <ClInclude Include="AnimatedButton.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="MultiDeviceComboBox.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="ThemePalette.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -73,5 +76,31 @@
     <ResourceCompile Include="resources.rc">
       <Filter>Resource Files</Filter>
     </ResourceCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="VideoWorker.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="VideoUI.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="VideoWorker.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="VideoBatchWorker.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="VideoBatchWorker.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="VideoBatchUI.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
 </Project>

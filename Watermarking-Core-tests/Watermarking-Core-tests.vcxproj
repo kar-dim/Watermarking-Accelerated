@@ -135,6 +135,8 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="CliRegression.ps1" />
+    <ClInclude Include="VideoBatchSchedulerTests.hpp" />
+    <ClInclude Include="ImageBatchTests.hpp" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Watermarking-Core\Watermarking-Core.vcxproj">

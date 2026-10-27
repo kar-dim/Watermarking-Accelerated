@@ -9,3 +9,13 @@
  */
 
 #include <CL/opencl.hpp>
+#include <stdexcept>
+#include <string>
+
+namespace cl_utils {
+class DriverError : public std::runtime_error {
+  public:
+    DriverError(const cl_int code, const std::string& operation) : std::runtime_error(operation + " failed with OpenCL error " + std::to_string(code)), code(code) {}
+    const cl_int code;
+};
+} // namespace cl_utils

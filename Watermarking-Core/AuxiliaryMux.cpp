@@ -122,7 +122,7 @@ bool validateAudioStreams(const AVFormatContext* input, const std::string& outpu
         if (avformat_query_codec(format, parameters->codec_id, FF_COMPLIANCE_NORMAL) == 1 && !muxerRefusesAsExperimental(format, parameters->codec_id)) {
             continue;
         }
-        error = std::format("Audio stream #{} is {}, which the {} container cannot store. Write a .mkv instead, Matroska accepts every audio codec.", index, codecName(parameters->codec_id),
+        error = std::format("Audio stream #{} is {}, which the {} container cannot store. Try .mkv for wider audio support.", index, codecName(parameters->codec_id),
             (format->name != nullptr) ? format->name : "requested");
         return false;
     }

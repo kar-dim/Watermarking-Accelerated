@@ -2,35 +2,46 @@
 
 #include "AuxiliaryMux.hpp"
 #include "buffer.hpp"
-#include "HdrTonemap.hpp"
-#include "OutputFile.hpp"
 #include "include/WatermarkCore.hpp"
+#include "OutputFile.hpp"
 #include "video_defines.hpp"
+#include "VideoObserver.hpp"
 #include "WatermarkBase.hpp"
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <utility>
 
 #if defined(_USE_OPENCL_)
-#include "OclVideoInterop.hpp"
 #include "OclHdrTonemap.hpp"
+#include "OclQueueManager.hpp"
+#include "OclVideoInterop.hpp"
 #endif
 
 extern "C" {
 #include "libavformat/avformat.h"
 #include "libavfilter/avfilter.h"
+#include "libavutil/avutil.h"
 #include "libavutil/pixfmt.h"
 #include "libavutil/rational.h"
 }
 
 namespace WatermarkCore {
+struct VideoPreview;
 /*!
  *  \brief  The unified internal session for video processing,
  *          this is hidden from the public API but shared internally
  *  \author Dimitris Karatzas
  */
 struct VideoSession {
-    VideoSettings settings;
+    VideoSession();
+    ~VideoSession();
+    VideoSettings settings{};
+    VideoProgress progress;
+    std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
+    std::chrono::steady_clock::time_point lastProgress{};
+    int64_t progressOrigin = AV_NOPTS_VALUE;
+    std::unique_ptr<VideoPreview> preview;
     video_utils::AVFormatContextPtr inputFormatCtx;
     video_utils::AVCodecContextPtr inputDecoderCtx;
     const AVStream* videoStream = nullptr;
@@ -39,12 +50,14 @@ struct VideoSession {
     // decoded frames held before processing, decoder surfaces must cover them
     size_t decodeLookahead = 0;
 #if defined(_USE_OPENCL_)
+    std::shared_ptr<OclQueueManager> openclDevice;
     // QSV direct mappings retain source frame without D3D11 frames descriptor
     video_utils::AVBufferRefPtr openclMappedFrames;
     std::unique_ptr<OclVideoFrame> openclVideoFrame;
     std::unique_ptr<OclHdrTonemap> openclHdrTonemap;
     std::unique_ptr<OclVideoOutput> openclVideoOutput;
 #endif
+    int deviceIndex = -1;
     // software format every decoded frame must have
     AVPixelFormat decodedFormat = AV_PIX_FMT_NONE;
     // 8-bit planar YUV format of encoded frames, none in detection

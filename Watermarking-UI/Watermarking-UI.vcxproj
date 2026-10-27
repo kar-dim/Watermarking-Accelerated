@@ -360,6 +360,10 @@
     <ClCompile Include="ComparisonView.cpp" />
     <ClCompile Include="ImagePreview.cpp" />
     <ClCompile Include="ImageWorker.cpp" />
+    <ClCompile Include="VideoWorker.cpp" />
+    <ClCompile Include="VideoUI.cpp" />
+    <ClCompile Include="VideoBatchWorker.cpp" />
+    <ClCompile Include="VideoBatchUI.cpp" />
     <ClCompile Include="WatermarkingUI.cpp" />
     <ClCompile Include="main.cpp" />
   </ItemGroup>
@@ -372,9 +376,12 @@
     <QtMoc Include="BenchmarkWorker.hpp" />
     <ClInclude Include="ComparisonView.hpp" />
     <ClInclude Include="AnimatedButton.hpp" />
+    <ClInclude Include="MultiDeviceComboBox.hpp" />
     <ClInclude Include="ThemePalette.hpp" />
     <QtMoc Include="ImageWorker.hpp" />
     <ClInclude Include="ImagePreview.hpp" />
+    <ClInclude Include="VideoWorker.hpp" />
+    <ClInclude Include="VideoBatchWorker.hpp" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="resources.rc" />

@@ -1,5 +1,5 @@
 #include "cuda_utils.hpp"
-#include "kernels/kernels.cuh"
+#include "kernels/utility_kernels.cuh"
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -11,6 +11,29 @@
  *  \author Dimitris Karatzas
  */
 namespace cuda_utils {
+
+namespace {
+__global__ void videoPreviewKernel(const uint8_t* yPlane, const uint8_t* uPlane, const uint8_t* vPlane, uchar4* output, const VideoPreviewParams p) {
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+    if (x >= p.outWidth || y >= p.outHeight)
+        return;
+    const int sx = min(p.width - 1, static_cast<int>((x + .5f) * p.width / p.outWidth));
+    const int sy = min(p.height - 1, static_cast<int>((y + .5f) * p.height / p.outHeight));
+    const int cx = sx >> p.shiftX, cy = sy >> p.shiftY;
+    const float yy = (yPlane[sy * p.yPitch + sx] - p.yOffset) * p.yScale;
+    const float u = p.gray ? 0.f : (uPlane[cy * p.uPitch + cx * (1 + p.interleaved)] - 128.f) * p.uvScale;
+    const float v = p.gray ? 0.f : (vPlane[cy * p.vPitch + cx * (1 + p.interleaved)] - 128.f) * p.uvScale;
+    output[y * p.outWidth + x] = make_uchar4(static_cast<uint8_t>(__float2int_rn(fminf(255.f, fmaxf(0.f, yy + p.redV * v)))),
+        static_cast<uint8_t>(__float2int_rn(fminf(255.f, fmaxf(0.f, yy + p.greenU * u + p.greenV * v)))), static_cast<uint8_t>(__float2int_rn(fminf(255.f, fmaxf(0.f, yy + p.blueU * u)))), 255);
+}
+} // namespace
+
+void launchVideoPreview(const uint8_t* y, const uint8_t* u, const uint8_t* v, uint8_t* output, const VideoPreviewParams params, const cudaStream_t stream) {
+    const dim3 block(16, 16);
+    videoPreviewKernel<<<dim3((params.outWidth + 15) / 16, (params.outHeight + 15) / 16), block, 0, stream>>>(y, u, v, reinterpret_cast<uchar4*>(output), params);
+    CUDA_CHECK(cudaGetLastError());
+}
 
 // convert NV12 UV plane to YUV420P format
 void launchNV12ToYUV420pKernel(const uint8_t* uvSrc, const int uvPitch, uint8_t* uvDst, const int uvWidth, const int uvHeight, const cudaStream_t stream) {

@@ -1,11 +1,36 @@
 #include "ImagePreview.hpp"
 #include <cstring>
+#include <QPainter>
 #include <WatermarkCore.hpp>
 
 /*!
- *  \brief  Image conversion implementations between session buffers and QImage
+ *  \brief  Image display and conversion between session buffers and QImage
  *  \author Dimitris Karatzas
  */
+
+ImagePreviewView::ImagePreviewView(QWidget* parent) : QLabel("Input image", parent) {
+    setAlignment(Qt::AlignCenter);
+    setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Ignored);
+}
+
+void ImagePreviewView::setImage(const QImage& image) {
+    image_ = image;
+    setText(image_.isNull() ? "Input image" : QString());
+    update();
+}
+
+void ImagePreviewView::paintEvent(QPaintEvent* event) {
+    QLabel::paintEvent(event);
+    if (image_.isNull())
+        return;
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform);
+    const QRect bounds = contentsRect();
+    QRect target(QPoint(), image_.size().scaled(bounds.size(), Qt::KeepAspectRatio));
+    target.moveCenter(bounds.center());
+    painter.setClipRect(bounds);
+    painter.drawImage(target, image_);
+}
 
 // Copy original pixel buffer into a QImage for side by side preview
 QImage originalPreviewFromSession(WatermarkCore::ImageSession* session) {

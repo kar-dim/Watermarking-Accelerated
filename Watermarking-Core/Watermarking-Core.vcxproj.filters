@@ -25,6 +25,15 @@
     <ClCompile Include="video_utils.cpp">
       <Filter>Source Files\util</Filter>
     </ClCompile>
+    <ClCompile Include="VideoMedia.cpp">
+      <Filter>Source Files\util</Filter>
+    </ClCompile>
+    <ClCompile Include="ImageBatch.cpp">
+      <Filter>Source Files\util</Filter>
+    </ClCompile>
+    <ClCompile Include="VideoBatch.cpp">
+      <Filter>Source Files\util</Filter>
+    </ClCompile>
     <ClCompile Include="OclHdrTonemap.cpp">
       <Filter>Source Files\opencl</Filter>
     </ClCompile>
@@ -160,6 +169,9 @@
     <ClInclude Include="OclVideoInterop.hpp">
       <Filter>Header Files\opencl</Filter>
     </ClInclude>
+    <ClInclude Include="kernels\utility_kernels.cuh">
+      <Filter>Header Files\cuda</Filter>
+    </ClInclude>
     <ClInclude Include="kernels\kernels.cuh">
       <Filter>Header Files\cuda</Filter>
     </ClInclude>
@@ -202,6 +214,9 @@
     <ClInclude Include="include\WatermarkCore.hpp">
       <Filter>public</Filter>
     </ClInclude>
+    <ClInclude Include="include\CorrelationFormat.hpp">
+      <Filter>public</Filter>
+    </ClInclude>
     <ClInclude Include="include\common_utils.hpp">
       <Filter>public</Filter>
     </ClInclude>
@@ -237,6 +252,33 @@
     </ClInclude>
     <ClInclude Include="EncodeOptions.hpp">
       <Filter>Header Files\util</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="VideoPreview.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="VideoPreviewParams.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="include\VideoObserver.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="VideoBatchScheduler.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="BatchUtils.hpp">
+      <Filter>Header Files\util</Filter>
+    </ClInclude>
+    <ClInclude Include="include\ImageBatch.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="include\VideoBatch.hpp">
+      <Filter>public</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

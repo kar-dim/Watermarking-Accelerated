@@ -1,17 +1,15 @@
 #pragma once
-#include "opencl_init.h"
 #include "CheckedSize.hpp"
+#include "opencl_init.h"
 #include <cstddef>
 #include <mutex>
-#include <stdexcept>
-#include <string>
 #include <unordered_map>
 
 /*!
  *  \brief  Free-list memory pool for OpenCL cl_mem buffers. Allocations are rounded up to the next
  *          power of 2 so that images with similar dimensions are put in the same "bucket",
  *          a maximum capacity cap, set based on available VRAM prevents overflow to RAM.
- *          Owned by OclQueueManager. reset() is called automatically on device/context switch
+ *          Owned by one device context, buffers return to that owner's pool
  *  \author Dimitris Karatzas
  */
 class OclMemPool {
@@ -56,7 +54,7 @@ class OclMemPool {
         cl_int err;
         cl_mem m = clCreateBuffer(ctx, CL_MEM_READ_WRITE, rounded, nullptr, &err);
         if (err != CL_SUCCESS)
-            throw std::runtime_error("clCreateBuffer failed: " + std::to_string(err));
+            throw cl_utils::DriverError(err, "clCreateBuffer");
         return m;
     }
 

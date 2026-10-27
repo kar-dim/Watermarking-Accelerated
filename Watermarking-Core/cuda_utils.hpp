@@ -1,6 +1,7 @@
 #pragma once
 #include "CudaCheck.hpp"
 #include "HdrTonemap.hpp"
+#include "VideoPreviewParams.hpp"
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -12,6 +13,7 @@
  *  \author Dimitris Karatzas
  */
 namespace cuda_utils {
+void launchVideoPreview(const uint8_t* y, const uint8_t* u, const uint8_t* v, uint8_t* output, VideoPreviewParams params, cudaStream_t stream);
 void launchNV12ToYUV420pKernel(const uint8_t* uvSrc, const int uvPitch, uint8_t* uvDst, const int uvWidth, const int uvHeight, const cudaStream_t stream);
 void launchYUV420pToNV12Kernel(const uint8_t* uvSrc, uint8_t* uvDst, const int uvPitch, const int uvWidth, const int uvHeight, const cudaStream_t stream);
 void launchPitchedToFloatKernel(const uint8_t* ySrc, float* yDst, const int width, const int height, const int pitch, const cudaStream_t stream);

@@ -16,6 +16,14 @@ QLabel {
     background-color: transparent;
 }
 
+QCheckBox {
+    background-color: transparent;
+}
+
+QCheckBox:disabled {
+    color: @MUTED@;
+}
+
 QLabel#mutedLabel, QLabel#deviceName {
     color: @MUTED@;
 }
@@ -25,11 +33,15 @@ QLabel#backendLabel {
     font-weight: bold;
 }
 
+QWidget[workflowContainer="true"], QWidget#devicePickerArea {
+    background-color: transparent;
+}
+
 QWidget#settingsRow, QWidget#settingsColumn {
     background-color: transparent;
 }
 
-QLineEdit, QComboBox, QDoubleSpinBox {
+QLineEdit, QComboBox, QDoubleSpinBox, QSpinBox {
     background-color: #201f1f;
     color: @TEXT@;
     border: 1px solid #333333;
@@ -39,7 +51,7 @@ QLineEdit, QComboBox, QDoubleSpinBox {
     selection-background-color: @ACCENT@;
 }
 
-QLineEdit:focus, QComboBox:focus, QDoubleSpinBox:focus {
+QLineEdit:focus, QComboBox:focus, QDoubleSpinBox:focus, QSpinBox:focus {
     border: 1px solid @ACCENT_BORDER@;
 }
 
@@ -134,13 +146,37 @@ QWidget#singleDetectArea {
     background-color: transparent;
 }
 
-QLabel#detectionResult {
+QWidget#detectionCard {
     background-color: #1a1a1a;
-    color: @ACCENT_LIGHT@;
     border: 1px solid #333333;
     border-radius: 9px;
-    font-size: 20px;
 }
+
+QLabel#detectionThumbnail {
+    background-color: @CANVAS@;
+    color: @MUTED@;
+    border: 1px solid #333333;
+    border-radius: 6px;
+}
+
+QLabel#detectionFile, QLabel#detectionHint {
+    color: @MUTED@;
+    font-size: 16px;
+}
+
+QLabel#detectionCaption {
+    font-size: 18px;
+}
+
+QLabel#detectionResult {
+    color: @ACCENT_LIGHT@;
+    font-size: 48px;
+    font-weight: bold;
+}
+
+QLabel#detectionResult[state="idle"] { color: @MUTED@; }
+QLabel#detectionResult[state="running"] { color: @WARNING@; }
+QLabel#detectionResult[state="error"] { color: @ERROR@; }
 
 QLabel#dropOverlay {
     background-color: rgba(14, 14, 14, 225);
@@ -205,4 +241,15 @@ QScrollBar::handle:vertical {
 
 QMessageBox {
     background-color: #1a1a1a;
+}
+
+QLabel#videoStatus { color: #c1c6d7; padding: 4px; }
+QLabel#videoStatus[state="done"] { color: @ACCENT_LIGHT@; }
+QLabel#videoStatus[state="error"] { color: @ERROR@; }
+QPlainTextEdit {
+    background-color: #1a1a1a;
+    color: @TEXT@;
+    border: 1px solid #333333;
+    border-radius: 6px;
+    padding: 6px;
 }

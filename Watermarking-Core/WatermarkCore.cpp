@@ -1,6 +1,7 @@
 #include "AvUtil.hpp"
 #include "buffer.hpp"
 #include "CheckedSize.hpp"
+#include "EncodeOptions.hpp"
 #include "common_utils.hpp"
 #include "ImageFileBuffer.hpp"
 #include "include/WatermarkCore.hpp"
@@ -348,6 +349,7 @@ void copySessionPreview(const ImageSession* session, uint8_t* destination, const
     cuda_utils::launchColMajorToInterleavedU8Kernel(buffer.data(), interleaved.data(), width, height, channels, stream);
     interleaved.toHostPitched(destination, width * channels, bytesPerLine);
 #elif defined(_USE_OPENCL_)
+    const OclQueueManager::Binding binding(buffer.getOwner());
     auto& mgr = OclQueueManager::getInstance();
     OclArray<uint8_t> interleaved(height, width, channels, mgr.getQueueRaw());
     cl_utils::launchColMajorToInterleavedU8(buffer.clBuffer(), interleaved.clBuffer(), width, height, channels, mgr.getQueue());
@@ -485,6 +487,9 @@ void buildOpenCLKernels() {
 }
 
 void updateSessionParams(ImageSession* s, const int p, const float psnr) {
+#if defined(_USE_OPENCL_)
+    const OclQueueManager::Binding binding(s->imgBuffer.image.getOwner());
+#endif
     checkPredictionOrder(p);
     checkPsnr(psnr);
     if (s->p == p && s->psnr == psnr)
@@ -515,6 +520,9 @@ PreloadedHandle preloadImageFromDisk(const string& imagePath, const int deviceIn
     // each prefetch thread must activate owning session GPU
     if (deviceIndex >= 0)
         CUDA_CHECK(cudaSetDevice(deviceIndex));
+#elif defined(_USE_OPENCL_)
+    if (deviceIndex >= 0)
+        OclQueueManager::initialize(deviceIndex);
 #endif
     PreloadedHandle p(new PreloadedImage());
     p->buffer = InternalUtils::loadImage(imagePath, captureOriginal);
@@ -536,7 +544,9 @@ PreloadedHandle ImagePrefetcher::next() {
     return image.get();
 }
 
-ImageSaver::ImageSaver(const size_t maxSaves) {
+ImageSaver::ImageSaver(const size_t maxSaves) : ImageSaver(maxSaves, 0) {}
+
+ImageSaver::ImageSaver(const size_t maxSaves, const size_t maxInFlightBytes) : maxInFlightBytes(maxInFlightBytes) {
     const size_t count = maxSaves > 0 ? maxSaves : std::max(std::thread::hardware_concurrency(), 1u);
     saveSlots.resize(count);
     for (size_t i = 0; i < count; i++) {
@@ -552,11 +562,19 @@ ImageSaver::~ImageSaver() {
             slot.task.wait();
 }
 
-void ImageSaver::save(ImageSession* session, const string& outPath, const size_t id) {
+void ImageSaver::save(ImageSession* session, const string& outPath, const size_t id) { saveImpl(session, outPath, id, false); }
+
+void ImageSaver::saveExact(ImageSession* session, const string& outPath, const size_t id) { saveImpl(session, outPath, id, true); }
+
+void ImageSaver::saveImpl(ImageSession* session, const string& outPath, const size_t id, const bool exactPath) {
+    const size_t pixels = InternalUtils::checkedProduct(static_cast<size_t>(session->currentRows), static_cast<size_t>(session->currentCols));
+    const size_t bytes = InternalUtils::checkedProduct(pixels, session->currentIsRGB ? 9u : 3u) + session->imgBuffer.alphaChannel.size();
     std::unique_lock lock(mutex);
-    slotFreed.wait(lock, [&] { return !freeSlots.empty(); });
+    // One oversized image can proceed alone, otherwise include export, conversion and host pixels in the budget
+    slotFreed.wait(lock, [&] { return !freeSlots.empty() && (!maxInFlightBytes || !inFlightBytes || (bytes <= maxInFlightBytes && inFlightBytes <= maxInFlightBytes - bytes)); });
     const size_t index = freeSlots.back();
     freeSlots.pop_back();
+    inFlightBytes += bytes;
     lock.unlock();
     Slot& slot = saveSlots[index];
     try {
@@ -564,23 +582,39 @@ void ImageSaver::save(ImageSession* session, const string& outPath, const size_t
         if (slot.task.valid())
             slot.task.get();
         exportForSave(session, slot.buffer.get());
-        slot.task = std::async(std::launch::async, [this, index, id, outPath] {
+        slot.task = std::async(std::launch::async, [this, index, id, outPath, exactPath, bytes] {
             string error;
             try {
-                flushToDiskAsync(saveSlots[index].buffer.get(), outPath);
+                if (exactPath) {
+                    const SerialOpenMPScope serial;
+                    const auto& output = *saveSlots[index].buffer;
+                    InternalUtils::saveImage(outPath, "", output.finalPixels, output.alpha);
+                } else {
+                    flushToDiskAsync(saveSlots[index].buffer.get(), outPath);
+                }
             } catch (const std::exception& e) { error = *e.what() ? e.what() : "Unknown save error"; } catch (...) {
                 error = "Unknown save error";
             }
+            // Idle slots must not retain GPU buffers outside the active save budget
+            if (maxInFlightBytes)
+                *saveSlots[index].buffer = {};
             {
                 std::lock_guard finishedLock(mutex);
                 finished.push_back(SaveResult{id, std::move(error)});
                 freeSlots.push_back(index);
+                inFlightBytes -= bytes;
             }
             slotFreed.notify_all();
         });
     } catch (...) {
-        std::lock_guard freeLock(mutex);
-        freeSlots.push_back(index);
+        if (maxInFlightBytes)
+            *slot.buffer = {};
+        {
+            std::lock_guard freeLock(mutex);
+            freeSlots.push_back(index);
+            inFlightBytes -= bytes;
+        }
+        slotFreed.notify_all();
         throw;
     }
 }
@@ -614,17 +648,27 @@ OriginalPixelData takeOriginalPixelData(ImageSession* s) {
 void bindPreloadedImage(ImageSession* s, PreloadedHandle preloadedData) {
     if (!preloadedData)
         throw std::invalid_argument("No preloaded image supplied");
+#if defined(_USE_OPENCL_)
+    const OclQueueManager::Binding binding(preloadedData->buffer.image.getOwner());
+    const bool deviceChanged = !s->imgBuffer.image.empty() && s->imgBuffer.image.getOwner() != preloadedData->buffer.image.getOwner();
+#else
+    const bool deviceChanged = false;
+#endif
     const auto rows = preloadedData->buffer.rows;
     const auto cols = preloadedData->buffer.cols;
     const auto isRGB = preloadedData->buffer.isRGB;
     // lazy init when dimensions change or on first frame
-    if (!s->watermarkObj || s->currentRows != rows || s->currentCols != cols || s->currentIsRGB != isRGB) {
+    if (!s->watermarkObj || s->currentRows != rows || s->currentCols != cols || s->currentIsRGB != isRGB || deviceChanged) {
         auto engine = createWatermarkObject(rows, cols, s->watermarkPassword, s->p, s->psnr);
 #if defined(_USE_EIGEN_)
         auto output = isRGB ? ImageOutputBuffer(eigen_utils::makeEigenRGBu8(rows, cols)) : ImageOutputBuffer(Gray8Buffer(rows, cols));
         s->watermarkBuffer = std::move(output);
 #endif
         s->watermarkObj = std::move(engine);
+#if defined(_USE_OPENCL_)
+        if (deviceChanged)
+            s->watermarkBuffer = {};
+#endif
         s->currentRows = rows;
         s->currentCols = cols;
         s->currentIsRGB = isRGB;
@@ -659,6 +703,9 @@ void finish() {
 
 void prepareDetectionImage(ImageSession* s) {
     checkOutput(s);
+#if defined(_USE_OPENCL_)
+    const OclQueueManager::Binding binding(s->watermarkBuffer.getOwner());
+#endif
     s->detectionReady = false;
     s->detectGrayBuffer = InternalUtils::castToFloatGray(s->watermarkBuffer, s->imgBuffer.isRGB);
     // sync device to measure full completion instead of async upload
@@ -699,7 +746,32 @@ void saveImageExact(const ImageSession* s, const string& outPath) {
 
 void VideoSessionDeleter::operator()(VideoSession* s) const { delete s; }
 
-VideoHandle initVideo(const VideoSettings& settings) {
+std::string defaultVideoEncoderOptions(const bool hardware, [[maybe_unused]] const int deviceIndex) {
+    if (!hardware)
+        return "-c:v libx265 -preset medium -crf 20";
+#if defined(_USE_OPENCL_)
+    return hardwareEncoderDefaults(OclQueueManager::deviceVendorId(deviceIndex));
+#elif defined(_USE_CUDA_)
+    return hardwareEncoderDefaults(0x10de);
+#else
+    throw std::invalid_argument("Eigen uses CPU video encoding");
+#endif
+}
+
+void validateVideoEncoderOptions(const std::string& options, const bool hardware) {
+#if defined(_USE_EIGEN_)
+    if (hardware)
+        throw std::invalid_argument("Eigen uses CPU encoding, select a GPU build for hardware encoding");
+#endif
+    if (hardware && options.empty())
+        return;
+    const auto parsed = parseEncodeOptions(options);
+    try {
+        findVideoEncoder(parsed.codecName, hardware);
+    } catch (const std::runtime_error& error) { throw std::invalid_argument(error.what()); }
+}
+
+static VideoHandle openVideo(const VideoSettings& settings) {
     checkPsnr(settings.psnr);
 #if defined(_USE_EIGEN_)
     if (settings.useHwEncoder)
@@ -710,9 +782,20 @@ VideoHandle initVideo(const VideoSettings& settings) {
     av_log_set_level(AV_LOG_INFO);
     VideoHandle session(new VideoSession());
     session->settings = settings;
-    AVFormatContext* rawInputCtx = nullptr;
+#if defined(_USE_OPENCL_)
+    session->openclDevice = OclQueueManager::current();
+#endif
+#if defined(_USE_GPU_)
+    session->deviceIndex = getCurrentDeviceIndex();
+#endif
+    checkCancelled(session.get());
+    reportProgress(session.get(), VideoState::Setup);
+    AVFormatContext* rawInputCtx = avformat_alloc_context();
+    checkError(!rawInputCtx, "Failed to allocate video input");
+    rawInputCtx->interrupt_callback = {interruptVideo, session.get()};
     const int openResult = avformat_open_input(&rawInputCtx, settings.videoFile.c_str(), nullptr, nullptr);
     session->inputFormatCtx.reset(rawInputCtx);
+    checkCancelled(session.get());
     checkError(openResult < 0, "Failed to open video");
     video_utils::checkAv(avformat_find_stream_info(session->inputFormatCtx.get(), nullptr), "Failed to read stream info");
     session->videoStreamIndex = findVideoStream(session->inputFormatCtx.get());
@@ -720,6 +803,7 @@ VideoHandle initVideo(const VideoSettings& settings) {
     session->videoStream = session->inputFormatCtx->streams[session->videoStreamIndex];
     session->useHwDecoder = false;
     session->inputDecoderCtx = openDecoder(session.get());
+    checkCancelled(session.get());
     checkError(!session->inputDecoderCtx.get(), "Could not open video decoder");
     if (!session->useHwDecoder)
         session->decodedFormat = session->inputDecoderCtx->pix_fmt;
@@ -728,28 +812,86 @@ VideoHandle initVideo(const VideoSettings& settings) {
     // dimensions must fit chroma subsampling, checked with encoder, detection reads only luma
     const int height = session->videoStream->codecpar->height;
     const int width = session->videoStream->codecpar->width;
+    checkCancelled(session.get());
     session->watermarkObj = createWatermarkObject(height, width, settings.watermarkPassword, settings.p, settings.psnr);
+    reportProgress(session.get(), VideoState::Setup);
     return session;
 }
 
-// failed embed discards temporary file and preserves destination
-int embedVideo(VideoSession* s) {
+VideoHandle initVideo(const VideoSettings& settings) {
     try {
+        return openVideo(settings);
+    } catch (const VideoCancelled&) {
+        if (settings.observer) {
+            VideoProgress progress;
+            progress.state = VideoState::Cancelled;
+            settings.observer->onProgress(progress);
+        }
+        throw;
+    } catch (...) {
+        if (settings.observer) {
+            VideoProgress progress;
+            progress.state = VideoState::Failed;
+            settings.observer->onProgress(progress);
+        }
+        throw;
+    }
+}
+
+// failed embed discards temporary file and preserves destination
+int embedVideo(VideoSession* s) { return embedVideo(s, true); }
+
+int embedVideo(VideoSession* s, const bool replaceExistingOutput) {
+    try {
+#if defined(_USE_OPENCL_)
+        const OclQueueManager::Binding binding(s->openclDevice);
+#elif defined(_USE_CUDA_)
+        CUDA_CHECK(cudaSetDevice(s->deviceIndex));
+#endif
+        checkCancelled(s);
         video_utils::initOutputEncoder(s);
+        reportProgress(s, VideoState::Processing);
         const bool needsFilter = initFilterGraph(s);
         const int framesProcessed = videoDispatcher(s, VideoMode::EMBED, needsFilter);
-        video_utils::flushAndFinalize(s);
+        checkError(framesProcessed <= 0, "No video frames were decoded");
+        reportProgress(s, VideoState::Finalizing);
+        video_utils::flushAndFinalize(s, replaceExistingOutput);
+        reportProgress(s, VideoState::Completed);
         return framesProcessed;
+    } catch (const VideoCancelled&) {
+        video_utils::discardOutput(s);
+        reportProgress(s, VideoState::Cancelled);
+        throw;
     } catch (...) {
+        reportProgress(s, VideoState::Failed);
         video_utils::discardOutput(s);
         throw;
     }
 }
 
 int detectVideo(VideoSession* s) {
-    checkError(is10bit(s->inputDecoderCtx.get(), s->videoStream) || isHDR(s->inputDecoderCtx.get()),
-        "Video watermark detection supports only 8-bit SDR input. High-bit-depth and HDR detection are not supported.");
-    return videoDispatcher(s, VideoMode::DETECT, initFilterGraph(s));
+    try {
+#if defined(_USE_OPENCL_)
+        const OclQueueManager::Binding binding(s->openclDevice);
+#elif defined(_USE_CUDA_)
+        CUDA_CHECK(cudaSetDevice(s->deviceIndex));
+#endif
+        checkCancelled(s);
+        checkError(is10bit(s->inputDecoderCtx.get(), s->videoStream) || isHDR(s->inputDecoderCtx.get()),
+            "Video watermark detection supports only 8-bit SDR input. High-bit-depth and HDR detection are not supported.");
+        reportProgress(s, VideoState::Processing);
+        const int frames = videoDispatcher(s, VideoMode::DETECT, initFilterGraph(s));
+        checkError(frames <= 0, "No video frames were decoded");
+        checkCancelled(s);
+        reportProgress(s, VideoState::Completed);
+        return frames;
+    } catch (const VideoCancelled&) {
+        reportProgress(s, VideoState::Cancelled);
+        throw;
+    } catch (...) {
+        reportProgress(s, VideoState::Failed);
+        throw;
+    }
 }
 
 void optimizeThreadsForVideoEmbedding() {

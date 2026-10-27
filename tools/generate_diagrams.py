@@ -192,12 +192,14 @@ class Flowchart:
 def image_pipeline():
     chart = Flowchart(
         1120, "Image watermarking",
-        "Single images and folders use the same watermark code. CUDA and OpenCL "
+        "Single images and batches use the same watermark code. CUDA and OpenCL "
         "run on the GPU, Eigen runs on the CPU. CUDA tries nvJPEG for supported "
         "JPEG files, CPU image libraries handle other inputs and fallback. "
         "Embedding saves an image, detection returns a correlation value. "
-        "Qt supports single-image embed and detect, CLI single-image mode embeds.",
-        "Image mode", "One image or a folder, the same steps on your chosen backend",
+        "Batches share whole images across selected GPUs, each GPU owns its session, "
+        "loads and saves. Eigen uses one CPU worker. Qt supports single-image embed "
+        "and detect, CLI single-image mode embeds.",
+        "Image mode", "Single files or batches, the same steps on your chosen backend",
     )
     chart.group(40, 464, 1200, 198, "Watermark processing", OPENCL, note="One backend per build")
     chart.link([(320, 264), (320, 298), (640, 298), (640, 326)])
@@ -211,7 +213,7 @@ def image_pipeline():
     chart.link([(510, 788), (320, 788), (320, 890)], color=CUDA)
     chart.link([(770, 788), (960, 788), (960, 890)], color=VIOLET)
     chart.node(130, 176, 380, 88, "Single image", "Qt embed or detect, CLI embed", terminal=True, color=OPENCL)
-    chart.node(770, 176, 380, 88, "Image folder", "Qt or CLI, embed or detect", terminal=True, color=OPENCL)
+    chart.node(770, 176, 380, 88, "Image batch", "Selected GPUs share the file queue", terminal=True, color=OPENCL)
     chart.node(420, 326, 440, 84, "Load and prepare pixels", "Read the file, apply its rotation")
     for x, title, subtitle, color in (
         (76, "CUDA", "GPU watermark, embed or detect", CUDA),
@@ -225,14 +227,14 @@ def image_pipeline():
     chart.node(110, 890, 420, 88, "Save the image", "Single file or watermark_output/ folder", terminal=True, color=CUDA)
     chart.node(750, 890, 420, 88, "Read the correlation", "A detection result, no image to save", terminal=True, color=VIOLET)
     chart.note(1024, "CUDA can read and write JPEGs with nvJPEG, other image formats use CPU libraries.")
-    chart.note(1054, "Batches load and save in the background, the same password and image size give the same watermark.")
+    chart.note(1054, "Batches share whole images across selected GPUs, each GPU overlaps loading, watermarking and saving.")
     chart.note(1084, "p sets the prediction window, PSNR sets the watermark strength.")
     return chart
 
 
 def video_pipeline():
     chart = Flowchart(
-        1630, "Video watermarking",
+        1660, "Video watermarking",
         "FFmpeg reads the video. CUDA tries NVDEC, OpenCL tries D3D11VA and "
         "QSV on Intel. Both hardware paths test the first frame before use, "
         "unsupported decoding uses CPU decode and GPU upload. Eigen stays on "
@@ -240,7 +242,8 @@ def video_pipeline():
         "HDR uses GPU Mobius, other HDR uses CPU filters. Detection accepts "
         "only 8-bit SDR input, returns correlation results and stops. Embedding uses CPU encoding by default, "
         "optional hardware encoding uses NVENC, QSV or AMF on the same GPU. "
-        "FFmpeg joins video with compatible audio and subtitle streams.",
+        "FFmpeg joins video with compatible audio and subtitle streams. A video batch "
+        "runs one complete pipeline per selected GPU, each worker takes a whole file.",
         "Video mode", "Decode, prepare frames, watermark, then encode or read the detection result",
     )
     for x, label, color in ((40, "CUDA / NVIDIA", CUDA), (456, "OPENCL / GPU", OPENCL), (872, "EIGEN / CPU", CPU)):
@@ -269,7 +272,7 @@ def video_pipeline():
     chart.link([(224, 1318), (224, 1350), (640, 1350)], arrow=False)
     chart.link([(1056, 1318), (1056, 1350), (640, 1350)], arrow=False)
     chart.link([(640, 1318), (640, 1384)])
-    chart.node(470, 158, 340, 56, "Input video", terminal=True, color=OPENCL)
+    chart.node(470, 158, 340, 56, "Single video or batch", terminal=True, color=OPENCL)
     chart.node(450, 258, 380, 76, "Read the video stream", "Keep audio and subtitles for the output")
     chart.node(62, 448, 324, 72, "NVDEC decode", "NVIDIA hardware decoder", color=CUDA)
     chart.node(478, 448, 324, 72, "D3D11VA decode", "Intel can also try QSV", color=OPENCL)
@@ -303,27 +306,29 @@ def video_pipeline():
     chart.note(1534, "*GPU HDR supports limited-range BT.2020 PQ, 4:2:0, 10-bit input. Other HDR uses CPU filters.")
     chart.note(1566, "CPU SDR converts before upload, skipped frames still get needed conversion, HDR tone mapping outputs 8-bit 4:2:0.")
     chart.note(1598, "D3D11 frames use GPU copies and sharing for OpenCL. Watermarking changes luma (Y), the brightness plane.")
+    chart.note(1630, "A batch runs this full pipeline on each selected GPU, whole videos come from one shared queue.")
     return chart
 
 
 def video_architecture():
     chart = Flowchart(
-        1430, "Video threads and queues",
-        "Video embedding uses a main thread and a separate encode and mux thread. "
-        "The decode pump runs on the main thread, reads packets, sends them to "
+        1430, "Inside one video worker",
+        "Video embedding uses a processing thread and a separate encode and mux thread. "
+        "Each active GPU in a video batch runs its own copy of this pipeline. "
+        "The decode pump runs on the processing thread, reads packets, sends them to "
         "FFmpeg and drains decoded frames. That thread also prepares frames and "
         "submits CUDA or OpenCL watermark work, or runs Eigen on the CPU. OpenCL "
         "hardware decoding holds two frames ahead and stages GPU copies. Owned "
         "video frames and audio or subtitle packets pass through one queue with "
-        "a maximum of eight items. A full queue makes the main thread wait. The "
+        "a maximum of eight items. A full queue makes the processing thread wait. The "
         "encode thread checks frame copies when needed, encodes video frames "
-        "and writes all output packets. After the worker is joined, the main "
+        "and writes all output packets. After the encode thread is joined, the processing "
         "thread flushes the encoder and finishes the file. Detection accepts "
         "8-bit SDR input and returns results without starting the encode thread. "
         "FFmpeg and Eigen may also use CPU worker threads.",
-        "Video architecture", "Two application threads during embedding, GPU engines can work on different frames",
+        "Video architecture", "One pipeline per active GPU, decode and encode can work on different frames",
     )
-    chart.group(40, 188, 600, 780, "Main thread", LINE, note="Decode and watermark loop")
+    chart.group(40, 188, 600, 780, "Processing thread", LINE, note="Decode and watermark loop")
     chart.group(880, 188, 360, 780, "Encode thread", LINE, note="Embed only")
     chart.group(40, 1160, 1200, 190, "GPU work can overlap", LINE,
                 note="Depends on the device, codec and copies")
@@ -351,7 +356,7 @@ def video_architecture():
     chart.tag(84, 682, "Detect", color=VIOLET, size=15)
     chart.tag(374, 776, "Embed", color=LINE, size=15)
     chart.node(118, 798, 444, 86, "Hand off an owned frame", "GPU surface or CPU buffer")
-    chart.text(78, 940, "The main loop continues while the encoder works.", size=18, color=MUTED)
+    chart.text(78, 940, "Decode continues while the encoder works.", size=18, color=MUTED)
 
     # Stacked outlines distinguish this shared queue from a processing step.
     chart.rect(656, 652, 192, 128, fill=tint(VIOLET), stroke=VIOLET, radius=11,
@@ -360,7 +365,7 @@ def video_architecture():
                extra=' stroke-opacity="0.45"')
     chart.node(664, 660, 192, 128, "Encode queue", "8 items max", color=VIOLET, size=19, body_size=16)
     chart.tag(760, 642, "Frames + packets", color=VIOLET, size=16)
-    chart.tag(760, 814, "If full, main waits", color=VIOLET, size=16)
+    chart.tag(760, 814, "If full, worker waits", color=VIOLET, size=16)
     chart.tag(760, 390, "Audio / subtitles", color=VIOLET, size=16)
 
     chart.decision(1060, 414, 180, 96, ["Frame or", "packet"], color=VIOLET, size=18)
@@ -380,7 +385,54 @@ def video_architecture():
     ):
         chart.node(x, 1228, 328, 80, title, subtitle, color=color, size=21, body_size=16)
     chart.note(1384, "The two thread groups show application threads, FFmpeg codecs and Eigen may also use CPU workers.")
-    chart.note(1414, "During the loop, only the encode thread writes output. Final flushing runs on the main thread after joining it.")
+    chart.note(1414, "Only the encode thread writes during the loop, the processing thread finishes the file after joining it.")
+    return chart
+
+
+def batch_architecture():
+    chart = Flowchart(
+        1340, "Multi-GPU batches",
+        "Image and video batches share whole files through one queue. Each selected "
+        "GPU runs a full pipeline with its own session and buffers. A CUDA build uses "
+        "CUDA on every selected NVIDIA GPU. An OpenCL build uses OpenCL on every "
+        "selected GPU, including mixed vendors. Images load and save in the background. "
+        "Videos have a decode loop and an encode thread per worker. Detection returns "
+        "image correlations or one CSV per video. Eigen uses one CPU worker. When "
+        "only one video remains, an idle GPU can start one backup attempt. Only the "
+        "first complete output is published, the other attempt stops and discards its "
+        "temporary file. Final-video acceleration is on by default and can be disabled. "
+        "Image batches do not start backup attempts.",
+        "Batch architecture", "Whole files from one queue, each selected GPU runs its own pipeline",
+    )
+    for x, label, color in ((40, "GPU 1", CUDA), (456, "GPU 2", OPENCL), (872, "GPU N", VIOLET)):
+        chart.group(x, 392, 368, 400, label, color, note="Own session")
+    chart.link([(640, 228), (640, 268)])
+    for center, color in ((224, CUDA), (640, OPENCL), (1056, VIOLET)):
+        chart.link([(640, 344), (640, 368), (center, 368), (center, 458)], color=color)
+        chart.link([(center, 528), (center, 574)], color=color)
+        chart.link([(center, 644), (center, 690)], color=color)
+        chart.link([(center, 760), (center, 824), (640, 824)], color=color, arrow=False)
+    chart.link([(640, 824), (640, 858)])
+    chart.node(440, 168, 400, 60, "Image batch or video batch", terminal=True, color=OPENCL)
+    chart.node(360, 268, 560, 76, "Shared file queue", "Each free worker takes the next file", color=OPENCL)
+    for x, label, color in ((40, "GPU 1", CUDA), (456, "GPU 2", OPENCL), (872, "GPU N", VIOLET)):
+        chart.node(x + 22, 458, 324, 70, "Read the file", "Load image or decode video", color=color)
+        chart.node(x + 22, 574, 324, 70, "Embed or detect", "CUDA or OpenCL kernels", color=color)
+        chart.node(x + 22, 690, 324, 70, "Finish the result", "Save image or encode video*", color=color)
+    chart.node(360, 858, 560, 76, "Publish the finished result", "Saved images, videos or detection results", terminal=True, color=OPENCL)
+    chart.note(972, "One backend per build, images overlap loading and saving, videos have a separate encode thread.")
+    chart.note(1002, "*Detection skips encoding, Eigen uses one CPU worker, CPU decoding and encoding share CPU time.")
+
+    chart.group(40, 1036, 1200, 232, "Final video", OPENCL, note="Optional, on by default")
+    chart.link([(336, 1150), (380, 1150), (380, 1120), (424, 1120)], color=CUDA)
+    chart.link([(380, 1150), (380, 1206), (424, 1206)], color=VIOLET)
+    chart.link([(644, 1120), (720, 1120), (720, 1150), (788, 1150)], color=CUDA)
+    chart.link([(644, 1206), (720, 1206), (720, 1150)], color=VIOLET, arrow=False)
+    chart.node(76, 1112, 260, 76, "One video left", "An idle GPU can help", color=OPENCL)
+    chart.node(424, 1090, 220, 60, "Active GPU", color=CUDA)
+    chart.node(424, 1176, 220, 60, "Idle GPU", color=VIOLET)
+    chart.node(788, 1112, 416, 76, "First complete output wins", "Stop the other attempt, discard its file", terminal=True, color=OPENCL, size=22)
+    chart.note(1306, "Final-video acceleration keeps one result, image batches do not start backup attempts.")
     return chart
 
 
@@ -436,6 +488,7 @@ def main():
         "image-pipeline.svg": image_pipeline,
         "video-pipeline.svg": video_pipeline,
         "video-architecture.svg": video_architecture,
+        "batch-architecture.svg": batch_architecture,
         "ui-benchmark.svg": ui_benchmark,
     }
     stale = []

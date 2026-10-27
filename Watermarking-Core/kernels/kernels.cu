@@ -1,4 +1,5 @@
 #include "kernels.cuh"
+#include "../HdrTonemapCurves.hpp"
 #include <cstdint>
 #include <cuda_runtime.h>
 #include <device_launch_parameters.h>
@@ -7,6 +8,62 @@
  *  \brief  CUDA device kernels for watermark embedding, prediction error filtering, and transforms
  *  \author Dimitris Karatzas
  */
+
+// Match zimg's extended curves outside [0, 1], clip only after converting back to YUV
+__device__ __forceinline__ float curveLerp(const float2* __restrict__ lut, const float x) {
+    const float idx = clamp(x, 0.0f, 2.0f) * 1023.0f;
+    const int i0 = __float2int_rd(idx);
+    const float frac = idx - static_cast<float>(i0);
+    const float2 values = __ldg(&lut[i0]);
+    return fmaf(values.y - values.x, frac, values.x);
+}
+
+// Mobius coefficients depend on the video's HDR peak and are computed once on the host
+__device__ __forceinline__ float mobiusTonemap(const float x, const float mobA, const float mobB, const float mobK) {
+    constexpr float j = 0.3f; // transition point in npl=100 units (30 nits)
+    if (x <= j)
+        return x;
+    return mobK * (x + mobA) * __frcp_rn(x + mobB);
+}
+
+// Match FFmpeg's zscale and Mobius chain, keep chroma precision until YUV conversion
+__device__ __forceinline__ float3 hdrPixelToSdrRgb(const uint16_t yRaw, const float2 chroma, const float mobA, const float mobB, const float mobK) {
+    // P010LE limited range -> normalized [0,1] / [-0.5,0.5]
+    const float Y2020 = fmaf(static_cast<float>(yRaw >> 6), 1.0f / 876.0f, -64.0f / 876.0f);
+    const float Cb2020 = fmaf(chroma.x, 1.0f / 896.0f, -512.0f / 896.0f);
+    const float Cr2020 = fmaf(chroma.y, 1.0f / 896.0f, -512.0f / 896.0f);
+    // BT.2020 YCbCr -> PQ-encoded R'G'B' (Kr=0.2627, Kb=0.0593), explicit FMAs! (not clipped, like zimg)
+    const float Rp = fmaf(1.4746f, Cr2020, Y2020);
+    const float Gp = fmaf(-0.16455f, Cb2020, fmaf(-0.57135f, Cr2020, Y2020));
+    const float Bp = fmaf(1.8814f, Cb2020, Y2020);
+    // PQ EOTF to linear RGB with peak luminance scaled inside the lookup table
+    float R = curveLerp(pqEotfPairs.entries, Rp);
+    float G = curveLerp(pqEotfPairs.entries, Gp);
+    float B = curveLerp(pqEotfPairs.entries, Bp);
+    // Highlight desaturation
+    constexpr float desat = 2.0f;
+    const float luma2020 = fmaf(0.2627f, R, fmaf(0.6780f, G, 0.0593f * B));
+    const float overbright = fmaxf(luma2020 - desat, 1e-6f) * __frcp_rn(fmaxf(luma2020, 1e-6f)); // Fast reciprocal
+    R = fmaf(overbright, luma2020 - R, R);
+    G = fmaf(overbright, luma2020 - G, G);
+    B = fmaf(overbright, luma2020 - B, B);
+    // Hue-preserving Mobius tone mapping applied uniformly across channels, not clipped (like vf_tonemap)
+    const float sig = fmaxf(fmaxf(R, G), B);
+    if (sig > 1e-6f) {
+        const float scale = mobiusTonemap(sig, mobA, mobB, mobK) * __frcp_rn(sig);
+        R *= scale;
+        G *= scale;
+        B *= scale;
+    } else {
+        R = G = B = 0.0f;
+    }
+    // Convert BT.2020 color gamut to BT.709
+    const float R7 = fmaf(1.6605f, R, fmaf(-0.5876f, G, -0.0728f * B));
+    const float G7 = fmaf(-0.1246f, R, fmaf(1.1329f, G, -0.0083f * B));
+    const float B7 = fmaf(-0.0182f, R, fmaf(-0.1006f, G, 1.1187f * B));
+    // Apply BT.1886 display gamma curve
+    return make_float3(curveLerp(bt1886Pairs.entries, R7), curveLerp(bt1886Pairs.entries, G7), curveLerp(bt1886Pairs.entries, B7));
+}
 
 __global__ void apply_watermark_row_major(
     const float* __restrict__ input, const __half* __restrict__ u, const uint64_t* __restrict__ sumSq, uint8_t* __restrict__ output, const float strengthNumerator, const int width, const int height) {

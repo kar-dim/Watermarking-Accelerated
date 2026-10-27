@@ -1,9 +1,10 @@
 #pragma once
-#include "OclQueueManager.hpp"
 #include "CheckedSize.hpp"
+#include "OclQueueManager.hpp"
 #include "opencl_init.h"
+#include <memory>
 #include <stdexcept>
-#include <string>
+#include <utility>
 
 /*!
  *  \brief  GPU buffer class for OpenCL, equivalent to CUDA CudaArray<T>
@@ -18,22 +19,24 @@ class OclArray {
     int cols = 0;
     int channels = 1;
     cl_command_queue queue = nullptr;
+    std::shared_ptr<OclQueueManager> owner;
 
     static void checkCl(const cl_int status, const char* operation) {
         if (status != CL_SUCCESS)
-            throw std::runtime_error(std::string(operation) + " failed with OpenCL error " + std::to_string(status));
+            throw cl_utils::DriverError(status, operation);
     }
 
     void alloc() {
         if (size() > 0) {
-            auto& mgr = OclQueueManager::getInstance();
-            mem = mgr.acquireBuffer(bytes(), queue);
+            owner = OclQueueManager::forQueue(queue);
+            mem = owner->acquireBuffer(bytes(), queue);
         }
     }
 
     void freeArray() {
         if (mem) {
-            OclQueueManager::getInstance().releaseBuffer(bytes(), mem);
+            // The caller's thread may now have a different GPU selected!
+            owner->releaseBuffer(bytes(), mem);
             mem = nullptr;
         }
     }
@@ -75,7 +78,7 @@ class OclArray {
     OclArray(const OclArray&) = delete;
     OclArray& operator=(const OclArray&) = delete;
 
-    OclArray(OclArray&& o) noexcept : mem(o.mem), rows(o.rows), cols(o.cols), channels(o.channels), queue(o.queue) {
+    OclArray(OclArray&& o) noexcept : mem(o.mem), rows(o.rows), cols(o.cols), channels(o.channels), queue(o.queue), owner(std::move(o.owner)) {
         o.mem = nullptr;
         o.rows = o.cols = 0;
         o.channels = 1;
@@ -89,6 +92,7 @@ class OclArray {
             cols = o.cols;
             channels = o.channels;
             queue = o.queue;
+            owner = std::move(o.owner);
             o.mem = nullptr;
             o.rows = o.cols = 0;
             o.channels = 1;
@@ -105,6 +109,7 @@ class OclArray {
     size_t bytes() const { return InternalUtils::checkedProduct(static_cast<size_t>(size()), sizeof(T)); }
     bool empty() const { return mem == nullptr; }
     cl_command_queue getQueue() const { return queue; }
+    const std::shared_ptr<OclQueueManager>& getOwner() const { return owner; }
 
     cl::Buffer clBuffer() const { return cl::Buffer(mem, true); }
 

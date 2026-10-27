@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="1430" viewBox="0 0 1280 1430" role="img" aria-labelledby="title description">
-<title id="title">Video threads and queues</title>
-<desc id="description">Video embedding uses a main thread and a separate encode and mux thread. The decode pump runs on the main thread, reads packets, sends them to FFmpeg and drains decoded frames. That thread also prepares frames and submits CUDA or OpenCL watermark work, or runs Eigen on the CPU. OpenCL hardware decoding holds two frames ahead and stages GPU copies. Owned video frames and audio or subtitle packets pass through one queue with a maximum of eight items. A full queue makes the main thread wait. The encode thread checks frame copies when needed, encodes video frames and writes all output packets. After the worker is joined, the main thread flushes the encoder and finishes the file. Detection accepts 8-bit SDR input and returns results without starting the encode thread. FFmpeg and Eigen may also use CPU worker threads.</desc>
+<title id="title">Inside one video worker</title>
+<desc id="description">Video embedding uses a processing thread and a separate encode and mux thread. Each active GPU in a video batch runs its own copy of this pipeline. The decode pump runs on the processing thread, reads packets, sends them to FFmpeg and drains decoded frames. That thread also prepares frames and submits CUDA or OpenCL watermark work, or runs Eigen on the CPU. OpenCL hardware decoding holds two frames ahead and stages GPU copies. Owned video frames and audio or subtitle packets pass through one queue with a maximum of eight items. A full queue makes the processing thread wait. The encode thread checks frame copies when needed, encodes video frames and writes all output packets. After the encode thread is joined, the processing thread flushes the encoder and finishes the file. Detection accepts 8-bit SDR input and returns results without starting the encode thread. FFmpeg and Eigen may also use CPU worker threads.</desc>
 <defs>
 <radialGradient id="ambient" gradientUnits="userSpaceOnUse" cx="640" cy="500.49999999999994" r="880">
 <stop offset="0" stop-color="#173747" stop-opacity="0.35"/>
@@ -22,8 +22,8 @@
 <rect x="2" y="2" width="1276" height="1426" rx="23" fill="url(#ambient)" stroke="none"/>
 <rect x="2" y="2" width="1276" height="1426" rx="23" fill="url(#grid)" stroke="none"/>
 <text x="44" y="48" font-family="Consolas, &#x27;Liberation Mono&#x27;, monospace" font-size="14" font-weight="400" text-anchor="start" letter-spacing="1.8" fill="#59d8f3">VIDEO ARCHITECTURE</text>
-<text x="44" y="94" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="34" font-weight="700" text-anchor="start" letter-spacing="0" fill="#edf7ff">Video threads and queues</text>
-<text x="44" y="126" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="19" font-weight="400" text-anchor="start" letter-spacing="0" fill="#a3b9ca">Two application threads during embedding, GPU engines can work on different frames</text>
+<text x="44" y="94" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="34" font-weight="700" text-anchor="start" letter-spacing="0" fill="#edf7ff">Inside one video worker</text>
+<text x="44" y="126" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="19" font-weight="400" text-anchor="start" letter-spacing="0" fill="#a3b9ca">One pipeline per active GPU, decode and encode can work on different frames</text>
 <rect x="40" y="188" width="600" height="780" rx="18" fill="#0b1825" stroke="#78a6bd" stroke-opacity="0.5" stroke-dasharray="3 7"/>
 <rect x="880" y="188" width="360" height="780" rx="18" fill="#0b1825" stroke="#78a6bd" stroke-opacity="0.5" stroke-dasharray="3 7"/>
 <rect x="40" y="1160" width="1200" height="190" rx="18" fill="#0b1825" stroke="#78a6bd" stroke-opacity="0.5" stroke-dasharray="3 7"/>
@@ -88,7 +88,7 @@
 <text x="340.0" y="837.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="22" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Hand off an owned frame</text>
 <text x="340.0" y="864.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">GPU surface or CPU buffer</text>
 </g>
-<text x="78" y="940" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="18" font-weight="400" text-anchor="start" letter-spacing="0" fill="#a3b9ca">The main loop continues while the encoder works.</text>
+<text x="78" y="940" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="18" font-weight="400" text-anchor="start" letter-spacing="0" fill="#a3b9ca">Decode continues while the encoder works.</text>
 <rect x="656" y="652" width="192" height="128" rx="11" fill="#161e31" stroke="#c3a0ff" stroke-opacity="0.25"/>
 <rect x="660" y="656" width="192" height="128" rx="11" fill="#161e31" stroke="#c3a0ff" stroke-opacity="0.45"/>
 <g data-node="Encode queue" data-bounds="664 660 192 128">
@@ -99,8 +99,8 @@
 </g>
 <rect x="682.16" y="626" width="155.68" height="24" rx="6" fill="#07131f" stroke="none"/>
 <text x="760" y="642" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="16" font-weight="500" text-anchor="middle" letter-spacing="0" fill="#c3a0ff">Frames + packets</text>
-<rect x="669.44" y="798" width="181.12" height="24" rx="6" fill="#07131f" stroke="none"/>
-<text x="760" y="814" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="16" font-weight="500" text-anchor="middle" letter-spacing="0" fill="#c3a0ff">If full, main waits</text>
+<rect x="660.96" y="798" width="198.08" height="24" rx="6" fill="#07131f" stroke="none"/>
+<text x="760" y="814" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="16" font-weight="500" text-anchor="middle" letter-spacing="0" fill="#c3a0ff">If full, worker waits</text>
 <rect x="677.92" y="374" width="164.16" height="24" rx="6" fill="#07131f" stroke="none"/>
 <text x="760" y="390" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="16" font-weight="500" text-anchor="middle" letter-spacing="0" fill="#c3a0ff">Audio / subtitles</text>
 <g data-node="decision" data-bounds="970.0 366.0 180 96" data-shape="diamond">
@@ -164,10 +164,10 @@
 <text x="1040.0" y="1291.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="16" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">NVENC, QSV or AMF</text>
 </g>
 <text x="44" y="1384" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="start" letter-spacing="0" fill="#a3b9ca">The two thread groups show application threads, FFmpeg codecs and Eigen may also use CPU workers.</text>
-<text x="44" y="1414" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="start" letter-spacing="0" fill="#a3b9ca">During the loop, only the encode thread writes output. Final flushing runs on the main thread after joining it.</text>
-<rect x="53" y="202" width="146" height="29" rx="4" fill="#0b1825" stroke="none"/>
+<text x="44" y="1414" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="start" letter-spacing="0" fill="#a3b9ca">Only the encode thread writes during the loop, the processing thread finishes the file after joining it.</text>
+<rect x="53" y="202" width="206" height="29" rx="4" fill="#0b1825" stroke="none"/>
 <rect x="60" y="210" width="5" height="14" rx="2" fill="#78a6bd" stroke="none"/>
-<text x="78" y="222" font-family="Consolas, &#x27;Liberation Mono&#x27;, monospace" font-size="15" font-weight="600" text-anchor="start" letter-spacing="1" fill="#78a6bd">MAIN THREAD</text>
+<text x="78" y="222" font-family="Consolas, &#x27;Liberation Mono&#x27;, monospace" font-size="15" font-weight="600" text-anchor="start" letter-spacing="1" fill="#78a6bd">PROCESSING THREAD</text>
 <text x="620" y="222" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="16" font-weight="400" text-anchor="end" letter-spacing="0" fill="#a3b9ca">Decode and watermark loop</text>
 <rect x="893" y="202" width="166" height="29" rx="4" fill="#0b1825" stroke="none"/>
 <rect x="900" y="210" width="5" height="14" rx="2" fill="#78a6bd" stroke="none"/>

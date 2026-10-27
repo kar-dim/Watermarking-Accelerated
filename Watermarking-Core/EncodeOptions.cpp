@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <iterator>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -18,6 +19,28 @@ extern "C" {
  */
 
 namespace video_utils {
+std::string hardwareEncoderDefaults(const std::uint32_t vendor) {
+    switch (vendor) {
+    case 0x8086: return "-c:v hevc_qsv -global_quality 20";
+    case 0x1002: return "-c:v hevc_amf -quality balanced -rc cqp -qp_i 22 -qp_p 22 -g 120 -vbaq 0";
+    case 0x10de: return "-c:v hevc_nvenc -preset p2 -tune hq -cq 28 -b:v 0";
+    default: throw std::runtime_error("No default hardware encoder for this GPU, enter hardware encoder options or use CPU encoding");
+    }
+}
+
+const AVCodec* findVideoEncoder(const std::string& name, const bool hardware) {
+    if (name.empty())
+        throw std::runtime_error("No video encoder in the options string, needs '-c:v <encoder>'");
+    const AVCodec* codec = avcodec_find_encoder_by_name(name.c_str());
+    if (!codec)
+        throw std::runtime_error("Encoder not found: '" + name + "' (check the video encoder options)");
+    const bool isHardware = (codec->capabilities & (AV_CODEC_CAP_HARDWARE | AV_CODEC_CAP_HYBRID)) != 0;
+    if (hardware != isHardware)
+        throw std::runtime_error(hardware ? "Hardware encoding is selected, but '" + name + "' is a software encoder. Choose a hardware encoder or turn hardware encoding off."
+                                          : "Software encoding is selected, but '" + name + "' is a hardware encoder. Choose a software encoder or turn hardware encoding on.");
+    return codec;
+}
+
 namespace {
 
 // ffmpeg options split to tokens, respecting single and double quotes

@@ -65,24 +65,16 @@ enum class ReductionMode { Portable, WorkGroupCollective, Subgroup };
 // inspect the selected reduction implementation in a built watermark program
 ReductionMode reductionMode(const cl::Program& program);
 
-// cache for reusing opencl kernels (static/global opencl program for each p) for each device
-// automatically invalidates when OclQueueManager's context generation changes (device switch)
+// context keys keep programs from different GPUs apart
 template <int p>
 struct OpenCLKernelCache {
     static cl::Program getProgram() {
-        static std::unordered_map<int, cl::Program> programs;
-        static uint32_t cachedGeneration = 0;
+        static std::unordered_map<uint64_t, cl::Program> programs;
         static std::mutex mutex;
         std::lock_guard lock(mutex);
         auto& mgr = OclQueueManager::getInstance();
-        auto contextLock = mgr.lockContext();
-        const uint32_t currentGen = mgr.getContextGeneration();
-        if (cachedGeneration != currentGen) {
-            programs.clear();
-            cachedGeneration = currentGen;
-        }
-        const int deviceId = mgr.getDeviceIndex();
-        const int cacheKey = (deviceId << 1) | static_cast<int>(forcePortableReductionsRequested());
+
+        const uint64_t cacheKey = (mgr.getContextGeneration() << 1) | static_cast<uint64_t>(forcePortableReductionsRequested());
         if (programs.find(cacheKey) == programs.end())
             programs[cacheKey] = buildKernels(p);
         return programs[cacheKey];
@@ -93,21 +85,15 @@ struct OpenCLKernelCache {
 template <cl::Program (*build)()>
 struct DeviceProgramCache {
     static cl::Program getProgram() {
-        static std::unordered_map<int, cl::Program> programs;
-        static uint32_t cachedGeneration = 0;
+        static std::unordered_map<uint64_t, cl::Program> programs;
         static std::mutex mutex;
         std::lock_guard lock(mutex);
         auto& mgr = OclQueueManager::getInstance();
-        auto contextLock = mgr.lockContext();
-        const uint32_t currentGen = mgr.getContextGeneration();
-        if (cachedGeneration != currentGen) {
-            programs.clear();
-            cachedGeneration = currentGen;
-        }
-        const int deviceId = mgr.getDeviceIndex();
-        if (programs.find(deviceId) == programs.end())
-            programs[deviceId] = build();
-        return programs[deviceId];
+
+        const uint64_t key = mgr.getContextGeneration();
+        if (programs.find(key) == programs.end())
+            programs[key] = build();
+        return programs[key];
     }
 };
 using UtilityKernelCache = DeviceProgramCache<buildUtilityKernels>;

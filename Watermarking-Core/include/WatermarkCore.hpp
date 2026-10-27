@@ -1,5 +1,7 @@
 #pragma once
 
+#include "VideoObserver.hpp"
+
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
@@ -8,6 +10,7 @@
 #include <future>
 #include <memory>
 #include <mutex>
+#include <stop_token>
 #include <string>
 #include <utility>
 #include <vector>
@@ -49,7 +52,7 @@ using ImageHandle = std::unique_ptr<ImageSession, ImageSessionDeleter>;
 using PreloadedHandle = std::unique_ptr<PreloadedImage, PreloadedImageDeleter>;
 using ExportHandle = std::unique_ptr<ExportedImage, ExportedImageDeleter>;
 
-// OpenCL device switches require releasing live image, session and export buffers first
+// Device selection is local to the calling thread, and by that allocations RETAIN their owning device
 bool initializeEnvironment(const int deviceIndex = 0);
 void updateSessionParams(ImageSession* session, const int p, const float psnr);
 bool isOpenCLBackend();
@@ -102,18 +105,20 @@ struct SaveResult {
 class ImageSaver {
   public:
     explicit ImageSaver(size_t maxSaves = 0);
+    ImageSaver(size_t maxSaves, size_t maxInFlightBytes);
     // wait for in-flight saves
     ~ImageSaver();
     ImageSaver(const ImageSaver&) = delete;
     ImageSaver& operator=(const ImageSaver&) = delete;
-    // waits for free slot, exports session output and writes outPath in background
     void save(ImageSession* session, const std::string& outPath, size_t id);
+    void saveExact(ImageSession* session, const std::string& outPath, size_t id);
     // finished saves since last call in completion order
     std::vector<SaveResult> takeFinished();
     // wait for all saves and return finished results
     std::vector<SaveResult> finish();
 
   private:
+    void saveImpl(ImageSession* session, const std::string& outPath, size_t id, bool exactPath);
     struct Slot {
         ExportHandle buffer;
         std::future<void> task;
@@ -123,6 +128,8 @@ class ImageSaver {
     std::vector<SaveResult> finished;
     std::mutex mutex;
     std::condition_variable slotFreed;
+    size_t inFlightBytes = 0;
+    size_t maxInFlightBytes = 0;
 };
 ExportHandle createReusableExportBuffer();
 // on Eigen transfers output to export buffer, call embedImage again before session reuse
@@ -136,6 +143,26 @@ PreviewFormat getSessionPreviewFormat(const ImageSession* session);
 void copySessionPreview(const ImageSession* session, uint8_t* destination, size_t bytesPerLine);
 void optimizeThreadsForVideoEmbedding();
 
+struct VideoSourceInfo {
+    int width = 0;
+    int height = 0;
+    int bitDepth = 0;
+    double framesPerSecond = 0.0;
+    double durationSeconds = -1.0;
+    std::int64_t frames = -1;
+    std::int64_t bytes = -1;
+    std::string codec;
+    std::string pixelFormat;
+    std::string dynamicRange;
+    unsigned audioTracks = 0;
+    unsigned subtitleTracks = 0;
+    unsigned attachments = 0;
+    unsigned chapters = 0;
+};
+
+VideoSourceInfo probeVideoSource(const std::string& path, std::stop_token stop = {});
+void validateVideoOutputPath(const std::string& path);
+
 struct VideoSettings {
     std::string videoFile;
     std::string watermarkPassword;
@@ -147,9 +174,17 @@ struct VideoSettings {
     // empty string selects GPU default hardware encoder when useHwEncoder is true
     std::string encodeOptions;
     std::string encodeOutputPath;
+    VideoObserver* observer = nullptr;
+    std::stop_token stopToken;
+    int cpuThreads = 0;
 };
 
+// codec type only, device support is checked when encoding starts
+void validateVideoEncoderOptions(const std::string& options, bool hardware);
+// querying another device does not switch the active compute context
+std::string defaultVideoEncoderOptions(bool hardware, int deviceIndex = 0);
 VideoHandle initVideo(const VideoSettings& settings);
 int embedVideo(VideoSession* session);
+int embedVideo(VideoSession* session, bool replaceExistingOutput);
 int detectVideo(VideoSession* session);
 } // namespace WatermarkCore

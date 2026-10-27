@@ -6,10 +6,12 @@
  */
 
 #include "AvUtil.hpp"
+#include <cstdint>
 #include <string>
 #include <vector>
 
 extern "C" {
+#include "libavcodec/codec.h"
 #include "libavutil/dict.h"
 }
 
@@ -25,6 +27,8 @@ struct ParsedEncodeOptions {
 };
 
 ParsedEncodeOptions parseEncodeOptions(const std::string& text);
+std::string hardwareEncoderDefaults(std::uint32_t vendor);
+const AVCodec* findVideoEncoder(const std::string& name, bool hardware);
 unsigned codecTagFromString(const std::string& tag);
 
 // refused options (ignored, valueless, overrides)

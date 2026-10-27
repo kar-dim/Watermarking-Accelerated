@@ -383,6 +383,7 @@ void InternalUtils::saveImage(const string& imagePath, const string& suffix, con
         }
     }
 #elif defined(_USE_OPENCL_)
+    const OclQueueManager::Binding binding(watermark.getOwner());
     auto& mgr = OclQueueManager::getInstance();
     OclArray<uint8_t> rowMajor(rows, cols, channels, mgr.getQueueRaw());
     cl_utils::launchColMajorToRowMajorU8(watermark.clBuffer(), rowMajor.clBuffer(), cols, rows, channels, mgr.getQueue());

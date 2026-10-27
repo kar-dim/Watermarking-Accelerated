@@ -41,16 +41,16 @@ The trick: the sum for neighbors ```a``` and ```b``` only depends on how far apa
 
 # Architecture
 
-These flowcharts show the image and video paths, how video work is shared between threads, and how the Qt benchmark runs.
+These flowcharts show the image and video paths, threads, multi-GPU batches and the Qt benchmark.
 
-[Images](#image-workflow) · [Video](#video-workflow) · [Video threads and queues](#video-threads-and-queues) · [Qt benchmark](#qt-benchmark-workflow)
+[Images](#image-workflow) · [Video](#video-workflow) · [Video threads and queues](#video-threads-and-queues) · [Multi-GPU batches](#multi-gpu-batches) · [Qt benchmark](#qt-benchmark-workflow)
 
 ## Image workflow
 
-Single images and folders use the same watermark code. CUDA and OpenCL run on the GPU, Eigen runs on the CPU. Embedding saves an image, detection returns a correlation value.
+Single images and batches use the same watermark code. CUDA and OpenCL run on the GPU, Eigen runs on the CPU. GPU batches share whole images between selected devices, with background loading and saving. Embedding saves an image, detection returns a correlation value.
 
 <p align="center">
-  <img src="thesis_data/diagrams/image-pipeline.svg" width="100%" alt="Image workflow: single or batch input, image decoding, CUDA or OpenCL GPU processing or Eigen CPU processing, then image encoding and saving for embedding or correlation results for detection." />
+  <img src="thesis_data/diagrams/image-pipeline.svg" width="100%" alt="Image workflow: single input or a batch shared across selected GPUs, image decoding, CUDA or OpenCL GPU processing or Eigen CPU processing, then image saving or detection correlations." />
 </p>
 
 ## Video workflow
@@ -63,15 +63,25 @@ CUDA tries NVDEC, OpenCL tries D3D11VA and Intel QSV. If setup or the first-fram
 
 ## Video threads and queues
 
-Video embedding uses a main thread and a separate thread for encoding and writing the file. The decode pump runs on the main thread, feeds FFmpeg, drains ready frames and schedules the watermark work. The encoder can work on earlier frames while the main loop handles later ones.
+Each video worker has a processing thread and a separate thread for encoding and writing the file. The decode pump feeds FFmpeg, drains ready frames and schedules the watermark work. The encoder can work on earlier frames while the processing loop handles later ones. A multi-GPU batch runs a separate pipeline on each active GPU.
 
-An eight-item queue holds owned video frames and audio or subtitle packets. If it fills, the main thread waits. OpenCL hardware decoding also holds two frames ahead and starts GPU copies before those frames are used. Detection returns results without starting the encode thread.
+An eight-item queue holds owned video frames and audio or subtitle packets. If it fills, the processing thread waits. OpenCL hardware decoding also holds two frames ahead and starts GPU copies before those frames are used. Detection returns results without starting the encode thread.
 
 <p align="center">
-  <img src="thesis_data/diagrams/video-architecture.svg" width="100%" alt="Video threads and queues: the main thread runs the decode pump and schedules watermark work. Owned frames and audio or subtitle packets pass through an eight-item queue to a separate encode and write thread. OpenCL hardware decoding holds two frames ahead. GPU work can overlap across frames. Detection does not start the encode thread." />
+  <img src="thesis_data/diagrams/video-architecture.svg" width="100%" alt="Inside each video worker: a processing thread runs the decode pump and watermark work. Owned frames and audio or subtitle packets pass through an eight-item queue to a separate encode and write thread. Each active batch GPU runs its own pipeline. Detection has no encode thread." />
 </p>
 
 See [Video Encoding Pipeline](#video-encoding-pipeline) for codec, color and frame handling details.
+
+## Multi-GPU batches
+
+Image and video batches use a shared file queue. Each selected GPU takes a whole file and runs its own pipeline, using the build's CUDA or OpenCL backend. Eigen uses one CPU worker. CPU decoding and encoding still share the available CPU time.
+
+For the final video, an idle GPU can start a second attempt. The first complete output is kept and the other attempt is stopped. This is on by default and can be disabled. Image batches do not start backup attempts.
+
+<p align="center">
+  <img src="thesis_data/diagrams/batch-architecture.svg" width="100%" alt="Multi-GPU batches: one shared file queue feeds independent GPU workers, each with its own session and buffers. Each worker loads or decodes a file, embeds or detects its watermark, then saves or encodes the result. Optional final-video acceleration keeps the first complete output and discards the other attempt." />
+</p>
 
 ## Qt benchmark workflow
 
@@ -91,8 +101,6 @@ python tools/generate_diagrams.py
 python tools/generate_diagrams.py --check
 ```
 
-See [diagram sources and notes](thesis_data/diagrams/README.md) for more detail.
-
 </details>
 
 # Run the pre-built binaries
@@ -100,17 +108,21 @@ See [diagram sources and notes](thesis_data/diagrams/README.md) for more detail.
 Get the latest binaries [here](https://github.com/kar-dim/Watermarking-Accelerated/releases) for Eigen, OpenCL or CUDA platform. The binaries contain:
 - The CLI (command line) application.
 - The embedded CUDA/OpenCL/Eigen implementations of the watermarking algorithms.
-- The Qt application for single-image watermarking, image batches, and backend benchmarking.
+- The Qt application for single-image and single-video watermarking, image and video batches, and backend benchmarking.
 - Bundled benchmark images. Use your own files for video operations.
 
 The CLI application:
    - Embeds the proposed Prediction-Error mask once for a single image, writes the requested output file, and reports total image time including load, watermark setup, embed, and save.
-   - For image mode only: Supports **batched** operation: It can embed or detect the watermark for all images under a specified folder. It is highly parallelized for both operations to reduce disk I/O latency.
+   - Supports image and video batches. Image batches process a folder in parallel. Video batches share whole files between selected GPUs, with progress, cancellation and a separate detection CSV for each file. Eigen uses one CPU worker.
    - Provides a separate `--bench` mode for repeated ME embedding and detection measurements and CSV output. Add `--bench-save` to save the benchmark images.
 
+Detection scores in the UI and CLI are correlation percentages rounded to one decimal place, for example `98.5%`. They can be negative and are not confidence estimates. Exported detection CSV files keep the raw correlation coefficients at full precision.
+
 The Qt application:
-  - **Single image:** choose Embed or Detect, an image, password, and p. Embed also lets you set PSNR, compare the original and watermarked result with a draggable divider, pan and zoom the preview, then save the result. The comparison respects EXIF orientation. Detect shows the ME correlation in a compact result card without writing a file. Drop supported images into the window to select the first one. Changing embed settings keeps the previous comparison visible until you preview again.
-  - **Batch images:** choose or drop a folder to embed or detect the ME watermark. Supported image files in that folder populate a queue, which shows the state of each image, and a completion dialog summarizes the run. PSNR is shown only for embedding. Embedded images go to a `watermark_output` subfolder.
+  - **Single image:** choose Embed or Detect, an image, password, and p. Embed also lets you set PSNR, compare the original and watermarked result with a draggable divider, pan and zoom the preview, then save the result. The comparison respects EXIF orientation. Detect shows the correlation with a resizable input preview without writing a file. Drop supported images into the window to select the first one. Changing embed settings keeps the previous comparison visible until you preview again.
+  - **Single video:** embed or detect with automatic decoding, a watermark interval, CPU or hardware encoding, and editable FFmpeg encoder options. Hardware options start with the selected GPU's vendor defaults, edits are kept separately for each GPU while the app is open. Source details are read in the background when a file is selected, without starting the GPU pipeline. The tab shows progress, FPS, elapsed time, ETA and an optional processing preview. Detection shows recent correlations and exports all sampled frames to CSV. Cancel stops the job and preserves an existing output file.
+  - **Batch images:** add or drop images and folders, remove selected files or clear the queue, then choose an output folder for Embed. Detect shows one correlation per image. Choose one or more **Devices** in the tab, each GPU processes whole images with its own session, prefetching and background saves. Rows show their device, existing output names receive numbered suffixes and incomplete saves are discarded. The elapsed timer stays visible after completion. Cancel stops taking new images and finishes work already in flight.
+  - **Batch videos:** add or drop files and folders, choose Embed or Detect, an output folder and one or more **Devices**. One worker per selected GPU takes the next whole file, Eigen uses one CPU worker. The queue shows progress and the actual device, with a live elapsed timer for the batch. Hardware encoder options can be edited separately for each selected device. Skip selected running rows, or Cancel the batch. **Accelerate final video** is on by default, an idle selected GPU can restart the last active file and only the first complete result is kept. Turn it off if the extra work slows CPU encoding or disk access. Embed writes MKV/MP4, Detect writes one CSV per input. Existing files are preserved with numbered names, incomplete outputs are discarded. Folder discovery is nonrecursive and batch has no preview.
   - **Benchmark:** runs the predefined image, p, and PSNR sweep, shows the live watermarked image and timings, and can be stopped without a score dialog. A completed run presents the final score in a dialog. The score uses the geometric mean of the two pipelines, scaled by a constant ($C=10$) for readability:
 
 $$\text{Score} = C \cdot \sqrt{\text{FPS}_{\text{embed}} \cdot \text{FPS}_{\text{detect}}}$$
@@ -123,7 +135,7 @@ $$\text{Score} = C \cdot \sqrt{\text{FPS}_{\text{embed}} \cdot \text{FPS}_{\text
 
 To build with ```AVX-512```, pass ```-p:WatermarkingSimd=AVX512``` to MSBuild (for example ```msbuild Watermarking-Thesis.sln -p:Configuration=EIGEN_Release -p:Platform=x64 -p:WatermarkingSimd=AVX512```). The output goes to separate folders (```x64\EIGEN_Release_AVX512\```), next to the AVX2 build. The AVX-512 build only runs on CPUs with AVX-512 and the gains are small, AVX2 stays the default.
 
-The CLI accepts command-line options only. Values can use `--key value` or `--key=value`, for example `--p 5`, `--psnr=42`, or `--gpu_device_id 1`. The duplicated `mode` and `path` names must include their group: `--image.mode`, `--image.path`, `--video.mode`, and `--video.path`. Other options also accept a group prefix, such as `--global.p` or `--compute.gpu_device_id`. Run `Watermarking-CLI.exe --help`, or run without arguments, for the complete list and defaults.
+The CLI accepts command-line options only. Values can use `--key value` or `--key=value`, for example `--p 5`, `--psnr=42`, or `--gpu_device_id 1`. The duplicated `mode`, `path` and `devices` names must include their `image` or `video` group, for example `--image.mode`, `--video.path` or `--image.devices`. Other options also accept a group prefix, such as `--global.p` or `--compute.gpu_device_id`. Run `Watermarking-CLI.exe --help`, or run without arguments, for the complete list and defaults.
 
 Image and video operations require an explicit `--watermark_password`. The defaults are `p=3`, PSNR 40 dB, and image mode `single`, supply the input and destination paths for an image embed:
 
@@ -145,7 +157,7 @@ For the repeated benchmark, use `Watermarking-CLI.exe --bench --benchmark_loops 
 | `--benchmark_loops` | Positive measured iteration count for `--bench` only. Defaults to 100 on Eigen and 1000 on GPU backends. |
 | `--benchmark_output_path` | CSV destination for `--bench` (default: `thesis_data/BACKEND.csv`). Use a separate file to preserve another device's results. |
 | `--list-gpu` | Print `index: GPU name` for this backend and exit before compute initialization or processing. Eigen reports that it has no GPU devices. |
-| `--gpu_device_id` | Zero-based CUDA/OpenCL GPU index (default: 0). An invalid index falls back to 0. |
+| `--gpu_device_id` | Zero-based CUDA/OpenCL GPU index (default: 0). Video batches reject an unavailable index, other operations fall back to 0. |
 
 **Video-only options:**
 
@@ -155,19 +167,38 @@ Providing `--video.path` selects video processing. For example, to detect a wate
 Watermarking-CLI.exe --video.path your-videos/input.mkv --video.mode detect --watermark_password "your-password"
 ```
 
+To process a folder sequentially on the selected device:
+
+```powershell
+Watermarking-CLI.exe --video.path your-videos --video.mode batch_embed --output_directory watermarked-videos --output_format mkv --watermark_password "your-password"
+Watermarking-CLI.exe --video.path watermarked-videos --video.mode batch_detect --output_directory detection-reports --watermark_password "your-password"
+```
+
+Use `--list-gpu` to find device indices, then select batch GPUs with `--image.devices 0,1` or `--video.devices 0,1`. Both default to `--gpu_device_id`. Each worker uses the build's backend on its selected GPU. CUDA keeps nvJPEG for compatible JPEG files, OpenCL image codecs use the CPU, Eigen uses one CPU pipeline.
+
+Video batches accept a file or folder. Without `--output_directory`, output goes to `watermark_output` beside the input file or inside the input folder. Existing outputs are kept and names are numbered when needed. Final-video acceleration is on by default, use `--accelerate_final false` to disable the second attempt on an idle GPU. Image batches do not start backup attempts.
+
+Ctrl+C cancels the batch. Image batches finish images already processing or saving, video batches discard incomplete output. Exit codes are 0 on success, 1 if any file failed, or 130 after cancellation.
+
+In the UI, each batch tab has a **Devices** picker, video batch **Encoder options for** selects whose hardware settings you edit. CLI hardware options apply to every selected GPU. Video workers keep hardware decoding and encoding on their selected GPU, with CPU decoder fallback. Processing errors can try each remaining GPU once and unavailable devices leave the batch. Automatic CPU codec threads and image load/save concurrency are bounded across workers to not overcommit, and shared CPU/disk/PCIe bandwidth can limit scaling.
+
 | Option | Description |
 |---|---|
-| `--video.mode` | `embed` (default) or `detect`. Both modes read `--video.path`: embedding re-encodes the watermarked video. |
-| `--video.path` | Input video filename. Uses the common password, p, PSNR, timing, and device options above. |
+| `--video.mode` | `embed` (default), `detect`, `batch_embed` or `batch_detect`. Embedding re-encodes the watermarked video. |
+| `--video.path` | Input video filename, or a folder for batch modes. Folder discovery reads common video extensions without entering subfolders. Uses the common password, p, PSNR, timing, and device options above. |
 | `--watermark_interval` | Embed or detect every Nth frame (N >= 1, default: 1). Other frames pass unchanged to the encoder when embedding, or are skipped when detecting. |
-| `--hw_encoder` | Use hardware encoding on CUDA/OpenCL (`false` by default). Uses `--hw_encode_options` instead of `--encode_codec_options`. The default encoder follows the selected GPU: NVENC on NVIDIA, QSV on Intel, AMF on AMD. Eigen uses CPU decoding and encoding. |
-| `--encode_output_path` | Required destination filename for video embedding. Use `--video.mode detect` to detect without writing a video. |
+| `--hw_encoder` | Use hardware encoding on CUDA/OpenCL (`true` by default). Uses `--hw_encode_options` instead of `--encode_codec_options`. The default encoder follows the selected GPU: NVENC on NVIDIA, QSV on Intel, AMF on AMD. Eigen uses CPU decoding and encoding. |
+| `--encode_output_path` | Required `.mkv` or `.mp4` destination filename for video embedding. Use `--video.mode detect` to detect without writing a video. |
+| `--output_directory` | Batch output folder. Defaults to `watermark_output` under the input folder, or beside a single input file. Outputs never replace an existing file. |
+| `--output_format` | Batch Embed container, `mkv` (default) or `mp4`. Batch Detect always writes CSV reports with raw correlation coefficients. |
+| `--video.devices` | Comma-separated batch GPU indices, for example `0,1`. Defaults to `--gpu_device_id`. Duplicate or unavailable indices are rejected. Eigen accepts one CPU worker. |
+| `--accelerate_final` | Let an idle selected GPU restart the final active file (`true` by default). Attempts use separate temporary files, only the first finalized and published result wins. Skip and Cancel reach both attempts. |
 | `--encode_codec_options` | Software encoder and quality options. Default: `-c:v libx265 -preset medium -crf 20`. Quote the whole value when passing it on the command line. |
 | `--hw_encode_options` | Hardware encoder and quality options, used only when `--hw_encoder true`. Defaults are listed below. Quote the whole value. Encoding and decoding can independently use hardware acceleration. |
 
 # Video Encoding Pipeline
 
-The application uses the **FFmpeg libraries (libav\*)** directly, no `ffmpeg.exe` is required or invoked. It decodes the input, watermarks selected luma frames, re-encodes the video, and remuxes compatible audio and subtitle streams. Incompatible text subtitles may be transcoded and unsupported subtitles are dropped. Matroska attachments, chapters, and metadata are preserved where supported. Decoded frame PTS and durations are forwarded to the encoder and invalid output video DTS is repaired before muxing.
+The application uses the **FFmpeg libraries (libav\*)** directly, no `ffmpeg.exe` is required or invoked. Inputs can use any supported video container. Outputs are limited to **MKV and MP4**, and the UI suggests MKV for wider track support. It decodes the input, watermarks selected luma frames, re-encodes the video, and remuxes compatible audio and subtitle streams. Incompatible audio stops the encode. Text subtitles may be converted, unsupported subtitles and non-MKV attachments are dropped with a message. Matroska attachments, chapters, and metadata are preserved where the output container supports them. Decoded frame PTS and durations are forwarded to the encoder and invalid output video DTS is repaired before muxing.
 
 Decoding is automatic: CUDA tries NVDEC, OpenCL tries D3D11VA and then QSV on Intel. Unsupported hardware decoding or failed startup checks use CPU decoding and GPU upload. OpenCL hardware decoding requires D3D11 sharing. Eigen uses CPU decoding and encoding.
 
@@ -226,7 +257,7 @@ This project is built using **Visual Studio** and consists of a **solution with 
 
 - Watermarking-Core: The Core of this project, implements the algorithms for each backend. It also implements a fast, efficient, secure and deterministic watermark generation: CUDA/OpenCL kernels on the GPU, AVX2/AVX-512 with OpenMP on the CPU, with identical results. It is built as a **static library**.
 - Watermarking-CLI: The sample command line application that interacts with the Core project to embed and detect watermark in images and video.
-- Watermarking-UI: The Qt image workflow and benchmark application. It uses the Core project for single-image embedding, image batches, and performance measurements.
+- Watermarking-UI: The Qt application for single images and videos, image and video batches, and performance measurements.
 - Watermarking-Core-tests: GoogleTest suite for the Core project. Runs from the build output folder, using bundled image samples and generated temporary 10-bit video.
 
 ### Solution Configurations
@@ -253,6 +284,8 @@ The solution provides multiple build configurations, each targeting a specific b
 6. Build the solution via **Build > Build Solution**.
 
 MSBuild automatically imports [Directory.Build.targets](Directory.Build.targets) for the projects. Before compilation, it runs the repository's `format.bat` to format project sources. Pass `/p:WatermarkingFormatOnBuild=false` to disable this step. Executables also receive the shared UTF-8 manifest.
+
+CUDA Release compiles six GPU targets with `--threads 0`, letting NVCC choose its parallel compile limit from the available CPU count. Launch wrappers use a light kernel header, HDR lookup tables stay with the tone-mapping kernels.
 
 
 | Backend | Dependencies |
@@ -334,5 +367,5 @@ See [Qt benchmark workflow](#qt-benchmark-workflow) for the measurement steps an
 Preview | Detail
 :-------------------------:|:-------------------------:
 **Single image comparison**<br>![Single image comparison](thesis_data/6.png) | **Zoomed comparison**<br>![Zoomed single image comparison](thesis_data/7.png)
-**Batch in progress**<br>![Batch image queue in progress](thesis_data/8.png) | **Batch complete**<br>![Completed batch and summary](thesis_data/9.png)
+**Batch in progress**<br>![Batch image queue in progress](thesis_data/8.png) | **Batch videos (Multi GPU)**<br>![Batch videos (Multi GPU)](thesis_data/9.png)
 **Benchmark in progress**<br>![Benchmark in progress](thesis_data/10.png) | **Benchmark score**<br>![Completed benchmark score](thesis_data/11.png)

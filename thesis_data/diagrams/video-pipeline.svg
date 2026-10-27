@@ -1,8 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="1630" viewBox="0 0 1280 1630" role="img" aria-labelledby="title description">
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="1660" viewBox="0 0 1280 1660" role="img" aria-labelledby="title description">
 <title id="title">Video watermarking</title>
-<desc id="description">FFmpeg reads the video. CUDA tries NVDEC, OpenCL tries D3D11VA and QSV on Intel. Both hardware paths test the first frame before use, unsupported decoding uses CPU decode and GPU upload. Eigen stays on the CPU. Frames become 8-bit SDR before luma watermarking. Supported HDR uses GPU Mobius, other HDR uses CPU filters. Detection accepts only 8-bit SDR input, returns correlation results and stops. Embedding uses CPU encoding by default, optional hardware encoding uses NVENC, QSV or AMF on the same GPU. FFmpeg joins video with compatible audio and subtitle streams.</desc>
+<desc id="description">FFmpeg reads the video. CUDA tries NVDEC, OpenCL tries D3D11VA and QSV on Intel. Both hardware paths test the first frame before use, unsupported decoding uses CPU decode and GPU upload. Eigen stays on the CPU. Frames become 8-bit SDR before luma watermarking. Supported HDR uses GPU Mobius, other HDR uses CPU filters. Detection accepts only 8-bit SDR input, returns correlation results and stops. Embedding uses CPU encoding by default, optional hardware encoding uses NVENC, QSV or AMF on the same GPU. FFmpeg joins video with compatible audio and subtitle streams. A video batch runs one complete pipeline per selected GPU, each worker takes a whole file.</desc>
 <defs>
-<radialGradient id="ambient" gradientUnits="userSpaceOnUse" cx="640" cy="570.5" r="880">
+<radialGradient id="ambient" gradientUnits="userSpaceOnUse" cx="640" cy="581.0" r="880">
 <stop offset="0" stop-color="#173747" stop-opacity="0.35"/>
 <stop offset="1" stop-color="#173747" stop-opacity="0"/>
 </radialGradient>
@@ -18,9 +18,9 @@
 <marker id="arrow-ffad85" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 1 1 L 8 5 L 1 9" fill="none" stroke="#ffad85" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
 <marker id="arrow-c3a0ff" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 1 1 L 8 5 L 1 9" fill="none" stroke="#c3a0ff" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
 </defs>
-<rect x="1" y="1" width="1278" height="1628" rx="24" fill="#07131f" stroke="#203a4c"/>
-<rect x="2" y="2" width="1276" height="1626" rx="23" fill="url(#ambient)" stroke="none"/>
-<rect x="2" y="2" width="1276" height="1626" rx="23" fill="url(#grid)" stroke="none"/>
+<rect x="1" y="1" width="1278" height="1658" rx="24" fill="#07131f" stroke="#203a4c"/>
+<rect x="2" y="2" width="1276" height="1656" rx="23" fill="url(#ambient)" stroke="none"/>
+<rect x="2" y="2" width="1276" height="1656" rx="23" fill="url(#grid)" stroke="none"/>
 <text x="44" y="48" font-family="Consolas, &#x27;Liberation Mono&#x27;, monospace" font-size="14" font-weight="400" text-anchor="start" letter-spacing="1.8" fill="#59d8f3">VIDEO MODE</text>
 <text x="44" y="94" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="34" font-weight="700" text-anchor="start" letter-spacing="0" fill="#edf7ff">Video watermarking</text>
 <text x="44" y="126" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="19" font-weight="400" text-anchor="start" letter-spacing="0" fill="#a3b9ca">Decode, prepare frames, watermark, then encode or read the detection result</text>
@@ -83,10 +83,10 @@
 <path d="M 1056 1318 L 1056 1338 Q 1056 1350 1044 1350 L 640 1350" fill="none" stroke="#78a6bd" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round"/>
 <path d="M 640 1318 L 640 1384" fill="none" stroke="#78a6bd" stroke-width="4" opacity="0.15" filter="url(#glow)"/>
 <path d="M 640 1318 L 640 1384" fill="none" stroke="#78a6bd" stroke-width="1.9" stroke-linejoin="round" stroke-linecap="round" marker-end="url(#arrow-78a6bd)"/>
-<g data-node="Input video" data-bounds="470 158 340 56">
+<g data-node="Single video or batch" data-bounds="470 158 340 56">
 <rect x="470" y="158" width="340" height="56" rx="28.0" fill="none" stroke="#59d8f3" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
 <rect x="470" y="158" width="340" height="56" rx="28.0" fill="#0e2330" stroke="#59d8f3" stroke-width="1.6"/>
-<text x="640.0" y="193.48" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="22" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Input video</text>
+<text x="640.0" y="193.48" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="22" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Single video or batch</text>
 </g>
 <g data-node="Read the video stream" data-bounds="450 258 380 76">
 <rect x="450" y="258" width="380" height="76" rx="11" fill="none" stroke="#78a6bd" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
@@ -230,6 +230,7 @@
 <text x="44" y="1534" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="start" letter-spacing="0" fill="#a3b9ca">*GPU HDR supports limited-range BT.2020 PQ, 4:2:0, 10-bit input. Other HDR uses CPU filters.</text>
 <text x="44" y="1566" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="start" letter-spacing="0" fill="#a3b9ca">CPU SDR converts before upload, skipped frames still get needed conversion, HDR tone mapping outputs 8-bit 4:2:0.</text>
 <text x="44" y="1598" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="start" letter-spacing="0" fill="#a3b9ca">D3D11 frames use GPU copies and sharing for OpenCL. Watermarking changes luma (Y), the brightness plane.</text>
+<text x="44" y="1630" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="start" letter-spacing="0" fill="#a3b9ca">A batch runs this full pipeline on each selected GPU, whole videos come from one shared queue.</text>
 <rect x="53" y="398" width="166" height="29" rx="4" fill="#0a1a23" stroke="none"/>
 <rect x="60" y="406" width="5" height="14" rx="2" fill="#52e69e" stroke="none"/>
 <text x="78" y="418" font-family="Consolas, &#x27;Liberation Mono&#x27;, monospace" font-size="15" font-weight="600" text-anchor="start" letter-spacing="1" fill="#52e69e">CUDA / NVIDIA</text>

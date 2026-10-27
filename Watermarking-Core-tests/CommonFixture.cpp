@@ -4,11 +4,11 @@
 #include "../Watermarking-Core/EncodeOptions.hpp"
 #include "../Watermarking-Core/half_float.hpp"
 #include "../Watermarking-Core/OutputFile.hpp"
+#include "../Watermarking-Core/video_utils.hpp"
+#include "../Watermarking-Core/VideoProcessingContext.hpp"
 #include "../Watermarking-Core/WatermarkCrypto.hpp"
 #if defined(_USE_OPENCL_) || defined(_USE_CUDA_)
 #include "../Watermarking-Core/HdrTonemapCurves.hpp"
-#include "../Watermarking-Core/video_utils.hpp"
-#include "../Watermarking-Core/VideoProcessingContext.hpp"
 #endif
 #if defined(_USE_OPENCL_)
 #include "../Watermarking-Core/kernels/half_kernels.hpp"
@@ -30,6 +30,7 @@ extern "C" {
 #include "../Watermarking-Core/nvjpeg_utils.hpp"
 #endif
 #include "WatermarkCore.hpp"
+#include "VideoBatch.hpp"
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -48,9 +49,11 @@ extern "C" {
 #include <initializer_list>
 #include <iterator>
 #include <limits>
+#include <map>
 #include <regex>
 #include <sstream>
 #include <stdexcept>
+#include <stop_token>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -856,9 +859,11 @@ TEST(VideoDeviceIdentityTest, SelectedOpenCLNvidiaDeviceCanOpenHostStagedNvenc) 
 // Concurrent first use must publish complete programs for the active context
 TEST(OpenCLCacheTest, ConcurrentColdProgramBuildsShareAValidProgram) {
     initializeEnvironment(0);
+    const auto owner = OclQueueManager::current();
     std::vector<std::future<cl_context>> builders;
     for (int i = 0; i < 8; ++i)
-        builders.push_back(std::async(std::launch::async, [] {
+        builders.push_back(std::async(std::launch::async, [owner] {
+            OclQueueManager::bind(owner);
             const auto watermark = cl_utils::OpenCLKernelCache<9>::getProgram();
             const auto utility = cl_utils::UtilityKernelCache::getProgram();
             const auto generation = cl_utils::GenerationKernelCache::getProgram();
@@ -1244,6 +1249,30 @@ TEST_F(WatermarkTest, ExportedImageRemainsStableAcrossSessionReuse) {
     EXPECT_NE(firstBytes, thirdBytes);
 }
 
+TEST_F(WatermarkTest, AsyncExactSaveKeepsItsPathAndPixelsAcrossSessionReuse) {
+    embedImage(session.get());
+    finish();
+    const fs::path reference = tempDir / "save_reference.png";
+    const fs::path exact = tempDir / "save_exact.png";
+    saveImageExact(session.get(), reference.string());
+    ImageSaver saver(1);
+    saver.saveExact(session.get(), exact.string(), 10);
+    loadImage(session.get(), grayImage.string());
+    embedImage(session.get());
+    saver.save(session.get(), (tempDir / "save_legacy.png").string(), 11);
+    const auto results = saver.finish();
+    ASSERT_EQ(results.size(), 2u);
+    for (const auto& result : results)
+        EXPECT_TRUE(result.error.empty()) << result.error;
+    ASSERT_TRUE(fs::exists(exact));
+    EXPECT_FALSE(fs::exists(tempDir / "save_exactW_ME.png"));
+    EXPECT_TRUE(fs::exists(tempDir / "save_legacyW_ME.png"));
+    std::ifstream referenceFile(reference, std::ios::binary), exactFile(exact, std::ios::binary);
+    const std::vector<char> referenceBytes(std::istreambuf_iterator<char>{referenceFile}, {});
+    const std::vector<char> exactBytes(std::istreambuf_iterator<char>{exactFile}, {});
+    EXPECT_EQ(referenceBytes, exactBytes);
+}
+
 TEST_F(WatermarkTest, DifferentPasswordsProduceDifferentWatermarks) {
     const SessionPixelData first = embedAndRead(session.get());
 
@@ -1379,15 +1408,14 @@ TEST(CudaBufferTest, FailedUploadReturnsItsAllocationToThePool) {
 #endif
 
 #if defined(_USE_OPENCL_)
-// Sessions, preloads and exported buffers must release their old device first
-TEST_F(WatermarkTest, OpenCLSwitchRequiresReleasingLiveHandles) {
+// Live handles keep their owning device when another device is selected
+TEST_F(WatermarkTest, OpenCLSwitchKeepsLiveSessionAndExportOwners) {
     if (getAvailableDevices().size() < 2)
         GTEST_SKIP() << "Requires two OpenCL devices";
     auto preload = preloadImageFromDisk(colorImage.string());
-    EXPECT_THROW(initializeEnvironment(1), std::runtime_error);
-    EXPECT_EQ(getCurrentDeviceIndex(), 0);
+    ASSERT_TRUE(initializeEnvironment(1));
+    EXPECT_EQ(getCurrentDeviceIndex(), 1);
     preload.reset();
-    EXPECT_THROW(initializeEnvironment(1), std::runtime_error);
     EXPECT_GT(detectLoadedImage(session.get()) + 1.0f, 0.0f);
     session.reset();
     ASSERT_TRUE(initializeEnvironment(1));
@@ -1397,7 +1425,7 @@ TEST_F(WatermarkTest, OpenCLSwitchRequiresReleasingLiveHandles) {
     auto exported = createReusableExportBuffer();
     exportForSave(session.get(), exported.get());
     session.reset();
-    EXPECT_THROW(initializeEnvironment(0), std::runtime_error);
+    ASSERT_TRUE(initializeEnvironment(0));
     flushToDiskAsync(exported.get(), (tempDir / "old-device.png").string());
     exported.reset();
     ASSERT_TRUE(initializeEnvironment(0));
@@ -3757,6 +3785,610 @@ TEST_F(WatermarkTest, RejectsAnEncoderThatDisagreesWithTheSelectedBackend) {
     EXPECT_THROW(embedVideo(session.get()), std::runtime_error);
 }
 
+class RecordingVideoObserver : public VideoObserver {
+  public:
+    std::vector<VideoProgress> updates;
+    std::vector<VideoDetection> detections;
+    std::vector<std::string> messages;
+    std::stop_source stop;
+    fs::path output;
+    bool preview = false;
+    bool cancelProcessing = false;
+    bool publishedAtCompletion = false;
+    int previews = 0;
+    int previewWidth = 0;
+    int previewHeight = 0;
+
+    void onProgress(const VideoProgress& progress) override {
+        updates.push_back(progress);
+        if (cancelProcessing && progress.state == VideoState::Processing && progress.frames > 0)
+            stop.request_stop();
+        if (progress.state == VideoState::Completed && !output.empty())
+            publishedAtCompletion = fs::exists(output) && fs::file_size(output) > 0;
+    }
+    void onDetection(const VideoDetection& result) override {
+        detections.push_back(result);
+        if (cancelProcessing && detections.size() == 5)
+            stop.request_stop();
+    }
+    void onLog(const std::string& line) override { messages.push_back(line); }
+    bool wantsPreview() const override { return preview; }
+    void previewSize(int& width, int& height) const override {
+        width = 96;
+        height = 54;
+    }
+    void onPreview(const uint8_t* pixels, const int width, const int height, const int pitch) override {
+        EXPECT_LE(width, 96);
+        EXPECT_LE(height, 54);
+        EXPECT_EQ(pitch, width * 4);
+        EXPECT_EQ(pixels[3], 255);
+        ++previews;
+        previewWidth = width;
+        previewHeight = height;
+        if (cancelProcessing)
+            stop.request_stop();
+    }
+};
+
+TEST(VideoObserverTest, ValidatesSoftwareAndHardwareChoicesWithoutOpeningFiles) {
+    EXPECT_NO_THROW(validateVideoEncoderOptions("-c:v libx265 -crf 20", false));
+    EXPECT_THROW(validateVideoEncoderOptions("-c:v hevc_nvenc", false), std::invalid_argument);
+    EXPECT_THROW(validateVideoEncoderOptions("-c:v hevc_qsv", false), std::invalid_argument);
+    EXPECT_THROW(validateVideoEncoderOptions("-c:v libx265", true), std::invalid_argument);
+    EXPECT_THROW(validateVideoEncoderOptions("-crf 20", false), std::invalid_argument);
+    EXPECT_THROW(validateVideoEncoderOptions("-c:v unknown_encoder", false), std::invalid_argument);
+}
+
+TEST(VideoObserverTest, CancelsBeforeOpeningInput) {
+    auto settings = makeVideoSettings("does-not-exist.mkv");
+    std::stop_source stop;
+    stop.request_stop();
+    settings.stopToken = stop.get_token();
+    EXPECT_THROW(initVideo(settings), VideoCancelled);
+}
+
+TEST(VideoObserverTest, HandlesUnknownDurationVariableTimingAndDisplayTransforms) {
+    VideoSession session;
+    RecordingVideoObserver observer;
+    session.settings.observer = &observer;
+    session.inputFormatCtx.reset(avformat_alloc_context());
+    ASSERT_TRUE(session.inputFormatCtx);
+    session.inputFormatCtx->duration = AV_NOPTS_VALUE;
+    AVStream* stream = avformat_new_stream(session.inputFormatCtx.get(), nullptr);
+    ASSERT_NE(stream, nullptr);
+    stream->codecpar->width = 720;
+    stream->codecpar->height = 576;
+    stream->codecpar->format = AV_PIX_FMT_YUV420P;
+    stream->codecpar->codec_id = AV_CODEC_ID_H264;
+    stream->time_base = {1, 1000};
+    stream->start_time = 10000;
+    stream->duration = AV_NOPTS_VALUE;
+    session.videoStream = stream;
+    session.inputDecoderCtx.reset(avcodec_alloc_context3(nullptr));
+    ASSERT_TRUE(session.inputDecoderCtx);
+    video_utils::AVFramePtr frame(av_frame_alloc());
+    ASSERT_TRUE(frame);
+    frame->pts = frame->best_effort_timestamp = 12000;
+    frame->duration = 500;
+    session.progress.frames = 10;
+    video_utils::reportProgress(&session, VideoState::Processing, true, frame.get());
+    EXPECT_LT(observer.updates.back().fraction, 0.0);
+    EXPECT_LT(observer.updates.back().remainingSeconds, 0.0);
+    stream->duration = 10000;
+    video_utils::reportProgress(&session, VideoState::Processing, true, frame.get());
+    EXPECT_DOUBLE_EQ(observer.updates.back().fraction, .25);
+    frame->pts = frame->best_effort_timestamp = 12750;
+    frame->duration = 250;
+    video_utils::reportProgress(&session, VideoState::Processing, true, frame.get());
+    EXPECT_DOUBLE_EQ(observer.updates.back().fraction, .3);
+    stream->nb_frames = 40;
+    video_utils::reportProgress(&session, VideoState::Processing, true, frame.get());
+    EXPECT_DOUBLE_EQ(observer.updates.back().fraction, .25);
+    AVPacketSideData* display = av_packet_side_data_new(&stream->codecpar->coded_side_data, &stream->codecpar->nb_coded_side_data, AV_PKT_DATA_DISPLAYMATRIX, 9 * sizeof(int32_t), 0);
+    ASSERT_NE(display, nullptr);
+    const std::array<int32_t, 9> rotated{0, 65536, 0, -65536, 0, 0, 0, 0, 1 << 30};
+    std::memcpy(display->data, rotated.data(), sizeof(rotated));
+    video_utils::reportProgress(&session, VideoState::Processing);
+    EXPECT_EQ(observer.updates.back().displayTransform, (std::array<double, 4>{0, 1, -1, 0}));
+    const std::array<int32_t, 9> mirrored{-65536, 0, 0, 0, 65536, 0, 0, 0, 1 << 30};
+    std::memcpy(display->data, mirrored.data(), sizeof(mirrored));
+    video_utils::reportProgress(&session, VideoState::Processing);
+    EXPECT_EQ(observer.updates.back().displayTransform, (std::array<double, 4>{-1, 0, 0, 1}));
+    video_utils::reportProgress(&session, VideoState::Completed);
+    EXPECT_DOUBLE_EQ(observer.updates.back().fraction, 1.0);
+    EXPECT_DOUBLE_EQ(observer.updates.back().remainingSeconds, 0.0);
+}
+
+TEST_F(WatermarkTest, VideoPreviewRespectsNonSquarePixels) {
+    const fs::path input = tempDir / "preview-aspect.mkv";
+    writeVideoFixture(input, false, AVCOL_TRC_BT709, true);
+    for (const bool wide : {false, true}) {
+        RecordingVideoObserver observer;
+        observer.preview = true;
+        auto settings = makeVideoSettings(input.string());
+        settings.observer = &observer;
+        auto video = initVideo(settings);
+        video->inputFormatCtx->streams[video->videoStreamIndex]->sample_aspect_ratio = wide ? AVRational{2, 1} : AVRational{1, 2};
+        detectVideo(video.get());
+        EXPECT_GT(observer.previews, 0);
+        EXPECT_EQ(observer.previewWidth, wide ? 96 : 48);
+        EXPECT_EQ(observer.previewHeight, wide ? 27 : 54);
+    }
+}
+
+TEST(VideoMediaTest, AcceptsOnlyMkvAndMp4OutputPaths) {
+    for (const char* path : {"output.mkv", "output.mp4", "output.MKV", "output.Mp4"})
+        EXPECT_NO_THROW(validateVideoOutputPath(path));
+    for (const char* path : {"", "output", "output.avi", "output.ts", "output.mts", "output.mov", "output.webm", "output.wmv", "output.mkv.ts"})
+        EXPECT_THROW(validateVideoOutputPath(path), std::invalid_argument) << path;
+}
+
+TEST_F(WatermarkTest, VideoBatchReservesDistinctNamesAndKeepsExistingFiles) {
+    const fs::path first = tempDir / "first" / "clip.mkv";
+    const fs::path second = tempDir / "second" / "clip.mp4";
+    fs::create_directories(first.parent_path());
+    fs::create_directories(second.parent_path());
+    const fs::path output = tempDir / "output";
+    fs::create_directories(output);
+    std::ofstream(output / "clip_watermarked.mkv") << "keep this file";
+    const auto jobs = prepareVideoBatch({first.string(), second.string(), first.string()}, output.string(), false);
+    ASSERT_EQ(jobs.size(), 2);
+    EXPECT_EQ(fs::path(jobs[0].outputPath).filename(), "clip_watermarked_2.mkv");
+    EXPECT_EQ(fs::path(jobs[1].outputPath).filename(), "clip_watermarked_3.mkv");
+    EXPECT_NE(jobs[0].id, jobs[1].id);
+    const auto report = prepareVideoBatch({first.string()}, output.string(), true);
+    ASSERT_EQ(report.size(), 1);
+    EXPECT_EQ(fs::path(report[0].outputPath).extension(), ".csv");
+    EXPECT_THROW(prepareVideoBatch({first.string()}, output.string(), false, "ts"), std::invalid_argument);
+}
+
+TEST(VideoBatchTest, CancellationDoesNotInitializeAnUnavailableDevice) {
+    VideoBatchSettings settings;
+    settings.detect = true;
+    settings.video = makeVideoSettings("missing-input.mkv");
+    settings.deviceIndex = std::numeric_limits<int>::max();
+    VideoBatchControl control;
+    control.cancel();
+    const auto result = runVideoBatch(settings,
+        {
+            {1, "missing-input.mkv", "missing-output.csv"}
+    },
+        control);
+    EXPECT_EQ(result.cancelled, 1);
+    EXPECT_EQ(result.succeeded, 0);
+    EXPECT_EQ(result.failed, 0);
+}
+
+TEST_F(WatermarkTest, VideoBatchDiscoveryIsFlatAndIgnoresItsOutputSubfolder) {
+    const fs::path directory = tempDir / "videos";
+    fs::create_directories(directory / "watermark_output");
+    std::ofstream(directory / "source.MKV") << "test";
+    std::ofstream(directory / "notes.txt") << "test";
+    std::ofstream(directory / ".watermark-test.tmp") << "test";
+    std::ofstream(directory / "watermark_output" / "source_watermarked.mkv") << "test";
+    const auto files = getValidVideoFiles(directory);
+    ASSERT_EQ(files.size(), 1);
+    EXPECT_EQ(files.front().filename(), "source.MKV");
+}
+
+class RecordingBatchObserver : public VideoBatchObserver {
+  public:
+    VideoBatchControl* control = nullptr;
+    bool skipFirst = false;
+    bool cancelFirst = false;
+    fs::path createDuringProcessing;
+    bool created = false;
+    std::vector<VideoBatchUpdate> updates;
+    void onUpdate(const VideoBatchUpdate& update) override {
+        updates.push_back(update);
+        if (update.id == 1 && update.state == VideoBatchState::Probing) {
+            if (skipFirst) {
+                EXPECT_FALSE(control->skipCurrent(2));
+                EXPECT_TRUE(control->skipCurrent(1));
+            }
+            if (cancelFirst)
+                control->cancel();
+        }
+        if (skipFirst && update.id == 2 && update.state == VideoBatchState::Probing)
+            EXPECT_FALSE(control->skipCurrent(1));
+        if (!createDuringProcessing.empty() && !created && update.state == VideoBatchState::Processing) {
+            std::ofstream(createDuringProcessing, std::ios::binary) << "created after planning";
+            created = true;
+        }
+    }
+};
+
+TEST_F(WatermarkTest, VideoBatchContinuesAfterBadInputAndWritesRawDetectionReports) {
+    const fs::path input = tempDir / "valid.mkv";
+    writeVideoFixture(input, false, AVCOL_TRC_BT709, true);
+    const auto jobs = prepareVideoBatch({(tempDir / "missing.mkv").string(), input.string()}, (tempDir / "reports").string(), true);
+    VideoBatchSettings settings;
+    settings.detect = true;
+    settings.video = makeVideoSettings(input.string());
+    settings.video.watermarkInterval = 2;
+    VideoBatchControl control;
+    RecordingBatchObserver observer;
+    const auto result = runVideoBatch(settings, jobs, control, &observer);
+    EXPECT_EQ(result.failed, 1);
+    EXPECT_EQ(result.succeeded, 1);
+    EXPECT_FALSE(fs::exists(jobs[0].outputPath));
+    std::ifstream report(jobs[1].outputPath);
+    std::string line;
+    ASSERT_TRUE(std::getline(report, line));
+    EXPECT_EQ(line, "frame,time_seconds,correlation");
+    ASSERT_TRUE(std::getline(report, line));
+    EXPECT_EQ(line.find('%'), std::string::npos);
+    EXPECT_GT(result.results[1].detections, 0);
+    EXPECT_EQ(result.results[1].progress.fraction, 1.0);
+}
+
+TEST_F(WatermarkTest, VideoBatchRejectsOverlappingOutputsBeforeStartingWorkers) {
+    const auto input = tempDir / "source.mkv";
+    writeVideoFixture(input, false, AVCOL_TRC_BT709, true);
+    const auto original = readBytes(input);
+    VideoBatchSettings settings;
+    settings.video = makeVideoSettings(input.string());
+    settings.video.encodeOptions = "-c:v ffv1";
+    const auto output = (tempDir / "output.mkv").string();
+    for (const bool detect : {false, true}) {
+        settings.detect = detect;
+        VideoBatchControl control;
+        EXPECT_THROW(runVideoBatch(settings,
+                         {
+                             {1, input.string(), output},
+                             {2, input.string(), output}
+        },
+                         control),
+            std::invalid_argument);
+        EXPECT_THROW(runVideoBatch(settings,
+                         {
+                             {1, input.string(), input.string()}
+        },
+                         control),
+            std::invalid_argument);
+        EXPECT_THROW(runVideoBatch(settings,
+                         {
+                             {1, input.string(), output                          },
+                             {2, output,         (tempDir / "other.mkv").string()}
+        },
+                         control),
+            std::invalid_argument);
+        EXPECT_FALSE(fs::exists(output));
+    }
+    VideoBatchControl control;
+    settings.detect = false;
+    EXPECT_THROW(runVideoBatch(settings,
+                     {
+                         {1, input.string(), (tempDir / "output.ts").string()}
+    },
+                     control),
+        std::invalid_argument);
+    EXPECT_EQ(readBytes(input), original);
+}
+
+TEST_F(WatermarkTest, VideoBatchObserverFailuresCancelAndJoinEveryWorker) {
+    const auto input = tempDir / "source.mkv";
+    writeVideoFixture(input, false, AVCOL_TRC_BT709, true);
+    VideoBatchSettings settings;
+    settings.video = makeVideoSettings(input.string());
+    settings.video.encodeOptions = "-c:v ffv1";
+    for (int device = 0; device < static_cast<int>(getAvailableDevices().size()); ++device)
+        settings.deviceIndices.push_back(device);
+    for (const int stage : {0, 1, 2}) {
+        struct Throw : VideoBatchObserver {
+            int stage;
+            explicit Throw(const int stage) : stage(stage) {}
+            void onUpdate(const VideoBatchUpdate& update) override {
+                if (stage == 0 || (stage == 1 && update.state == VideoBatchState::Processing))
+                    throw std::runtime_error("progress observer stopped");
+            }
+            void onLog(std::uint64_t, const std::string&) override {
+                if (stage == 2)
+                    throw std::runtime_error("log observer stopped");
+            }
+        } observer(stage);
+        const auto output = tempDir / ("observer-" + std::to_string(stage));
+        const auto jobs = prepareVideoBatch({input.string()}, output.string(), false);
+        VideoBatchControl control;
+        try {
+            runVideoBatch(settings, jobs, control, &observer);
+            FAIL() << "The observer exception was not returned";
+        } catch (const std::runtime_error& error) { EXPECT_EQ(std::string(error.what()), stage == 2 ? "log observer stopped" : "progress observer stopped"); }
+        EXPECT_TRUE(control.cancelled());
+        EXPECT_TRUE(fs::is_empty(output));
+        EXPECT_FALSE(control.skipCurrent());
+    }
+}
+
+TEST_F(WatermarkTest, VideoBatchCanSkipTheCurrentFileAndCancelPendingFiles) {
+    const fs::path input = tempDir / "valid.mkv";
+    writeVideoFixture(input, false, AVCOL_TRC_BT709, true);
+    const fs::path second = tempDir / "second.mkv";
+    fs::copy_file(input, second);
+    const auto jobs = prepareVideoBatch({input.string(), second.string()}, (tempDir / "reports").string(), true);
+    VideoBatchSettings settings;
+    settings.detect = true;
+    settings.video = makeVideoSettings(input.string());
+    {
+        VideoBatchControl control;
+        RecordingBatchObserver observer;
+        observer.control = &control;
+        observer.skipFirst = true;
+        const auto result = runVideoBatch(settings, jobs, control, &observer);
+        EXPECT_EQ(result.skipped, 1);
+        EXPECT_EQ(result.succeeded, 1);
+        EXPECT_FALSE(fs::exists(jobs[0].outputPath));
+    }
+    {
+        VideoBatchControl control;
+        RecordingBatchObserver observer;
+        observer.control = &control;
+        observer.cancelFirst = true;
+        const auto result = runVideoBatch(settings, jobs, control, &observer);
+        EXPECT_EQ(result.cancelled, 2);
+        EXPECT_EQ(result.succeeded, 0);
+    }
+}
+
+TEST_F(WatermarkTest, VideoBatchPublicationCannotReplaceAFileCreatedAfterPlanning) {
+    const fs::path input = tempDir / "valid.mkv";
+    writeVideoFixture(input, false, AVCOL_TRC_BT709, true);
+    for (const bool detect : {false, true}) {
+        const auto jobs = prepareVideoBatch({input.string()}, (tempDir / (detect ? "reports" : "encoded")).string(), detect);
+        VideoBatchSettings settings;
+        settings.detect = detect;
+        settings.video = makeVideoSettings(input.string());
+        settings.video.encodeOptions = "-c:v ffv1";
+        VideoBatchControl control;
+        RecordingBatchObserver observer;
+        observer.createDuringProcessing = fs::path(jobs[0].outputPath);
+        const auto result = runVideoBatch(settings, jobs, control, &observer);
+        EXPECT_TRUE(observer.created);
+        EXPECT_EQ(result.failed, 1);
+        EXPECT_EQ(result.succeeded, 0);
+        const auto data = readBytes(jobs[0].outputPath);
+        EXPECT_EQ(std::string(data.begin(), data.end()), "created after planning");
+        EXPECT_EQ(std::distance(fs::directory_iterator(fs::path(jobs[0].outputPath).parent_path()), fs::directory_iterator{}), 1);
+    }
+}
+
+TEST_F(WatermarkTest, VideoBatchEmbeddingMatchesSingleVideoAndNeverRequestsPreview) {
+    const fs::path input = tempDir / "valid.mkv";
+    writeVideoFixture(input, false, AVCOL_TRC_BT709, true);
+    auto videoSettings = makeVideoSettings(input.string());
+    videoSettings.encodeOptions = "-c:v ffv1";
+    videoSettings.encodeOutputPath = (tempDir / "single.mkv").string();
+    {
+        auto video = initVideo(videoSettings);
+        embedVideo(video.get());
+    }
+    const auto jobs = prepareVideoBatch({input.string()}, (tempDir / "batch").string(), false);
+    RecordingVideoObserver preview;
+    preview.preview = true;
+    VideoBatchSettings settings;
+    settings.video = videoSettings;
+    settings.video.observer = &preview;
+    VideoBatchControl control;
+    const auto result = runVideoBatch(settings, jobs, control);
+    ASSERT_EQ(result.succeeded, 1);
+    EXPECT_EQ(decodeVideoPlanes(jobs[0].outputPath).frames, decodeVideoPlanes(videoSettings.encodeOutputPath).frames);
+    EXPECT_EQ(preview.previews, 0);
+}
+
+#if defined(_USE_OPENCL_)
+TEST(OpenCLCacheTest, DeviceOwnersKeepBuffersAndProgramsAcrossThreadsAndSelections) {
+    if (getAvailableDevices().size() < 2)
+        GTEST_SKIP() << "Two OpenCL GPUs are required";
+    OclQueueManager::initialize(0);
+    const auto first = OclQueueManager::current();
+    const auto program = cl_utils::OpenCLKernelCache<3>::getProgram();
+    OclArray<uint8_t> buffer = OclArray<uint8_t>::zeros(256, first->getQueueRaw());
+    OclQueueManager::initialize(1);
+    const auto second = OclQueueManager::current();
+    const auto otherProgram = cl_utils::OpenCLKernelCache<3>::getProgram();
+    EXPECT_NE(first->getContextRaw(), second->getContextRaw());
+    EXPECT_NE(program(), otherProgram());
+    auto clone = buffer.clone();
+    EXPECT_EQ(clone.getOwner(), first);
+    auto release = std::async(std::launch::async, [owned = std::move(buffer)]() mutable {
+        std::array<uint8_t, 256> values;
+        owned.toHost(values.data());
+        EXPECT_TRUE(std::ranges::all_of(values, [](const auto value) { return value == 0; }));
+        owned = {};
+    });
+    release.get();
+    OclQueueManager::initialize(0);
+    EXPECT_EQ(OclQueueManager::current(), first);
+    EXPECT_EQ(cl_utils::OpenCLKernelCache<3>::getProgram()(), program());
+}
+
+TEST_F(WatermarkTest, MultiDeviceVideoBatchMatchesIsolatedFilesAndPublishesOneReportPerInput) {
+    if (getAvailableDevices().size() < 2)
+        GTEST_SKIP() << "Two OpenCL GPUs are required";
+    const fs::path input = tempDir / "reference.mkv";
+    writeVideoFixture(input, false, AVCOL_TRC_BT709, true);
+    auto singleSettings = makeVideoSettings(input.string());
+    singleSettings.encodeOptions = "-c:v ffv1";
+    singleSettings.encodeOutputPath = (tempDir / "single.mkv").string();
+    {
+        auto session = initVideo(singleSettings);
+        embedVideo(session.get());
+    }
+    std::vector<std::string> inputs;
+    for (int index = 0; index < 6; ++index) {
+        const auto path = tempDir / ("source" + std::to_string(index) + ".mkv");
+        fs::copy_file(input, path);
+        inputs.push_back(path.string());
+    }
+    const auto expected = decodeVideoPlanes(singleSettings.encodeOutputPath).frames;
+    VideoBatchSettings settings;
+    settings.video = singleSettings;
+    using Frames = decltype(decodeVideoPlanes(input.string()).frames);
+    std::map<int, Frames> isolated;
+    isolated.emplace(0, expected);
+    for (int device = 0; device < static_cast<int>(getAvailableDevices().size()); ++device) {
+        settings.deviceIndices.push_back(device);
+        if (device == 0)
+            continue;
+        initializeEnvironment(device);
+        singleSettings.encodeOutputPath = (tempDir / ("single-device-" + std::to_string(device) + ".mkv")).string();
+        {
+            auto session = initVideo(singleSettings);
+            embedVideo(session.get());
+        }
+        isolated.emplace(device, decodeVideoPlanes(singleSettings.encodeOutputPath).frames);
+    }
+    for (const bool race : {false, true}) {
+        settings.accelerateFinal = race;
+        const auto folder = tempDir / (race ? "race" : "parallel");
+        const auto jobs = prepareVideoBatch(inputs, folder.string(), false);
+        VideoBatchControl control;
+        const auto result = runVideoBatch(settings, jobs, control);
+        ASSERT_EQ(result.succeeded, inputs.size());
+        EXPECT_EQ(result.failed, 0);
+        for (std::size_t index = 0; index < jobs.size(); ++index)
+            EXPECT_TRUE(decodeVideoPlanes(jobs[index].outputPath).frames == isolated.at(result.results[index].deviceIndex)) << "file " << index;
+        EXPECT_EQ(std::distance(fs::directory_iterator(folder), fs::directory_iterator{}), inputs.size());
+        settings.detect = true;
+        std::vector<std::string> encoded;
+        for (const auto& job : jobs)
+            encoded.push_back(job.outputPath);
+        const auto reports = prepareVideoBatch(encoded, (folder / "reports").string(), true);
+        VideoBatchControl detectControl;
+        const auto detected = runVideoBatch(settings, reports, detectControl);
+        ASSERT_EQ(detected.succeeded, inputs.size());
+        for (const auto& view : detected.results)
+            EXPECT_GT(view.detections, 0);
+        for (const auto& report : reports) {
+            const auto data = readBytes(report.outputPath);
+            EXPECT_EQ(std::count(data.begin(), data.end(), '\n'), expected.size() + 1);
+        }
+        EXPECT_EQ(std::distance(fs::directory_iterator(folder / "reports"), fs::directory_iterator{}), inputs.size());
+        settings.detect = false;
+    }
+    initializeEnvironment(0);
+}
+#endif
+
+TEST(VideoMediaTest, CancelsSourceProbeBeforeOpeningInput) {
+    std::stop_source stop;
+    stop.request_stop();
+    EXPECT_THROW(probeVideoSource("missing-video.mkv", stop.get_token()), VideoCancelled);
+    EXPECT_THROW(probeVideoSource("missing-video.mkv"), std::runtime_error);
+}
+
+TEST_F(WatermarkTest, SourceProbeReportsDepthChromaAndHdrWithoutChangingDevice) {
+    const int device = getCurrentDeviceIndex();
+    for (const bool hdr : {false, true}) {
+        const fs::path path = tempDir / (hdr ? "probe-hdr.mkv" : "probe-sdr.mkv");
+        writeVideoFixture(path, hdr, hdr ? AVCOL_TRC_SMPTE2084 : AVCOL_TRC_BT709, false, nullptr, hdr ? AV_PIX_FMT_YUV444P10LE : AV_PIX_FMT_YUV422P);
+        const VideoSourceInfo source = probeVideoSource(path.string());
+        EXPECT_EQ(source.width, 16);
+        EXPECT_EQ(source.height, 16);
+        EXPECT_EQ(source.bitDepth, hdr ? 10 : 8);
+        EXPECT_EQ(source.pixelFormat, hdr ? "yuv444p10le" : "yuv422p");
+        EXPECT_EQ(source.dynamicRange, hdr ? "PQ HDR" : "SDR");
+        EXPECT_EQ(source.codec, "ffv1");
+        EXPECT_GT(source.durationSeconds, 0.0);
+        EXPECT_GT(source.bytes, 0);
+        EXPECT_EQ(source.audioTracks, 0u);
+        EXPECT_EQ(source.subtitleTracks, 0u);
+        EXPECT_EQ(getCurrentDeviceIndex(), device);
+    }
+}
+
+TEST_F(WatermarkTest, RejectedVideoContainerPreservesExistingDestination) {
+    const fs::path output = tempDir / "existing.ts";
+    const std::string sentinel = "keep the existing file";
+    {
+        std::ofstream file(output, std::ios::binary);
+        file << sentinel;
+    }
+    auto settings = makeVideoSettings(shortVideoFixture().string());
+    settings.encodeOutputPath = output.string();
+    auto video = initVideo(settings);
+    EXPECT_THROW(embedVideo(video.get()), std::invalid_argument);
+    const auto bytes = readBytes(output);
+    EXPECT_EQ(std::string(bytes.begin(), bytes.end()), sentinel);
+    EXPECT_EQ(std::distance(fs::directory_iterator(tempDir), fs::directory_iterator{}), 1);
+}
+
+TEST_F(WatermarkTest, VideoObserverReportsFinalizedOutputAndPreviewDoesNotChangePixels) {
+    const fs::path input = tempDir / "observer-input.mkv";
+    writeVideoFixture(input, false, AVCOL_TRC_BT709, true, nullptr, AV_PIX_FMT_YUV444P, AVCOL_RANGE_MPEG, {}, true);
+    RecordingVideoObserver observer;
+    observer.preview = true;
+    observer.output = tempDir / "observer-output.mkv";
+    auto settings = makeVideoSettings(input.string());
+    settings.encodeOptions = "-c:v ffv1";
+    settings.encodeOutputPath = observer.output.string();
+    settings.observer = &observer;
+    settings.watermarkInterval = 3;
+    {
+        auto video = initVideo(settings);
+        EXPECT_EQ(embedVideo(video.get()), 100);
+    }
+    ASSERT_FALSE(observer.updates.empty());
+    EXPECT_EQ(observer.updates.back().state, VideoState::Completed);
+    EXPECT_EQ(observer.updates.back().frames, 100U);
+    EXPECT_EQ(observer.updates.back().selectedFrames, 34U);
+    EXPECT_DOUBLE_EQ(observer.updates.back().fraction, 1.0);
+    EXPECT_TRUE(observer.publishedAtCompletion);
+    EXPECT_GT(observer.previews, 0);
+    EXPECT_TRUE(std::ranges::any_of(observer.updates, [](const auto& update) { return update.state == VideoState::Finalizing; }));
+    settings.observer = nullptr;
+    settings.encodeOutputPath = (tempDir / "observer-disabled.mkv").string();
+    {
+        auto video = initVideo(settings);
+        EXPECT_EQ(embedVideo(video.get()), 100);
+    }
+    EXPECT_EQ(decodeVideoPlanes(observer.output).frames, decodeVideoPlanes(settings.encodeOutputPath).frames);
+}
+
+TEST_F(WatermarkTest, VideoDetectionObserverReportsSelectedFramesAndCancels) {
+    const auto input = tempDir / "observer-detect.mkv";
+    writeVideoFixture(input, false, AVCOL_TRC_BT709, true);
+    RecordingVideoObserver observer;
+    observer.cancelProcessing = true;
+    auto settings = makeVideoSettings(input.string());
+    settings.watermarkInterval = 3;
+    settings.observer = &observer;
+    settings.stopToken = observer.stop.get_token();
+    auto video = initVideo(settings);
+    EXPECT_THROW(detectVideo(video.get()), VideoCancelled);
+    ASSERT_EQ(observer.detections.size(), 5U);
+    for (size_t index = 0; index < observer.detections.size(); ++index) {
+        EXPECT_EQ(observer.detections[index].frame, 1U + index * 3);
+        EXPECT_TRUE(std::isfinite(observer.detections[index].correlation));
+    }
+    ASSERT_FALSE(observer.updates.empty());
+    EXPECT_EQ(observer.updates.back().state, VideoState::Cancelled);
+}
+
+TEST_F(WatermarkTest, CancelledVideoEmbeddingKeepsTheDestinationAndRemovesTemporaryOutput) {
+    RecordingVideoObserver observer;
+    observer.cancelProcessing = true;
+    observer.preview = true;
+    const auto output = tempDir / "observer-preserved.mkv";
+    {
+        std::ofstream existing(output);
+        existing << "keep me";
+    }
+    auto settings = makeVideoSettings(shortVideoFixture().string());
+    settings.encodeOutputPath = output.string();
+    settings.observer = &observer;
+    settings.stopToken = observer.stop.get_token();
+    {
+        auto video = initVideo(settings);
+        EXPECT_THROW(embedVideo(video.get()), VideoCancelled);
+    }
+    std::ifstream existing(output);
+    const std::string content((std::istreambuf_iterator<char>(existing)), std::istreambuf_iterator<char>());
+    EXPECT_EQ(content, "keep me");
+    for (const auto& file : fs::directory_iterator(tempDir))
+        EXPECT_FALSE(file.path().filename().string().starts_with(".watermark-"));
+}
+
 TEST_F(WatermarkTest, RejectsAnEncodeOptionsStringWithoutAnEncoder) {
     VideoSettings settings = makeVideoSettings(shortVideoFixture().string());
     settings.encodeOptions = "-preset ultrafast -crf 20";
@@ -3992,3 +4624,7 @@ TEST(WatermarkThreadingTest, EmbedsAndDetectsWhileAnotherThreadPreloadsImages) {
         EXPECT_EQ(error, "") << "run " << run;
     }
 }
+
+#include "VideoBatchSchedulerTests.hpp"
+
+#include "ImageBatchTests.hpp"

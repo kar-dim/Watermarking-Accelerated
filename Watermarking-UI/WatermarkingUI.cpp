@@ -1,6 +1,10 @@
 #include "WatermarkingUI.h"
 #include "AnimatedButton.hpp"
+#include "ImagePreview.hpp"
+#include "MultiDeviceComboBox.hpp"
+#include <ImageBatch.hpp>
 #include "ThemePalette.hpp"
+#include <CorrelationFormat.hpp>
 #include <algorithm>
 #include <exception>
 #include <filesystem>
@@ -22,6 +26,9 @@
 #include <QHeaderView>
 #include <QHBoxLayout>
 #include <QMessageBox>
+#include <QDesktopServices>
+#include <QItemSelectionModel>
+#include <set>
 #include <QMimeData>
 #include <QPixmap>
 #include <QPoint>
@@ -52,6 +59,7 @@ QColor successColor() { return themePalette().accent; }
 // Create an input row combining a text path field with a browse button
 QWidget* makeFileRow(QLineEdit*& field, const QString& buttonText, QWidget* parent, const std::function<void()>& browse) {
     auto* row = new QWidget(parent);
+    row->setProperty("workflowContainer", true);
     auto* layout = new QHBoxLayout(row);
     layout->setContentsMargins(0, 0, 0, 0);
     field = new QLineEdit(row);
@@ -90,12 +98,14 @@ QString supportedDropPath(const QMimeData* data, const bool folder) {
 // Construct settings inputs for password, window size p, and PSNR strength
 QWidget* WatermarkingUI::createSettingsRow(SettingsControls& controls, QWidget* parent) {
     auto* row = new QWidget(parent);
+    row->setProperty("workflowContainer", true);
     row->setObjectName("settingsRow");
     auto* layout = new QHBoxLayout(row);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(10);
     const auto addColumn = [row, layout](const QString& label, QWidget* input, const int stretch) {
         auto* column = new QWidget(row);
+        column->setProperty("workflowContainer", true);
         column->setObjectName("settingsColumn");
         auto* columnLayout = new QVBoxLayout(column);
         columnLayout->setContentsMargins(0, 0, 0, 0);
@@ -138,6 +148,7 @@ WatermarkingUI::WatermarkingUI(QWidget* parent) : QMainWindow(parent) {
     scroll->setWidgetResizable(true);
     scroll->setFrameShape(QFrame::NoFrame);
     auto* central = new QWidget(scroll);
+    central->setProperty("workflowContainer", true);
     auto* root = new QVBoxLayout(central);
     root->setContentsMargins(20, 12, 20, 16);
     root->setSpacing(12);
@@ -145,6 +156,7 @@ WatermarkingUI::WatermarkingUI(QWidget* parent) : QMainWindow(parent) {
     setCentralWidget(scroll);
 
     auto* deviceRow = new QWidget(central);
+    deviceRow->setProperty("workflowContainer", true);
     auto* deviceLayout = new QHBoxLayout(deviceRow);
     deviceLayout->setContentsMargins(0, 0, 0, 0);
     const std::string backend = getBackendName();
@@ -153,23 +165,33 @@ WatermarkingUI::WatermarkingUI(QWidget* parent) : QMainWindow(parent) {
     backendLabel->setObjectName("backendLabel");
     deviceLayout->addWidget(backendLabel);
     deviceLayout->addStretch();
+    devicePickerArea = new QWidget(deviceRow);
+    devicePickerArea->setProperty("workflowContainer", true);
+    devicePickerArea->setObjectName("devicePickerArea");
+    auto pickerPolicy = devicePickerArea->sizePolicy();
+    // Keep tabs aligned while batch tabs use their own device pickers
+    pickerPolicy.setRetainSizeWhenHidden(true);
+    devicePickerArea->setSizePolicy(pickerPolicy);
+    auto* pickerLayout = new QHBoxLayout(devicePickerArea);
+    pickerLayout->setContentsMargins(0, 0, 0, 0);
+    deviceLayout->addWidget(devicePickerArea);
     std::vector<std::string> availableDevices;
     try {
         availableDevices = getAvailableDevices();
     } catch (const std::exception&) { availableDevices.clear(); }
     // A picker is useful only when the GPU backend exposes multiple devices
     if (backend != "eigen" && availableDevices.size() > 1) {
-        deviceLayout->addWidget(new QLabel("Device", deviceRow));
-        deviceComboBox = new QComboBox(deviceRow);
+        pickerLayout->addWidget(new QLabel("Device", devicePickerArea));
+        deviceComboBox = new QComboBox(devicePickerArea);
         deviceComboBox->setObjectName("deviceComboBox");
         for (const auto& device : availableDevices)
             deviceComboBox->addItem(QString::fromStdString(device));
-        deviceLayout->addWidget(deviceComboBox);
+        pickerLayout->addWidget(deviceComboBox);
     } else {
         const QString name = availableDevices.empty() ? "No device found" : QString::fromStdString(availableDevices.front());
-        auto* deviceName = new QLabel(name, deviceRow);
+        auto* deviceName = new QLabel(name, devicePickerArea);
         deviceName->setObjectName("deviceName");
-        deviceLayout->addWidget(deviceName);
+        pickerLayout->addWidget(deviceName);
     }
     root->addWidget(deviceRow);
 
@@ -186,8 +208,8 @@ WatermarkingUI::WatermarkingUI(QWidget* parent) : QMainWindow(parent) {
     singleFiles->setLabelAlignment(Qt::AlignRight);
     singleMode = new QComboBox(singlePage);
     singleMode->setObjectName("singleMode");
-    singleMode->addItem("Embed ME watermark");
-    singleMode->addItem("Detect ME watermark");
+    singleMode->addItem("Embed watermark");
+    singleMode->addItem("Detect watermark");
     singleFiles->addRow("Operation", singleMode);
     singleFiles->addRow("Input image", makeFileRow(singleInput, "Browse", singlePage, [this] {
         if (busy)
@@ -219,7 +241,7 @@ WatermarkingUI::WatermarkingUI(QWidget* parent) : QMainWindow(parent) {
     singleActions->addWidget(saveButton);
     singleActions->addStretch();
     singleLayout->addLayout(singleActions);
-    singleStatus = new QLabel("Choose an image, then preview the ME watermark.", singlePage);
+    singleStatus = new QLabel("Choose an image, then preview the watermark.", singlePage);
     singleStatus->setObjectName("singleStatus");
     singleLayout->addWidget(singleStatus);
     auto* comparisonHint = new QLabel("Drag the divider to compare. Drag the image to pan, scroll to zoom, or double-click to reset.", singlePage);
@@ -229,18 +251,44 @@ WatermarkingUI::WatermarkingUI(QWidget* parent) : QMainWindow(parent) {
     singleImageView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
     singleLayout->addWidget(singleImageView, 1);
     singleDetectArea = new QWidget(singlePage);
+    singleDetectArea->setProperty("workflowContainer", true);
     singleDetectArea->setObjectName("singleDetectArea");
     auto* detectLayout = new QVBoxLayout(singleDetectArea);
     detectLayout->setContentsMargins(0, 0, 0, 0);
-    singleDetectionResult = new QLabel("ME correlation will appear here", singleDetectArea);
+    auto* detectionCard = new QWidget(singleDetectArea);
+    detectionCard->setProperty("workflowContainer", true);
+    detectionCard->setObjectName("detectionCard");
+    auto* cardLayout = new QHBoxLayout(detectionCard);
+    cardLayout->setContentsMargins(24, 24, 24, 24);
+    cardLayout->setSpacing(28);
+    singleDetectionPreview = new ImagePreviewView(detectionCard);
+    singleDetectionPreview->setObjectName("detectionThumbnail");
+    singleDetectionPreview->setMinimumSize(240, 180);
+    cardLayout->addWidget(singleDetectionPreview, 3);
+    auto* resultLayout = new QVBoxLayout;
+    resultLayout->setSpacing(8);
+    resultLayout->addStretch();
+    singleDetectionFile = new QLabel("No image selected", detectionCard);
+    singleDetectionFile->setObjectName("detectionFile");
+    singleDetectionFile->setTextFormat(Qt::PlainText);
+    singleDetectionFile->setWordWrap(true);
+    singleDetectionFile->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    resultLayout->addWidget(singleDetectionFile);
+    auto* detectionCaption = new QLabel("Correlation", detectionCard);
+    detectionCaption->setObjectName("detectionCaption");
+    resultLayout->addWidget(detectionCaption);
+    singleDetectionResult = new QLabel("Not run", detectionCard);
     singleDetectionResult->setObjectName("detectionResult");
-    singleDetectionResult->setAlignment(Qt::AlignCenter);
+    singleDetectionResult->setProperty("state", "idle");
     singleDetectionResult->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    singleDetectionResult->setFixedHeight(92);
-    singleDetectionResult->setMinimumWidth(360);
-    singleDetectionResult->setMaximumWidth(520);
-    detectLayout->addWidget(singleDetectionResult, 0, Qt::AlignLeft);
-    detectLayout->addStretch(1);
+    resultLayout->addWidget(singleDetectionResult);
+    auto* detectionHint = new QLabel("Higher values mean a stronger match.", detectionCard);
+    detectionHint->setObjectName("detectionHint");
+    detectionHint->setWordWrap(true);
+    resultLayout->addWidget(detectionHint);
+    resultLayout->addStretch();
+    cardLayout->addLayout(resultLayout, 2);
+    detectLayout->addWidget(detectionCard, 1);
     singleDetectArea->hide();
     singleLayout->addWidget(singleDetectArea, 1);
     tabs->addTab(singlePage, "Single image");
@@ -250,53 +298,111 @@ WatermarkingUI::WatermarkingUI(QWidget* parent) : QMainWindow(parent) {
     auto* batchLayout = new QVBoxLayout(batchPage);
     batchLayout->setContentsMargins(18, 20, 18, 18);
     batchLayout->setSpacing(12);
-    auto* batchFiles = new QFormLayout;
-    batchFiles->addRow("Image folder", makeFileRow(batchFolder, "Browse", batchPage, [this] {
-        if (busy)
-            return;
-        const QString folder = QFileDialog::getExistingDirectory(this, "Choose an image folder", batchFolder->text());
-        if (!folder.isEmpty())
-            selectBatchFolder(folder);
-    }));
+    auto* batchForm = new QFormLayout;
+    batchForm->setLabelAlignment(Qt::AlignRight);
     batchMode = new QComboBox(batchPage);
     batchMode->setObjectName("batchMode");
-    batchMode->addItem("Embed ME watermark");
-    batchMode->addItem("Detect ME watermark");
-    batchFiles->addRow("Operation", batchMode);
-    batchLayout->addLayout(batchFiles);
+    batchMode->addItems({"Embed watermark", "Detect watermark"});
+    batchForm->addRow("Operation", batchMode);
+    imageBatchDevices = new MultiDeviceComboBox(batchPage);
+    imageBatchDevices->setObjectName("imageBatchDevices");
+    for (int device = 0; device < static_cast<int>(availableDevices.size()); ++device)
+        imageBatchDevices->addDevice(QString::fromStdString(availableDevices[device]), device, device == (deviceComboBox ? deviceComboBox->currentIndex() : 0));
+    imageBatchDevices->selectionChanged = [this] { batchStartButton->setEnabled(!busy && !batchFiles.empty() && !imageBatchDevices->selectedDevices().empty()); };
+    batchOutputRow = makeFileRow(batchOutput, "Browse", batchPage, [this] {
+        if (busy)
+            return;
+        const QString folder = QFileDialog::getExistingDirectory(this, "Choose batch output folder", batchOutput->text());
+        if (!folder.isEmpty())
+            batchOutput->setText(folder);
+    });
+    batchOutput->setObjectName("batchOutput");
+    batchForm->addRow("Output folder", batchOutputRow);
+    batchForm->addRow("Devices", imageBatchDevices);
+    batchLayout->addLayout(batchForm);
     batchLayout->addWidget(createSettingsRow(batchSettings, batchPage));
     batchSettings.password->setObjectName("batchPassword");
     batchSettings.psnrColumn->setObjectName("batchPsnrColumn");
-    batchFolder->setObjectName("batchFolder");
-    batchOutputHint = new QLabel("Embedded files go to a watermark_output folder inside the selected folder.", batchPage);
+    batchOutputHint = new QLabel("Embedded images keep their format, existing files are kept.", batchPage);
     batchOutputHint->setObjectName("mutedLabel");
     batchLayout->addWidget(batchOutputHint);
+    auto* batchFilesRow = new QHBoxLayout;
+    batchAddFiles = new AnimatedButton("Add images", batchPage);
+    batchAddFiles->setObjectName("batchAddFiles");
+    batchAddFolder = new AnimatedButton("Add folder", batchPage);
+    batchRemove = new AnimatedButton("Remove selected", batchPage);
+    batchClear = new AnimatedButton("Clear", batchPage);
+    for (auto* button : {batchAddFiles, batchAddFolder, batchRemove, batchClear})
+        batchFilesRow->addWidget(button);
+    batchFilesRow->addStretch();
+    batchLayout->addLayout(batchFilesRow);
     auto* batchActions = new QHBoxLayout;
     batchStartButton = new AnimatedButton("Start batch", batchPage);
     batchStartButton->setObjectName("primaryButton");
-    batchCancelButton = new AnimatedButton("Stop after current image", batchPage);
+    batchCancelButton = new AnimatedButton("Cancel batch", batchPage);
+    batchCancelButton->setToolTip("Stop taking new images and finish processing and saving images already in flight.");
     batchCancelButton->setEnabled(false);
+    auto* batchOpen = new AnimatedButton("Open output folder", batchPage);
     batchActions->addWidget(batchStartButton);
     batchActions->addWidget(batchCancelButton);
     batchActions->addStretch();
+    batchActions->addWidget(batchOpen);
     batchLayout->addLayout(batchActions);
-    batchStatus = new QLabel("Select a folder to build the queue.", batchPage);
+    connect(batchOpen, &QPushButton::clicked, this, [this] {
+        const QString path = batchOutput->text().trimmed();
+        if (QFileInfo(path).isDir())
+            QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+    });
+    connect(batchAddFiles, &QPushButton::clicked, this, [this] { addImageBatchPaths(QFileDialog::getOpenFileNames(this, "Add images", QString(), imageFilter)); });
+    connect(batchAddFolder, &QPushButton::clicked, this, [this] {
+        const QString folder = QFileDialog::getExistingDirectory(this, "Add images from a folder");
+        if (!folder.isEmpty())
+            addImageBatchPaths({folder});
+    });
+    connect(batchClear, &QPushButton::clicked, this, [this] {
+        batchFiles.clear();
+        refreshBatchQueue();
+    });
+    connect(batchRemove, &QPushButton::clicked, this, [this] {
+        std::set<int, std::greater<int>> rows;
+        for (const auto& index : batchTable->selectionModel()->selectedRows())
+            rows.insert(index.row());
+        for (const int row : rows)
+            batchFiles.erase(batchFiles.begin() + row);
+        refreshBatchQueue();
+    });
+    batchStatus = new QLabel("Add images or drop files and folders to build the queue.", batchPage);
     batchStatus->setObjectName("batchStatus");
-    batchLayout->addWidget(batchStatus);
+    batchStatus->setWordWrap(true);
+    auto* batchStatusRow = new QHBoxLayout;
+    batchStatusRow->addWidget(batchStatus, 1);
+    batchElapsed = new QLabel("Elapsed: 0.0 s", batchPage);
+    batchElapsed->setObjectName("batchElapsed");
+    batchStatusRow->addWidget(batchElapsed);
+    batchLayout->addLayout(batchStatusRow);
+    batchTimer = new QTimer(this);
+    batchTimer->setInterval(100);
+    connect(batchTimer, &QTimer::timeout, this, [this] {
+        batchElapsed->setText(QString("Elapsed: %1 s").arg(batchClock.elapsed() / 1000.0, 0, 'f', 1));
+        pollImageBatch();
+    });
     batchProgress = new QProgressBar(batchPage);
     batchProgress->setValue(0);
     batchLayout->addWidget(batchProgress);
     batchTable = new QTableWidget(batchPage);
     batchTable->setObjectName("batchQueue");
-    batchTable->setColumnCount(3);
-    batchTable->setHorizontalHeaderLabels({"File", "Status", "Result"});
+    batchTable->setColumnCount(4);
+    batchTable->setHorizontalHeaderLabels({"File", "Status", "Device", "Result"});
     batchTable->setEditTriggers(QAbstractItemView::NoEditTriggers);
     batchTable->setSelectionBehavior(QAbstractItemView::SelectRows);
+    batchTable->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    batchTable->setWordWrap(false);
     batchTable->setAlternatingRowColors(true);
     batchTable->verticalHeader()->setVisible(false);
     batchTable->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
     batchTable->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
-    batchTable->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
+    batchTable->horizontalHeader()->resizeSection(2, 180);
+    batchTable->horizontalHeader()->setSectionResizeMode(3, QHeaderView::Stretch);
     batchLayout->addWidget(batchTable, 1);
     tabs->addTab(batchPage, "Batch images");
 
@@ -326,6 +432,8 @@ WatermarkingUI::WatermarkingUI(QWidget* parent) : QMainWindow(parent) {
     benchmarkImageView->setMinimumSize(400, 280);
     benchmarkLayout->addWidget(benchmarkImageView, 1);
     tabs->addTab(benchmarkPage, "Benchmark");
+    createVideoTab();
+    createVideoBatchTab();
 
     dropOverlay = new QLabel(tabs);
     dropOverlay->setObjectName("dropOverlay");
@@ -376,15 +484,19 @@ WatermarkingUI::WatermarkingUI(QWidget* parent) : QMainWindow(parent) {
         connect(deviceComboBox, &QComboBox::currentIndexChanged, this, [this] { invalidateSingleResult(); });
     connect(previewButton, &QPushButton::clicked, this, [this] { startSingleOperation(); });
     connect(saveButton, &QPushButton::clicked, this, [this] { saveSingleImage(); });
-    connect(batchMode, &QComboBox::currentIndexChanged, this, [this](const int index) {
-        batchOutputHint->setText(index == 0 ? "Embedded files go to a watermark_output folder inside the selected folder." : "Detection reports one correlation per image, no files are written.");
+    connect(batchMode, &QComboBox::currentIndexChanged, this, [this, batchForm](const int index) {
+        batchOutputHint->setText(index == 0 ? "Embedded images keep their format, existing files are kept." : "Detection reports one correlation per image, no files are written.");
+        batchForm->setRowVisible(batchOutputRow, index == 0);
         batchSettings.psnrColumn->setVisible(index == 0);
     });
-    connect(batchFolder, &QLineEdit::editingFinished, this, [this] { refreshBatchQueue(); });
     connect(batchStartButton, &QPushButton::clicked, this, [this] { startBatch(); });
     connect(batchCancelButton, &QPushButton::clicked, this, [this] { cancelBatch(); });
     connect(benchmarkStartButton, &QPushButton::clicked, this, [this] { startBenchmark(); });
-    connect(tabs, &QTabWidget::currentChanged, this, [this] { dropOverlay->hide(); });
+    connect(tabs, &QTabWidget::currentChanged, this, [this] {
+        dropOverlay->hide();
+        devicePickerArea->setVisible(tabs->currentWidget() != videoBatchPage && tabs->currentIndex() != 2);
+    });
+    refreshBatchQueue();
     qApp->installEventFilter(this);
 }
 
@@ -394,9 +506,30 @@ void WatermarkingUI::selectSingleImage(const QString& path) {
     singleOutput->setText(info.dir().filePath(info.completeBaseName() + "_watermarked." + info.suffix()));
 }
 
-void WatermarkingUI::selectBatchFolder(const QString& path) {
-    batchFolder->setText(path);
-    refreshBatchQueue();
+void WatermarkingUI::addImageBatchPaths(const QStringList& paths) {
+    if (busy)
+        return;
+    try {
+        for (const auto& selected : paths) {
+            std::vector<fs::path> files;
+            const QFileInfo info(selected);
+            if (info.isDir())
+                files = WatermarkCore::getValidImageFiles(fs::path(selected.toStdWString()));
+            else if (info.isFile() && WatermarkCore::hasSupportedImageExtension(fs::path(selected.toStdWString())))
+                files.emplace_back(selected.toStdWString());
+            for (const auto& file : files) {
+                const QFileInfo input(QString::fromStdWString(file.wstring()));
+                const QString canonical = input.canonicalFilePath();
+                const QString path = canonical.isEmpty() ? input.absoluteFilePath() : canonical;
+                const bool duplicate = std::ranges::any_of(batchFiles, [&](const auto& existing) { return QString::fromStdWString(existing.wstring()).compare(path, Qt::CaseInsensitive) == 0; });
+                if (!duplicate)
+                    batchFiles.emplace_back(path.toStdWString());
+            }
+        }
+        if (batchOutput->text().isEmpty() && !batchFiles.empty())
+            batchOutput->setText(QFileInfo(QString::fromStdWString(batchFiles.front().wstring())).dir().filePath("watermark_output"));
+        refreshBatchQueue();
+    } catch (const std::exception& error) { QMessageBox::warning(this, "Image files", QString::fromUtf8(error.what())); }
 }
 
 ImageOptions WatermarkingUI::imageOptions(const bool batch) const {
@@ -406,6 +539,19 @@ ImageOptions WatermarkingUI::imageOptions(const bool batch) const {
 
 void WatermarkingUI::setBusy(const bool running) {
     busy = running;
+    if (!running && videoProbePending && !videoProbeTimer->isActive())
+        videoProbeTimer->start(0);
+    videoInputs->setEnabled(!running);
+    videoStart->setEnabled(!running);
+    videoCancel->setEnabled(running && videoWorker != nullptr && videoWorker->isRunning());
+    videoBatchInputs->setEnabled(!running);
+    videoBatchAddFiles->setEnabled(!running);
+    videoBatchAddFolder->setEnabled(!running);
+    videoBatchRemove->setEnabled(!running);
+    videoBatchClear->setEnabled(!running);
+    updateVideoBatchControls();
+    videoBatchCancel->setEnabled(running && videoBatchWorker && videoBatchWorker->isRunning() && !videoBatchWorker->cancellationRequested());
+    videoBatchSkip->setEnabled(running && videoBatchActive && videoBatchWorker && videoBatchWorker->isRunning() && !videoBatchWorker->cancellationRequested());
     singleSettings.password->setEnabled(!running);
     singleSettings.p->setEnabled(!running);
     singleSettings.psnr->setEnabled(!running);
@@ -415,13 +561,16 @@ void WatermarkingUI::setBusy(const bool running) {
     singleInput->setEnabled(!running);
     singleOutput->setEnabled(!running);
     singleMode->setEnabled(!running);
-    batchFolder->setEnabled(!running);
+    batchOutputRow->setEnabled(!running);
+    for (auto* button : {batchAddFiles, batchAddFolder, batchRemove, batchClear})
+        button->setEnabled(!running);
     batchMode->setEnabled(!running);
+    imageBatchDevices->setEnabled(!running);
     if (deviceComboBox)
         deviceComboBox->setEnabled(!running);
     previewButton->setEnabled(!running);
     saveButton->setEnabled(!running && singleMode->currentIndex() == 0 && singleWorker != nullptr && singleWorker->session() != nullptr);
-    batchStartButton->setEnabled(!running);
+    batchStartButton->setEnabled(!running && !batchFiles.empty() && !imageBatchDevices->selectedDevices().empty());
     batchCancelButton->setEnabled(running && batchWorker != nullptr);
     benchmarkStartButton->setEnabled(!running || benchmarkWorker != nullptr);
     benchmarkStartButton->setProperty("stop", benchmarkWorker != nullptr);
@@ -439,11 +588,15 @@ void WatermarkingUI::invalidateSingleResult() {
     }
     saveButton->setEnabled(false);
     if (singleMode->currentIndex() == 1) {
-        singleDetectionResult->setText("ME correlation will appear here");
-        setStatus(singleStatus, "Choose an image, then detect the ME watermark.", "idle");
+        setStatus(singleDetectionResult, "Not run", "idle");
+        singleDetectionPreview->setImage({});
+        const QString path = singleInput->text().trimmed();
+        singleDetectionFile->setText(path.isEmpty() ? "No image selected" : QFileInfo(path).fileName());
+        singleDetectionFile->setToolTip(path);
+        setStatus(singleStatus, "Choose an image, then detect the watermark.", "idle");
     } else {
-        setStatus(singleStatus,
-            singleImageView->hasImages() ? "Showing the previous preview. Preview again to apply the current settings or device." : "Choose an image, then preview the ME watermark.", "idle");
+        setStatus(singleStatus, singleImageView->hasImages() ? "Showing the previous preview. Preview again to apply the current settings or device." : "Choose an image, then preview the watermark.",
+            "idle");
     }
 }
 
@@ -457,26 +610,33 @@ void WatermarkingUI::startSingleOperation() {
     invalidateSingleResult();
     const bool detect = singleMode->currentIndex() == 1;
     singleWorker = new SingleImageWorker(imageOptions(false), singleInput->text().trimmed(), detect, this);
-    setStatus(singleStatus, detect ? "Loading image and detecting ME watermark..." : "Loading image and embedding ME watermark...", "running");
+    setStatus(singleStatus, detect ? "Loading image and detecting watermark..." : "Loading image and embedding watermark...", "running");
+    if (detect)
+        setStatus(singleDetectionResult, "Running", "running");
     setBusy(true);
     connect(singleWorker, &QThread::finished, this, [this, detect] {
+        if (closing)
+            return;
         setBusy(false);
         if (!singleWorker->error().isEmpty()) {
             setStatus(singleStatus, singleWorker->error(), "error");
+            if (detect)
+                setStatus(singleDetectionResult, "Failed", "error");
             QMessageBox::critical(this, detect ? "Detection failed" : "Preview failed", singleWorker->error());
             delete singleWorker;
             singleWorker = nullptr;
             return;
         }
         if (detect) {
-            const QString value = QString::number(*singleWorker->correlation(), 'f', 4);
-            singleDetectionResult->setText("ME correlation: " + value);
-            setStatus(singleStatus, "ME correlation: " + value, "done");
+            const QString value = QString::fromStdString(formatCorrelationPercent(*singleWorker->correlation()));
+            setStatus(singleDetectionResult, value, "done");
+            singleDetectionPreview->setImage(singleWorker->original());
+            setStatus(singleStatus, "Detection complete.", "done");
             return;
         }
         singleImageView->setImages(singleWorker->original(), singleWorker->preview());
         saveButton->setEnabled(true);
-        setStatus(singleStatus, "ME watermark ready. Save writes this exact result.", "done");
+        setStatus(singleStatus, "watermark ready. Save writes this exact result.", "done");
     });
     singleWorker->start();
 }
@@ -511,37 +671,31 @@ void WatermarkingUI::saveSingleImage() {
 void WatermarkingUI::refreshBatchQueue() {
     if (busy)
         return;
-    batchFiles.clear();
     batchTable->setRowCount(0);
     batchProgress->setValue(0);
-    if (batchFolder->text().trimmed().isEmpty()) {
-        setStatus(batchStatus, "Select a folder to build the queue.", "idle");
-        return;
-    }
-    const fs::path folder(batchFolder->text().trimmed().toStdString());
-    try {
-        batchFiles = WatermarkCore::getValidImageFiles(folder);
-    } catch (const std::exception& error) {
-        setStatus(batchStatus, QString::fromUtf8(error.what()), "error");
-        return;
-    }
+    batchElapsed->setText("Elapsed: 0.0 s");
     batchTable->setRowCount(static_cast<int>(batchFiles.size()));
     for (size_t index = 0; index < batchFiles.size(); ++index) {
-        batchTable->setItem(static_cast<int>(index), 0, new QTableWidgetItem(QString::fromStdString(batchFiles[index].filename().string())));
-        batchTable->setItem(static_cast<int>(index), 1, new QTableWidgetItem("Queued"));
+        auto* file = new QTableWidgetItem(QString::fromStdWString(batchFiles[index].filename().wstring()));
+        file->setToolTip(QString::fromStdWString(batchFiles[index].wstring()));
+        batchTable->setItem(static_cast<int>(index), 0, file);
+        auto* state = new QTableWidgetItem("Queued");
+        state->setData(Qt::UserRole, static_cast<int>(ImageBatchState::Queued));
+        batchTable->setItem(static_cast<int>(index), 1, state);
         batchTable->setItem(static_cast<int>(index), 2, new QTableWidgetItem());
+        batchTable->setItem(static_cast<int>(index), 3, new QTableWidgetItem());
     }
     batchCompleted = 0;
     batchProgress->setRange(0, std::max(1, static_cast<int>(batchFiles.size())));
-    setStatus(batchStatus, batchFiles.empty() ? "The folder contains no supported image files." : QString("%1 images queued.").arg(static_cast<int>(batchFiles.size())),
-        batchFiles.empty() ? "error" : "idle");
+    batchStartButton->setEnabled(!batchFiles.empty() && !imageBatchDevices->selectedDevices().empty());
+    setStatus(batchStatus, QString("%1 images queued").arg(batchFiles.size()), "idle");
 }
 
 void WatermarkingUI::startBatch() {
     if (busy)
         return;
-    if (batchFolder->text().trimmed().isEmpty() || batchSettings.password->text().isEmpty()) {
-        QMessageBox::warning(this, "Missing input", "Choose an image folder and enter a watermark password.");
+    if (batchFiles.empty() || batchSettings.password->text().isEmpty() || (batchMode->currentIndex() == 0 && batchOutput->text().trimmed().isEmpty())) {
+        QMessageBox::warning(this, "Missing input", "Add images, choose an output folder and enter a watermark password.");
         return;
     }
     refreshBatchQueue();
@@ -550,41 +704,54 @@ void WatermarkingUI::startBatch() {
         return;
     }
     invalidateSingleResult();
-    const fs::path folder(batchFolder->text().trimmed().toStdString());
     const bool embed = batchMode->currentIndex() == 0;
-    const fs::path outputDir = folder / "watermark_output";
-    batchWorker = new BatchImageWorker(imageOptions(true), batchFiles, outputDir, embed, this);
+    const fs::path outputDir(batchOutput->text().trimmed().toStdWString());
+    ImageBatchSettings settings;
+    settings.password = batchSettings.password->text().toStdString();
+    settings.p = batchSettings.p->currentData().toInt();
+    settings.psnr = static_cast<float>(batchSettings.psnr->value());
+    settings.detect = !embed;
+    settings.deviceIndices = imageBatchDevices->selectedDevices();
+    if (settings.deviceIndices.empty()) {
+        QMessageBox::warning(this, "Batch devices", "Select at least one image batch device.");
+        return;
+    }
+    std::vector<std::string> inputs;
+    for (const auto& path : batchFiles) {
+        const auto text = path.u8string();
+        inputs.emplace_back(text.begin(), text.end());
+    }
+    std::vector<ImageBatchJob> jobs;
+    try {
+        jobs = prepareImageBatch(inputs, batchOutput->text().trimmed().toStdString(), !embed);
+    } catch (const std::exception& error) {
+        QMessageBox::warning(this, "Image batch", QString::fromUtf8(error.what()));
+        return;
+    }
+    batchWorker = new BatchImageWorker(std::move(settings), std::move(jobs), this);
     setStatus(batchStatus, QString("Processing %1 images...").arg(static_cast<int>(batchFiles.size())), "running");
     setBusy(true);
-    connect(batchWorker, &BatchImageWorker::itemState, this, [this](const int index, const QString& state, const QString& detail) {
-        if (index < 0 || index >= batchTable->rowCount())
+    connect(batchWorker, &BatchImageWorker::summaryReady, this, [this, outputDir, embed](const int, const int, const double seconds, const bool canceled, const QString& fatalError) {
+        if (closing)
             return;
-        auto* status = batchTable->item(index, 1);
-        if (state == "Done") {
-            status->setText(QString(QChar(0x2713)) + " Done");
-            status->setForeground(successColor());
-            ++batchCompleted;
-        } else if (state == "Error") {
-            status->setText(QString(QChar(0x2715)) + " Error");
-            status->setForeground(themePalette().error);
-            ++batchCompleted;
-        } else {
-            status->setText("Working");
-            status->setForeground(themePalette().warning);
-        }
-        batchTable->item(index, 2)->setText(detail);
-        batchProgress->setValue(batchCompleted);
-        if (state != "Working")
-            batchStatus->setText(QString("%1 of %2 images finished").arg(batchCompleted).arg(batchTable->rowCount()));
-    });
-    connect(batchWorker, &BatchImageWorker::summaryReady, this, [this, outputDir, embed](const int succeeded, const int failed, const double seconds, const bool canceled, const QString& fatalError) {
         batchWorker->wait();
+        batchTimer->stop();
+        pollImageBatch();
+        const double elapsed = fatalError.isEmpty() ? seconds : batchClock.elapsed() / 1000.0;
+        batchElapsed->setText(QString("Elapsed: %1 s").arg(elapsed, 0, 'f', 1));
+        int succeeded = 0, failed = 0;
         for (int index = 0; index < batchTable->rowCount(); ++index) {
-            const QString state = batchTable->item(index, 1)->text();
-            if (state == "Queued" || state == "Working") {
-                batchTable->item(index, 1)->setText(canceled ? "Stopped" : "Skipped");
-                batchTable->item(index, 1)->setForeground(themePalette().muted);
+            auto* state = batchTable->item(index, 1);
+            auto value = static_cast<ImageBatchState>(state->data(Qt::UserRole).toInt());
+            if (value != ImageBatchState::Completed && value != ImageBatchState::Failed && value != ImageBatchState::Cancelled) {
+                value = canceled ? ImageBatchState::Cancelled : ImageBatchState::Failed;
+                state->setData(Qt::UserRole, static_cast<int>(value));
+                state->setText(imageBatchStateName(value));
+                state->setForeground(canceled ? themePalette().muted : themePalette().error);
+                batchTable->item(index, 3)->setText(fatalError);
             }
+            succeeded += value == ImageBatchState::Completed;
+            failed += value == ImageBatchState::Failed;
         }
         const int remaining = batchTable->rowCount() - succeeded - failed;
         const QString heading = fatalError.isEmpty() ? (canceled ? "Batch stopped" : "Batch complete") : "Batch failed";
@@ -592,8 +759,8 @@ void WatermarkingUI::startBatch() {
                                     .arg(succeeded)
                                     .arg(failed)
                                     .arg(remaining)
-                                    .arg(seconds, 0, 'f', 2)
-                                    .arg(embed ? "\nOutput: " + QString::fromStdString(outputDir.string()) : "")
+                                    .arg(elapsed, 0, 'f', 2)
+                                    .arg(embed ? "\nOutput: " + QString::fromStdWString(outputDir.wstring()) : "")
                                     .arg(fatalError.isEmpty() ? "" : "\n\n" + fatalError);
         batchWorker->deleteLater();
         batchWorker = nullptr;
@@ -601,13 +768,51 @@ void WatermarkingUI::startBatch() {
         setStatus(batchStatus, heading + QString(" (%1 succeeded, %2 failed)").arg(succeeded).arg(failed), fatalError.isEmpty() && failed == 0 ? "done" : "error");
         QMessageBox::information(this, heading, details);
     });
+    batchClock.start();
+    batchTimer->start();
     batchWorker->start();
+}
+
+void WatermarkingUI::pollImageBatch() {
+    if (!batchWorker)
+        return;
+    for (const auto& update : batchWorker->takeUpdates()) {
+        if (!update.id || update.id > static_cast<std::uint64_t>(batchTable->rowCount()))
+            continue;
+        const int row = static_cast<int>(update.id - 1);
+        auto* state = batchTable->item(row, 1);
+        if (update.revision <= state->data(Qt::UserRole + 1).toULongLong())
+            continue;
+        state->setData(Qt::UserRole, static_cast<int>(update.state));
+        state->setData(Qt::UserRole + 1, QVariant::fromValue<qulonglong>(update.revision));
+        state->setText(imageBatchStateName(update.state));
+        state->setForeground(update.state == ImageBatchState::Completed   ? themePalette().accent
+                             : update.state == ImageBatchState::Failed    ? themePalette().error
+                             : update.state == ImageBatchState::Cancelled ? themePalette().muted
+                                                                          : themePalette().text);
+        auto* device = batchTable->item(row, 2);
+        device->setText(update.deviceIndex >= 0 && update.deviceIndex < imageBatchDevices->count() ? imageBatchDevices->itemText(update.deviceIndex) : QString());
+        device->setToolTip(device->text());
+        const QString detail = update.correlation ? QString("Correlation: %1").arg(QString::fromStdString(formatCorrelationPercent(*update.correlation))) : QString::fromStdString(update.detail);
+        batchTable->item(row, 3)->setText(detail);
+        batchTable->item(row, 3)->setToolTip(detail);
+    }
+    batchCompleted = 0;
+    int active = 0;
+    for (int row = 0; row < batchTable->rowCount(); ++row) {
+        const auto state = static_cast<ImageBatchState>(batchTable->item(row, 1)->data(Qt::UserRole).toInt());
+        batchCompleted += state == ImageBatchState::Completed || state == ImageBatchState::Failed;
+        active += state == ImageBatchState::Loading || state == ImageBatchState::Processing || state == ImageBatchState::Saving;
+    }
+    batchProgress->setValue(batchCompleted);
+    if (batchCancelButton->isEnabled())
+        batchStatus->setText(QString("%1 of %2 images finished  |  %3 active").arg(batchCompleted).arg(batchTable->rowCount()).arg(active));
 }
 
 void WatermarkingUI::cancelBatch() {
     if (batchWorker == nullptr)
         return;
-    batchWorker->requestInterruption();
+    batchWorker->cancel();
     batchCancelButton->setEnabled(false);
     setStatus(batchStatus, "Stopping after in-flight files finish...", "running");
 }
@@ -638,6 +843,8 @@ void WatermarkingUI::startBenchmark() {
     connect(benchmarkWorker, &BenchmarkWorker::resultReady, this, &WatermarkingUI::onBenchmarkResult);
     connect(benchmarkWorker, &BenchmarkWorker::benchmarkCanceled, this, &WatermarkingUI::finishBenchmarkCanceled);
     connect(benchmarkWorker, &BenchmarkWorker::benchmarkFinished, this, [this](const double embedFps, const double detectFps, const int score) {
+        if (closing)
+            return;
         if (benchmarkWorker->isInterruptionRequested()) {
             finishBenchmarkCanceled();
             return;
@@ -688,11 +895,11 @@ void WatermarkingUI::onBenchmarkResult(
     benchmarkPreviewImage = image;
     updateImageViews();
     setStatus(benchmarkStatus,
-        QString("%1 | p=%2 | PSNR=%3 dB | Corr=%4\nEmbed: %5 ms (%6 FPS)  |  Detect: %7 ms (%8 FPS)")
+        QString("%1 | p=%2 | PSNR=%3 dB | Correlation=%4\nEmbed: %5 ms (%6 FPS)  |  Detect: %7 ms (%8 FPS)")
             .arg(file)
             .arg(p)
             .arg(psnr, 0, 'f', 1)
-            .arg(correlation, 0, 'f', 4)
+            .arg(QString::fromStdString(formatCorrelationPercent(correlation)))
             .arg(embedTime, 0, 'f', 2)
             .arg(embedFps, 0, 'f', 1)
             .arg(detectTime, 0, 'f', 2)
@@ -701,6 +908,8 @@ void WatermarkingUI::onBenchmarkResult(
 }
 
 void WatermarkingUI::updateImageViews() {
+    if (!videoPreviewImage.isNull() && videoPreviewEnabled->isChecked())
+        videoPreview->setPixmap(QPixmap::fromImage(videoPreviewImage).scaled(videoPreview->contentsRect().size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
     if (!benchmarkPreviewImage.isNull())
         benchmarkImageView->setPixmap(QPixmap::fromImage(benchmarkPreviewImage).scaled(benchmarkImageView->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
 }
@@ -727,8 +936,30 @@ bool WatermarkingUI::eventFilter(QObject* watched, QEvent* event) {
 
     auto* drop = static_cast<QDropEvent*>(event);
     const int tab = tabs->currentIndex();
-    const bool batch = tab == 1;
-    const QString path = (!busy && (tab == 0 || batch)) ? supportedDropPath(drop->mimeData(), batch) : QString();
+    const bool batch = tab == 2;
+    const bool video = tab == 1;
+    const bool videoBatch = tabs->currentWidget() == videoBatchPage;
+    QStringList videoBatchPaths;
+    QStringList imageBatchPaths;
+    if (!busy && videoBatch && drop->mimeData()->hasUrls())
+        for (const auto& url : drop->mimeData()->urls())
+            if (url.isLocalFile() && QFileInfo(url.toLocalFile()).exists())
+                videoBatchPaths.push_back(url.toLocalFile());
+    if (!busy && batch && drop->mimeData()->hasUrls())
+        for (const auto& url : drop->mimeData()->urls())
+            if (url.isLocalFile() && (QFileInfo(url.toLocalFile()).isDir() || WatermarkCore::hasSupportedImageExtension(fs::path(url.toLocalFile().toStdWString()))))
+                imageBatchPaths.push_back(url.toLocalFile());
+    QString path = !busy && tab == 0 ? supportedDropPath(drop->mimeData(), false) : QString();
+    if (!imageBatchPaths.isEmpty())
+        path = imageBatchPaths.front();
+    if (!videoBatchPaths.isEmpty())
+        path = videoBatchPaths.front();
+    if (!busy && video && drop->mimeData()->hasUrls())
+        for (const auto& url : drop->mimeData()->urls())
+            if (url.isLocalFile() && QFileInfo(url.toLocalFile()).isFile()) {
+                path = url.toLocalFile();
+                break;
+            }
     if (path.isEmpty()) {
         dropOverlay->hide();
         drop->ignore();
@@ -738,14 +969,20 @@ bool WatermarkingUI::eventFilter(QObject* watched, QEvent* event) {
     drop->acceptProposedAction();
     if (type == QEvent::Drop) {
         dropOverlay->hide();
-        if (batch)
-            selectBatchFolder(path);
+        if (videoBatch)
+            addVideoBatchPaths(videoBatchPaths);
+        else if (batch)
+            addImageBatchPaths(imageBatchPaths);
+        else if (video)
+            selectVideo(path);
         else
             selectSingleImage(path);
     } else {
         QWidget* page = tabs->currentWidget();
         dropOverlay->setGeometry(QRect(page->mapTo(tabs, QPoint(0, 0)), page->size()));
-        dropOverlay->setText(batch ? QString("Drop folder to load image queue\n%1").arg(QFileInfo(path).fileName()) : QString("Drop image to select input\n%1").arg(QFileInfo(path).fileName()));
+        dropOverlay->setText(videoBatch ? QString("Drop videos or folders to add to the queue\n%1 items").arg(videoBatchPaths.size())
+                             : batch    ? QString("Drop images or folders to add to the queue\n%1 items").arg(imageBatchPaths.size())
+                                        : QString(video ? "Drop video to select input\n%1" : "Drop image to select input\n%1").arg(QFileInfo(path).fileName()));
         dropOverlay->raise();
         dropOverlay->show();
     }
@@ -753,12 +990,31 @@ bool WatermarkingUI::eventFilter(QObject* watched, QEvent* event) {
 }
 
 void WatermarkingUI::closeEvent(QCloseEvent* event) {
+    // Completion signals can remain queued after wait returns, ignore them during close
+    closing = true;
+    batchTimer->stop();
+    videoTimer->stop();
+    videoBatchTimer->stop();
+    if (videoBatchWorker) {
+        videoBatchWorker->cancel();
+        videoBatchWorker->wait();
+    }
+    videoProbeTimer->stop();
+    videoProbePending = false;
+    if (videoProbeWorker) {
+        videoProbeWorker->cancel();
+        videoProbeWorker->wait();
+    }
+    if (videoWorker != nullptr && videoWorker->isRunning()) {
+        videoWorker->cancel();
+        videoWorker->wait();
+    }
     if (singleWorker != nullptr && singleWorker->isRunning()) {
         singleWorker->requestInterruption();
         singleWorker->wait();
     }
     if (batchWorker != nullptr && batchWorker->isRunning()) {
-        batchWorker->requestInterruption();
+        batchWorker->cancel();
         batchWorker->wait();
     }
     if (benchmarkWorker != nullptr && benchmarkWorker->isRunning()) {

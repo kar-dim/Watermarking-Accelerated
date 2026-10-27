@@ -38,13 +38,15 @@ using Microsoft::WRL::ComPtr;
 
 namespace {
 void checkHr(const HRESULT result, const char* operation) {
+    if (result == DXGI_ERROR_DEVICE_REMOVED || result == DXGI_ERROR_DEVICE_RESET || result == DXGI_ERROR_DEVICE_HUNG)
+        throw cl_utils::DriverError(CL_DEVICE_NOT_AVAILABLE, std::string(operation) + " (D3D11 device lost)");
     if (FAILED(result))
         throw std::runtime_error(std::string(operation) + " failed (" + std::to_string(static_cast<unsigned long>(result)) + ")");
 }
 
 void checkCl(const cl_int result, const char* operation) {
     if (result != CL_SUCCESS)
-        throw std::runtime_error(std::string(operation) + " failed (OpenCL " + std::to_string(result) + ")");
+        throw cl_utils::DriverError(result, operation);
 }
 
 constexpr char copyShader[] = R"HLSL(
@@ -249,7 +251,7 @@ class VideoCompletion {
                 throw std::runtime_error("D3D11 video copy timed out");
         }
         if (fence->GetCompletedValue() == UINT64_MAX)
-            throw std::runtime_error("The D3D11 video device was removed");
+            throw cl_utils::DriverError(CL_DEVICE_NOT_AVAILABLE, "D3D11 video device removed");
         checkHr(device->GetDeviceRemovedReason(), "D3D11 video device");
     }
 };

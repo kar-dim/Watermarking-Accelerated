@@ -37,7 +37,12 @@ int findVideoStream(const AVFormatContext* inputFormatCtx);
 bool initFilterGraph(WatermarkCore::VideoSession* s);
 int videoDispatcher(WatermarkCore::VideoSession* s, VideoMode op, bool needsFilter = false);
 void initOutputEncoder(WatermarkCore::VideoSession* s);
-void flushAndFinalize(WatermarkCore::VideoSession* s);
+void flushAndFinalize(WatermarkCore::VideoSession* s, bool replaceExistingOutput = true);
 // failed embed closes and deletes temporary output file
 void discardOutput(WatermarkCore::VideoSession* s) noexcept;
+void checkCancelled(const WatermarkCore::VideoSession* s);
+int interruptVideo(void* session);
+void reportProgress(WatermarkCore::VideoSession* s, WatermarkCore::VideoState state, bool force = true, const AVFrame* frame = nullptr);
+void previewVideoFrame(WatermarkCore::VideoSession* s, const AVFrame* frame, bool encoded);
+void videoLog(const WatermarkCore::VideoSession* s, const std::string& text);
 } // namespace video_utils
