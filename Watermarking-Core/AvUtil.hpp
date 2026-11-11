@@ -6,6 +6,8 @@
  */
 
 #include "video_defines.hpp"
+#include <algorithm>
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
@@ -13,12 +15,15 @@
 #include <map>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <system_error>
+#include <vector>
 
 extern "C" {
 #include "libavcodec/avcodec.h"
 #include "libavcodec/codec.h"
 #include "libavcodec/packet.h"
+#include "libavutil/avstring.h"
 #include "libavutil/avutil.h"
 #include "libavutil/dict.h"
 #include "libavutil/error.h"
@@ -41,6 +46,25 @@ inline std::string avErrorText(const int avRet) {
 inline void checkAv(const int avRet, const std::string& what) {
     if (avRet < 0)
         throw std::runtime_error(what + ": " + avErrorText(avRet));
+}
+
+inline void dropReencodedStreamTags(AVDictionary** metadata) {
+    constexpr std::array<std::string_view, 8> staleTags{
+        "BPS", "DURATION", "NUMBER_OF_FRAMES", "NUMBER_OF_BYTES", "_STATISTICS_WRITING_APP", "_STATISTICS_WRITING_DATE_UTC", "_STATISTICS_TAGS", "ENCODER"};
+    std::vector<std::string> staleKeys;
+    const AVDictionaryEntry* entry = nullptr;
+    while ((entry = av_dict_iterate(*metadata, entry)) != nullptr) {
+        const std::string_view key = entry->key;
+        const bool stale = std::ranges::any_of(staleTags, [key](const std::string_view name) {
+            // Matroska also exposes language tags as NAME-language
+            return key.size() >= name.size() && av_strncasecmp(key.data(), name.data(), name.size()) == 0 && (key.size() == name.size() || key[name.size()] == '-');
+        });
+        if (stale)
+            staleKeys.emplace_back(key);
+    }
+    // Dictionary edits invalidate the iterator
+    for (const std::string& key : staleKeys)
+        av_dict_set(metadata, key.c_str(), nullptr, AV_DICT_MATCH_CASE);
 }
 
 inline int64_t framePts(const AVFrame* f) { return (f->pts != AV_NOPTS_VALUE) ? f->pts : f->best_effort_timestamp; }

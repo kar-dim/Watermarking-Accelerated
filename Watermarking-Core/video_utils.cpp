@@ -1551,6 +1551,8 @@ int processFrames(VideoSession* s, const bool needsFilter, const int filterInter
         filteredFrame.reset(av_frame_alloc());
     int framesCount = 0;
     long long droppedPackets = 0;
+    int droppedRun = 0;
+    constexpr int maxDroppedRun = 32;
     StreamShapeWatch shapeWatch(s->videoStream->codecpar);
     // lookahead queue lets decode engine run ahead of watermark processing
     std::deque<AVFramePtr> lookahead;
@@ -1614,6 +1616,7 @@ int processFrames(VideoSession* s, const bool needsFilter, const int filterInter
             checkError(readRet != AVERROR_EOF, std::format("Reading input video failed after {} frames: {}", decodedFrames(), avErrorText(readRet)));
             const std::string change = shapeWatch.flush();
             checkError(!change.empty(), change);
+            checkError(droppedRun > 0, std::format("Input video ended on rejected packets after {} frames. No valid output was written.", decodedFrames()));
             break;
         }
         if (packet->stream_index == s->videoStreamIndex) {
@@ -1627,7 +1630,14 @@ int processFrames(VideoSession* s, const bool needsFilter, const int filterInter
             if (sendRet < 0 && sendRet != AVERROR(EAGAIN)) {
                 if (droppedPackets++ == 0)
                     videoLog(s, std::format("Corrupt video packet skipped at frame {} ({})\n", decodedFrames(), avErrorText(sendRet)));
+                // Streams cut mid-GOP may reject packets before their first frame
+                if (decodedFrames() > 0) {
+                    ++droppedRun;
+                    checkError(droppedRun > maxDroppedRun,
+                        std::format("Input video rejected {} packets in a row after {} frames ({}). No valid output was written.", droppedRun, decodedFrames(), avErrorText(sendRet)));
+                }
             } else if (sendRet >= 0) {
+                droppedRun = 0;
                 drainDecodedFrames();
             }
         } else if (s->outputFormatCtx) {
@@ -2104,6 +2114,7 @@ void initOutputEncoder(VideoSession* s) {
     // copy stream tags and disposition, drop rotate tag
     av_dict_copy(&outVideoStream->metadata, s->videoStream->metadata, 0);
     av_dict_set(&outVideoStream->metadata, "rotate", nullptr, 0);
+    dropReencodedStreamTags(&outVideoStream->metadata);
     outVideoStream->disposition = s->videoStream->disposition;
     s->outputVideoStreamIndex = outVideoStream->index;
     s->stretchLastPacket = durationsFollowDecodeOrder(s->outputFormatCtx->oformat);

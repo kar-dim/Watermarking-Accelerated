@@ -243,6 +243,7 @@ bool AuxiliaryMux::addSubtitle(const AVStream* inputStream, const unsigned input
     }
     outputStream->codecpar->codec_tag = 0;
     av_dict_copy(&outputStream->metadata, inputStream->metadata, 0);
+    dropReencodedStreamTags(&outputStream->metadata);
     outputStream->disposition = inputStream->disposition;
     outputStream->time_base = encoderContext->time_base;
     inputToOutput_[inputIndex] = outputStream->index;

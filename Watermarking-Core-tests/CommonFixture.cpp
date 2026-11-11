@@ -554,6 +554,44 @@ const fs::path& shortVideoFixture() {
     return fixture.path;
 }
 
+// Rawvideo rejects undersized packets without losing container framing
+void writeRawPacketFixture(const fs::path& path, const std::vector<bool>& corruptPackets, const std::initializer_list<std::pair<const char*, const char*>> metadata = {}) {
+    using namespace video_utils;
+    AVFormatContext* rawOutput = nullptr;
+    checkAv(avformat_alloc_output_context2(&rawOutput, nullptr, "nut", path.string().c_str()), "Allocate packet fixture muxer");
+    AVOutputFormatContextPtr output(rawOutput);
+    AVStream* stream = avformat_new_stream(output.get(), nullptr);
+    if (!stream)
+        throw std::runtime_error("Allocate packet fixture stream");
+    stream->time_base = {1, 30};
+    stream->avg_frame_rate = {30, 1};
+    stream->codecpar->codec_type = AVMEDIA_TYPE_VIDEO;
+    stream->codecpar->codec_id = AV_CODEC_ID_RAWVIDEO;
+    stream->codecpar->format = AV_PIX_FMT_YUV420P;
+    stream->codecpar->codec_tag = avcodec_pix_fmt_to_codec_tag(AV_PIX_FMT_YUV420P);
+    stream->codecpar->width = 96;
+    stream->codecpar->height = 64;
+    for (const auto& [key, value] : metadata)
+        checkAv(av_dict_set(&stream->metadata, key, value, 0), "Set packet fixture metadata");
+    checkAv(avio_open(&output->pb, path.string().c_str(), AVIO_FLAG_WRITE), "Open packet fixture output");
+    checkAv(avformat_write_header(output.get(), nullptr), "Write packet fixture header");
+    AVPacketPtr packet(av_packet_alloc());
+    if (!packet)
+        throw std::runtime_error("Allocate packet fixture packet");
+    for (size_t index = 0; index < corruptPackets.size(); ++index) {
+        checkAv(av_new_packet(packet.get(), corruptPackets[index] ? 1 : 96 * 64 * 3 / 2), "Allocate packet fixture pixels");
+        for (int sample = 0; sample < packet->size; ++sample)
+            packet->data[sample] = static_cast<uint8_t>(64 + (sample % 128));
+        packet->pts = packet->dts = av_rescale_q(static_cast<int64_t>(index), AVRational{1, 30}, stream->time_base);
+        packet->duration = av_rescale_q(1, AVRational{1, 30}, stream->time_base);
+        packet->stream_index = stream->index;
+        packet->flags = AV_PKT_FLAG_KEY;
+        checkAv(av_interleaved_write_frame(output.get(), packet.get()), "Write packet fixture packet");
+    }
+    checkAv(av_write_trailer(output.get()), "Write packet fixture trailer");
+    checkAv(avio_closep(&output->pb), "Close packet fixture output");
+}
+
 // Inspect the first decoded sample and transfer tag to verify HDR conversion
 std::pair<int, AVColorTransferCharacteristic> firstVideoLuma(const fs::path& path, video_utils::AVFramePtr* decoded = nullptr) {
     using namespace video_utils;
@@ -3607,6 +3645,103 @@ TEST_F(WatermarkTest, RefusesToOverwriteTheInputVideo) {
     EXPECT_THROW(embedVideo(session.get()), std::runtime_error);
 }
 
+TEST_F(WatermarkTest, DecoderPacketFailuresPreserveTheDestination) {
+    const fs::path input = tempDir / "rejected-packets.nut";
+    const fs::path output = tempDir / "existing.mkv";
+    const std::string sentinel = "existing destination must survive";
+    for (const bool rejectedTail : {true, false}) {
+        SCOPED_TRACE(rejectedTail);
+        std::vector<bool> corruptPackets{false, false};
+        corruptPackets.insert(corruptPackets.end(), rejectedTail ? 2 : 33, true);
+        if (!rejectedTail)
+            corruptPackets.push_back(false);
+        writeRawPacketFixture(input, corruptPackets);
+        {
+            std::ofstream file(output, std::ios::binary);
+            file << sentinel;
+        }
+        auto settings = makeVideoSettings(input.string());
+        settings.encodeOptions = "-c:v ffv1";
+        settings.encodeOutputPath = output.string();
+        auto session = initVideo(settings);
+        try {
+            embedVideo(session.get());
+            FAIL() << "Rejected packets must not publish a shortened video";
+        } catch (const std::runtime_error& error) { EXPECT_NE(std::string_view(error.what()).find("rejected"), std::string_view::npos) << error.what(); }
+        session.reset();
+        const auto bytes = readBytes(output);
+        EXPECT_EQ(std::string(bytes.begin(), bytes.end()), sentinel);
+        EXPECT_EQ(std::distance(fs::directory_iterator(tempDir), fs::directory_iterator{}), 2);
+        session = initVideo(settings);
+        EXPECT_THROW(detectVideo(session.get()), std::runtime_error);
+    }
+}
+
+TEST_F(WatermarkTest, DecoderCanRecoverFromRejectedPackets) {
+    const fs::path input = tempDir / "recover-packets.nut";
+    const fs::path output = tempDir / "recovered.mkv";
+    std::vector<bool> corruptPackets(40, true);
+    corruptPackets.push_back(false);
+    for (int run = 0; run < 2; ++run) {
+        corruptPackets.insert(corruptPackets.end(), 32, true);
+        corruptPackets.push_back(false);
+    }
+    writeRawPacketFixture(input, corruptPackets);
+    auto settings = makeVideoSettings(input.string());
+    settings.encodeOptions = "-c:v ffv1";
+    settings.encodeOutputPath = output.string();
+    auto session = initVideo(settings);
+    EXPECT_EQ(embedVideo(session.get()), 3);
+    session.reset();
+    EXPECT_EQ(decodeVideoPlanes(output).frames.size(), 3);
+    session = initVideo(settings);
+    EXPECT_EQ(detectVideo(session.get()), 3);
+}
+
+TEST_F(WatermarkTest, ReencodedVideoDropsSourceStatisticsAndKeepsDescriptiveTags) {
+    const fs::path input = tempDir / "tagged.nut";
+    const fs::path output = tempDir / "retagged.mkv";
+    const std::vector<bool> packets(2, false);
+    writeRawPacketFixture(input, packets,
+        {
+            {"BPS",              "99999999"          },
+            {"NUMBER_OF_FRAMES", "999"               },
+            {"DURATION-eng",     "99:00:00.000000000"},
+            {"ENCODER",          "old encoder"       },
+            {"title",            "Keep this title"   },
+            {"language",         "eng"               }
+    });
+    auto settings = makeVideoSettings(input.string());
+    settings.encodeOptions = "-c:v ffv1";
+    settings.encodeOutputPath = output.string();
+    auto session = initVideo(settings);
+    const AVDictionary* sourceTags = session->videoStream->metadata;
+    ASSERT_NE(av_dict_get(sourceTags, "BPS", nullptr, 0), nullptr);
+    EXPECT_STREQ(av_dict_get(sourceTags, "BPS", nullptr, 0)->value, "99999999");
+    ASSERT_NE(av_dict_get(sourceTags, "DURATION-eng", nullptr, 0), nullptr);
+    ASSERT_NE(av_dict_get(sourceTags, "ENCODER", nullptr, 0), nullptr);
+    EXPECT_STREQ(av_dict_get(sourceTags, "ENCODER", nullptr, 0)->value, "old encoder");
+    EXPECT_EQ(embedVideo(session.get()), 2);
+    session.reset();
+    video_utils::AVFormatContextPtr result;
+    AVFormatContext* rawInput = nullptr;
+    ASSERT_EQ(avformat_open_input(&rawInput, output.string().c_str(), nullptr, nullptr), 0);
+    result.reset(rawInput);
+    ASSERT_GE(avformat_find_stream_info(result.get(), nullptr), 0);
+    const int streamIndex = av_find_best_stream(result.get(), AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
+    ASSERT_GE(streamIndex, 0);
+    const AVDictionary* tags = result->streams[streamIndex]->metadata;
+    EXPECT_EQ(av_dict_get(tags, "BPS", nullptr, 0), nullptr);
+    EXPECT_EQ(av_dict_get(tags, "NUMBER_OF_FRAMES", nullptr, 0), nullptr);
+    EXPECT_EQ(av_dict_get(tags, "DURATION-eng", nullptr, 0), nullptr);
+    const auto* encoder = av_dict_get(tags, "ENCODER", nullptr, 0);
+    EXPECT_TRUE(!encoder || std::string_view(encoder->value) != "old encoder");
+    ASSERT_NE(av_dict_get(tags, "title", nullptr, 0), nullptr);
+    EXPECT_STREQ(av_dict_get(tags, "title", nullptr, 0)->value, "Keep this title");
+    ASSERT_NE(av_dict_get(tags, "language", nullptr, 0), nullptr);
+    EXPECT_STREQ(av_dict_get(tags, "language", nullptr, 0)->value, "eng");
+}
+
 // A muxer header failure must preserve the destination and remove temporary output
 TEST_F(WatermarkTest, FailedVideoHeaderPreservesExistingOutput) {
     const fs::path output = tempDir / "existing.mp4";
@@ -4466,6 +4601,58 @@ TEST(VideoMuxTest, CopiesMatroskaAttachmentsAndDropsThemForMp4) {
     }
 }
 
+TEST(VideoMuxTest, DropsOnlyStaleReencodedStreamTags) {
+    video_utils::OptionDict tags;
+    video_utils::dropReencodedStreamTags(tags.ptr());
+    EXPECT_EQ(tags.get(), nullptr);
+    const char* stale[]{
+        "bps", "DURATION", "NUMBER_OF_FRAMES", "NUMBER_OF_BYTES", "_STATISTICS_WRITING_APP", "_STATISTICS_WRITING_DATE_UTC", "_STATISTICS_TAGS", "ENCODER", "BpS-eng", "duration-jpn", "ENCODER-fra"};
+    const char* preserved[]{"title", "language", "comment", "BPS_custom", "DURATION_HINT", "ENCODER_SETTINGS"};
+    for (const char* key : stale)
+        ASSERT_EQ(av_dict_set(tags.ptr(), key, "stale", 0), 0);
+    for (const char* key : preserved)
+        ASSERT_EQ(av_dict_set(tags.ptr(), key, "keep", 0), 0);
+    video_utils::dropReencodedStreamTags(tags.ptr());
+    for (const char* key : stale)
+        EXPECT_EQ(av_dict_get(tags.get(), key, nullptr, 0), nullptr) << key;
+    for (const char* key : preserved) {
+        const auto* entry = av_dict_get(tags.get(), key, nullptr, 0);
+        ASSERT_NE(entry, nullptr) << key;
+        EXPECT_STREQ(entry->value, "keep") << key;
+    }
+}
+
+TEST(VideoMuxTest, RemuxedTracksKeepTheirSourceStatistics) {
+    auto input = std::unique_ptr<AVFormatContext, decltype(&avformat_free_context)>(avformat_alloc_context(), avformat_free_context);
+    ASSERT_NE(input, nullptr);
+    for (const auto codec : {AV_CODEC_ID_FLAC, AV_CODEC_ID_SUBRIP}) {
+        AVStream* stream = avformat_new_stream(input.get(), nullptr);
+        ASSERT_NE(stream, nullptr);
+        stream->codecpar->codec_type = codec == AV_CODEC_ID_FLAC ? AVMEDIA_TYPE_AUDIO : AVMEDIA_TYPE_SUBTITLE;
+        stream->codecpar->codec_id = codec;
+        ASSERT_EQ(av_dict_set(&stream->metadata, "BPS-eng", "12345", 0), 0);
+        ASSERT_EQ(av_dict_set(&stream->metadata, "ENCODER", "original", 0), 0);
+    }
+    AVFormatContext* rawOutput = nullptr;
+    ASSERT_EQ(avformat_alloc_output_context2(&rawOutput, nullptr, nullptr, "test.mkv"), 0);
+    auto output = std::unique_ptr<AVFormatContext, decltype(&avformat_free_context)>(rawOutput, avformat_free_context);
+    video_utils::AuxiliaryMux mux;
+    video_utils::AuxiliaryMuxSetup setup;
+    setup.input = input.get();
+    setup.output = output.get();
+    setup.outputPath = "test.mkv";
+    std::string error;
+    ASSERT_TRUE(mux.configure(setup, error)) << error;
+    ASSERT_EQ(output->nb_streams, 2u);
+    for (unsigned index = 0; index < output->nb_streams; ++index) {
+        const auto* tags = output->streams[index]->metadata;
+        ASSERT_NE(av_dict_get(tags, "BPS-eng", nullptr, 0), nullptr);
+        EXPECT_STREQ(av_dict_get(tags, "BPS-eng", nullptr, 0)->value, "12345");
+        ASSERT_NE(av_dict_get(tags, "ENCODER", nullptr, 0), nullptr);
+        EXPECT_STREQ(av_dict_get(tags, "ENCODER", nullptr, 0)->value, "original");
+    }
+}
+
 // MP4 cannot store SubRip, the events are converted to mov_text. Events that cannot be converted
 // are dropped with one log line per stream and the others go on
 TEST(VideoMuxTest, ConvertsTextSubtitlesAndDropsEventsItCannotConvert) {
@@ -4476,6 +4663,9 @@ TEST(VideoMuxTest, ConvertsTextSubtitlesAndDropsEventsItCannotConvert) {
     subtitles->codecpar->codec_type = AVMEDIA_TYPE_SUBTITLE;
     subtitles->codecpar->codec_id = AV_CODEC_ID_SUBRIP;
     subtitles->time_base = AVRational{1, 1000};
+    ASSERT_EQ(av_dict_set(&subtitles->metadata, "BPS-eng", "12345", 0), 0);
+    ASSERT_EQ(av_dict_set(&subtitles->metadata, "ENCODER", "original subtitle encoder", 0), 0);
+    ASSERT_EQ(av_dict_set(&subtitles->metadata, "title", "Keep subtitles", 0), 0);
 
     AVFormatContext* rawOutput = nullptr;
     ASSERT_EQ(avformat_alloc_output_context2(&rawOutput, nullptr, nullptr, "test.mp4"), 0);
@@ -4498,6 +4688,12 @@ TEST(VideoMuxTest, ConvertsTextSubtitlesAndDropsEventsItCannotConvert) {
     ASSERT_TRUE(mux.configure(setup, error)) << error;
     ASSERT_EQ(output->nb_streams, 1u);
     EXPECT_EQ(output->streams[0]->codecpar->codec_id, AV_CODEC_ID_MOV_TEXT);
+    const auto* tags = output->streams[0]->metadata;
+    EXPECT_EQ(av_dict_get(tags, "BPS-eng", nullptr, 0), nullptr);
+    EXPECT_EQ(av_dict_get(tags, "ENCODER", nullptr, 0), nullptr);
+    ASSERT_NE(av_dict_get(tags, "title", nullptr, 0), nullptr);
+    EXPECT_STREQ(av_dict_get(tags, "title", nullptr, 0)->value, "Keep subtitles");
+    EXPECT_NE(av_dict_get(subtitles->metadata, "BPS-eng", nullptr, 0), nullptr);
 
     const auto route = [&mux, &error](const std::string& text, const int64_t pts) {
         video_utils::AVPacketPtr packet(av_packet_alloc());
