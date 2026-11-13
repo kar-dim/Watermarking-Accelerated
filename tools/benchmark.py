@@ -8,37 +8,75 @@ import csv
 import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 BENCHMARK_DIR = ROOT / "thesis_data"
 BACKENDS = {
-    "eigen": ROOT / "x64" / "EIGEN_Release" / "Watermarking-CLI.exe",
+    "eigen": ROOT / "x64" / "EIGEN_AVX512_Release" / "Watermarking-CLI.exe",
     "cuda": ROOT / "x64" / "CUDA_Release" / "Watermarking-CLI.exe",
     "opencl": ROOT / "x64" / "OPENCL_Release" / "Watermarking-CLI.exe",
 }
+EIGEN_AVX2 = ROOT / "x64" / "EIGEN_Release" / "Watermarking-CLI.exe"
+# Windows exit code of the AVX-512 build on a CPU without AVX-512
+ILLEGAL_INSTRUCTION = 0xC000001D
 BACKEND_LABELS = {"eigen": "CPU", "cuda": "CUDA", "opencl": "OpenCL"}
 BACKEND_COLORS = {"eigen": "#071d2b", "cuda": "#00bd68", "opencl": "#0795ad"}
 RESOLUTIONS = ("480p", "720p", "1080p", "4K")
 OPERATIONS = ("embed", "detect")
 
 
-def run_benchmarks(device_ids: dict[str, int | None], loops: int | None, backends: list[str], result_name: str | None) -> None:
+def run_benchmarks(
+    executables: dict[str, Path], device_ids: dict[str, int | None], loops: int | None, backends: list[str], result_name: str | None, repeats: int
+) -> None:
     BENCHMARK_DIR.mkdir(exist_ok=True)
     for backend in backends:
-        executable = BACKENDS[backend]
+        executable = executables[backend]
         if not executable.is_file():
             raise FileNotFoundError(f"Missing {backend} Release CLI: {executable}")
+        output = BENCHMARK_DIR / f"{result_name or backend}.csv"
         command = [str(executable), "--bench"]
-        if result_name is not None:
-            command.extend(("--benchmark_output_path", str(BENCHMARK_DIR / f"{result_name}.csv")))
         if loops is not None:
             command.extend(("--benchmark_loops", str(loops)))
         if device_ids.get(backend) is not None:
             command.extend(("--gpu_device_id", str(device_ids[backend])))
-        print(f"\n=== Running {BACKEND_LABELS[backend]} benchmark ===", flush=True)
-        subprocess.run(command, cwd=ROOT, check=True)
+        with tempfile.TemporaryDirectory() as scratch:
+            runs = [output] if repeats == 1 else [Path(scratch) / f"run{run + 1}.csv" for run in range(repeats)]
+            for run, path in enumerate(runs):
+                suffix = f" (run {run + 1}/{repeats})" if repeats > 1 else ""
+                print(f"\n=== Running {BACKEND_LABELS[backend]} benchmark{suffix} ===", flush=True)
+                try:
+                    subprocess.run(command + ["--benchmark_output_path", str(path)], cwd=ROOT, check=True)
+                except subprocess.CalledProcessError as error:
+                    if backend == "eigen" and error.returncode == ILLEGAL_INSTRUCTION:
+                        raise RuntimeError("this CPU has no AVX-512, rerun with --eigen-avx2") from error
+                    raise
+            if repeats > 1:
+                write_median_run(runs, output)
+                print(f"Median of {repeats} runs written to {output}", flush=True)
+
+
+def write_median_run(runs: list[Path], output: Path) -> None:
+    tables = []
+    for path in runs:
+        with path.open(newline="", encoding="utf-8") as stream:
+            reader = csv.DictReader(stream)
+            fieldnames = reader.fieldnames
+            tables.append(list(reader))
+    if len({len(table) for table in tables}) != 1:
+        raise RuntimeError("benchmark runs wrote different numbers of rows")
+    rows = []
+    for cells in zip(*tables):
+        if len({(row["p"], row["resolution"], row["operation"]) for row in cells}) != 1:
+            raise RuntimeError("benchmark runs list their cases in different orders")
+        # The whole row of the median run keeps its fps and seconds consistent
+        rows.append(sorted(cells, key=lambda row: float(row["fps"]))[len(cells) // 2])
+    with output.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
 
 
 def read_results() -> dict[str, list[dict[str, str]]]:
@@ -60,9 +98,9 @@ def read_results() -> dict[str, list[dict[str, str]]]:
     return results
 
 
-def list_gpus(backends: list[str]) -> None:
+def list_gpus(executables: dict[str, Path], backends: list[str]) -> None:
     for backend in backends:
-        executable = BACKENDS[backend]
+        executable = executables[backend]
         if not executable.is_file():
             raise FileNotFoundError(f"Missing {backend} Release CLI: {executable}")
         print(f"\n{BACKEND_LABELS[backend]} devices:", flush=True)
@@ -241,14 +279,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--result-name", help="separate CSV stem for one backend, e.g. opencl_arc_a380 (requires --run --backend opencl)")
     parser.add_argument("--no-figures", action="store_true", help="run benchmarks without regenerating CLI figures 1-4 (requires --run)")
     parser.add_argument("--loops", type=int, help="iterations per measurement for each backend (requires --run)")
+    parser.add_argument("--repeats", type=int, help="odd number of sweeps per backend, each case keeps the row of its median FPS run (requires --run)")
+    parser.add_argument("--eigen-avx2", action="store_true", help="use the AVX2 Eigen build (EIGEN_Release) on CPUs without AVX-512")
     return parser.parse_args()
 
 
 def main() -> int:
     arguments = parse_args()
+    executables = {**BACKENDS, "eigen": EIGEN_AVX2} if arguments.eigen_avx2 else BACKENDS
     try:
         if arguments.loops is not None and (not arguments.run or arguments.loops <= 0):
             raise ValueError("--loops requires --run and a positive integer")
+        if arguments.repeats is not None and (not arguments.run or arguments.repeats <= 0 or arguments.repeats % 2 == 0):
+            raise ValueError("--repeats requires --run and a positive odd integer")
         if arguments.no_figures and not arguments.run:
             raise ValueError("--no-figures requires --run")
         if arguments.result_name is not None:
@@ -257,13 +300,14 @@ def main() -> int:
             if not re.fullmatch(re.escape(arguments.backend[0]) + r"_[A-Za-z0-9_-]+", arguments.result_name):
                 raise ValueError("--result-name must start with BACKEND_ and contain only letters, digits, underscores, or hyphens")
         if arguments.list_gpu:
-            list_gpus(arguments.backend)
+            list_gpus(executables, arguments.backend)
             return 0
         if arguments.ui_figure:
             generate_ui_figure()
             return 0
         if arguments.run:
-            run_benchmarks({"cuda": arguments.cuda_device_id, "opencl": arguments.opencl_device_id}, arguments.loops, arguments.backend, arguments.result_name)
+            device_ids = {"cuda": arguments.cuda_device_id, "opencl": arguments.opencl_device_id}
+            run_benchmarks(executables, device_ids, arguments.loops, arguments.backend, arguments.result_name, arguments.repeats or 1)
             if arguments.no_figures:
                 return 0
         generate_figures(read_results())

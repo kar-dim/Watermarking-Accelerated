@@ -329,9 +329,9 @@ The CLI benchmark sweep can be reproduced automatically from the repository root
 python tools/benchmark.py --run
 ```
 
-This runs the CUDA and OpenCL Release CLIs with 1000 loops per measurement and the Eigen/CPU Release CLI with 100 loops. Pass `--loops N` to `tools/benchmark.py --run` to set the same positive loop count for all three backends. Each CLI's ```--bench``` mode benchmarks ME embedding and detection for p=3,5,7,9 using the 480p, 720p, 1080p, and 4K sample images. Raw results are written to ```thesis_data/cuda.csv```, ```thesis_data/opencl.csv```, and ```thesis_data/eigen.csv```, after which figures 1–4 are regenerated. To redraw the figures without rerunning the benchmarks, use ```python tools/benchmark.py --figures```. A GPU can be selected with ```--cuda-device-id N``` and ```--opencl-device-id N``` when using ```--run``` (separate options because CUDA and OpenCL number the devices differently, OpenCL also lists integrated GPUs and enumerates GPU devices only).
+This runs the CUDA and OpenCL Release CLIs with 1000 loops per measurement and the Eigen/CPU `EIGEN_AVX512_Release` CLI with 100 loops (on a CPU without AVX-512, add `--eigen-avx2` to use `EIGEN_Release`). Pass `--loops N` to `tools/benchmark.py --run` to set the same positive loop count for all three backends. Each CLI's ```--bench``` mode benchmarks ME embedding and detection for p=3,5,7,9 using the 480p, 720p, 1080p, and 4K sample images. Raw results are written to ```thesis_data/cuda.csv```, ```thesis_data/opencl.csv```, and ```thesis_data/eigen.csv```, after which figures 1–4 are regenerated. To redraw the figures without rerunning the benchmarks, use ```python tools/benchmark.py --figures```. A GPU can be selected with ```--cuda-device-id N``` and ```--opencl-device-id N``` when using ```--run``` (separate options because CUDA and OpenCL number the devices differently, OpenCL also lists integrated GPUs and enumerates GPU devices only).
 
-The published CPU bars use `EIGEN_AVX512_Release`, taking the median of three 100-loop sweeps for each case.
+The published CPU bars are the median of three sweeps, made with `python tools/benchmark.py --run --backend eigen --repeats 3`. For each case, `--repeats N` (an odd number) keeps the row of the run with the median FPS.
 
 To list the OpenCL GPU names and their selection indices without running a benchmark:
 
