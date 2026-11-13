@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="1390" viewBox="0 0 1280 1390" role="img" aria-labelledby="title description">
 <title id="title">The Qt benchmark</title>
-<desc id="description">The Qt Benchmark tab runs six images, four prediction windows and eleven PSNR levels, making 264 cases. Setup, loading, pixel preparation and previews are outside timing. Embedding and detection each warm up once and repeat until timing is stable or a time or run limit is reached. The UI shows each result, then moves to the next case. On completion, the score is round of ten times the square root of the product of the geometric-mean embed and detect FPS. Stopping the run produces no score.</desc>
+<desc id="description">The Qt Benchmark tab runs six images, four prediction windows and six PSNR levels, making 144 cases. Setup, loading, pixel preparation and previews are outside timing. Embedding and detection each warm up once and repeat until timing is stable or a time or run limit is reached. The UI shows each result, then moves to the next case. On completion, the score is round of ten times the square root of the product of the geometric-mean embed and detect FPS. Stopping the run produces no score.</desc>
 <defs>
 <radialGradient id="ambient" gradientUnits="userSpaceOnUse" cx="640" cy="486.49999999999994" r="880">
 <stop offset="0" stop-color="#173747" stop-opacity="0.35"/>
@@ -55,8 +55,8 @@
 <text x="640.0" y="302.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="22" font-weight="650" text-anchor="middle" letter-spacing="0" fill="#edf7ff">Set up the test</text>
 <text x="640.0" y="329.0" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="middle" letter-spacing="0" fill="#a3b9ca">Prepare the selected CPU or GPU</text>
 </g>
-<rect x="378.25" y="371" width="523.5" height="27" rx="6" fill="#07131f" stroke="none"/>
-<text x="640" y="390" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="19" font-weight="500" text-anchor="middle" letter-spacing="0" fill="#59d8f3">6 images × 4 p values × 11 PSNR levels = 264 cases</text>
+<rect x="383.28499999999997" y="371" width="513.4300000000001" height="27" rx="6" fill="#07131f" stroke="none"/>
+<text x="640" y="390" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="19" font-weight="500" text-anchor="middle" letter-spacing="0" fill="#59d8f3">6 images × 4 p values × 6 PSNR levels = 144 cases</text>
 <g data-node="Prepare the next case" data-bounds="430 432 420 88">
 <rect x="430" y="432" width="420" height="88" rx="11" fill="none" stroke="#78a6bd" stroke-width="3" opacity="0.28" filter="url(#glow)"/>
 <rect x="430" y="432" width="420" height="88" rx="11" fill="#101f2c" stroke="#78a6bd" stroke-width="1.6"/>
@@ -109,7 +109,7 @@
 </g>
 <text x="44" y="1310" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="start" letter-spacing="0" fill="#a3b9ca">E and D are the geometric mean embed and detect FPS across all cases.</text>
 <text x="44" y="1340" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="start" letter-spacing="0" fill="#a3b9ca">Loading and previews are outside the timers, slow cases can use one or two runs, stopping gives no score.</text>
-<text x="44" y="1370" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="start" letter-spacing="0" fill="#a3b9ca">Images: 18×18, 512×512, 480p, 720p, 1080p, 4K. p: 3, 5, 7, 9. PSNR: 10–60 dB, step 5.</text>
+<text x="44" y="1370" font-family="&#x27;Segoe UI&#x27;, Inter, Helvetica, Arial, sans-serif" font-size="17" font-weight="400" text-anchor="start" letter-spacing="0" fill="#a3b9ca">Images: 18×18, 512×512, 480p, 720p, 1080p, 4K. p: 3, 5, 7, 9. PSNR: 10–60 dB, step 10.</text>
 <rect x="53" y="606" width="146" height="29" rx="4" fill="#0a1a23" stroke="none"/>
 <rect x="60" y="614" width="5" height="14" rx="2" fill="#52e69e" stroke="none"/>
 <text x="78" y="626" font-family="Consolas, &#x27;Liberation Mono&#x27;, monospace" font-size="15" font-weight="600" text-anchor="start" letter-spacing="1" fill="#52e69e">TIMED EMBED</text>

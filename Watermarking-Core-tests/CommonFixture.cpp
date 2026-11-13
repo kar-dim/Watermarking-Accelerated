@@ -67,6 +67,7 @@ extern "C" {
 #include <png.h>
 
 #if defined(_USE_EIGEN_)
+#include "../Watermarking-Core/WatermarkEigen.hpp"
 #include <omp.h>
 #endif
 
@@ -1601,6 +1602,85 @@ TEST_F(WatermarkTest, PreservesTheAlphaChannelWhenSaving) {
 }
 
 #if defined(_USE_EIGEN_)
+TEST(EigenPredictionTest, VectorRemaindersMatchClampedReferenceCalculations) {
+    const int originalThreads = omp_get_max_threads();
+    struct RestoreThreadCount {
+        int count;
+        ~RestoreThreadCount() { omp_set_num_threads(count); }
+    } restore{originalThreads};
+    omp_set_num_threads(1);
+
+    const auto check = []<int p> {
+        constexpr int pad = p / 2;
+        constexpr int neighbors = (p * p) - 1;
+        constexpr int width = 29;
+        for (int height = p; height < p + 32; ++height) {
+            SCOPED_TRACE(std::format("p={} {}x{}", p, width, height));
+            Eigen::ArrayXXf image(height, width), watermark(height, width);
+            uint32_t state = 0x3456789a;
+            // Integer pixels keep these products and column sums exact in float
+            for (int i = 0; i < image.size(); ++i) {
+                state = (state * 1664525u) + 1013904223u;
+                image(i) = static_cast<float>(32 + ((state >> 24) % 192));
+                watermark(i) = static_cast<float>((state >> 8) & 255) / 128.0f - 1.0f;
+            }
+            PredictionErrorMatrixData<p> prediction(height, width);
+            ASSERT_TRUE(prediction.computeCoefficients(image.data()));
+            Eigen::Matrix<double, neighbors, neighbors> expectedRx = Eigen::Matrix<double, neighbors, neighbors>::Zero();
+            Eigen::Matrix<double, neighbors, 1> expectedRxCenter = Eigen::Matrix<double, neighbors, 1>::Zero();
+            for (int col = 0; col < width; ++col) {
+                for (int row = 0; row < height; ++row) {
+                    Eigen::Matrix<double, neighbors, 1> values;
+                    int k = 0;
+                    for (int dc = -pad; dc <= pad; ++dc)
+                        for (int dr = -pad; dr <= pad; ++dr)
+                            if (dc != 0 || dr != 0)
+                                values(k++) = image(std::clamp(row + dr, 0, height - 1), std::clamp(col + dc, 0, width - 1));
+                    expectedRx.noalias() += values * values.transpose();
+                    expectedRxCenter.noalias() += values * image(row, col);
+                }
+            }
+            EXPECT_EQ((prediction.Rx - expectedRx).cwiseAbs().maxCoeff(), 0.0);
+            EXPECT_EQ((prediction.rx - expectedRxCenter).cwiseAbs().maxCoeff(), 0.0);
+            const auto errorOf = [&](const Eigen::ArrayXXd& values) {
+                Eigen::ArrayXXd error(height, width);
+                for (int col = 0; col < width; ++col) {
+                    for (int row = 0; row < height; ++row) {
+                        double value = values(row, col);
+                        int k = 0;
+                        for (int dc = -pad; dc <= pad; ++dc)
+                            for (int dr = -pad; dr <= pad; ++dr)
+                                if (dc != 0 || dr != 0)
+                                    value -= prediction.coefficients(k++) * values(std::clamp(row + dr, 0, height - 1), std::clamp(col + dc, 0, width - 1));
+                        error(row, col) = value;
+                    }
+                }
+                return error;
+            };
+            const Eigen::ArrayXXd error = errorOf(image.cast<double>());
+            const Eigen::ArrayXXd masked = error.abs() * watermark.cast<double>();
+            const Eigen::ArrayXXd maskedError = errorOf(masked);
+            const double expectedCorrelation = (error * maskedError).sum() / std::sqrt(error.square().sum() * maskedError.square().sum());
+            WatermarkEigen<p> object(height, width, WatermarkBuffer(Eigen::ArrayXXf(watermark)), defaultPsnr);
+            ImageBuffer input{Eigen::ArrayXXf(image)};
+            EXPECT_NEAR(object.detectWatermark(input), expectedCorrelation, 2e-5);
+            ImageOutputBuffer output;
+            object.makeWatermark(input, output, WatermarkBase::Layout::ColMajor);
+            const double strength = 255.0 / std::sqrt(std::pow(10.0, defaultPsnr / 10.0) * masked.square().mean());
+            int maxPixelDifference = 0;
+            for (int i = 0; i < image.size(); ++i) {
+                const int expected = static_cast<int>(std::clamp(std::floor(image(i) + (strength * masked(i)) + 0.5), 0.0, 255.0));
+                maxPixelDifference = std::max(maxPixelDifference, std::abs(static_cast<int>(output.getGray()(i)) - expected));
+            }
+            EXPECT_LE(maxPixelDifference, 1);
+        }
+    };
+    check.operator()<3>();
+    check.operator()<5>();
+    check.operator()<7>();
+    check.operator()<9>();
+}
+
 TEST(EigenDetectionTest, LargePredictionWindowsRemainStableWithOneThread) {
     initializeEnvironment(0);
     const int originalThreads = omp_get_max_threads();
@@ -1645,6 +1725,67 @@ TEST(GpuDetectionTest, FourKLargePredictionWindowsRemainDetectable) {
             const float correlation = detectEmbeddedBuffer(image.get());
             EXPECT_TRUE(std::isfinite(correlation)) << devices[deviceIndex] << " p=" << order;
             EXPECT_GT(correlation, 0.75f) << devices[deviceIndex] << " p=" << order;
+        }
+    }
+}
+
+// correlations of the two kernel detection that the detection kernel replaced, images smaller than a tile, partial tiles, exact tiles and heights that are not a multiple of 4
+TEST_F(WatermarkTest, GpuDetectionMatchesTheRecordedCorrelationsOnEveryDevice) {
+    struct Recorded {
+        int width, height, order;
+        float plain, embedded;
+    };
+    static constexpr Recorded recorded[] = {
+        {9,   9,   3, +0.2024214f, +0.2739380f},
+        {9,   9,   5, +0.3126046f, +0.3606846f},
+        {9,   9,   7, +0.3091328f, +0.3835911f},
+        {9,   9,   9, +0.1497022f, +0.1026908f},
+        {17,  31,  3, -0.0150238f, +0.0928999f},
+        {17,  31,  5, +0.0001131f, +0.1042330f},
+        {17,  31,  7, +0.0298941f, +0.1315140f},
+        {17,  31,  9, -0.0376275f, +0.0693105f},
+        {24,  128, 3, +0.0116431f, +0.1155904f},
+        {24,  128, 5, +0.0144428f, +0.1160471f},
+        {24,  128, 7, +0.0140579f, +0.1157609f},
+        {24,  128, 9, +0.0112545f, +0.1127171f},
+        {25,  129, 3, -0.0249119f, +0.0786041f},
+        {25,  129, 5, -0.0158550f, +0.0864549f},
+        {25,  129, 7, -0.0230039f, +0.0785141f},
+        {25,  129, 9, -0.0246187f, +0.0767896f},
+        {47,  255, 3, +0.0196201f, +0.1213135f},
+        {47,  255, 5, +0.0192539f, +0.1194073f},
+        {47,  255, 7, +0.0150896f, +0.1149511f},
+        {47,  255, 9, +0.0152225f, +0.1149156f},
+        {130, 100, 3, +0.0121053f, +0.1134467f},
+        {130, 100, 5, +0.0057079f, +0.1066940f},
+        {130, 100, 7, +0.0101088f, +0.1103182f},
+        {130, 100, 9, +0.0129810f, +0.1126300f},
+        {333, 217, 3, -0.0005381f, +0.1016815f},
+        {333, 217, 5, +0.0061207f, +0.1068454f},
+        {333, 217, 7, +0.0052076f, +0.1054177f},
+        {333, 217, 9, +0.0047961f, +0.1048735f},
+        {641, 479, 3, +0.0040120f, +0.1057981f},
+        {641, 479, 5, +0.0025408f, +0.1029993f},
+        {641, 479, 7, +0.0034656f, +0.1033886f},
+        {641, 479, 9, +0.0034434f, +0.1032163f},
+    };
+    for (const Recorded& r : recorded) {
+        const fs::path input = tempDir / std::format("noise_{}x{}.bmp", r.width, r.height);
+        if (!fs::exists(input))
+            writeNoiseBmp(input, r.width, r.height);
+    }
+    const auto devices = getAvailableDevices();
+    ASSERT_FALSE(devices.empty());
+    for (size_t deviceIndex = 0; deviceIndex < devices.size(); ++deviceIndex) {
+        ASSERT_TRUE(initializeEnvironment(static_cast<int>(deviceIndex))) << devices[deviceIndex];
+        for (const Recorded& r : recorded) {
+            SCOPED_TRACE(std::format("{} p={} {}x{}", devices[deviceIndex], r.order, r.width, r.height));
+            ImageHandle image = createImageSession(defaultPassword, r.order, defaultPsnr);
+            loadImage(image.get(), (tempDir / std::format("noise_{}x{}.bmp", r.width, r.height)).string());
+            EXPECT_NEAR(detectLoadedImage(image.get()), r.plain, 1.0e-5f);
+            embedImage(image.get());
+            prepareDetectionImage(image.get());
+            EXPECT_NEAR(detectEmbeddedBuffer(image.get()), r.embedded, 1.0e-5f);
         }
     }
 }

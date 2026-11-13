@@ -1,5 +1,6 @@
 #include "AvUtil.hpp"
 #include "include/WatermarkCore.hpp"
+#include "include/Utf8Path.hpp"
 #include "video_defines.hpp"
 #include <algorithm>
 #include <cctype>
@@ -37,7 +38,7 @@ void checkProbeCancelled(const std::stop_token& stop) {
 } // namespace
 
 void validateVideoOutputPath(const std::string& path) {
-    std::string extension = std::filesystem::u8path(path).extension().string();
+    std::string extension = pathFromUtf8(path).extension().string();
     std::transform(extension.begin(), extension.end(), extension.begin(), [](const unsigned char c) { return static_cast<char>(std::tolower(c)); });
     if (extension != ".mkv" && extension != ".mp4")
         throw std::invalid_argument("Video output must be a .mkv or .mp4 file");

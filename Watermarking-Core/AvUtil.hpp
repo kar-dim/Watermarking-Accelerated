@@ -6,6 +6,7 @@
  */
 
 #include "video_defines.hpp"
+#include "include/Utf8Path.hpp"
 #include <algorithm>
 #include <array>
 #include <cstdint>
@@ -151,8 +152,7 @@ class OptionDict {
     AVDictionary* m_dict = nullptr;
 };
 
-// libav and filesystem paths must match UTF-8 bytes
-inline std::filesystem::path pathFromUtf8(const std::string& path) { return std::filesystem::path(std::u8string(path.begin(), path.end())); }
+using WatermarkCore::pathFromUtf8;
 
 // checks if both paths point to same physical file
 inline bool sameFileOnDisk(const std::filesystem::path& left, const std::filesystem::path& right) {

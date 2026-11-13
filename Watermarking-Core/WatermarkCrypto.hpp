@@ -438,7 +438,8 @@ inline void QR8(__m256i& a, __m256i& b, __m256i& c, __m256i& d) {
 
 // 8 consecutive ChaCha20 blocks (firstBlock ... firstBlock + 7) at once, one block per 32-bit lane, bit identical to chacha20Block
 inline std::array<std::array<uint64_t, 8>, 8> chacha20Blocks8(const std::array<uint32_t, 16>& baseState, const uint64_t firstBlock) {
-    std::array<__m256i, 16> x;
+    // NOTE: clang ignores the alignment of the vector type in template arguments! without alignas the array is 8-byte aligned
+    alignas(32) std::array<__m256i, 16> x;
     for (int i = 0; i < 16; i++)
         x[i] = _mm256_set1_epi32(static_cast<int>(baseState[i]));
     // per lane 64-bit block counter: the low words firstBlock + lane, a wrapped low word carries into the high word
@@ -497,7 +498,8 @@ inline void QR16(__m512i& a, __m512i& b, __m512i& c, __m512i& d) {
 
 // 16 consecutive ChaCha20 blocks (firstBlock ... firstBlock + 15) at once, one block per 32-bit lane, bit identical to chacha20Block
 inline std::array<std::array<uint64_t, 8>, 16> chacha20Blocks16(const std::array<uint32_t, 16>& baseState, const uint64_t firstBlock) {
-    std::array<__m512i, 16> x;
+    // without alignas the array is 8-byte aligned (check chacha20Blocks8 too)
+    alignas(64) std::array<__m512i, 16> x;
     for (int i = 0; i < 16; i++)
         x[i] = _mm512_set1_epi32(static_cast<int>(baseState[i]));
     // per lane 64-bit block counter: the low words firstBlock + lane, a wrapped low word carries into the high word

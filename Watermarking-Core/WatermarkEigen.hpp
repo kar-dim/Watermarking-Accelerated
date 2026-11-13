@@ -3,6 +3,7 @@
 #include "buffer.hpp"
 #include "Eigen/Core"
 #include "PredictionErrorMatrixData.hpp"
+#include "simd.hpp"
 #include "WatermarkBase.hpp"
 #include <algorithm>
 #include <array>
@@ -23,25 +24,22 @@ class WatermarkEigen final : public WatermarkBase {
   private:
     static constexpr int pSquared = p * p;
     static constexpr int pad = p / 2;
-    static constexpr int localSize = pSquared - 1;
-    static constexpr int startRow = pad;
-    static constexpr int startCol = pad;
-    static constexpr int center = pad;
+    static constexpr int centerIndex = pSquared / 2;
+    // per thread columns: p of the prediction error, p of the masked watermark and one result column
+    static constexpr int workspaceCols = (2 * p) + 1;
+    // neighbor columns per pass over an error column, their coefficients STAY in registers
+    static constexpr int passColumns = p == 3 ? 3 : 1;
+    // sums per vector (chain of FMAs)
+    static constexpr int chains = 2;
 
     const int endRow = baseRows - pad;
-    const int endCol = baseCols - pad;
-    const int innerRows = endRow - startRow;
-    const bool hasInnerRegion = (endRow > startRow) && (endCol > startCol);
 
-    using LocalVector = Eigen::Matrix<float, localSize, 1>;
     using ArrayXXf = Eigen::ArrayXXf;
-    using VectorXf = Eigen::VectorXf;
-    template <typename T>
-    using Map = Eigen::Map<T>;
 
   public:
-    WatermarkEigen<p>(const int rows, const int cols, WatermarkBuffer watermark, const float psnr)
-        : WatermarkBase(rows, cols, std::move(watermark), psnr), errorSequence(rows, cols), u(rows, cols), predictionData(rows, cols) {}
+    WatermarkEigen<p>(const int rows, const int cols, WatermarkBuffer watermark, const float psnr) : WatermarkBase(rows, cols, std::move(watermark), psnr), u(rows, cols), predictionData(rows, cols) {
+        prepareWorkspaces();
+    }
 
     // RGB embedding: compute watermark from luma, flat images copied unchanged
     void makeWatermark(const ImageBuffer& inputGrayImage, const ImageOutputBuffer& inputImage, ImageOutputBuffer& output) override {
@@ -101,24 +99,55 @@ class WatermarkEigen final : public WatermarkBase {
 
     // detection: correlation between image prediction error and watermark error
     float detectWatermark(const ImageBuffer& inputImage) override {
-        // correlation is scale-invariant, max|e| division omitted
-        if (!computePredictionErrorData<false>(inputImage.getGray()))
+        const auto& image = inputImage.getGray();
+        if (!predictionData.computeCoefficients(image.data()))
             return 0.0f;
+        prepareWorkspaces();
         const auto& w = randomMatrix.getGray();
-#pragma omp parallel for schedule(static)
-        for (int i = 0; i < u.size(); i++)
-            u(i) = std::abs(errorSequence(i)) * w(i);
-        const auto [dot, sqEz, sqEu] = computeDetectionCorrelation(u);
-        const float correlation = dot / (std::sqrt(sqEz) * std::sqrt(sqEu));
+        const auto imageColumn = [&](const int col) { return image.data() + (static_cast<size_t>(std::clamp(col, 0, baseCols - 1)) * baseRows); };
+        double dot = 0.0;
+        double sqError = 0.0;
+        double sqMaskedError = 0.0;
+#pragma omp parallel reduction(+ : dot, sqError, sqMaskedError)
+        {
+            // each thread keeps only the last p columns of e and of |e| * w (the correlation is scale-invariant, no max|e| division)
+            ArrayXXf& columns = workspaces[omp_get_thread_num()];
+            const int threads = omp_get_num_threads();
+            const int first = static_cast<int>((static_cast<int64_t>(baseCols) * omp_get_thread_num()) / threads);
+            const int last = static_cast<int>((static_cast<int64_t>(baseCols) * (omp_get_thread_num() + 1)) / threads);
+            const auto maskedColumn = [&](const int col) { return columns.col(p + (std::clamp(col, 0, baseCols - 1) % p)).data(); };
+            auto maskedError = columns.col(2 * p);
+            int next = std::max(first - pad, 0);
+            for (int col = first; col < last; col++) {
+                for (; next <= std::min(col + pad, baseCols - 1); next++) {
+                    auto error = columns.col(next % p);
+                    errorColumn(imageColumn, next, error.data());
+                    columns.col(p + (next % p)) = error.abs() * w.col(next);
+                }
+                errorColumn(maskedColumn, col, maskedError.data());
+                const auto error = columns.col(col % p);
+                dot += (error * maskedError).sum();
+                sqError += error.square().sum();
+                sqMaskedError += maskedError.square().sum();
+            }
+        }
+        const float correlation = static_cast<float>(dot / (std::sqrt(sqError) * std::sqrt(sqMaskedError)));
         return std::isfinite(correlation) ? correlation : 0.0f;
     }
 
   private:
     using Gray8 = Eigen::Array<uint8_t, Eigen::Dynamic, Eigen::Dynamic>;
 
-    // prediction error of image and watermark u or mask * watermark
-    ArrayXXf errorSequence, u;
+    // unscaled watermark |e| * w
+    ArrayXXf u;
     PredictionErrorMatrixData<p> predictionData;
+    std::vector<ArrayXXf> workspaces;
+
+    // the thread count can grow after construction
+    void prepareWorkspaces() {
+        while (workspaces.size() < static_cast<size_t>(omp_get_max_threads()))
+            workspaces.emplace_back(baseRows, workspaceCols);
+    }
 
     // watermarked output pixels: round and clamp to [0, 255]
     template <typename Expr>
@@ -138,171 +167,122 @@ class WatermarkEigen final : public WatermarkBase {
         }
     }
 
-    // coordinates outside image clamp to edge pixel
-    inline float clampedValue(const ArrayXXf& img, int r, int c, const int rows, const int cols) { return img(std::clamp(r, 0, rows - 1), std::clamp(c, 0, cols - 1)); }
-
-    // process border pixels with clamped window neighbors, caller must be in omp parallel region
-    template <typename Processor>
-    void processBorder(const ArrayXXf& image, Processor&& processor) {
-        const int threadId = omp_get_thread_num();
-        LocalVector neighbors; // per thread
-
-        auto processRect = [&](int rStart, int rEnd, int cStart, int cEnd) {
-        // nowait: threads move on to the next strip without waiting, collapse(2): thin strips are still split across threads
-#pragma omp for schedule(static) collapse(2) nowait
-            for (int j = cStart; j < cEnd; j++) {
-                for (int i = rStart; i < rEnd; i++) {
-                    // the window neighbors (clamped at the image edges)
-                    int k = 0;
-                    for (int dj = 0; dj < p; dj++) {
-                        for (int di = 0; di < p; di++) {
-                            if (di == center && dj == center)
-                                continue;
-                            neighbors(k++) = clampedValue(image, i + di - center, j + dj - center, baseRows, baseCols);
-                        }
-                    }
-                    processor(i, j, neighbors, threadId);
-                }
-            }
+    // prediction error of one column: e = x - sum(c_k * x_k), fused multiply-subtract per neighbor
+    // columnAt returns a column with its index clamped at the image edges
+    template <typename ColumnAt>
+    void errorColumn(const ColumnAt& columnAt, const int col, float* __restrict error) const {
+        using namespace Simd;
+        const auto& coefficients = predictionData.coefficients;
+        std::array<const float*, p> columns;
+        for (int dj = 0; dj < p; dj++)
+            columns[dj] = columnAt(col + dj - pad);
+        const auto isNeighbor = [](const int dj, const int di) { return dj != pad || di != pad; };
+        const auto coefficient = [&](const int dj, const int di) { return coefficients(((dj * p) + di) - (((dj * p) + di) > centerIndex)); };
+        // one pass of a row: the neighbors of "passColumns" columns leave "sums", neighbor rows come from rowAt
+        // row offset di goes to sum di % chains in the vector and in the scalar code
+        const auto scalarPass = [&](const int first, const float start, const auto& rowAt) {
+            std::array<float, chains> sums{start};
+            for (int offset = 0; offset < passColumns; offset++)
+                for (int di = 0; di < p; di++)
+                    if (isNeighbor(first + offset, di))
+                        sums[di % chains] = std::fma(-coefficient(first + offset, di), columns[first + offset][rowAt(di)], sums[di % chains]);
+            for (int chain = 1; chain < chains; chain++)
+                sums[0] += sums[chain];
+            return sums[0];
         };
-        // the 4 border strips
-        if (startRow > 0)
-            processRect(0, startRow, 0, baseCols);
-        if (endRow < baseRows)
-            processRect(endRow, baseRows, 0, baseCols);
-        if (startCol > 0 && hasInnerRegion)
-            processRect(startRow, endRow, 0, startCol);
-        if (endCol < baseCols && hasInnerRegion)
-            processRect(startRow, endRow, endCol, baseCols);
+
+        constexpr int quads = windowQuads(p);
+        // the last load of a neighbor column reads this many rows past its last window
+        const int vectorEnd = endRow - ((4 * (quads - 1)) - (p - 1));
+        for (int first = 0; first < p; first += passColumns) {
+            // locals: the stores to "error" could alias the member coefficients
+            Vec c[passColumns * p];
+            for (int offset = 0; offset < passColumns; offset++)
+                for (int di = 0; di < p; di++)
+                    c[(offset * p) + di] = isNeighbor(first + offset, di) ? broadcast(coefficient(first + offset, di)) : zero();
+            const float* source = first == 0 ? columns[pad] : error;
+            int row = pad;
+            for (; row + lanes <= vectorEnd; row += lanes) {
+                Vec sums[chains];
+                sums[0] = load(source + row);
+                for (int chain = 1; chain < chains; chain++)
+                    sums[chain] = zero();
+                // constant offset and di: the window shifts resolve at compile time and the sums stay in registers
+#pragma clang loop unroll(full)
+                for (int offset = 0; offset < passColumns; offset++) {
+                    Vec neighbors[quads];
+                    for (int q = 0; q < quads; q++)
+                        neighbors[q] = load(columns[first + offset] + row - pad + (4 * q));
+#pragma clang loop unroll(full)
+                    for (int di = 0; di < p; di++)
+                        if (isNeighbor(first + offset, di))
+                            sums[di % chains] = fnmadd(c[(offset * p) + di], window(neighbors, di), sums[di % chains]);
+                }
+                for (int chain = 1; chain < chains; chain++)
+                    sums[0] = add(sums[0], sums[chain]);
+                store(error + row, sums[0]);
+            }
+#if defined(__AVX512F__)
+            // Neighbor loads extend beyond the output rows, even in the narrow cleanup
+            if (row + Avx2::lanes <= vectorEnd) {
+                Avx2::Vec sums[chains];
+                sums[0] = Avx2::load(source + row);
+                for (int chain = 1; chain < chains; chain++)
+                    sums[chain] = Avx2::zero();
+#pragma clang loop unroll(full)
+                for (int offset = 0; offset < passColumns; offset++) {
+                    Avx2::Vec neighbors[quads];
+                    for (int q = 0; q < quads; q++)
+                        neighbors[q] = Avx2::load(columns[first + offset] + row - pad + (4 * q));
+#pragma clang loop unroll(full)
+                    for (int di = 0; di < p; di++)
+                        if (isNeighbor(first + offset, di))
+                            sums[di % chains] = Avx2::fnmadd(low(c[(offset * p) + di]), window(neighbors, di), sums[di % chains]);
+                }
+                for (int chain = 1; chain < chains; chain++)
+                    sums[0] = Avx2::add(sums[0], sums[chain]);
+                Avx2::store(error + row, sums[0]);
+                row += Avx2::lanes;
+            }
+#endif
+            for (; row < endRow; row++)
+                error[row] = scalarPass(first, source[row], [&](const int di) { return row + di - pad; });
+        }
+        // the top and bottom rows read clamped neighbors
+        const auto clampedRow = [&](const int row) {
+            for (int first = 0; first < p; first += passColumns)
+                error[row] = scalarPass(first, first == 0 ? columns[pad][row] : error[row], [&](const int di) { return std::clamp(row + di - pad, 0, baseRows - 1); });
+        };
+        for (int row = 0; row < pad; row++) {
+            clampedRow(row);
+            clampedRow(endRow + row);
+        }
     }
 
-    // compute unscaled watermark u and return scale factor, 0 for flat frames
+    // unscaled watermark u = |e| * w and the scale that reaches the PSNR, empty for flat images
     std::optional<float> computeStrengthenedWatermark(const ArrayXXf& inputImage) {
-        const auto maxAbsOpt = computePredictionErrorData<true>(inputImage);
-        if (!maxAbsOpt || *maxAbsOpt <= 0.0f)
+        if (!predictionData.computeCoefficients(inputImage.data()))
             return std::nullopt;
+        prepareWorkspaces();
         const auto& w = randomMatrix.getGray();
-        const float invMax = 1.0f / *maxAbsOpt;
-        const float* ePtr = errorSequence.data();
-        float sumSq = 0.0f;
-#pragma omp parallel for schedule(static) reduction(+ : sumSq)
-        for (int i = 0; i < errorSequence.size(); i++) {
-            const float uValue = std::abs(ePtr[i]) * invMax * w(i);
-            u(i) = uValue;
-            sumSq += uValue * uValue;
-        }
-        if (sumSq <= 1e-3f) // flat image
-            return std::nullopt;
-        return strengthFactor / std::sqrt(sumSq / totalPixels);
-    }
-
-    // computes prediction coefficients and prediction error of image
-    template <bool FindMax>
-    std::optional<float> computePredictionErrorData(const ArrayXXf& image) {
-        if (!predictionData.computeCoefficients(image.data()))
-            return std::nullopt;
-        return computeErrorSequence<FindMax>(image, errorSequence);
-    }
-
-    // prediction error of the inner rows of one inner column, 8 neighbors per vectorized expression
-    void computeInnerColumnError(const float* imgData, const int colOffset, Map<VectorXf>& columnError) const {
-        const auto& coefficients = predictionData.coefficients;
-        const auto& offsets = predictionData.neighborOffsets;
-        const Map<const VectorXf> imgBatch(imgData + colOffset, innerRows);
-        columnError.noalias() =
-            imgBatch - (Map<const VectorXf>(imgData + colOffset + offsets[0], innerRows) * coefficients(0) + Map<const VectorXf>(imgData + colOffset + offsets[1], innerRows) * coefficients(1) +
-                           Map<const VectorXf>(imgData + colOffset + offsets[2], innerRows) * coefficients(2) + Map<const VectorXf>(imgData + colOffset + offsets[3], innerRows) * coefficients(3) +
-                           Map<const VectorXf>(imgData + colOffset + offsets[4], innerRows) * coefficients(4) + Map<const VectorXf>(imgData + colOffset + offsets[5], innerRows) * coefficients(5) +
-                           Map<const VectorXf>(imgData + colOffset + offsets[6], innerRows) * coefficients(6) + Map<const VectorXf>(imgData + colOffset + offsets[7], innerRows) * coefficients(7));
-        for (int k = 8; k < localSize; k += 8) {
-            columnError.noalias() -= (Map<const VectorXf>(imgData + colOffset + offsets[k + 0], innerRows) * coefficients(k + 0) +
-                                      Map<const VectorXf>(imgData + colOffset + offsets[k + 1], innerRows) * coefficients(k + 1) +
-                                      Map<const VectorXf>(imgData + colOffset + offsets[k + 2], innerRows) * coefficients(k + 2) +
-                                      Map<const VectorXf>(imgData + colOffset + offsets[k + 3], innerRows) * coefficients(k + 3) +
-                                      Map<const VectorXf>(imgData + colOffset + offsets[k + 4], innerRows) * coefficients(k + 4) +
-                                      Map<const VectorXf>(imgData + colOffset + offsets[k + 5], innerRows) * coefficients(k + 5) +
-                                      Map<const VectorXf>(imgData + colOffset + offsets[k + 6], innerRows) * coefficients(k + 6) +
-                                      Map<const VectorXf>(imgData + colOffset + offsets[k + 7], innerRows) * coefficients(k + 7));
-        }
-    }
-
-    // prediction error of the image, FindMax returns its maximum abs value
-    template <bool FindMax>
-    float computeErrorSequence(const ArrayXXf& image, ArrayXXf& outputErrorSequence) {
-        const auto& coefficients = predictionData.coefficients;
-        float centerMax = 0.0f;
-        const float* imgData = image.data();
-        float* outData = outputErrorSequence.data();
-        // the inner region and the border in one parallel region
-#pragma omp parallel
+        const auto imageColumn = [&](const int col) { return inputImage.data() + (static_cast<size_t>(std::clamp(col, 0, baseCols - 1)) * baseRows); };
+        float maxAbs = 0.0f;
+        double sumSq = 0.0;
+#pragma omp parallel reduction(max : maxAbs) reduction(+ : sumSq)
         {
-            if (hasInnerRegion) {
-                if constexpr (FindMax) {
-#pragma omp for schedule(static) reduction(max : centerMax) nowait
-                    for (int j = startCol; j < endCol; j++) {
-                        const int colOffset = (j * baseRows) + startRow;
-                        Map<VectorXf> columnError(outData + colOffset, innerRows);
-                        computeInnerColumnError(imgData, colOffset, columnError);
-                        centerMax = std::max(centerMax, columnError.cwiseAbs().maxCoeff());
-                    }
-                } else {
-#pragma omp for schedule(static) nowait
-                    for (int j = startCol; j < endCol; j++) {
-                        const int colOffset = (j * baseRows) + startRow;
-                        Map<VectorXf> columnError(outData + colOffset, innerRows);
-                        computeInnerColumnError(imgData, colOffset, columnError);
-                    }
-                }
+            // the error column stays in cache between its passes, the full size error is never stored
+            auto error = workspaces[omp_get_thread_num()].col(0);
+#pragma omp for schedule(static)
+            for (int col = 0; col < baseCols; col++) {
+                errorColumn(imageColumn, col, error.data());
+                maxAbs = std::max(maxAbs, error.abs().maxCoeff());
+                u.col(col) = error.abs() * w.col(col);
+                sumSq += u.col(col).square().sum();
             }
-            processBorder(image, [&](const int i, const int j, const LocalVector& neighbors, const int) { outputErrorSequence(i, j) = image(i, j) - neighbors.dot(coefficients); });
         }
-        if constexpr (FindMax) {
-            float borderMax = 0.0f;
-            if (startRow > 0)
-                borderMax = std::max(borderMax, outputErrorSequence.topRows(startRow).abs().maxCoeff());
-            if (endRow < baseRows)
-                borderMax = std::max(borderMax, outputErrorSequence.bottomRows(baseRows - endRow).abs().maxCoeff());
-            if (startCol > 0 && hasInnerRegion)
-                borderMax = std::max(borderMax, outputErrorSequence.block(startRow, 0, innerRows, startCol).abs().maxCoeff());
-            if (endCol < baseCols && hasInnerRegion)
-                borderMax = std::max(borderMax, outputErrorSequence.block(startRow, endCol, innerRows, baseCols - endCol).abs().maxCoeff());
-            return std::max(centerMax, borderMax);
-        }
-        return 0.0f;
-    }
-
-    // correlation sums of the detection: computes the prediction error of "image" (mask * watermark) and correlates it with the image's
-    // prediction error, returns {dot, sum(ez^2), sum(eu^2)}
-    std::array<float, 3> computeDetectionCorrelation(const ArrayXXf& image) {
-        const auto& coefficients = predictionData.coefficients;
-        const float* imgData = image.data();
-        const float* errorData = errorSequence.data();
-        float dot = 0.0f;
-        float sqEz = 0.0f;
-        float sqEu = 0.0f;
-#pragma omp parallel reduction(+ : dot, sqEz, sqEu)
-        {
-            VectorXf columnBuffer(innerRows);
-            if (hasInnerRegion) {
-#pragma omp for schedule(static) nowait
-                for (int j = startCol; j < endCol; j++) {
-                    const int colOffset = (j * baseRows) + startRow;
-                    Map<VectorXf> columnError(columnBuffer.data(), innerRows);
-                    computeInnerColumnError(imgData, colOffset, columnError);
-                    const Map<const VectorXf> sourceError(errorData + colOffset, innerRows);
-                    dot += sourceError.dot(columnError);
-                    sqEz += sourceError.squaredNorm();
-                    sqEu += columnError.squaredNorm();
-                }
-            }
-            processBorder(image, [&](const int i, const int j, const LocalVector& neighbors, const int) {
-                const float eu = image(i, j) - neighbors.dot(coefficients);
-                const float ez = errorSequence(i, j);
-                dot += ez * eu;
-                sqEz += ez * ez;
-                sqEu += eu * eu;
-            });
-        }
-        return {dot, sqEz, sqEu};
+        // flat image: sum(u^2) with u normalized by max|e|
+        if (!(maxAbs > 0.0f) || sumSq <= 1e-3 * maxAbs * maxAbs)
+            return std::nullopt;
+        return static_cast<float>(strengthFactor / std::sqrt(sumSq / totalPixels));
     }
 };

@@ -34,6 +34,7 @@
     </WatermarkingLicenseFile>
     <WatermarkingRuntimeFile Include="$(WatermarkingCoreDir)libs\ffmpeg\bin\*.dll" />
     <WatermarkingRuntimeFile Include="$(WatermarkingCoreDir)libs\zlib\bin\zlib1.dll" />
+    <WatermarkingRuntimeFile Include="$(WatermarkingCoreDir)libs\zlib\bin\zlibd1.dll" Condition="$(Configuration.Contains('Debug'))" />
     <WatermarkingRuntimeFile Include="$(WatermarkingCoreDir)libs\libjpeg\bin\jpeg62.dll" />
     <WatermarkingRuntimeFile Include="$(WatermarkingCoreDir)libs\libtiff\bin\tiff.dll" />
     <WatermarkingRuntimeFile Include="$(WatermarkingCoreDir)libs\libpng\bin\libpng16d.dll" Condition="$(Configuration.Contains('Debug'))" />
@@ -42,6 +43,7 @@
     <WatermarkingRuntimeFile Include="$(LLVMInstallDir)\x64\bin\libomp.dll" Condition="$(Configuration.StartsWith('EIGEN_')) and Exists('$(LLVMInstallDir)\x64\bin\libomp.dll')" />
     <WatermarkingRuntimeFile Include="$(LLVMInstallDir)\bin\libomp.dll" Condition="$(Configuration.StartsWith('EIGEN_')) and !Exists('$(LLVMInstallDir)\x64\bin\libomp.dll') and Exists('$(LLVMInstallDir)\bin\libomp.dll')" />
     <WatermarkingRuntimeFile Include="$(VCInstallDir)Redist\MSVC\$(VCToolsRedistVersion)\$(WatermarkingCrtSubDir)\*.dll" Condition="Exists('$(VCInstallDir)Redist\MSVC\$(VCToolsRedistVersion)\$(WatermarkingCrtSubDir)')" />
+    <WatermarkingRuntimeFile Include="$(UniversalCRTSdkDir)bin\$(TargetPlatformVersion)\x64\ucrt\ucrtbased.dll" Condition="$(Configuration.Contains('Debug')) and Exists('$(UniversalCRTSdkDir)bin\$(TargetPlatformVersion)\x64\ucrt\ucrtbased.dll')" />
     <WatermarkingRuntimeFile Include="$(VCInstallDir)Redist\MSVC\$(VCToolsRedistVersion)\x64\Microsoft.VC$(PlatformToolsetVersion).OpenMP\vcomp140.dll" Condition="!$(Configuration.Contains('Debug')) and !$(Configuration.StartsWith('EIGEN_')) and Exists('$(VCInstallDir)Redist\MSVC\$(VCToolsRedistVersion)\x64\Microsoft.VC$(PlatformToolsetVersion).OpenMP\vcomp140.dll')" />
     <WatermarkingSampleFile Include="$(WatermarkingRoot)samples\**\*" Exclude="$(WatermarkingRoot)samples\videos\**\*" Condition="'$(MSBuildProjectName)' == 'Watermarking-CLI' or '$(MSBuildProjectName)' == 'Watermarking-Core-tests'" />
   </ItemGroup>

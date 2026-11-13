@@ -48,6 +48,10 @@ cl::Program buildKernels(const int p);
 // probed workgroup size
 int workGroupSize(const cl::Program& program);
 
+// tile patches per work-item of the detection kernel (DT_OWN). 3 need more than 32 KB of local memory at p >= 7 with 256 work-items,
+// which halves the work-groups on GPUs with 64 KB per CU
+inline constexpr int detectionTilePatches = 2;
+
 // selected native half storage conversion, false when the integer fallback is used
 bool usesNativeHalfStorage(const cl::Program& program);
 

@@ -153,8 +153,10 @@ ReductionMode reductionMode(const cl::Program& program) {
 bool kernelsFit(cl::Program program, const cl::Device& device, const int groupSize) {
     std::vector<cl::Kernel> programKernels;
     program.createKernels(&programKernels);
+    const cl_ulong localMemory = device.getInfo<CL_DEVICE_LOCAL_MEM_SIZE>();
+    // the local memory check catches drivers that reserve more than the kernel's tiles, the kernel would fail at its first launch
     for (const auto& kernel : programKernels)
-        if (kernel.getWorkGroupInfo<CL_KERNEL_WORK_GROUP_SIZE>(device) < static_cast<size_t>(groupSize))
+        if (kernel.getWorkGroupInfo<CL_KERNEL_WORK_GROUP_SIZE>(device) < static_cast<size_t>(groupSize) || kernel.getWorkGroupInfo<CL_KERNEL_LOCAL_MEM_SIZE>(device) > localMemory)
             return false;
     return true;
 }
@@ -181,7 +183,7 @@ cl::Program buildKernels(const int p) {
                                         string(nativeHalfStorage ? " -DWM_NATIVE_HALF_STORAGE=1" : "");
         const char* description = forcePortable ? "forced portable local-memory reductions" : useWorkGroupCollectives ? "work-group collective reductions" : subgroupDescription(dialect);
         for (int groupSize = static_cast<int>(std::min(256u, maxPow2WorkGroupSize(device))); groupSize >= 64; groupSize /= 2) {
-            const string baseOptions = standard + " -DWINDOW_SIZE=" + std::to_string(p) + " -DWG_SIZE=" + std::to_string(groupSize);
+            const string baseOptions = standard + " -DWINDOW_SIZE=" + std::to_string(p) + " -DWG_SIZE=" + std::to_string(groupSize) + " -DDT_OWN=" + std::to_string(detectionTilePatches);
             string buildLog;
             cl::Program program(context, cl::Program::Sources{halfKernels, kernels});
             if (tryBuildProgram(program, device, baseOptions + reductionOptions, buildLog)) {

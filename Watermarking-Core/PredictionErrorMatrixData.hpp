@@ -1,6 +1,7 @@
 #pragma once
 #include "Eigen/Cholesky"
 #include "Eigen/Core"
+#include "simd.hpp"
 #include <algorithm>
 #include <array>
 #include <omp.h>
@@ -48,12 +49,10 @@ class PredictionErrorMatrixData {
 
     static constexpr int shiftIndex(const int dr, const int dc) { return dc == 0 ? dr : (maxShift + 1) + ((dc - 1) * shiftSpan) + (dr + maxShift); }
 
-    // Vector register width and maximum shifts processed together in one pass
+    // Maximum shifts processed together in one pass, their sums stay in registers
 #if defined(__AVX512F__)
-    static constexpr int rowLanes = 16;
     static constexpr int maxShiftsPerPass = 24;
 #else
-    static constexpr int rowLanes = 8;
     static constexpr int maxShiftsPerPass = 12;
 #endif
 
@@ -61,23 +60,41 @@ class PredictionErrorMatrixData {
     // Inner rows run vectorized, while boundary rows read clamped neighbor values
     template <int NUM>
     void innerDots(const float* __restrict colA, const float* __restrict colB, const int dr0, float* __restrict dots) const {
-        constexpr int lanes = rowLanes;
-        using Lanes = Eigen::Array<float, lanes, 1>;
+        using namespace Simd;
+        constexpr int quads = windowQuads(NUM);
         const int rStart = pad;
         const int rEnd = rows - pad;
         const int mainLo = std::clamp(-dr0, rStart, rEnd);
-        const int mainHi = std::clamp(rows - (dr0 + NUM - 1), mainLo, rEnd);
-        std::array<Lanes, NUM> acc;
+        // The last partner load starts 4 * (quads - 1) rows after the first shift
+        const int mainHi = std::clamp(rows - (dr0 + (4 * (quads - 1))), mainLo, rEnd);
+        Vec acc[NUM];
         for (auto& lane : acc)
-            lane.setZero();
+            lane = zero();
         int r = mainLo;
         for (; r + lanes <= mainHi; r += lanes) {
-            const Lanes a = Lanes::Map(colA + r);
+            const Vec a = load(colA + r);
+            Vec partners[quads];
+            for (int q = 0; q < quads; q++)
+                partners[q] = load(colB + r + dr0 + (4 * q));
+            // Constant k: the window shifts resolve at compile time and the sums stay in registers
+#pragma clang loop unroll(full)
             for (int k = 0; k < NUM; k++)
-                acc[k] += a * Lanes::Map(colB + r + dr0 + k);
+                acc[k] = fmadd(a, window(partners, k), acc[k]);
         }
+#if defined(__AVX512F__)
+        if (r + Avx2::lanes <= mainHi) {
+            const Avx2::Vec a = Avx2::load(colA + r);
+            Avx2::Vec partners[quads];
+            for (int q = 0; q < quads; q++)
+                partners[q] = Avx2::load(colB + r + dr0 + (4 * q));
+#pragma clang loop unroll(full)
+            for (int k = 0; k < NUM; k++)
+                acc[k] = fmaddLow(a, window(partners, k), acc[k]);
+            r += Avx2::lanes;
+        }
+#endif
         for (int k = 0; k < NUM; k++)
-            dots[k] = acc[k].sum();
+            dots[k] = sum(acc[k]);
         const auto edgeRows = [&](const int lo, const int hi) {
             constexpr int block = 16;
             std::array<float, block + NUM - 1> partners;

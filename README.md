@@ -85,10 +85,10 @@ For the final video, an idle GPU can start a second attempt. The first complete 
 
 ## Qt benchmark workflow
 
-The Qt Benchmark tab tests embedding and detection across six bundled images, four prediction windows and eleven PSNR levels. Loading, pixel preparation and previews run outside the timers. The diagram shows how each step is timed and how the final score is calculated.
+The Qt Benchmark tab tests embedding and detection across six bundled images, four prediction windows and six PSNR levels (10 to 60 dB in 10 dB steps). Loading, pixel preparation and previews run outside the timers. The diagram shows how each step is timed and how the final score is calculated.
 
 <p align="center">
-  <img src="thesis_data/diagrams/ui-benchmark.svg" width="100%" alt="Qt benchmark workflow: prepare the selected backend and images, test 264 image, prediction-window and PSNR combinations, time embedding and detection, update the preview, and calculate the score from geometric-mean FPS." />
+  <img src="thesis_data/diagrams/ui-benchmark.svg" width="100%" alt="Qt benchmark workflow: prepare the selected backend and images, test 144 image, prediction-window and PSNR combinations, time embedding and detection, update the preview, and calculate the score from geometric-mean FPS." />
 </p>
 
 <details>
@@ -129,11 +129,7 @@ $$\text{Score} = C \cdot \sqrt{\text{FPS}_{\text{embed}} \cdot \text{FPS}_{\text
 
 **NOTE**:
 1. The CLI uses the proposed mask for single images, batches, video, and its `--bench` mode.
-2. All implementations are built with ```AVX2``` support, set once for every project in ```Directory.Build.props```:
-     - clang (CPU builds): ```-mavx2 -mfma -mf16c```
-     - MSVC (GPU builds): ```/arch:AVX2```
-
-To build with ```AVX-512```, pass ```-p:WatermarkingSimd=AVX512``` to MSBuild (for example ```msbuild Watermarking-Thesis.sln -p:Configuration=EIGEN_Release -p:Platform=x64 -p:WatermarkingSimd=AVX512```). The output goes to separate folders (```x64\EIGEN_Release_AVX512\```), next to the AVX2 build. The AVX-512 build only runs on CPUs with AVX-512 and the gains are small, AVX2 stays the default.
+2. Standard configurations require **AVX2**. For an AVX-512 CPU, select **EIGEN_AVX512_Release** or **EIGEN_AVX512_Debug** build in Visual Studio which improves performance for compatible CPUs.
 
 The CLI accepts command-line options only. Values can use `--key value` or `--key=value`, for example `--p 5`, `--psnr=42`, or `--gpu_device_id 1`. The duplicated `mode`, `path` and `devices` names must include their `image` or `video` group, for example `--image.mode`, `--video.path` or `--image.devices`. Other options also accept a group prefix, such as `--global.p` or `--compute.gpu_device_id`. Run `Watermarking-CLI.exe --help`, or run without arguments, for the complete list and defaults.
 
@@ -266,12 +262,14 @@ The solution provides multiple build configurations, each targeting a specific b
 
 | Configuration    | Backend     | Notes                                       |
 |------------------|-------------|---------------------------------------------|
-| `CUDA_Release`     | CUDA        | Recommended for systems with NVIDIA GPUs. Faster than OpenCL backend, adds support for CUDA HW accelerated video decoding. Builds a fat binary with SASS and PTX for Turing (sm_75), Ampere (sm_80, sm_86), Ada (sm_89), Hopper (sm_90) and Blackwell (sm_120), other GPUs JIT from the closest PTX |
-| `CUDA_Debug`       | CUDA        | Use for debugging CUDA-specific code        |
-| `OPENCL_Release`   | OpenCL      | Recommended for systems without NVIDIA GPUs. Provides GPU acceleration across a wide range of hardware (NVIDIA, AMD, Intel, etc.) and delivers better performance than the CPU backend, though typically slower than the CUDA implementation |
-| `OPENCL_Debug`     | OpenCL      | Use for debugging the OpenCL implementation |
-| `EIGEN_Release`    | Eigen       | Optimized CPU-based implementation used for its maximum compatibility. Clang compiler is used (clang-cl) for maximum performance [<img width="48" height="48" alt="DragonMedium" src="https://github.com/user-attachments/assets/1a920f45-facc-44f6-bfd0-d6aa864cc4c2" />](https://clang.llvm.org/) |
-| `EIGEN_Debug`      | Eigen       | Use for debugging CPU implementation [<img width="48" height="48" alt="DragonMedium" src="https://github.com/user-attachments/assets/1a920f45-facc-44f6-bfd0-d6aa864cc4c2" />](https://clang.llvm.org/) |
+| `CUDA_Release`         | CUDA    | Recommended for systems with NVIDIA GPUs. Faster than OpenCL backend, adds support for CUDA HW accelerated video decoding. Builds a fat binary with SASS and PTX for Turing (sm_75), Ampere (sm_80, sm_86), Ada (sm_89), Hopper (sm_90) and Blackwell (sm_120), other GPUs JIT from the closest PTX |
+| `CUDA_Debug`           | CUDA    | Use for debugging CUDA-specific code        |
+| `OPENCL_Release`       | OpenCL  | Recommended for systems without NVIDIA GPUs. Provides GPU acceleration across a wide range of hardware (NVIDIA, AMD, Intel, etc.) and delivers better performance than the CPU backend, though typically slower than the CUDA implementation |
+| `OPENCL_Debug`         | OpenCL  | Use for debugging the OpenCL implementation |
+| `EIGEN_Release`        | Eigen   | Optimized CPU-based implementation used for its maximum compatibility. Clang compiler is used (clang-cl) for maximum performance [<img width="48" height="48" alt="DragonMedium" src="https://github.com/user-attachments/assets/1a920f45-facc-44f6-bfd0-d6aa864cc4c2" />](https://clang.llvm.org/) |
+| `EIGEN_Debug`          | Eigen   | Use for debugging CPU implementation [<img width="48" height="48" alt="DragonMedium" src="https://github.com/user-attachments/assets/1a920f45-facc-44f6-bfd0-d6aa864cc4c2" />](https://clang.llvm.org/) |
+| `EIGEN_AVX512_Release` | Eigen   | Optimized CPU implementation for processors with AVX-512 [<img width="48" height="48" alt="DragonMedium" src="https://github.com/user-attachments/assets/1a920f45-facc-44f6-bfd0-d6aa864cc4c2" />](https://clang.llvm.org/) |
+| `EIGEN_AVX512_Debug`   | Eigen   | Debug CPU implementation for processors with AVX-512 [<img width="48" height="48" alt="DragonMedium" src="https://github.com/user-attachments/assets/1a920f45-facc-44f6-bfd0-d6aa864cc4c2" />](https://clang.llvm.org/) |
 
 
 ## Build Instructions
@@ -333,6 +331,8 @@ python tools/benchmark.py --run
 
 This runs the CUDA and OpenCL Release CLIs with 1000 loops per measurement and the Eigen/CPU Release CLI with 100 loops. Pass `--loops N` to `tools/benchmark.py --run` to set the same positive loop count for all three backends. Each CLI's ```--bench``` mode benchmarks ME embedding and detection for p=3,5,7,9 using the 480p, 720p, 1080p, and 4K sample images. Raw results are written to ```thesis_data/cuda.csv```, ```thesis_data/opencl.csv```, and ```thesis_data/eigen.csv```, after which figures 1–4 are regenerated. To redraw the figures without rerunning the benchmarks, use ```python tools/benchmark.py --figures```. A GPU can be selected with ```--cuda-device-id N``` and ```--opencl-device-id N``` when using ```--run``` (separate options because CUDA and OpenCL number the devices differently, OpenCL also lists integrated GPUs and enumerates GPU devices only).
 
+The published CPU bars use `EIGEN_AVX512_Release`, taking the median of three 100-loop sweeps for each case.
+
 To list the OpenCL GPU names and their selection indices without running a benchmark:
 
 ```powershell
@@ -347,7 +347,7 @@ python tools/benchmark.py --run --backend opencl --opencl-device-id 1 --result-n
 python tools/benchmark.py --ui-figure
 ```
 
-The A380 sweep uses 1000 loops per measurement and writes [opencl_arc_a380.csv](thesis_data/opencl_arc_a380.csv). `--no-figures` keeps CLI figures 1–4 unchanged. The UI figure command updates only 5.png from `ui_bench.csv`, including the submitted A380 score of 18,552.
+The A380 sweep uses 1000 loops per measurement and writes [opencl_arc_a380.csv](thesis_data/opencl_arc_a380.csv). `--no-figures` keeps CLI figures 1–4 unchanged. The UI figure command updates only 5.png from `ui_bench.csv`.
 
 p = 3            |  p = 5
 :-------------------------:|:-------------------------:

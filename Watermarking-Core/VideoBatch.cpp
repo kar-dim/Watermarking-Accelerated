@@ -1,4 +1,5 @@
 #include "include/VideoBatch.hpp"
+#include "include/Utf8Path.hpp"
 #include "AvUtil.hpp"
 #include "BatchUtils.hpp"
 #include "OutputFile.hpp"
@@ -195,11 +196,11 @@ VideoBatchSummary runVideoBatch(const VideoBatchSettings& settings, const std::v
     }
     std::set<fs::path, PathLess> inputs, outputs;
     for (const auto& job : jobs)
-        inputs.insert(normalized(fs::u8path(job.inputPath)));
+        inputs.insert(normalized(pathFromUtf8(job.inputPath)));
     for (const auto& job : jobs) {
         if (!settings.detect)
             validateVideoOutputPath(job.outputPath);
-        const auto path = normalized(fs::u8path(job.outputPath));
+        const auto path = normalized(pathFromUtf8(job.outputPath));
         if (inputs.contains(path) || !outputs.insert(path).second)
             throw std::invalid_argument("Video batch outputs must be distinct from every input and other output");
     }

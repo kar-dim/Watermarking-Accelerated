@@ -12,6 +12,7 @@ See [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md) for redistribution requi
 | libpng | [Header notices](Common/LIBPNG_HEADER_NOTICES.txt) | Copyright and license notices from the vendored headers. |
 | libtiff | [Header notices](Common/LIBTIFF_HEADER_NOTICES.txt) | Copyright and license notices from the vendored headers. |
 | zlib-ng | [Header notice](Common/ZLIB_NG_HEADER_NOTICE.txt) | Copyright and license notice from the vendored headers. |
+| zlib 1.3.1, Debug | [License](Common/ZLIB_LICENSE.txt) | Debug DLL and import library used by debug libpng. |
 | Eigen | [License texts](Eigen/) | MPL, BSD, Apache and MINPACK texts for the vendored Eigen code. |
 | OpenCL headers and C++ bindings | [Apache-2.0 text](OpenCL/OPENCL_LICENSE.txt), [header notices](OpenCL/OPENCL_HEADER_NOTICES.txt) | License and Khronos contributor copyrights. The runtime implementation is supplied by the system's GPU drivers. |
 | Qt 6.12.0 | [LGPLv3 text](Qt/QT_LICENSE_LGPLv3.txt), [GPL/LGPL texts](Qt/QT_INSTALLED_LICENSES.txt) | License texts for the dynamically linked Qt libraries and plugins. |

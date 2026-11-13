@@ -44,11 +44,10 @@ __device__ inline int2 packedToRowCol(const int k) {
 inline __device__ float clamp(float f, float a, float b) { return fmaxf(a, fminf(f, b)); }
 inline __device__ int clamp(int f, int a, int b) { return max(a, min(f, b)); }
 
-// Fills shared memory with the image tile around block outputs with clamped edges, MASKED: |input| * w (the ME mask times the watermark)
+// Fills shared memory with the image tile around block outputs with clamped edges
 // Loads all values into registers first before writing to shared memory
-template <bool MASKED, int p, int shDimFast, int shDimSlow, int THREADS>
-__device__ __forceinline__ void fillBlock(
-    const float* __restrict__ input, const __half* __restrict__ w, float* __restrict__ sharedMem, const int tileSlow0, const int tileFast0, const int width, const int height) {
+template <int p, int shDimFast, int shDimSlow, int THREADS>
+__device__ __forceinline__ void fillBlock(const float* __restrict__ input, float* __restrict__ sharedMem, const int tileSlow0, const int tileFast0, const int width, const int height) {
     constexpr int pad = p / 2;
     constexpr int totalElements = shDimFast * shDimSlow;
     constexpr int iterations = (totalElements + THREADS - 1) / THREADS;
@@ -65,12 +64,7 @@ __device__ __forceinline__ void fillBlock(
             const int c = i / shDimFast;
             const int globalX = clamp(baseGlobalX + c, 0, width - 1);
             const int globalY = clamp(baseGlobalY + r, 0, height - 1);
-            const int idx = globalX * height + globalY;
-            // Evaluated at compile time to avoid branches
-            if constexpr (MASKED)
-                values[it] = fabsf(input[idx]) * __half2float(w[idx]);
-            else
-                values[it] = input[idx];
+            values[it] = input[globalX * height + globalY];
         }
     }
 #pragma unroll
@@ -115,8 +109,8 @@ __device__ __forceinline__ void loadCoefficients(const float* __restrict__ coeff
     }
 }
 
-// Computes prediction errors for all outputs assigned to this thread
-template <int p>
+// Computes prediction errors for all outputs assigned to this thread, STRIDE: the rows of a region column
+template <int p, int STRIDE = ErrorTile<p>::shFast>
 __device__ __forceinline__ void predictionErrorTile(
     const float* __restrict__ region, const float (&coef)[ErrorTile<p>::coeffsSize], const int slow0, const int fast0, float (&error)[ErrorTile<p>::cols][ErrorTile<p>::rows]) {
     using T = ErrorTile<p>;
@@ -127,7 +121,7 @@ __device__ __forceinline__ void predictionErrorTile(
 #pragma unroll
     for (int wc = 0; wc < p + T::cols - 1; wc++) {
         float window[T::windowFast];
-        const float4* src = reinterpret_cast<const float4*>(region + ((slow0 + wc) * T::shFast) + fast0);
+        const float4* src = reinterpret_cast<const float4*>(region + ((slow0 + wc) * STRIDE) + fast0);
 #pragma unroll
         for (int v = 0; v < T::windowFast / 4; v++) {
             const float4 value = src[v];
@@ -163,27 +157,6 @@ __device__ __forceinline__ void predictionErrorTile(
             error[c][r] = pixel[c][r] - dot[c][r];
 }
 
-// Loads 4 consecutive rows using float4 when aligned or scalar reads otherwise
-__device__ __forceinline__ float4 loadRows4(const float* __restrict__ input, const int x, const int y0, const int height) {
-    const int idx = (x * height) + y0;
-    if ((height & 3) == 0)
-        return y0 < height ? __ldg(reinterpret_cast<const float4*>(input + idx)) : make_float4(0.0f, 0.0f, 0.0f, 0.0f);
-    return make_float4(y0 < height ? input[idx] : 0.0f, y0 + 1 < height ? input[idx + 1] : 0.0f, y0 + 2 < height ? input[idx + 2] : 0.0f, y0 + 3 < height ? input[idx + 3] : 0.0f);
-}
-__device__ __forceinline__ void storeRows4(float* __restrict__ output, const int x, const int y0, const int height, const float4 value) {
-    const int idx = (x * height) + y0;
-    if ((height & 3) == 0) {
-        if (y0 < height)
-            *reinterpret_cast<float4*>(output + idx) = value;
-        return;
-    }
-    const float v[4] = {value.x, value.y, value.z, value.w};
-#pragma unroll
-    for (int r = 0; r < 4; r++)
-        if (y0 + r < height)
-            output[idx + r] = v[r];
-}
-
 // Stores 4 half values packed into an 8-byte structure
 struct alignas(8) Half4 {
     __half2 lo, hi;
@@ -194,6 +167,8 @@ __device__ __forceinline__ float4 toFloat4(const Half4 v) {
     return make_float4(lo.x, lo.y, hi.x, hi.y);
 }
 __device__ __forceinline__ float roundToHalf(const float value) { return __half2float(__float2half_rn(value)); }
+
+// Loads 4 consecutive rows with one 8-byte load when aligned or scalar reads otherwise
 __device__ __forceinline__ float4 loadRows4(const __half* __restrict__ input, const int x, const int y0, const int height) {
     const int idx = (x * height) + y0;
     if ((height & 3) == 0)
@@ -215,35 +190,17 @@ __device__ __forceinline__ void storeRows4(__half* __restrict__ output, const in
             output[idx + r] = __float2half_rn(v[r]);
 }
 
-// Prepares shared memory tile (the input, or |input| * w when MASKED) and coefficients, returning thread start coordinates
-template <int p, bool MASKED>
-__device__ __forceinline__ int2 setupErrorTile(const float* __restrict__ input, const __half* __restrict__ w, const float* __restrict__ coeffs, float* __restrict__ region,
-    float (&coef)[ErrorTile<p>::coeffsSize], const int width, const int height) {
+// Prepares shared memory tile and coefficients, returning thread start coordinates
+template <int p>
+__device__ __forceinline__ int2 setupErrorTile(
+    const float* __restrict__ input, const float* __restrict__ coeffs, float* __restrict__ region, float (&coef)[ErrorTile<p>::coeffsSize], const int width, const int height) {
     using T = ErrorTile<p>;
     const int tileSlow0 = blockIdx.y * T::tileSlow;
     const int tileFast0 = blockIdx.x * T::tileFast;
-    fillBlock<MASKED, p, T::shFast, T::shSlow, T::threads>(input, w, region, tileSlow0, tileFast0, width, height);
+    fillBlock<p, T::shFast, T::shSlow, T::threads>(input, region, tileSlow0, tileFast0, width, height);
     loadCoefficients<p>(coeffs, coef);
     __syncthreads();
     return make_int2(tileSlow0 + ((threadIdx.x / 32) * T::cols), tileFast0 + ((threadIdx.x % 32) * T::rows));
-}
-
-// Computes prediction error across the image for detection
-template <int p>
-__global__ void __launch_bounds__(ErrorTile<p>::threads)
-    calculate_error_sequence(const float* __restrict__ input, float* __restrict__ errorOut, const float* __restrict__ coeffs, const int width, const int height, const int* __restrict__ stopFlag) {
-    using T = ErrorTile<p>;
-    __shared__ alignas(16) float region[T::shSlow * T::shFast];
-    float coef[T::coeffsSize];
-    const int2 origin = setupErrorTile<p, false>(input, nullptr, coeffs, region, coef, width, height);
-
-    float error[T::cols][T::rows] = {};
-    if (!(*stopFlag))
-        predictionErrorTile<p>(region, coef, (threadIdx.x / 32) * T::cols, (threadIdx.x % 32) * T::rows, error);
-#pragma unroll
-    for (int c = 0; c < T::cols; c++)
-        if (origin.x + c < width)
-            storeRows4(errorOut, origin.x + c, origin.y, height, make_float4(error[c][0], error[c][1], error[c][2], error[c][3]));
 }
 
 // Computes prediction error, creates u = (|e| / 255) * w, and tracks energy sums
@@ -256,7 +213,7 @@ __global__ void __launch_bounds__(ErrorTile<p>::threads) me_error_sequence_u_sum
     __shared__ typename BlockReduceT::TempStorage maxStorage;
     __shared__ alignas(16) float region[T::shSlow * T::shFast];
     float coef[T::coeffsSize];
-    const int2 origin = setupErrorTile<p, false>(input, nullptr, coeffs, region, coef, width, height);
+    const int2 origin = setupErrorTile<p>(input, coeffs, region, coef, width, height);
 
     float error[T::cols][T::rows] = {};
     if (!(*stopFlag)) // Skip computation if system solve failed
@@ -290,37 +247,173 @@ __global__ void __launch_bounds__(ErrorTile<p>::threads) me_error_sequence_u_sum
     }
 }
 
-// Correlation of the image prediction error e_u with the prediction error of |e_u| * w (the ME mask times the watermark, not divided by
-// max|e_u|: the correlation does not depend on the scale). Computes partial sums and writes the final result from the last finished block
+// Detection tile: the prediction error e of the image is computed on the tile and a halo around it, then the prediction error of |e| * w
+// (the ME mask times the watermark, not divided by max|e|: the correlation does not depend on the scale) and the correlation sums
 template <int p>
-__global__ void __launch_bounds__(ErrorTile<p>::threads) calculate_error_sequence_and_partial_corr_fused(const float* __restrict__ e_u, const __half* __restrict__ w, const float* __restrict__ coeffs,
-    float* __restrict__ partialDots, float* __restrict__ partialNormU, float* __restrict__ partialNormZ, unsigned int* __restrict__ blockCounter, float* __restrict__ correlation, const int width,
-    const int height, const int* __restrict__ stopFlag) {
+struct DetectTile {
     using T = ErrorTile<p>;
-    using BlockReduceT = cub::BlockReduce<CorrelationData, T::threads, cub::BLOCK_REDUCE_WARP_REDUCTIONS>;
+    static constexpr int pad = p / 2;
+    static constexpr int threads = 256;
+    // Tile patches per thread
+    static constexpr int own = 2;
+    static constexpr int warpsSlow = (threads / 32) * T::cols;
+    static constexpr int tileSlow = own * warpsSlow;
+    static constexpr int ownPatches = own * threads;
+    // Halo in whole patches: the tile's own patches stay patches of the grown tile
+    static constexpr int haloSlow = ((pad + T::cols - 1) / T::cols) * T::cols;
+    static constexpr int haloFast = ((pad + T::rows - 1) / T::rows) * T::rows;
+    static constexpr int patchesFast = (T::tileFast + (2 * haloFast)) / T::rows;
+    static constexpr int tilePatchesFast = T::tileFast / T::rows;
+    static constexpr int tilePatchesSlow = tileSlow / T::cols;
+    static constexpr int sidePatchesSlow = haloSlow / T::cols;
+    static constexpr int sidePatches = 2 * sidePatchesSlow * patchesFast;
+    static constexpr int patches = ownPatches + sidePatches + (2 * (haloFast / T::rows) * tilePatchesSlow);
+    // Image tile around the grown tile, windows of the patches start at multiples of 4 rows
+    static constexpr int imageFast = (patchesFast * T::rows) - T::rows + T::windowFast;
+    static constexpr int imageSlow = tileSlow + (2 * haloSlow) + (2 * pad);
+    static constexpr int maskedFast = T::shFast;
+    static constexpr int maskedSlow = tileSlow + (2 * haloSlow);
+    static constexpr int tileSize = imageSlow * imageFast > maskedSlow* maskedFast ? imageSlow* imageFast : maskedSlow* maskedFast;
+    static constexpr int rounds = (patches + threads - 1) / threads;
+
+    __host__ static dim3 grid(const int width, const int height) { return dim3((height + T::tileFast - 1) / T::tileFast, (width + tileSlow - 1) / tileSlow); }
+
+    // Patch on the grown tile: the threads' tile patches first, then the patches around the tile
+    __device__ static __forceinline__ int2 patchPosition(const int patch) {
+        if (patch < ownPatches)
+            return make_int2(sidePatchesSlow + (patch / tilePatchesFast), (haloFast / T::rows) + (patch % tilePatchesFast));
+        const int halo = patch - ownPatches;
+        if (halo < sidePatches) {
+            const int side = halo / patchesFast;
+            return make_int2(side < sidePatchesSlow ? side : side + tilePatchesSlow, halo % patchesFast);
+        }
+        const int above = halo - sidePatches;
+        const int row = above / tilePatchesSlow;
+        return make_int2(sidePatchesSlow + (above % tilePatchesSlow), row < haloFast / T::rows ? row : row + tilePatchesFast);
+    }
+};
+
+// |e| * w of a patch where its first output is at (x0,y0). 0 outside the image, replaced later by the nearest image pixel
+template <int p>
+__device__ __forceinline__ void maskPatch(const __half* __restrict__ w, const float (&e)[ErrorTile<p>::cols][ErrorTile<p>::rows], const int x0, const int y0, const int width, const int height,
+    float (&masked)[ErrorTile<p>::cols][ErrorTile<p>::rows]) {
+#pragma unroll
+    for (int c = 0; c < ErrorTile<p>::cols; c++) {
+        const float4 wv = (x0 + c >= 0 && x0 + c < width && y0 >= 0) ? loadRows4(w, x0 + c, y0, height) : make_float4(0.0f, 0.0f, 0.0f, 0.0f);
+        const float wr[4] = {wv.x, wv.y, wv.z, wv.w};
+#pragma unroll
+        for (int r = 0; r < ErrorTile<p>::rows; r++)
+            masked[c][r] = fabsf(e[c][r]) * wr[r];
+    }
+}
+
+// Detection in one kernel, e never leaves the block. The last finished block writes the correlation
+template <int p>
+__global__ void __launch_bounds__(DetectTile<p>::threads)
+    detect_correlation_fused(const float* __restrict__ input, const __half* __restrict__ w, const float* __restrict__ coeffs, float* __restrict__ partialDots, float* __restrict__ partialNormU,
+        float* __restrict__ partialNormZ, unsigned int* __restrict__ blockCounter, float* __restrict__ correlation, const int width, const int height, const int* __restrict__ stopFlag) {
+    using T = ErrorTile<p>;
+    using D = DetectTile<p>;
+    static_assert(D::tilePatchesFast == 32, "a warp covers the 32 row patches of a column pair");
+    using BlockReduceT = cub::BlockReduce<CorrelationData, D::threads, cub::BLOCK_REDUCE_WARP_REDUCTIONS>;
     __shared__ typename BlockReduceT::TempStorage temp_storage;
-    __shared__ alignas(16) float region[T::shSlow * T::shFast];
+    __shared__ alignas(16) float tile[D::tileSize];
     float coef[T::coeffsSize];
-    const int2 origin = setupErrorTile<p, true>(e_u, w, coeffs, region, coef, width, height);
+    const int tileSlow0 = blockIdx.y * D::tileSlow;
+    const int tileFast0 = blockIdx.x * T::tileFast;
+    // First grown tile column and first masked row in the image
+    const int slow0 = tileSlow0 - D::haloSlow;
+    const int maskedFast0 = tileFast0 - D::pad;
+    // fillBlock starts pad before the origin it is given
+    fillBlock<p, D::imageFast, D::imageSlow, D::threads>(input, tile, slow0, tileFast0 - D::haloFast, width, height);
+    loadCoefficients<p>(coeffs, coef);
+    __syncthreads();
 
     // Out-of-bounds pixels or failed solves contribute zero
     CorrelationData threadData = {0.0f, 0.0f, 0.0f};
     if (!(*stopFlag)) {
-        float ez[T::cols][T::rows];
-        predictionErrorTile<p>(region, coef, (threadIdx.x / 32) * T::cols, (threadIdx.x % 32) * T::rows, ez);
+        // e of the own tile patches and |e| * w of the halo patches wait in registers until no thread reads the image tile
+        float eu[D::own][T::cols][T::rows];
+        float masked[D::rounds][T::cols][T::rows];
 #pragma unroll
-        for (int c = 0; c < T::cols; c++) {
-            if (origin.x + c >= width)
-                continue;
-            // e_u reads zero outside image bounds
-            const float4 euv = loadRows4(e_u, origin.x + c, origin.y, height);
-            const float eu[4] = {euv.x, euv.y, euv.z, euv.w};
+        for (int round = 0; round < D::rounds; round++) {
+            const int patch = threadIdx.x + (round * D::threads);
+            if (patch < D::patches) {
+                const int2 position = D::patchPosition(patch);
+                if (round < D::own) {
+                    predictionErrorTile<p, D::imageFast>(tile, coef, position.x * T::cols, position.y * T::rows, eu[round]);
+                } else {
+                    float e[T::cols][T::rows];
+                    predictionErrorTile<p, D::imageFast>(tile, coef, position.x * T::cols, position.y * T::rows, e);
+                    maskPatch<p>(w, e, slow0 + (position.x * T::cols), tileFast0 - D::haloFast + (position.y * T::rows), width, height, masked[round]);
+                }
+            }
+        }
+        __syncthreads();
 #pragma unroll
-            for (int r = 0; r < T::rows; r++) {
-                const float z = origin.y + r < height ? ez[c][r] : 0.0f;
-                threadData.dot += eu[r] * z;
-                threadData.normU += eu[r] * eu[r];
-                threadData.normZ += z * z;
+        for (int round = 0; round < D::rounds; round++) {
+            const int patch = threadIdx.x + (round * D::threads);
+            if (patch < D::patches) {
+                const int2 position = D::patchPosition(patch);
+                // own patches load w after the barrier, their |e| * w would need 8 more registers each
+                if (round < D::own)
+                    maskPatch<p>(w, eu[round], slow0 + (position.x * T::cols), tileFast0 - D::haloFast + (position.y * T::rows), width, height, masked[round]);
+                const int row0 = (position.y * T::rows) - D::haloFast + D::pad;
+#pragma unroll
+                for (int c = 0; c < T::cols; c++) {
+#pragma unroll
+                    for (int r = 0; r < T::rows; r++)
+                        if (row0 + r >= 0 && row0 + r < D::maskedFast)
+                            tile[(((position.x * T::cols) + c) * D::maskedFast) + row0 + r] = masked[round][c][r];
+                }
+            }
+        }
+        __syncthreads();
+        // |e| * w repeats the nearest image pixel (clamped reads) and the rows above/below the image part of the tile first, then the columns left/right
+        const int insideSlow0 = max(-slow0, 0), insideSlow1 = min(width - slow0, D::maskedSlow);
+        const int insideFast0 = max(-maskedFast0, 0), insideFast1 = min(height - maskedFast0, D::maskedFast);
+        const int ringSlow0 = max(insideSlow0 - D::pad, 0), ringSlow1 = min(insideSlow1 + D::pad, D::maskedSlow);
+        const int ringFast0 = max(insideFast0 - D::pad, 0), ringFast1 = min(insideFast1 + D::pad, D::maskedFast);
+        const int rowsAbove = insideFast0 - ringFast0, outsideRows = rowsAbove + (ringFast1 - insideFast1);
+        const int colsLeft = insideSlow0 - ringSlow0, outsideCols = colsLeft + (ringSlow1 - insideSlow1);
+        const int rowElements = outsideRows * (ringSlow1 - ringSlow0);
+        const int outsideElements = rowElements + (outsideCols * (insideFast1 - insideFast0));
+        if (outsideElements > 0) {
+            for (int i = threadIdx.x; i < outsideElements; i += D::threads) {
+                int c, r;
+                if (i < rowElements) {
+                    c = ringSlow0 + (i / outsideRows);
+                    const int k = i % outsideRows;
+                    r = k < rowsAbove ? ringFast0 + k : insideFast1 + (k - rowsAbove);
+                } else {
+                    r = insideFast0 + ((i - rowElements) / outsideCols);
+                    const int k = (i - rowElements) % outsideCols;
+                    c = k < colsLeft ? ringSlow0 + k : insideSlow1 + (k - colsLeft);
+                }
+                tile[(c * D::maskedFast) + r] = tile[(clamp(c, insideSlow0, insideSlow1 - 1) * D::maskedFast) + clamp(r, insideFast0, insideFast1 - 1)];
+            }
+            __syncthreads();
+        }
+
+#pragma unroll
+        for (int own = 0; own < D::own; own++) {
+            const int slow = ((threadIdx.x / 32) * T::cols) + (own * D::warpsSlow);
+            float ez[T::cols][T::rows];
+            predictionErrorTile<p, D::maskedFast>(tile, coef, D::haloSlow - D::pad + slow, (threadIdx.x % 32) * T::rows, ez);
+            const int2 origin = make_int2(tileSlow0 + slow, tileFast0 + ((threadIdx.x % 32) * T::rows));
+#pragma unroll
+            for (int c = 0; c < T::cols; c++) {
+                if (origin.x + c >= width)
+                    continue;
+#pragma unroll
+                for (int r = 0; r < T::rows; r++) {
+                    const bool inside = origin.y + r < height;
+                    const float e = inside ? eu[own][c][r] : 0.0f;
+                    const float z = inside ? ez[c][r] : 0.0f;
+                    threadData.dot += e * z;
+                    threadData.normU += e * e;
+                    threadData.normZ += z * z;
+                }
             }
         }
     }
@@ -344,7 +437,7 @@ __global__ void __launch_bounds__(ErrorTile<p>::threads) calculate_error_sequenc
 
     // Final block sums all block outputs and writes normalized correlation
     CorrelationData total = {0.0f, 0.0f, 0.0f};
-    for (int i = threadIdx.x; i < numBlocks; i += T::threads) {
+    for (int i = threadIdx.x; i < numBlocks; i += D::threads) {
         total.dot += __ldcg(partialDots + i);
         total.normU += __ldcg(partialNormU + i);
         total.normZ += __ldcg(partialNormZ + i);

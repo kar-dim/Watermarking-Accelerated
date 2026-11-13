@@ -104,12 +104,11 @@ class WatermarkCuda final : public WatermarkBase {
         if constexpr (L::copyBorderRows)
             borderRowsCopy = CudaArray<float>(L::borderCopyRows * this->baseCols, stream);
         solverSystem = CudaArray<uint64_t>(solverSystemSize, stream);
-        const dim3 errorGrid = ErrorTile<p>::grid(this->baseCols, this->baseRows);
-        const int corrNumBlocks = errorGrid.x * errorGrid.y;
+        const dim3 detectGrid = DetectTile<p>::grid(this->baseCols, this->baseRows);
+        const int corrNumBlocks = detectGrid.x * detectGrid.y;
         // per frame buffers live with object, CUDA graphs require fixed pointers
         u = CudaArray<__half>(this->baseRows, this->baseCols, stream);
         sumSq = CudaArray<uint64_t>::zeros(2, stream);
-        errorSeq = ImageBuffer(this->baseRows, this->baseCols, stream);
         dotPartial = ImageBuffer(corrNumBlocks, stream);
         uNormPartial = ImageBuffer(corrNumBlocks, stream);
         zNormPartial = ImageBuffer(corrNumBlocks, stream);
@@ -160,11 +159,10 @@ class WatermarkCuda final : public WatermarkBase {
     static constexpr int solverSystemSize = ((localSize * (localSize + 1)) / 2) + localSize;
     CudaArray<uint64_t> solverSystem;
 
-    // per frame buffers: u, [0] = sum(u^2) (fixed point) and [1] = max|e| float bits, the detection prediction error, the per block
-    // correlation sums, the last block ticket counter and the result (mapped pinned host memory, written by the correlation kernel)
+    // per frame buffers: u, [0] = sum(u^2) (fixed point) and [1] = max|e| float bits, the per block correlation sums, the last block ticket
+    // counter and the result (mapped pinned host memory, written by the detection kernel)
     CudaArray<__half> u;
     CudaArray<uint64_t> sumSq;
-    ImageBuffer errorSeq;
     ImageBuffer dotPartial;
     ImageBuffer uNormPartial;
     ImageBuffer zNormPartial;
@@ -216,21 +214,13 @@ class WatermarkCuda final : public WatermarkBase {
         CUDA_CHECK(cudaGetLastError());
     }
 
-    // detection kernels (recorded into detectGraph on graphStream), the correlation kernel writes the result to mapped pinned host memory
+    // detection kernels (recorded into detectGraph on graphStream): the prediction coefficients, then the prediction error of the image
+    // and of (mask x watermark) correlated in one kernel, its last block writes the result to mapped pinned host memory
     void enqueueDetect(const ImageBuffer& inputImage, const cudaStream_t graphStream) {
-        // prediction coefficients (Rx, rx, Cholesky)
         solvePredictionCoefficients(inputImage.data(), graphStream);
-
-        // prediction error of the image (with its sign, the correlation needs it)
-        const dim3 errorGrid = ErrorTile<p>::grid(this->baseCols, this->baseRows);
-        calculate_error_sequence<p>
-            <<<errorGrid, ErrorTile<p>::threads, 0, graphStream>>>(inputImage.data(), errorSeq.data(), this->coefficients.data(), this->baseCols, this->baseRows, this->stopFlag.data());
-        CUDA_CHECK(cudaGetLastError());
-
-        // prediction error of (mask x watermark), correlated with the image's prediction error. The mask |e| is formed while loading, not
-        // divided by max|e| (the correlation does not depend on the scale)
-        calculate_error_sequence_and_partial_corr_fused<p><<<errorGrid, ErrorTile<p>::threads, 0, graphStream>>>(errorSeq.data(), this->randomMatrix.data(), this->coefficients.data(),
-            dotPartial.data(), uNormPartial.data(), zNormPartial.data(), corrBlockCounter.data(), correlationHost.get(), this->baseCols, this->baseRows, this->stopFlag.data());
+        detect_correlation_fused<p><<<DetectTile<p>::grid(this->baseCols, this->baseRows), DetectTile<p>::threads, 0, graphStream>>>(inputImage.data(), this->randomMatrix.data(),
+            this->coefficients.data(), dotPartial.data(), uNormPartial.data(), zNormPartial.data(), corrBlockCounter.data(), correlationHost.get(), this->baseCols, this->baseRows,
+            this->stopFlag.data());
         CUDA_CHECK(cudaGetLastError());
     }
 

@@ -37,11 +37,14 @@ class WatermarkOCL final : public WatermarkBase {
         const int shiftInteriorBlocks = std::max(blocksPerGroup, 1) * shiftGroups;
         shiftSumsGlobal = cl::NDRange(static_cast<size_t>(shiftInteriorBlocks + borderBlocks) * groupSize);
 
-        // prediction error tiles: 32 x 4 rows x (groupSize / 32) x 2 columns per workgroup
+        // prediction error tiles: 32 x 4 rows x (groupSize / 32) x 2 columns per workgroup, detection tiles are detectionTilePatches times wider
         const int tilesFast = (this->baseRows + 127) / 128;
         const int tilesSlow = (this->baseCols + (groupSize / 16) - 1) / (groupSize / 16);
         errorGlobal = cl::NDRange(static_cast<size_t>(tilesFast) * groupSize, tilesSlow);
-        const int corrGroups = tilesFast * tilesSlow;
+        const int detectTileColumns = detectionTilePatches * (groupSize / 16);
+        const int detectTilesSlow = (this->baseCols + detectTileColumns - 1) / detectTileColumns;
+        detectGlobal = cl::NDRange(static_cast<size_t>(tilesFast) * groupSize, detectTilesSlow);
+        const int corrGroups = tilesFast * detectTilesSlow;
 
         // buffers: shift sums, border rows, solver system, u, stats and correlation sums
         shiftSums = OclArray<uint64_t>::zeros(shiftSumsSize, rawQueue);
@@ -50,7 +53,6 @@ class WatermarkOCL final : public WatermarkBase {
         solverSystem = OclArray<uint64_t>(solverSystemSize, rawQueue);
         u = OclArray<cl_half>(this->baseRows, this->baseCols, rawQueue);
         sumSq = OclArray<uint64_t>::zeros(2, rawQueue);
-        errorSeq = ImageBuffer(this->baseRows, this->baseCols, rawQueue);
         dotPartial = ImageBuffer(corrGroups, rawQueue);
         uNormPartial = ImageBuffer(corrGroups, rawQueue);
         zNormPartial = ImageBuffer(corrGroups, rawQueue);
@@ -71,14 +73,12 @@ class WatermarkOCL final : public WatermarkBase {
             setArgs(copyBorderRowsKernel, cl::Buffer(), borderCopy, this->baseCols, this->baseRows);
 
         const cl::NDRange errorLocal(groupSize);
-        errorSequenceKernel = cl::Kernel(program, "calculate_error_sequence");
-        setArgs(errorSequenceKernel, cl::Buffer(), errorSeq.clBuffer(), coefficients.clBuffer(), this->baseCols, this->baseRows, stopFlag.clBuffer());
         meErrorKernel = cl::Kernel(program, "me_error_sequence_u_sumsq_fused");
         setArgs(meErrorKernel, cl::Buffer(), this->randomMatrix.clBuffer(), u.clBuffer(), coefficients.clBuffer(), sumSq.clBuffer(), this->baseCols, this->baseRows, stopFlag.clBuffer(),
             cl::Local(reductionScratchBytes(program, "me_error_sequence_u_sumsq_fused", errorLocal, 1)));
-        corrKernel = cl::Kernel(program, "calculate_error_sequence_and_partial_corr_fused");
-        setArgs(corrKernel, errorSeq.clBuffer(), this->randomMatrix.clBuffer(), coefficients.clBuffer(), dotPartial.clBuffer(), uNormPartial.clBuffer(), zNormPartial.clBuffer(), this->baseCols,
-            this->baseRows, stopFlag.clBuffer(), cl::Local(3 * groupSize * sizeof(float)));
+        detectKernel = cl::Kernel(program, "detect_correlation_fused");
+        setArgs(detectKernel, cl::Buffer(), this->randomMatrix.clBuffer(), coefficients.clBuffer(), dotPartial.clBuffer(), uNormPartial.clBuffer(), zNormPartial.clBuffer(), this->baseCols,
+            this->baseRows, stopFlag.clBuffer());
         corrFinalizeKernel = cl::Kernel(program, "finalize_correlation");
         setArgs(corrFinalizeKernel, dotPartial.clBuffer(), uNormPartial.clBuffer(), zNormPartial.clBuffer(), correlation.clBuffer(), corrGroups, cl::Local(3 * groupSize * sizeof(float)));
 
@@ -100,11 +100,9 @@ class WatermarkOCL final : public WatermarkBase {
             [&]() {
                 const cl::Buffer input = inputImage.clBuffer();
                 solvePredictionCoefficients(input);
-                // prediction error of image with sign for correlation
-                errorSequenceKernel.setArg(0, input);
-                enqueue(errorSequenceKernel, errorGlobal, cl::NDRange(groupSize));
-                // prediction error of mask * watermark, correlated with image prediction error
-                enqueue(corrKernel, errorGlobal, cl::NDRange(groupSize));
+                // prediction error of the image and of mask * watermark, correlated in one kernel
+                detectKernel.setArg(0, input);
+                enqueue(detectKernel, detectGlobal, cl::NDRange(groupSize));
                 enqueue(corrFinalizeKernel, cl::NDRange(groupSize), cl::NDRange(groupSize));
             },
             "detectWatermark");
@@ -150,20 +148,19 @@ class WatermarkOCL final : public WatermarkBase {
     FlagBuffer stopFlag;
 
     int borderBlocksPerLine;
-    cl::NDRange shiftSumsGlobal, errorGlobal, applyGlobal;
+    cl::NDRange shiftSumsGlobal, errorGlobal, detectGlobal, applyGlobal;
     OclArray<uint64_t> shiftSums;
     OclArray<float> borderRowsCopy;
     OclArray<uint64_t> solverSystem;
     OclArray<cl_half> u;
     OclArray<uint64_t> sumSq;
-    ImageBuffer errorSeq;
     ImageBuffer dotPartial;
     ImageBuffer uNormPartial;
     ImageBuffer zNormPartial;
     ImageBuffer correlation;
 
     cl::Kernel copyBorderRowsKernel, shiftSumsKernel, buildSystemKernel, solveSystemKernel;
-    cl::Kernel errorSequenceKernel, meErrorKernel, corrKernel, corrFinalizeKernel;
+    cl::Kernel meErrorKernel, detectKernel, corrFinalizeKernel;
     cl::Kernel applyRgbKernel, applyGrayKernel, applyRowMajorKernel;
 
     // enqueues kernel on in-order queue

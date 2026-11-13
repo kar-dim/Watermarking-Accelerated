@@ -1,5 +1,6 @@
 #include "BatchUtils.hpp"
 #include "include/ImageBatch.hpp"
+#include "include/Utf8Path.hpp"
 #include "OutputFile.hpp"
 #include "utils.hpp"
 #include <algorithm>
@@ -214,13 +215,13 @@ const char* imageBatchStateName(const ImageBatchState state) {
 std::vector<ImageBatchJob> prepareImageBatch(const std::vector<std::string>& inputs, const std::string& outputDirectory, const bool detect, const std::string& suffix) {
     if (!detect && outputDirectory.empty())
         throw std::invalid_argument("Choose an image batch output folder");
-    const auto folder = detect ? fs::path{} : normalized(fs::u8path(outputDirectory));
+    const auto folder = detect ? fs::path{} : normalized(pathFromUtf8(outputDirectory));
     std::set<fs::path, PathLess> reserved, seen;
     std::vector<fs::path> paths;
     for (const auto& input : inputs) {
         if (input.empty())
             throw std::invalid_argument("An image input path is empty");
-        const auto path = normalized(fs::u8path(input));
+        const auto path = normalized(pathFromUtf8(input));
         reserved.insert(path);
         if (seen.insert(path).second)
             paths.push_back(path);
@@ -229,7 +230,7 @@ std::vector<ImageBatchJob> prepareImageBatch(const std::vector<std::string>& inp
     for (const auto& input : paths) {
         std::string output;
         if (!detect) {
-            const auto stem = input.stem().native() + fs::u8path(suffix).native();
+            const auto stem = input.stem().native() + pathFromUtf8(suffix).native();
             auto candidate = folder / (stem + input.extension().native());
             for (std::size_t number = 2; reserved.contains(candidate) || fs::exists(candidate); ++number)
                 candidate = folder / (stem + L"_" + std::to_wstring(number) + input.extension().native());
@@ -263,13 +264,13 @@ ImageBatchSummary runImageBatch(const ImageBatchSettings& settings, const std::v
     for (const auto& job : jobs) {
         if (job.inputPath.empty())
             throw std::invalid_argument("An image input path is empty");
-        inputs.insert(normalized(fs::u8path(job.inputPath)));
+        inputs.insert(normalized(pathFromUtf8(job.inputPath)));
     }
     for (const auto& job : jobs) {
         if (!settings.detect) {
             if (job.outputPath.empty())
                 throw std::invalid_argument("An image output path is empty");
-            const auto path = normalized(fs::u8path(job.outputPath));
+            const auto path = normalized(pathFromUtf8(job.outputPath));
             if (inputs.contains(path) || !outputs.insert(path).second)
                 throw std::invalid_argument("Image batch outputs must be distinct from every input and other output");
         }
@@ -376,8 +377,11 @@ ImageBatchSummary runImageBatch(const ImageBatchSettings& settings, const std::v
                         std::future<PreloadedHandle> loaded;
                     };
                     std::deque<Pending> pending;
-                    const auto load = [&, device
-#if defined(_USE_OPENCL_)
+                    const auto load = [&
+#if defined(_USE_CUDA_)
+                                          ,
+                                          device
+#elif defined(_USE_OPENCL_)
                                           ,
                                           owner
 #endif
@@ -441,7 +445,7 @@ ImageBatchSummary runImageBatch(const ImageBatchSettings& settings, const std::v
                                 queue.update(next.id, ImageBatchState::Completed, {}, correlation);
                             } else {
                                 auto output = std::make_unique<OutputFile>();
-                                fs::create_directories(fs::absolute(fs::u8path(jobs[next.id].outputPath)).parent_path());
+                                fs::create_directories(fs::absolute(pathFromUtf8(jobs[next.id].outputPath)).parent_path());
                                 output->prepare(jobs[next.id].outputPath, true);
                                 embedImage(session.get());
                                 const auto path = output->path();

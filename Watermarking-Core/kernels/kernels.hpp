@@ -174,10 +174,9 @@ WM_INLINE float roundToHalf(const float value) {
 #define ET_FILL_ITERATIONS  ((ET_SH_SIZE + WG_SIZE - 1) / WG_SIZE)
 #define ET_OUTPUTS          (ET_ROWS * ET_COLS)
 
-// Fills local memory tile with image region using clamped edges, masked: |input| * w (the ME mask times the watermark)
+// Fills local memory tile with image region using clamped edges
 // Loads all values into registers before writing to local memory
-WM_INLINE void fillErrorTile(const __global float* restrict input, const __global half* restrict w, const int masked, __local float* restrict region, const int tileSlow0,
-    const int tileFast0, const int width, const int height)
+WM_INLINE void fillErrorTile(const __global float* restrict input, __local float* restrict region, const int tileSlow0, const int tileFast0, const int width, const int height)
 {
     const int lid = get_local_id(0);
     float values[ET_FILL_ITERATIONS];
@@ -187,8 +186,7 @@ WM_INLINE void fillErrorTile(const __global float* restrict input, const __globa
         if (i < ET_SH_SIZE) {
             const int r = i % ET_SH_FAST;
             const int c = i / ET_SH_FAST;
-            const int idx = (clamp(tileSlow0 - PAD + c, 0, width - 1) * height) + clamp(tileFast0 - PAD + r, 0, height - 1);
-            values[it] = masked ? fabs(input[idx]) * vload_half(idx, w) : input[idx];
+            values[it] = input[(clamp(tileSlow0 - PAD + c, 0, width - 1) * height) + clamp(tileFast0 - PAD + r, 0, height - 1)];
         }
     }
     #pragma unroll
@@ -211,8 +209,8 @@ WM_INLINE void loadCoefficients(const __global float* restrict coeffs, float* re
     }
 }
 
-// Computes prediction errors for all outputs assigned to this work-item
-WM_INLINE void predictionErrorTile(__local const float* restrict region, const float* restrict coef, const int slow0, const int fast0, float* restrict error) {
+// Computes prediction errors for all outputs assigned to this work-item, stride: the rows of a region column
+WM_INLINE void predictionErrorTile(__local const float* restrict region, const int stride, const float* restrict coef, const int slow0, const int fast0, float* restrict error) {
     float dot[ET_OUTPUTS];
     float pixel[ET_OUTPUTS];
     #pragma unroll
@@ -221,7 +219,7 @@ WM_INLINE void predictionErrorTile(__local const float* restrict region, const f
     #pragma unroll
     for (int wc = 0; wc < WINDOW_SIZE + ET_COLS - 1; wc++) {
         float window[ET_WINDOW_FAST];
-        __local const float4* src = (__local const float4*)(region + ((slow0 + wc) * ET_SH_FAST) + fast0);
+        __local const float4* src = (__local const float4*)(region + ((slow0 + wc) * stride) + fast0);
         #pragma unroll
         for (int v = 0; v < ET_WINDOW_FAST / 4; v++) {
             const float4 value = src[v];
@@ -255,24 +253,7 @@ WM_INLINE void predictionErrorTile(__local const float* restrict region, const f
         error[o] = pixel[o] - dot[o];
 }
 
-// Loads 4 consecutive rows with one vector load when all are inside the column (vload4 needs only element alignment), scalar reads otherwise
-WM_INLINE float4 loadRows4(const __global float* restrict input, const int x, const int y0, const int height) {
-    const int idx = (x * height) + y0;
-    if (y0 + 3 < height)
-        return vload4(0, input + idx);
-    return (float4)(y0 < height ? input[idx] : 0.0f, y0 + 1 < height ? input[idx + 1] : 0.0f, y0 + 2 < height ? input[idx + 2] : 0.0f, y0 + 3 < height ? input[idx + 3] : 0.0f);
-}
-WM_INLINE void storeRows4(__global float* restrict output, const int x, const int y0, const int height, const float4 value) {
-    const int idx = (x * height) + y0;
-    if (y0 + 3 < height) {
-        vstore4(value, 0, output + idx);
-        return;
-    }
-    if (y0 < height) output[idx] = value.x;
-    if (y0 + 1 < height) output[idx + 1] = value.y;
-    if (y0 + 2 < height) output[idx + 2] = value.z;
-    if (y0 + 3 < height) output[idx + 3] = value.w;
-}
+// Loads 4 consecutive rows with one vector load when all are inside the column (vload_half4 needs only element alignment), scalar reads otherwise
 WM_INLINE float4 loadRows4Half(const __global half* restrict input, const int x, const int y0, const int height) {
     const int idx = (x * height) + y0;
     if (y0 + 3 < height)
@@ -302,31 +283,6 @@ WM_INLINE void storeRows4Half(__global half* restrict output, const int x, const
 )CLC"
                                    R"CLC(
 
-// Computes prediction error across the image for detection
-__kernel __attribute__((reqd_work_group_size(WG_SIZE, 1, 1))) void calculate_error_sequence(__global const float* restrict input, __global float* restrict errorOut,
-    __global const float* restrict coeffs, const int width, const int height, __global const int* restrict stopFlag)
-{
-    __local float4 regionStorage[ET_SH_SIZE / 4];
-    __local float* region = (__local float*)regionStorage;
-    float coef[NEIGHB_SIZE];
-    fillErrorTile(input, 0, 0, region, ET_TILE_SLOW0, ET_TILE_FAST0, width, height);
-    loadCoefficients(coeffs, coef);
-    barrier(CLK_LOCAL_MEM_FENCE);
-
-    float error[ET_OUTPUTS];
-    #pragma unroll
-    for (int o = 0; o < ET_OUTPUTS; o++)
-        error[o] = 0.0f;
-    if (!(*stopFlag))
-        predictionErrorTile(region, coef, ET_SLOW0, ET_FAST0, error);
-    const int x0 = ET_TILE_SLOW0 + ET_SLOW0;
-    const int y0 = ET_TILE_FAST0 + ET_FAST0;
-    #pragma unroll
-    for (int c = 0; c < ET_COLS; c++)
-        if (x0 + c < width)
-            storeRows4(errorOut, x0 + c, y0, height, vload4(c, error));
-}
-
 // Computes prediction error, creates u = (|e| / 255) * w, and tracks energy sums
 __kernel __attribute__((reqd_work_group_size(WG_SIZE, 1, 1))) void me_error_sequence_u_sumsq_fused(__global const float* restrict input, __global const half* restrict w,
     __global half* restrict u, __global const float* restrict coeffs, volatile __global ulong* restrict globalSumSqMax, const int width, const int height,
@@ -335,7 +291,7 @@ __kernel __attribute__((reqd_work_group_size(WG_SIZE, 1, 1))) void me_error_sequ
     __local float4 regionStorage[ET_SH_SIZE / 4];
     __local float* region = (__local float*)regionStorage;
     float coef[NEIGHB_SIZE];
-    fillErrorTile(input, 0, 0, region, ET_TILE_SLOW0, ET_TILE_FAST0, width, height);
+    fillErrorTile(input, region, ET_TILE_SLOW0, ET_TILE_FAST0, width, height);
     loadCoefficients(coeffs, coef);
     barrier(CLK_LOCAL_MEM_FENCE);
 
@@ -344,7 +300,7 @@ __kernel __attribute__((reqd_work_group_size(WG_SIZE, 1, 1))) void me_error_sequ
     for (int o = 0; o < ET_OUTPUTS; o++)
         error[o] = 0.0f;
     if (!(*stopFlag)) // Skip computation if system solve failed
-        predictionErrorTile(region, coef, ET_SLOW0, ET_FAST0, error);
+        predictionErrorTile(region, ET_SH_FAST, coef, ET_SLOW0, ET_FAST0, error);
     // Outputs outside image bounds contribute zero
     const int x0 = ET_TILE_SLOW0 + ET_SLOW0;
     const int y0 = ET_TILE_FAST0 + ET_FAST0;
@@ -378,49 +334,199 @@ __kernel __attribute__((reqd_work_group_size(WG_SIZE, 1, 1))) void me_error_sequ
     }
 }
 
-// Correlation of the image prediction error e_u with the prediction error of |e_u| * w (the ME mask times the watermark, not divided by
-// correlation independent of scale, next queued kernel reduces partial sums
-__kernel __attribute__((reqd_work_group_size(WG_SIZE, 1, 1))) void calculate_error_sequence_and_partial_corr_fused(__global const float* restrict e_u,
-    __global const half* restrict w, __global const float* restrict coeffs, __global float* restrict partialDots, __global float* restrict partialNormU,
-    __global float* restrict partialNormZ, const int width, const int height,
-    __global const int* restrict stopFlag, __local float* restrict reductionScratch)
+)CLC"
+                                   R"CLC(
+
+// Detection tile: DT_OWN patches per work-item side by side and a halo of whole patches around them, wider tiles lower the share of the halo
+#define DT_TILE_SLOW            (DT_OWN * ET_TILE_SLOW)
+#define DT_OWN_PATCHES          (DT_OWN * WG_SIZE)
+#define DT_HALO_SLOW            (((PAD + ET_COLS - 1) / ET_COLS) * ET_COLS)
+#define DT_HALO_FAST            (((PAD + ET_ROWS - 1) / ET_ROWS) * ET_ROWS)
+#define DT_PATCHES_FAST         ((ET_TILE_FAST + (2 * DT_HALO_FAST)) / ET_ROWS)
+#define DT_TILE_PATCHES_FAST    (ET_TILE_FAST / ET_ROWS)
+#define DT_TILE_PATCHES_SLOW    (DT_TILE_SLOW / ET_COLS)
+#define DT_SIDE_PATCHES_SLOW    (DT_HALO_SLOW / ET_COLS)
+#define DT_SIDE_PATCHES         (2 * DT_SIDE_PATCHES_SLOW * DT_PATCHES_FAST)
+#define DT_PATCHES              (DT_OWN_PATCHES + DT_SIDE_PATCHES + (2 * (DT_HALO_FAST / ET_ROWS) * DT_TILE_PATCHES_SLOW))
+// Image tile around the grown tile, windows of the patches start at multiples of 4 rows
+#define DT_IMAGE_FAST           ((DT_PATCHES_FAST * ET_ROWS) - ET_ROWS + ET_WINDOW_FAST)
+#define DT_IMAGE_SLOW           (DT_TILE_SLOW + (2 * DT_HALO_SLOW) + (2 * PAD))
+#define DT_IMAGE_SIZE           (DT_IMAGE_SLOW * DT_IMAGE_FAST)
+#define DT_FILL_ITERATIONS      ((DT_IMAGE_SIZE + WG_SIZE - 1) / WG_SIZE)
+// |e| * w around the tile, rows start PAD before the tile (aligned windows for the tile's patches)
+#define DT_MASKED_FAST          ET_SH_FAST
+#define DT_MASKED_SLOW          (DT_TILE_SLOW + (2 * DT_HALO_SLOW))
+#define DT_MASKED_SIZE          (DT_MASKED_SLOW * DT_MASKED_FAST)
+// One local buffer holds the image tile, then |e| * w, then the reduction scratch: a smaller footprint keeps more work-groups resident
+#define DT_TILE_SIZE            (DT_IMAGE_SIZE > DT_MASKED_SIZE ? DT_IMAGE_SIZE : DT_MASKED_SIZE)
+#define DT_ROUNDS               ((DT_PATCHES + WG_SIZE - 1) / WG_SIZE)
+
+// Fills the local memory image tile with clamped edges, slow0 and fast0: the image position of its first element
+WM_INLINE void fillDetectTile(const __global float* restrict input, __local float* restrict image, const int slow0, const int fast0, const int width, const int height)
 {
-    __local float4 regionStorage[ET_SH_SIZE / 4];
-    __local float* region = (__local float*)regionStorage;
+    const int lid = get_local_id(0);
+    float values[DT_FILL_ITERATIONS];
+    #pragma unroll
+    for (int it = 0; it < DT_FILL_ITERATIONS; it++) {
+        const int i = lid + (it * WG_SIZE);
+        if (i < DT_IMAGE_SIZE)
+            values[it] = input[(clamp(slow0 + (i / DT_IMAGE_FAST), 0, width - 1) * height) + clamp(fast0 + (i % DT_IMAGE_FAST), 0, height - 1)];
+    }
+    #pragma unroll
+    for (int it = 0; it < DT_FILL_ITERATIONS; it++) {
+        const int i = lid + (it * WG_SIZE);
+        if (i < DT_IMAGE_SIZE)
+            image[i] = values[it];
+    }
+}
+
+// Patch on the grown tile: the work-items' own tile patches first, then the patches around the tile
+WM_INLINE int2 detectPatchPosition(const int patch) {
+    if (patch < DT_OWN_PATCHES)
+        return (int2)(DT_SIDE_PATCHES_SLOW + (patch / DT_TILE_PATCHES_FAST), (DT_HALO_FAST / ET_ROWS) + (patch % DT_TILE_PATCHES_FAST));
+    const int halo = patch - DT_OWN_PATCHES;
+    if (halo < DT_SIDE_PATCHES) {
+        const int side = halo / DT_PATCHES_FAST;
+        return (int2)(side < DT_SIDE_PATCHES_SLOW ? side : side + DT_TILE_PATCHES_SLOW, halo % DT_PATCHES_FAST);
+    }
+    const int above = halo - DT_SIDE_PATCHES;
+    const int row = above / DT_TILE_PATCHES_SLOW;
+    return (int2)(DT_SIDE_PATCHES_SLOW + (above % DT_TILE_PATCHES_SLOW), row < DT_HALO_FAST / ET_ROWS ? row : row + DT_TILE_PATCHES_FAST);
+}
+
+// |e| * w of a patch at y0, the image row of its first output. Zero outside the image, replaced later by the nearest image pixel
+WM_INLINE void maskPatch(__global const half* restrict w, const float* restrict e, const int x0, const int y0, const int width, const int height, float* restrict masked) {
+    #pragma unroll
+    for (int c = 0; c < ET_COLS; c++) {
+        const float4 wv = (x0 + c >= 0 && x0 + c < width && y0 >= 0) ? loadRows4Half(w, x0 + c, y0, height) : (float4)(0.0f);
+        const float wr[4] = {wv.x, wv.y, wv.z, wv.w};
+        #pragma unroll
+        for (int r = 0; r < ET_ROWS; r++)
+            masked[(c * ET_ROWS) + r] = fabs(e[(c * ET_ROWS) + r]) * wr[r];
+    }
+}
+
+// Detection in one kernel: the prediction error e of the image is computed on the tile and a halo around it, then the prediction error of
+// |e| * w (not divided by max|e|: the correlation does not depend on the scale) and the correlation sums. e never leaves the work-group
+__kernel __attribute__((reqd_work_group_size(WG_SIZE, 1, 1))) void detect_correlation_fused(__global const float* restrict input, __global const half* restrict w,
+    __global const float* restrict coeffs, __global float* restrict partialDots, __global float* restrict partialNormU, __global float* restrict partialNormZ,
+    const int width, const int height, __global const int* restrict stopFlag)
+{
+    __local float4 tileStorage[DT_TILE_SIZE / 4];
+    __local float* tile = (__local float*)tileStorage;
     float coef[NEIGHB_SIZE];
-    fillErrorTile(e_u, w, 1, region, ET_TILE_SLOW0, ET_TILE_FAST0, width, height);
+    const int lid = get_local_id(0);
+    const int tileSlow0 = (int)get_group_id(1) * DT_TILE_SLOW;
+    const int tileFast0 = ET_TILE_FAST0;
+    // First grown tile column and first masked row in the image
+    const int slow0 = tileSlow0 - DT_HALO_SLOW;
+    const int maskedFast0 = tileFast0 - PAD;
+    fillDetectTile(input, tile, slow0 - PAD, tileFast0 - DT_HALO_FAST - PAD, width, height);
     loadCoefficients(coeffs, coef);
     barrier(CLK_LOCAL_MEM_FENCE);
 
+    // A failed solve skips the work, the barriers stay outside of the branches
+    const int stopped = *stopFlag;
+    // e of the own tile patches and |e| * w of the halo patches wait in registers until no work-item reads the image tile
+    float eu[DT_OWN][ET_OUTPUTS];
+    float masked[DT_ROUNDS][ET_OUTPUTS];
+    #pragma unroll
+    for (int own = 0; own < DT_OWN; own++)
+        #pragma unroll
+        for (int o = 0; o < ET_OUTPUTS; o++)
+            eu[own][o] = 0.0f;
+    #pragma unroll
+    for (int round = 0; round < DT_ROUNDS; round++) {
+        const int patch = lid + (round * WG_SIZE);
+        if (!stopped && patch < DT_PATCHES) {
+            const int2 position = detectPatchPosition(patch);
+            if (round < DT_OWN) {
+                predictionErrorTile(tile, DT_IMAGE_FAST, coef, position.x * ET_COLS, position.y * ET_ROWS, eu[round]);
+            } else {
+                float e[ET_OUTPUTS];
+                predictionErrorTile(tile, DT_IMAGE_FAST, coef, position.x * ET_COLS, position.y * ET_ROWS, e);
+                maskPatch(w, e, slow0 + (position.x * ET_COLS), tileFast0 - DT_HALO_FAST + (position.y * ET_ROWS), width, height, masked[round]);
+            }
+        }
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+    #pragma unroll
+    for (int round = 0; round < DT_ROUNDS; round++) {
+        const int patch = lid + (round * WG_SIZE);
+        if (!stopped && patch < DT_PATCHES) {
+            const int2 position = detectPatchPosition(patch);
+            // own patches load w after the barrier, their |e| * w would need 8 more registers each
+            if (round < DT_OWN)
+                maskPatch(w, eu[round], slow0 + (position.x * ET_COLS), tileFast0 - DT_HALO_FAST + (position.y * ET_ROWS), width, height, masked[round]);
+            const int row0 = (position.y * ET_ROWS) - DT_HALO_FAST + PAD;
+            #pragma unroll
+            for (int c = 0; c < ET_COLS; c++) {
+                #pragma unroll
+                for (int r = 0; r < ET_ROWS; r++)
+                    if (row0 + r >= 0 && row0 + r < DT_MASKED_FAST)
+                        tile[(((position.x * ET_COLS) + c) * DT_MASKED_FAST) + row0 + r] = masked[round][(c * ET_ROWS) + r];
+            }
+        }
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+    // Outside the image |e| * w repeats the nearest image pixel (the clamped reads of a full-size mask), outputs read at most PAD
+    // pixels out: the rows above and below the image part of the tile first, then the columns left and right of it
+    const int insideSlow0 = max(-slow0, 0), insideSlow1 = min(width - slow0, DT_MASKED_SLOW);
+    const int insideFast0 = max(-maskedFast0, 0), insideFast1 = min(height - maskedFast0, DT_MASKED_FAST);
+    const int ringSlow0 = max(insideSlow0 - PAD, 0), ringSlow1 = min(insideSlow1 + PAD, DT_MASKED_SLOW);
+    const int ringFast0 = max(insideFast0 - PAD, 0), ringFast1 = min(insideFast1 + PAD, DT_MASKED_FAST);
+    const int rowsAbove = insideFast0 - ringFast0, outsideRows = rowsAbove + (ringFast1 - insideFast1);
+    const int colsLeft = insideSlow0 - ringSlow0, outsideCols = colsLeft + (ringSlow1 - insideSlow1);
+    const int rowElements = outsideRows * (ringSlow1 - ringSlow0);
+    const int outsideElements = stopped ? 0 : rowElements + (outsideCols * (insideFast1 - insideFast0));
+    for (int i = lid; i < outsideElements; i += WG_SIZE) {
+        int c, r;
+        if (i < rowElements) {
+            c = ringSlow0 + (i / outsideRows);
+            const int k = i % outsideRows;
+            r = k < rowsAbove ? ringFast0 + k : insideFast1 + (k - rowsAbove);
+        } else {
+            r = insideFast0 + ((i - rowElements) / outsideCols);
+            const int k = (i - rowElements) % outsideCols;
+            c = k < colsLeft ? ringSlow0 + k : insideSlow1 + (k - colsLeft);
+        }
+        tile[(c * DT_MASKED_FAST) + r] = tile[(clamp(c, insideSlow0, insideSlow1 - 1) * DT_MASKED_FAST) + clamp(r, insideFast0, insideFast1 - 1)];
+    }
+    barrier(CLK_LOCAL_MEM_FENCE);
+
+    // Out-of-bounds pixels or failed solves contribute zero
     float threadDot = 0.0f;
     float threadNormU = 0.0f;
     float threadNormZ = 0.0f;
-    if (!(*stopFlag)) {
-        float ez[ET_OUTPUTS];
-        predictionErrorTile(region, coef, ET_SLOW0, ET_FAST0, ez);
-        const int x0 = ET_TILE_SLOW0 + ET_SLOW0;
-        const int y0 = ET_TILE_FAST0 + ET_FAST0;
+    if (!stopped) {
         #pragma unroll
-        for (int c = 0; c < ET_COLS; c++) {
-            if (x0 + c >= width)
-                continue;
-            // e_u reads zero outside image bounds
-            const float4 euv = loadRows4(e_u, x0 + c, y0, height);
-            const float eu[4] = {euv.x, euv.y, euv.z, euv.w};
+        for (int own = 0; own < DT_OWN; own++) {
+            float ez[ET_OUTPUTS];
+            predictionErrorTile(tile, DT_MASKED_FAST, coef, DT_HALO_SLOW - PAD + ET_SLOW0 + (own * ET_TILE_SLOW), ET_FAST0, ez);
+            const int x0 = tileSlow0 + ET_SLOW0 + (own * ET_TILE_SLOW);
+            const int y0 = tileFast0 + ET_FAST0;
             #pragma unroll
-            for (int r = 0; r < ET_ROWS; r++) {
-                const float z = y0 + r < height ? ez[(c * ET_ROWS) + r] : 0.0f;
-                threadDot += eu[r] * z;
-                threadNormU += eu[r] * eu[r];
-                threadNormZ += z * z;
+            for (int c = 0; c < ET_COLS; c++) {
+                if (x0 + c >= width)
+                    continue;
+                #pragma unroll
+                for (int r = 0; r < ET_ROWS; r++) {
+                    const int inside = y0 + r < height;
+                    const float e = inside ? eu[own][(c * ET_ROWS) + r] : 0.0f;
+                    const float z = inside ? ez[(c * ET_ROWS) + r] : 0.0f;
+                    threadDot += e * z;
+                    threadNormU += e * e;
+                    threadNormZ += z * z;
+                }
             }
         }
     }
 
-    const int lid = get_local_id(0);
-    __local float* dotCache = reductionScratch;
-    __local float* normUCache = reductionScratch + WG_SIZE;
-    __local float* normZCache = reductionScratch + (2 * WG_SIZE);
+    // the reduction scratch reuses the tile, every work-item must be done reading it
+    barrier(CLK_LOCAL_MEM_FENCE);
+    __local float* dotCache = tile;
+    __local float* normUCache = tile + WG_SIZE;
+    __local float* normZCache = tile + (2 * WG_SIZE);
     REDUCE_SUM_3(lid, WG_SIZE / 2, dotCache, normUCache, normZCache, threadDot, threadNormU, threadNormZ);
     if (lid == 0) {
         const int groupId = (get_group_id(1) * get_num_groups(0)) + get_group_id(0);

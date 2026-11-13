@@ -217,6 +217,9 @@
     <ClInclude Include="include\CorrelationFormat.hpp">
       <Filter>public</Filter>
     </ClInclude>
+    <ClInclude Include="include\Utf8Path.hpp">
+      <Filter>public</Filter>
+    </ClInclude>
     <ClInclude Include="include\common_utils.hpp">
       <Filter>public</Filter>
     </ClInclude>

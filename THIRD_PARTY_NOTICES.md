@@ -34,6 +34,7 @@ source references are not independently verified for these exact binaries.
 This software is based in part on the work of the Independent JPEG Group.
 Standalone libjpeg-turbo, libwebp and their component notices remain to be collected.
 The known libpng, libtiff and zlib-ng header notices are in `LICENSES/Common/`.
+Debug builds also include zlib 1.3.1 for debug libpng, its license is in `LICENSES/Common/ZLIB_LICENSE.txt`.
 The notices do not establish all implementation components or exact binary revisions.
 CImg offers CeCILL-C or CeCILL-2.1. The CeCILL-2.1 text and contributor notices
 for this GPL combination remain to be collected.

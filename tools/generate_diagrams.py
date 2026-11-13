@@ -440,7 +440,7 @@ def ui_benchmark():
     chart = Flowchart(
         1390, "The Qt benchmark",
         "The Qt Benchmark tab runs six images, four prediction windows and "
-        "eleven PSNR levels, making 264 cases. Setup, loading, pixel preparation "
+        "six PSNR levels, making 144 cases. Setup, loading, pixel preparation "
         "and previews are outside timing. Embedding and detection each warm up "
         "once and repeat until timing is stable or a time or run limit is reached. "
         "The UI shows each result, then moves to the next case. On completion, "
@@ -461,7 +461,7 @@ def ui_benchmark():
     chart.link([(640, 1096), (640, 1162)], color=OPENCL)
     chart.node(470, 162, 340, 56, "Start benchmark", terminal=True, color=OPENCL)
     chart.node(430, 266, 420, 80, "Set up the test", "Prepare the selected CPU or GPU")
-    chart.tag(640, 390, "6 images × 4 p values × 11 PSNR levels = 264 cases", size=19, color=OPENCL)
+    chart.tag(640, 390, "6 images × 4 p values × 6 PSNR levels = 144 cases", size=19, color=OPENCL)
     chart.node(430, 432, 420, 88, "Prepare the next case", "Load if needed, set p and PSNR")
     chart.node(64, 650, 328, 80, "Embed the watermark", "Repeat, wait for GPU work, record FPS", color=CUDA, body_size=16)
     chart.node(478, 650, 324, 80, "Prepare detection pixels", "Convert once, outside the timers", size=21, body_size=16)

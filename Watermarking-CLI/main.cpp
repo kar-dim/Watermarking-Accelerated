@@ -1,5 +1,6 @@
 #include "common_utils.hpp"
 #include "CorrelationFormat.hpp"
+#include "Utf8Path.hpp"
 #include "WatermarkCore.hpp"
 #include "VideoBatch.hpp"
 #include "ImageBatch.hpp"
@@ -356,7 +357,7 @@ class CliVideoBatchObserver : public VideoBatchObserver {
         const bool changed = states_[update.id] != update.state;
         states_[update.id] = update.state;
         const auto& job = jobs_.at(static_cast<size_t>(update.id - 1));
-        const std::string name = pathUtf8(fs::u8path(job.inputPath).filename());
+        const std::string name = pathUtf8(pathFromUtf8(job.inputPath).filename());
         if (update.state == VideoBatchState::Processing) {
             const int percent = update.progress.fraction >= 0 ? static_cast<int>(update.progress.fraction * 100) : -1;
             const auto now = std::chrono::steady_clock::now();
@@ -418,7 +419,7 @@ class CliImageBatchObserver : public ImageBatchObserver {
         if (update.state != ImageBatchState::Completed && update.state != ImageBatchState::Failed && update.state != ImageBatchState::Cancelled)
             return;
         const auto& job = jobs_.at(static_cast<std::size_t>(update.id - 1));
-        std::string line = std::format("[{}/{}] {}: {}", update.id, jobs_.size(), imageBatchStateName(update.state), pathUtf8(fs::u8path(job.inputPath).filename()));
+        std::string line = std::format("[{}/{}] {}: {}", update.id, jobs_.size(), imageBatchStateName(update.state), pathUtf8(pathFromUtf8(job.inputPath).filename()));
         if (update.deviceIndex >= 0)
             line += std::format(" | device {}", update.deviceIndex);
         if (update.correlation)
@@ -433,7 +434,7 @@ class CliImageBatchObserver : public ImageBatchObserver {
 };
 
 int testForImageBatch(const Settings& options, const int p, const float psnr, const bool embed) {
-    const auto input = fs::u8path(options.Get("image", "path", ""));
+    const auto input = pathFromUtf8(options.Get("image", "path", ""));
     if (!fs::is_directory(input))
         throw std::invalid_argument("Image batch path must be a directory");
     ImageBatchSettings settings;
@@ -462,7 +463,7 @@ int testForImageBatch(const Settings& options, const int p, const float psnr, co
 }
 
 int testForVideoBatch(const Settings& options, const std::string& input, const int p, const float psnr, const bool detect) {
-    const fs::path path = fs::u8path(input);
+    const fs::path path = pathFromUtf8(input);
     const bool directory = fs::is_directory(path);
     const auto files = directory ? getValidVideoFiles(path) : std::vector<fs::path>{path};
     std::vector<std::string> inputs;

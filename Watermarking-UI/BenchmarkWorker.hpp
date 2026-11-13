@@ -30,7 +30,7 @@ class BenchmarkWorker : public QThread {
   private:
     // Sweep values for window size p and target embedding PSNR
     static constexpr std::array<int, 4> pValues{3, 5, 7, 9};
-    static constexpr std::array<float, 11> psnrValues{10.0f, 15.0f, 20.0f, 25.0f, 30.0f, 35.0f, 40.0f, 45.0f, 50.0f, 55.0f, 60.0f};
+    static constexpr std::array<float, 6> psnrValues{10.0f, 20.0f, 30.0f, 40.0f, 50.0f, 60.0f};
 
     // Temporary directory containing extracted sample images for benchmark
     QTemporaryDir tempDir;

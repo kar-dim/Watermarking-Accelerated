@@ -54,8 +54,6 @@ namespace fs = std::filesystem;
 namespace {
 constexpr auto imageFilter = "Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff *.webp)";
 
-QColor successColor() { return themePalette().accent; }
-
 // Create an input row combining a text path field with a browse button
 QWidget* makeFileRow(QLineEdit*& field, const QString& buttonText, QWidget* parent, const std::function<void()>& browse) {
     auto* row = new QWidget(parent);

@@ -9,6 +9,10 @@
       <Configuration>EIGEN_Release</Configuration>
       <Platform>x64</Platform>
     </ProjectConfiguration>
+    <ProjectConfiguration Include="EIGEN_AVX512_Release|x64">
+      <Configuration>EIGEN_AVX512_Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
     <ProjectConfiguration Include="OPENCL_Release|x64">
       <Configuration>OPENCL_Release</Configuration>
       <Platform>x64</Platform>
@@ -39,6 +43,11 @@
     <CharacterSet>Unicode</CharacterSet>
     <WholeProgramOptimization>false</WholeProgramOptimization>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='EIGEN_AVX512_Release|x64'" Label="Configuration">
+    <PlatformToolset>ClangCL</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+    <WholeProgramOptimization>false</WholeProgramOptimization>
+  </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings" Condition="'$(Configuration)'=='CUDA_Release'">
     <Import Project="$(VCTargetsPath)\BuildCustomizations\CUDA 13.4.props" />
@@ -56,6 +65,9 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='EIGEN_Release|x64'">
     <LinkIncremental>false</LinkIncremental>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='EIGEN_AVX512_Release|x64'">
+    <LinkIncremental>false</LinkIncremental>
+  </PropertyGroup>
   <ItemDefinitionGroup />
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='CUDA_Release|x64'">
     <ClCompile>
@@ -67,7 +79,7 @@
       <DebugInformationFormat>None</DebugInformationFormat>
       <AdditionalIncludeDirectories>$(WatermarkingPublicIncludeDirectories);$(WatermarkingCoreDir)libs\libjpeg\include;$(WatermarkingCoreDir)libs\libpng\include;$(ProjectDir)libs\googletest-1.17.0\include;$(WatermarkingMediaIncludeDirectory);$(CUDA_PATH)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
-      <EnableEnhancedInstructionSet>$(WatermarkingInstructionSet)</EnableEnhancedInstructionSet>
+      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>false</GenerateDebugInformation>
@@ -80,7 +92,7 @@
     </Link>
     <CudaCompile>
       <AdditionalOptions>-diag-suppress 1388 --std c++20 %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalCompilerOptions>/wd4275 $(WatermarkingArch) /Zc:__cplusplus</AdditionalCompilerOptions>
+      <AdditionalCompilerOptions>/wd4275 /arch:AVX2 /Zc:__cplusplus</AdditionalCompilerOptions>
       <CodeGeneration>compute_86,sm_86</CodeGeneration>
       <GenerateDebugInformation>false</GenerateDebugInformation>
       <HostDebugInfo>false</HostDebugInfo>
@@ -96,7 +108,30 @@
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <DebugInformationFormat>None</DebugInformationFormat>
       <AdditionalIncludeDirectories>$(WatermarkingPublicIncludeDirectories);$(WatermarkingCoreDir)libs\Eigen;$(WatermarkingCoreDir)libs\CImg;$(WatermarkingCoreDir)libs\zlib\include;$(WatermarkingCoreDir)libs\libpng\include;$(WatermarkingCoreDir)libs\libjpeg\include;$(WatermarkingCoreDir)libs\libwebp\include;$(WatermarkingCoreDir)libs\libtiff\include;$(ProjectDir)libs\googletest-1.17.0\include;$(WatermarkingMediaIncludeDirectory);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <AdditionalOptions>-openmp $(WatermarkingClangSimdFlags) /clang:-O3 /Zc:__cplusplus -flto=thin %(AdditionalOptions)</AdditionalOptions>
+      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
+      <AdditionalOptions>-openmp /clang:-O3 /Zc:__cplusplus -flto=thin %(AdditionalOptions)</AdditionalOptions>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <SubSystem>Console</SubSystem>
+      <OptimizeReferences>true</OptimizeReferences>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <AdditionalLibraryDirectories>$(WatermarkingLibraryOutputDirectory);$(WatermarkingCoreDir)libs\libpng\lib;$(LLVMInstallDir)\x64\lib;$(LLVMInstallDir)\lib;$(WatermarkingCoreDir)libs\zlib\lib;$(WatermarkingCoreDir)libs\libjpeg\lib;$(WatermarkingCoreDir)libs\libwebp\lib;$(WatermarkingCoreDir)libs\libtiff\lib;$(ProjectDir)libs\googletest-1.17.0\lib;$(WatermarkingCoreDir)libs\ffmpeg\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>zlib.lib;libomp.lib;libpng16.lib;jpeg.lib;tiff.lib;libwebp.lib;Watermarking-Core.lib;gtest.lib;gtest_main.lib;avutil.lib;avformat.lib;swscale.lib;avcodec.lib;avfilter.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='EIGEN_AVX512_Release|x64'">
+    <ClCompile>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <PrecompiledHeaderFile>
+      </PrecompiledHeaderFile>
+      <PreprocessorDefinitions>X64;NDEBUG;_CONSOLE;_CRT_SECURE_NO_WARNINGS;_USE_EIGEN_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <DebugInformationFormat>None</DebugInformationFormat>
+      <AdditionalIncludeDirectories>$(WatermarkingPublicIncludeDirectories);$(WatermarkingCoreDir)libs\Eigen;$(WatermarkingCoreDir)libs\CImg;$(WatermarkingCoreDir)libs\zlib\include;$(WatermarkingCoreDir)libs\libpng\include;$(WatermarkingCoreDir)libs\libjpeg\include;$(WatermarkingCoreDir)libs\libwebp\include;$(WatermarkingCoreDir)libs\libtiff\include;$(ProjectDir)libs\googletest-1.17.0\include;$(WatermarkingMediaIncludeDirectory);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <EnableEnhancedInstructionSet>AdvancedVectorExtensions512</EnableEnhancedInstructionSet>
+      <AdditionalOptions>-openmp /clang:-O3 /Zc:__cplusplus -flto=thin %(AdditionalOptions)</AdditionalOptions>
       <FunctionLevelLinking>true</FunctionLevelLinking>
     </ClCompile>
     <Link>
@@ -118,7 +153,7 @@
       <DebugInformationFormat>None</DebugInformationFormat>
       <AdditionalIncludeDirectories>$(WatermarkingPublicIncludeDirectories);$(WatermarkingCoreDir)libs\opencl\include;$(WatermarkingCoreDir)libs\libjpeg\include;$(WatermarkingCoreDir)libs\libpng\include;$(ProjectDir)libs\googletest-1.17.0\include;$(WatermarkingMediaIncludeDirectory);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
-      <EnableEnhancedInstructionSet>$(WatermarkingInstructionSet)</EnableEnhancedInstructionSet>
+      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
     </ClCompile>
     <Link>
       <GenerateDebugInformation>false</GenerateDebugInformation>
