@@ -3,12 +3,14 @@
 #include "cimg_init.h"
 #include "common_utils.hpp"
 #include "ImageFileBuffer.hpp"
+#include "ImagePixels.hpp"
 #include "TinyEXIF.h"
 #include "utils.hpp"
 #include <algorithm>
 #include <cctype>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <fstream>
 #include <stdexcept>
 #include <string>
@@ -16,10 +18,6 @@
 #include <utility>
 #include <vector>
 #include <zlib.h>
-
-#if defined(_USE_GPU_)
-#include <cstring>
-#endif
 
 #if defined(_USE_OPENCL_)
 #include "OclArray.hpp"
@@ -208,35 +206,6 @@ Gray8BufferIO loadImage8(const string& imageFile) {
     return image;
 }
 
-// zero RGB channels where alpha is 0
-void cimgAlphaZero(Gray8BufferIO& rgb, const uint8_t* A) {
-    const int planeSize = rgb.width() * rgb.height();
-    uint8_t* R = rgb.data();
-    uint8_t* G = R + planeSize;
-    uint8_t* B = G + planeSize;
-    // 32 pixels per step
-    constexpr int lanes = 32;
-    const int blocks = planeSize / lanes;
-    // serial execution avoids OpenMP spin delay on prefetch thread
-#if !defined(_USE_GPU_)
-#pragma omp parallel for schedule(static)
-#endif
-    for (int block = 0; block < blocks; block++) {
-        const size_t offset = static_cast<size_t>(block) * lanes;
-        const __m256i transparent = _mm256_cmpeq_epi8(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(A + offset)), _mm256_setzero_si256());
-        for (uint8_t* plane : {R, G, B}) {
-            __m256i* pixels = reinterpret_cast<__m256i*>(plane + offset);
-            _mm256_storeu_si256(pixels, _mm256_andnot_si256(transparent, _mm256_loadu_si256(pixels)));
-        }
-    }
-    for (int i = blocks * lanes; i < planeSize; i++) {
-        const uint8_t mask = A[i] ? 0xFF : 0;
-        R[i] &= mask;
-        G[i] &= mask;
-        B[i] &= mask;
-    }
-}
-
 // the EXIF orientation on the host (CImg), the same transforms as the upload kernels
 void rotate(Gray8BufferIO& img, const int orientation) {
     switch (orientation) {
@@ -257,48 +226,6 @@ void rotate(Gray8BufferIO& img, const int orientation) {
     }
 }
 
-// 8 planar samples in low 8 bytes
-inline __m128i loadBytes(const uint8_t* source) { return _mm_loadl_epi64(reinterpret_cast<const __m128i*>(source)); }
-
-// interleave planar pixels for preview without intermediate copy
-void makeOriginalPreview(const uint8_t* source, uint8_t* preview, const size_t pixelCount, const int channels) {
-    const size_t blocks = pixelCount / 8;
-    const uint8_t* green = channels >= 3 ? source + pixelCount : source;
-    const uint8_t* blue = channels >= 3 ? green + pixelCount : source;
-    const uint8_t* alpha = channels == 4 ? blue + pixelCount : source;
-    const __m128i zero = _mm_setzero_si128();
-    const __m128i rgbMask = _mm_setr_epi8(0, 1, 2, 4, 5, 6, 8, 9, 10, 12, 13, 14, -1, -1, -1, -1);
-    // threshold for parallel interleaving
-#pragma omp parallel for if (pixelCount > 1000000) schedule(static)
-    for (std::ptrdiff_t block = 0; block < static_cast<std::ptrdiff_t>(blocks); ++block) {
-        const size_t offset = static_cast<size_t>(block) * 8;
-        const __m128i redBytes = loadBytes(source + offset);
-        if (channels == 1) {
-            _mm_storel_epi64(reinterpret_cast<__m128i*>(preview + offset), redBytes);
-        } else {
-            const __m128i greenBytes = loadBytes(green + offset);
-            const __m128i blueBytes = loadBytes(blue + offset);
-            const __m128i rg = _mm_unpacklo_epi8(redBytes, greenBytes);
-            const __m128i ba = _mm_unpacklo_epi8(blueBytes, channels == 4 ? loadBytes(alpha + offset) : zero);
-            const __m128i first = _mm_unpacklo_epi16(rg, ba);
-            const __m128i second = _mm_unpackhi_epi16(rg, ba);
-            if (channels == 4) {
-                _mm_storeu_si128(reinterpret_cast<__m128i*>(preview + offset * 4), first);
-                _mm_storeu_si128(reinterpret_cast<__m128i*>(preview + offset * 4 + 16), second);
-            } else {
-                const __m128i packedFirst = _mm_shuffle_epi8(first, rgbMask);
-                const __m128i packedSecond = _mm_shuffle_epi8(second, rgbMask);
-                const __m128i front = _mm_or_si128(packedFirst, _mm_slli_si128(packedSecond, 12));
-                _mm_storeu_si128(reinterpret_cast<__m128i*>(preview + offset * 3), front);
-                _mm_storel_epi64(reinterpret_cast<__m128i*>(preview + offset * 3 + 16), _mm_srli_si128(packedSecond, 4));
-            }
-        }
-    }
-    // tail pixels
-    for (size_t pixel = blocks * 8; pixel < pixelCount; ++pixel)
-        for (int channel = 0; channel < channels; ++channel)
-            preview[pixel * channels + channel] = source[static_cast<size_t>(channel) * pixelCount + pixel];
-}
 } // namespace
 
 // GPU helpers for CImg (row-major) -> GPU array (column-major) conversion
@@ -455,7 +382,7 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile, const bool cap
         if (hostImage) {
             const size_t planeSize = static_cast<size_t>(rows) * cols;
             buf.originalPreview.resize(planeSize * channels);
-            makeOriginalPreview(cimgRgb.data(), buf.originalPreview.data(), planeSize, channels);
+            ImagePixels::makePreview(cimgRgb.data(), buf.originalPreview.data(), planeSize, channels);
         }
     }
 
@@ -479,7 +406,7 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile, const bool cap
         const uint8_t* alphaPlane = cimgRgb.data(0, 0, 0, 3);
         alphaChannel.assign(alphaPlane, alphaPlane + static_cast<size_t>(cimgRgb.width()) * cimgRgb.height());
         auto rgbView = cimgRgb.get_shared_channels(0, 2);
-        cimgAlphaZero(rgbView, alphaChannel.data());
+        ImagePixels::clearTransparent(rgbView.data(), alphaChannel.data(), alphaChannel.size());
         auto [rgb, gray] = uploadOriented(rgbView, deviceOrientation, nullptr);
         rgbImage = std::move(rgb);
         image = std::move(gray);
@@ -506,7 +433,7 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile, const bool cap
         const uint8_t* alphaPlane = cimgRgb.data(0, 0, 0, 3);
         alphaChannel.assign(alphaPlane, alphaPlane + static_cast<size_t>(cimgRgb.width()) * cimgRgb.height());
         auto rgbView = cimgRgb.get_shared_channels(0, 2);
-        cimgAlphaZero(rgbView, alphaChannel.data());
+        ImagePixels::clearTransparent(rgbView.data(), alphaChannel.data(), alphaChannel.size());
         auto [rgb, gray] = eigen_utils::cimgToEigenRgbAndGray(rgbView);
         rgbImage = std::move(rgb);
         image = std::move(gray);

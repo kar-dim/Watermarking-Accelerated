@@ -22,6 +22,15 @@
     <ClCompile Include="utils.cpp">
       <Filter>Source Files\util</Filter>
     </ClCompile>
+    <ClCompile Include="ImagePixels.cpp">
+      <Filter>Source Files\util</Filter>
+    </ClCompile>
+    <ClCompile Include="ImagePixelsAvx512.cpp">
+      <Filter>Source Files\util</Filter>
+    </ClCompile>
+    <ClInclude Include="ImagePixels.hpp">
+      <Filter>Header Files\util</Filter>
+    </ClInclude>
     <ClCompile Include="video_utils.cpp">
       <Filter>Source Files\util</Filter>
     </ClCompile>

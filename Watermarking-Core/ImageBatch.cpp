@@ -7,6 +7,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <deque>
+#include <exception>
 #include <future>
 #include <latch>
 #include <map>
@@ -25,6 +26,7 @@
 #elif defined(_USE_CUDA_)
 #include "CudaCheck.hpp"
 #include "CudaStreamManager.hpp"
+#include <cstring>
 #include <cuda_runtime.h>
 #endif
 

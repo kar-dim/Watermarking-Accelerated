@@ -351,6 +351,15 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="AuxiliaryMux.cpp" />
+    <ClCompile Include="ImagePixels.cpp">
+      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
+    </ClCompile>
+    <ClCompile Include="ImagePixelsAvx512.cpp">
+      <EnableEnhancedInstructionSet>AdvancedVectorExtensions512</EnableEnhancedInstructionSet>
+      <!-- Keep AVX-512 code outside link-time optimization of the AVX2 callers -->
+      <WholeProgramOptimization>false</WholeProgramOptimization>
+      <AdditionalOptions Condition="$(Configuration.StartsWith('EIGEN_'))">%(AdditionalOptions) -fno-lto</AdditionalOptions>
+    </ClCompile>
     <ClCompile Include="EncodeOptions.cpp" />
     <ClCompile Include="WatermarkBase.cpp" />
     <ClCompile Include="WatermarkCore.cpp" />
@@ -404,6 +413,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="buffer.hpp" />
+    <ClInclude Include="ImagePixels.hpp" />
     <ClInclude Include="cimg_init.h">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='OPENCL_Release|x64'">false</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='OPENCL_Debug|x64'">false</ExcludedFromBuild>

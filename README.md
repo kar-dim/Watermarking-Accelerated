@@ -129,7 +129,7 @@ $$\text{Score} = C \cdot \sqrt{\text{FPS}_{\text{embed}} \cdot \text{FPS}_{\text
 
 **NOTE**:
 1. The CLI uses the proposed mask for single images, batches, video, and its `--bench` mode.
-2. Standard configurations require **AVX2**. For an AVX-512 CPU, select **EIGEN_AVX512_Release** or **EIGEN_AVX512_Debug** build in Visual Studio which improves performance for compatible CPUs.
+2. Standard configurations require **AVX2**. CPU image helpers automatically use AVX-512 when the CPU and OS support it, including in CUDA and OpenCL builds. For Eigen builds only, if CPU is AVX-512 capable, select **EIGEN_AVX512_Release** or **EIGEN_AVX512_Debug** build in Visual Studio which improves watermark calculations performance for compatible CPUs.
 
 The CLI accepts command-line options only. Values can use `--key value` or `--key=value`, for example `--p 5`, `--psnr=42`, or `--gpu_device_id 1`. The duplicated `mode`, `path` and `devices` names must include their `image` or `video` group, for example `--image.mode`, `--video.path` or `--image.devices`. Other options also accept a group prefix, such as `--global.p` or `--compute.gpu_device_id`. Run `Watermarking-CLI.exe --help`, or run without arguments, for the complete list and defaults.
 

@@ -3,7 +3,9 @@
 #include "../Watermarking-Core/CheckedSize.hpp"
 #include "../Watermarking-Core/EncodeOptions.hpp"
 #include "../Watermarking-Core/half_float.hpp"
+#include "../Watermarking-Core/ImagePixels.hpp"
 #include "../Watermarking-Core/OutputFile.hpp"
+#include "../Watermarking-Core/utils.hpp"
 #include "../Watermarking-Core/video_utils.hpp"
 #include "../Watermarking-Core/VideoProcessingContext.hpp"
 #include "../Watermarking-Core/WatermarkCrypto.hpp"
@@ -50,6 +52,7 @@ extern "C" {
 #include <iterator>
 #include <limits>
 #include <map>
+#include <omp.h>
 #include <regex>
 #include <sstream>
 #include <stdexcept>
@@ -68,7 +71,6 @@ extern "C" {
 
 #if defined(_USE_EIGEN_)
 #include "../Watermarking-Core/WatermarkEigen.hpp"
-#include <omp.h>
 #endif
 
 extern "C" {
@@ -1210,6 +1212,98 @@ TEST_F(WatermarkTest, OriginalPreviewInterleavesRgbPixelsAndTail) {
     EXPECT_EQ(preview.height, 3);
     EXPECT_EQ(preview.channels, 3);
     EXPECT_EQ(preview.pixels, expected);
+}
+
+TEST(ImagePixelsTest, RuntimeAndDirectKernelsMatchScalarAtUnalignedBoundaries) {
+    const int originalThreads = omp_get_max_threads();
+    struct RestoreThreadCount {
+        int count;
+        ~RestoreThreadCount() { omp_set_num_threads(count); }
+    } restore{originalThreads};
+    omp_set_num_threads(1);
+    for (size_t count = 0; count <= 257; ++count) {
+        SCOPED_TRACE(count);
+        std::vector<uint8_t> source(count * 4 + 2), alpha(count + 2);
+        for (size_t i = 0; i < source.size(); ++i)
+            source[i] = static_cast<uint8_t>((i * 73 + 19) % 256);
+        for (size_t i = 0; i < alpha.size(); ++i)
+            alpha[i] = std::array<uint8_t, 4>{0, 1, 128, 255}[i % 4];
+        for (const int channels : {1, 3, 4}) {
+            std::vector<uint8_t> expected(count * channels + 2, 0xa5), actual(expected);
+            for (size_t pixel = 0; pixel < count; ++pixel)
+                for (int channel = 0; channel < channels; ++channel)
+                    expected[1 + pixel * channels + channel] = source[1 + static_cast<size_t>(channel) * count + pixel];
+            ImagePixels::makePreview(source.data() + 1, actual.data() + 1, count, channels);
+            EXPECT_EQ(actual, expected);
+            if (channels != 1) {
+                std::fill(actual.begin(), actual.end(), 0xa5);
+                ImagePixels::Avx2::interleave(source.data() + 1, actual.data() + 1, count, channels);
+                EXPECT_EQ(actual, expected);
+                if (ImagePixels::supportsAvx512()) {
+                    std::fill(actual.begin(), actual.end(), 0xa5);
+                    ImagePixels::Avx512::interleave(source.data() + 1, actual.data() + 1, count, channels);
+                    EXPECT_EQ(actual, expected);
+                }
+            }
+        }
+        std::vector<uint8_t> expected(source);
+        for (size_t pixel = 0; pixel < count; ++pixel)
+            for (size_t channel = 0; channel < 3; ++channel)
+                if (alpha[1 + pixel] == 0)
+                    expected[1 + channel * count + pixel] = 0;
+        for (const auto clear : {ImagePixels::clearTransparent, ImagePixels::Avx2::clearTransparent, ImagePixels::supportsAvx512() ? ImagePixels::Avx512::clearTransparent : nullptr}) {
+            if (!clear)
+                continue;
+            std::vector<uint8_t> actual(source);
+            clear(actual.data() + 1, alpha.data() + 1, count);
+            EXPECT_EQ(actual, expected);
+        }
+    }
+}
+
+TEST_F(WatermarkTest, OriginalPreviewAndTransparentLumaMatchSourceAcrossVectorBoundaries) {
+    const auto check = [&](const int width, const int height, const int channels) {
+        SCOPED_TRACE(std::format("{}x{} channels={}", width, height, channels));
+        const size_t pixelCount = static_cast<size_t>(width) * height;
+        std::vector<uint8_t> pixels(pixelCount * channels);
+        for (size_t i = 0; i < pixels.size(); ++i)
+            pixels[i] = static_cast<uint8_t>((i * 73 + 19) % 256);
+        if (channels == 4)
+            for (size_t pixel = 0; pixel < pixelCount; ++pixel)
+                pixels[pixel * 4 + 3] = std::array<uint8_t, 4>{0, 1, 128, 255}[pixel % 4];
+        const fs::path input = tempDir / "original-preview.png";
+        png_image png{};
+        png.version = PNG_IMAGE_VERSION;
+        png.width = width;
+        png.height = height;
+        png.format = channels == 1 ? PNG_FORMAT_GRAY : channels == 3 ? PNG_FORMAT_RGB : PNG_FORMAT_RGBA;
+        ASSERT_TRUE(png_image_write_to_file(&png, input.string().c_str(), 0, pixels.data(), 0, nullptr)) << png.message;
+        const auto loaded = InternalUtils::loadImage(input.string(), true);
+        EXPECT_EQ(loaded.originalPreview, pixels);
+        EXPECT_EQ(loaded.previewChannels, channels);
+        std::vector<float> luma(pixelCount);
+#if defined(_USE_GPU_)
+        loaded.image.toHost(luma.data());
+#else
+        std::copy_n(loaded.image.getGray().data(), pixelCount, luma.data());
+#endif
+        for (int row = 0; row < height; ++row)
+            for (int col = 0; col < width; ++col) {
+                const size_t pixel = static_cast<size_t>(row) * width + col;
+                float expected = pixels[pixel * channels];
+                if (channels != 1)
+                    expected = channels == 4 && pixels[pixel * 4 + 3] == 0
+                                   ? 0.0f
+                                   : std::fma(static_cast<float>(pixels[pixel * channels + 2]), 0.114f,
+                                         std::fma(static_cast<float>(pixels[pixel * channels]), 0.299f, static_cast<float>(pixels[pixel * channels + 1]) * 0.587f));
+                ASSERT_NEAR(luma[static_cast<size_t>(col) * height + row], expected, 4e-5f) << "pixel " << pixel;
+            }
+    };
+    for (const int channels : {1, 3, 4}) {
+        for (int width = 3; width <= 67; ++width)
+            check(width, 3, channels);
+        check(1025, 1025, channels);
+    }
 }
 
 TEST_F(WatermarkTest, EmbedsAndDetects) {
