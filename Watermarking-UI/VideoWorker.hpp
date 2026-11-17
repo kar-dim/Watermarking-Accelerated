@@ -5,6 +5,7 @@
  * \author Dimitris Karatzas
  */
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <deque>
@@ -86,6 +87,8 @@ class VideoWorker : public QThread, private WatermarkCore::VideoObserver {
     std::atomic<int> previewWidth_{960}, previewHeight_{540};
     std::mutex mutex_;
     VideoUpdate pending_;
+    std::array<QImage, 2> previews_;
+    std::size_t previewIndex_ = 0;
     double correlationSum_ = 0.0;
     QTemporaryFile csv_;
     std::unique_ptr<QTextStream> csvStream_;

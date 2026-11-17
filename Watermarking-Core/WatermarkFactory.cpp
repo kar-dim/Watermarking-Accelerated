@@ -22,8 +22,7 @@ using std::string;
  *  \author Dimitris Karatzas
  */
 
-std::unique_ptr<WatermarkBase> InternalUtils::createWatermarkObject(
-    const unsigned int height, const unsigned int width, const string& watermarkPassword, const int p, const float psnr, std::unique_ptr<WatermarkBase> previous) {
+std::unique_ptr<WatermarkBase> InternalUtils::createWatermarkObject(const unsigned int height, const unsigned int width, const string& watermarkPassword, const int p, const float psnr) {
     if (p != 3 && p != 5 && p != 7 && p != 9)
         throw std::invalid_argument("Unsupported value for p. Allowed p values: 3, 5, 7, 9");
     if (height < static_cast<unsigned int>(p) || width < static_cast<unsigned int>(p))
@@ -31,13 +30,7 @@ std::unique_ptr<WatermarkBase> InternalUtils::createWatermarkObject(
     checkImageDimensions(height, width);
     const int rows = static_cast<int>(height);
     const int cols = static_cast<int>(width);
-    WatermarkBuffer watermark = [&] {
-        if (previous && previous->hasSize(rows, cols))
-            return previous->releaseWatermark();
-        previous.reset();
-        return WatermarkBase::generateWatermark(watermarkPassword, rows, cols);
-    }();
-    previous.reset();
+    WatermarkBuffer watermark = WatermarkBase::generateWatermark(watermarkPassword, rows, cols);
 #if defined(_USE_OPENCL_)
     switch (p) {
     case 3: return std::make_unique<WatermarkOCL<3>>(rows, cols, std::move(watermark), psnr); break;

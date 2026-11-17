@@ -50,10 +50,6 @@ class WatermarkBase {
     // implementation lives in cpp file, nvcc hangs when parsing generation in header
     static WatermarkBuffer generateWatermark(const std::string& watermarkPassword, const int rows, const int cols);
 
-    // watermark reused across objects of same size and password, source invalidated
-    bool hasSize(const int rows, const int cols) const { return baseRows == rows && baseCols == cols; }
-    WatermarkBuffer releaseWatermark() { return std::move(randomMatrix); }
-
     // PSNR affects only strength, updates do not regenerate watermark or workspaces
     void updatePsnr(const float psnr) {
         strengthFactor = computeStrengthFactor(psnr);

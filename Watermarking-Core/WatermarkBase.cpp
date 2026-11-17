@@ -11,7 +11,6 @@
 #include "OclQueueManager.hpp"
 #include "opencl_utils.hpp"
 #elif defined(_USE_EIGEN_)
-#include "half_float.hpp"
 #include <Eigen/Core>
 #endif
 
@@ -37,12 +36,8 @@ WatermarkBuffer WatermarkBase::generateWatermark(const std::string& watermarkPas
     cl_utils::launchGenerateWatermarkKernel(baseState, watermark.clBuffer(), numElements, queueManager.getQueue());
     return watermark;
 #elif defined(_USE_EIGEN_)
-    const auto halfBits = WatermarkCrypto::generateHalfWatermark(baseState, numElements);
     Eigen::ArrayXXf watermark(rows, cols);
-    float* values = watermark.data();
-#pragma omp parallel for schedule(static)
-    for (int64_t i = 0; i < numElements; i++)
-        values[i] = HalfFloat::toFloat(halfBits[i]);
+    WatermarkCrypto::generateFloatRoundedHalfWatermark(baseState, watermark.data(), numElements);
     return WatermarkBuffer(std::move(watermark));
 #endif
 }

@@ -375,7 +375,7 @@ void WatermarkingUI::updateVideoBatchSelection() {
         const QSignalBlocker block(videoBatchEncoderDevice);
         videoBatchEncoderDevice->clear();
         for (const int device : devices)
-            videoBatchEncoderDevice->addItem(videoBatchDevices->itemText(device), device);
+            videoBatchEncoderDevice->addItem(videoBatchDevices->deviceName(device), device);
         const int previous = videoBatchEncoderDevice->findData(videoBatchOptionsDevice);
         videoBatchEncoderDevice->setCurrentIndex(previous >= 0 ? previous : (devices.empty() ? -1 : 0));
     }
@@ -541,9 +541,11 @@ void WatermarkingUI::pollVideoBatch() {
             ++videoBatchFinished;
         QStringList devices;
         const auto indices = terminal(job.state) ? std::vector<int>{job.deviceIndex} : job.activeDevices;
-        for (const int device : indices)
-            if (device >= 0 && device < videoBatchDevices->count())
-                devices.push_back(videoBatchDevices->itemText(device));
+        for (const int device : indices) {
+            const QString name = videoBatchDevices->deviceName(device);
+            if (!name.isEmpty())
+                devices.push_back(name);
+        }
         auto* device = videoBatchTable->item(row, 3);
         device->setText(devices.join(" + "));
         device->setToolTip(device->text());

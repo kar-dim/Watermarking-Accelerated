@@ -8,27 +8,33 @@
 
 inline const std::string utilityKernels = R"CLC(
 
-// coalesced tiled transpose: column-major uchar to row-major uchar, multi-channel via z-dimension
+// coalesced 32x32 tiled transpose: column-major uchar to row-major uchar, multi-channel via z-dimension
 __kernel void col_major_to_row_major_u8(
     const __global uchar* restrict src,
     __global uchar* restrict dst,
     const int width,
     const int height)
 {
-    __local uchar tile[16][17];
+    __local uchar tile[32][33];
     const int planeOffset = get_global_id(2) * width * height;
-    const int col = get_group_id(0) * 16 + get_local_id(1);
-    const int row = get_group_id(1) * 16 + get_local_id(0);
-    if (col < width && row < height)
-        tile[get_local_id(0)][get_local_id(1)] = src[planeOffset + col * height + row];
+    const int col = get_group_id(0) * 32 + get_local_id(1);
+    const int row = get_group_id(1) * 32 + get_local_id(0);
+    #pragma unroll
+    for (int i = 0; i < 32; i += 8) {
+        if ((col + i) < width && row < height)
+            tile[get_local_id(0)][get_local_id(1) + i] = src[planeOffset + (col + i) * height + row];
+    }
     barrier(CLK_LOCAL_MEM_FENCE);
-    const int outRow = get_group_id(1) * 16 + get_local_id(1);
-    const int outCol = get_group_id(0) * 16 + get_local_id(0);
-    if (outRow < height && outCol < width)
-        dst[planeOffset + outRow * width + outCol] = tile[get_local_id(1)][get_local_id(0)];
+    const int outRow = get_group_id(1) * 32 + get_local_id(1);
+    const int outCol = get_group_id(0) * 32 + get_local_id(0);
+    #pragma unroll
+    for (int i = 0; i < 32; i += 8) {
+        if ((outRow + i) < height && outCol < width)
+            dst[planeOffset + (outRow + i) * width + outCol] = tile[get_local_id(1) + i][get_local_id(0)];
+    }
 }
 
-// coalesced tiled transpose: column-major planar uchar (1 or 3 channels) to row-major interleaved uchar (display layout)
+// coalesced 32x32 tiled transpose: column-major planar uchar (1 or 3 channels) to row-major interleaved uchar (display layout)
 __kernel void col_major_to_interleaved_u8(
     const __global uchar* restrict src,
     __global uchar* restrict dst,
@@ -36,28 +42,30 @@ __kernel void col_major_to_interleaved_u8(
     const int height,
     const int channels)
 {
-    __local uchar tile[3][16][17];
+    __local uchar tile[3][32][33];
     const int planeSize = width * height;
-    const int tileCol = get_group_id(0) * 16;
-    const int tileRow = get_group_id(1) * 16;
+    const int tileCol = get_group_id(0) * 32;
+    const int tileRow = get_group_id(1) * 32;
     const int col = tileCol + get_local_id(1);
     const int row = tileRow + get_local_id(0);
     for (int channel = 0; channel < channels; channel++) {
-        if (col < width && row < height)
-            tile[channel][get_local_id(1)][get_local_id(0)] = src[channel * planeSize + col * height + row];
+        #pragma unroll
+        for (int i = 0; i < 32; i += 8) {
+            if ((col + i) < width && row < height)
+                tile[channel][get_local_id(1) + i][get_local_id(0)] = src[channel * planeSize + (col + i) * height + row];
+        }
     }
     barrier(CLK_LOCAL_MEM_FENCE);
-    // the pixels of a tile row are contiguous in the output, consecutive work-items write consecutive bytes
-    const int outRow = tileRow + get_local_id(1);
-    if (outRow >= height)
-        return;
-    const int rowBytes = min(16, width - tileCol) * channels;
-    __global uchar* output = dst + (outRow * width + tileCol) * channels;
-    for (int byte = get_local_id(0); byte < rowBytes; byte += 16)
-        output[byte] = tile[byte % channels][byte / channels][get_local_id(1)];
+    // pixels of a tile row are contiguous in output, consecutive work-items write consecutive bytes
+    const int rowBytes = min(32, width - tileCol) * channels;
+    for (int i = get_local_id(1); i < 32 && (tileRow + i) < height; i += 8) {
+        __global uchar* output = dst + ((tileRow + i) * width + tileCol) * channels;
+        for (int byte = get_local_id(0); byte < rowBytes; byte += 32)
+            output[byte] = channels == 1 ? tile[0][byte][i] : tile[byte % channels][byte / channels][i];
+    }
 }
 
-// coalesced tiled transpose: row-major uchar (with pitch) to column-major float
+// coalesced 32x32 tiled transpose: row-major uchar (with pitch) to column-major float
 __kernel void pitched_to_float(
     const __global uchar* restrict input,
     __global float* restrict output,
@@ -65,16 +73,22 @@ __kernel void pitched_to_float(
     const int height,
     const int pitch)
 {
-    __local float tile[16][17];
-    const int col = get_group_id(0) * 16 + get_local_id(0);
-    const int row = get_group_id(1) * 16 + get_local_id(1);
-    if (col < width && row < height)
-        tile[get_local_id(1)][get_local_id(0)] = (float)input[row * pitch + col];
+    __local float tile[32][33];
+    const int x = get_group_id(0) * 32 + get_local_id(0);
+    const int y = get_group_id(1) * 32 + get_local_id(1);
+    #pragma unroll
+    for (int i = 0; i < 32; i += 8) {
+        if (x < width && (y + i) < height)
+            tile[get_local_id(1) + i][get_local_id(0)] = (float)input[(y + i) * pitch + x];
+    }
     barrier(CLK_LOCAL_MEM_FENCE);
-    const int outRow = get_group_id(1) * 16 + get_local_id(0);
-    const int outCol = get_group_id(0) * 16 + get_local_id(1);
-    if (outRow < height && outCol < width)
-        output[outCol * height + outRow] = tile[get_local_id(0)][get_local_id(1)];
+    const int dstX = get_group_id(1) * 32 + get_local_id(0);
+    const int dstY = get_group_id(0) * 32 + get_local_id(1);
+    #pragma unroll
+    for (int i = 0; i < 32; i += 8) {
+        if (dstX < height && (dstY + i) < width)
+            output[(dstY + i) * height + dstX] = tile[get_local_id(0)][get_local_id(1) + i];
+    }
 }
 
 // uint8 col-major (1 or 3 channel) to float col-major grayscale, with optional RGB weighting

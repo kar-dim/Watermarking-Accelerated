@@ -154,7 +154,7 @@ class VideoBatchScheduler {
         return accepted;
     }
 
-    void fail(const Claim& claim, const std::string& error, const bool retryable, const bool lost = false) {
+    VideoBatchState fail(const Claim& claim, const std::string& error, const bool retryable, const bool lost = false) {
         const std::lock_guard lock(mutex_);
         auto& record = records_.at(claim.id);
         record.active.erase(claim.attempt);
@@ -173,9 +173,11 @@ class VideoBatchScheduler {
                 record.view = preserveRevision(record, record.active.begin()->second.view);
             }
         }
+        const VideoBatchState state = record.view.state;
         refresh(record);
         failUnreachable();
         changed_.notify_all();
+        return state;
     }
 
     void retire(const int device, const std::string& error) {

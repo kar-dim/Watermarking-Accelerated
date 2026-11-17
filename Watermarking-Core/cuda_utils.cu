@@ -37,9 +37,8 @@ void launchVideoPreview(const uint8_t* y, const uint8_t* u, const uint8_t* v, ui
 
 // convert NV12 UV plane to YUV420P format
 void launchNV12ToYUV420pKernel(const uint8_t* uvSrc, const int uvPitch, uint8_t* uvDst, const int uvWidth, const int uvHeight, const cudaStream_t stream) {
-    constexpr int blockSize = 256;
-    const int totalPixels = uvWidth * uvHeight;
-    const int gridSize = (totalPixels + blockSize - 1) / blockSize;
+    constexpr dim3 blockSize(32, 8);
+    const dim3 gridSize((uvWidth + blockSize.x - 1) / blockSize.x, (uvHeight + blockSize.y - 1) / blockSize.y);
     nV12ToYUV420p<<<gridSize, blockSize, 0, stream>>>(uvSrc, uvPitch, uvDst, uvWidth, uvHeight);
     CUDA_CHECK(cudaGetLastError());
 }
@@ -80,7 +79,10 @@ void launchColMajorToRowMajorU8Kernel(const uint8_t* src, uint8_t* dst, const in
 void launchColMajorToInterleavedU8Kernel(const uint8_t* src, uint8_t* dst, const int width, const int height, const int channels, const cudaStream_t stream) {
     constexpr dim3 blockSize(32, 8);
     const dim3 gridSize((width + 31) / 32, (height + 31) / 32);
-    colMajorToInterleavedU8<<<gridSize, blockSize, 0, stream>>>(src, dst, width, height, channels);
+    if (channels == 3)
+        colMajorToInterleavedU8<3><<<gridSize, blockSize, 0, stream>>>(src, dst, width, height);
+    else
+        colMajorToInterleavedU8<1><<<gridSize, blockSize, 0, stream>>>(src, dst, width, height);
     CUDA_CHECK(cudaGetLastError());
 }
 // row-major planar 8-bit image to displayed column-major RGB and float luma
@@ -98,20 +100,17 @@ void launchOrientRowMajorToColMajorKernel(
     CUDA_CHECK(cudaGetLastError());
 }
 
-void launchYUV420p10ToP010Kernel(const uint16_t* planar, uint16_t* yDst, uint16_t* uvDst, const int width, const int height, const cudaStream_t stream) {
-    constexpr dim3 blockSize(32, 8);
-    const dim3 gridSize((width / 2 + 31) / 32, (height / 2 + 7) / 8);
-    yuv420p10ToP010<<<gridSize, blockSize, 0, stream>>>(planar, yDst, uvDst, width, height);
-    CUDA_CHECK(cudaGetLastError());
-}
-
 void launchP010HdrToSdrKernel(const uint16_t* ySrc, const int yPitchBytes, const uint16_t* uvSrc, const int uvPitchBytes, uint8_t* yDst, const int yDstPitch, float* lumaDst, uint8_t* uvDst,
-    const int uvDstPitch, const int width, const int height, const video_utils::ChromaSiting& siting, const video_utils::MobiusParams& mobius, const cudaStream_t stream) {
+    const int uvDstPitch, const int width, const int height, const video_utils::ChromaSiting& siting, const video_utils::MobiusParams& mobius, const cudaStream_t stream, const bool planar10) {
     // one 32x8 block per 32x8 chroma pairs
     constexpr dim3 blockSize(32, 8);
     const dim3 gridSize((width / 2 + 31) / 32, (height / 2 + 7) / 8);
-    p010HdrToSdr<<<gridSize, blockSize, 0, stream>>>(
-        ySrc, yPitchBytes, uvSrc, uvPitchBytes, yDst, yDstPitch, lumaDst, uvDst, uvDstPitch, width, height, siting.x, siting.y, mobius.a, mobius.b, mobius.k);
+    if (planar10)
+        planar10HdrToSdr<<<gridSize, blockSize, 0, stream>>>(
+            ySrc, yPitchBytes, uvSrc, uvPitchBytes, yDst, yDstPitch, lumaDst, uvDst, uvDstPitch, width, height, siting.x, siting.y, mobius.a, mobius.b, mobius.k);
+    else
+        p010HdrToSdr<<<gridSize, blockSize, 0, stream>>>(
+            ySrc, yPitchBytes, uvSrc, uvPitchBytes, yDst, yDstPitch, lumaDst, uvDst, uvDstPitch, width, height, siting.x, siting.y, mobius.a, mobius.b, mobius.k);
     CUDA_CHECK(cudaGetLastError());
 }
 

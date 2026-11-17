@@ -610,7 +610,7 @@ __kernel void apply_watermark_gray(__global const float* restrict input, __globa
 }
 
 // Grayscale embedding transposing column-major input to row-major output via local memory
-#define TR_TILE 16
+#define TR_TILE 32
 #define TR_ROWS (WG_SIZE / TR_TILE)
 __kernel __attribute__((reqd_work_group_size(TR_TILE, TR_ROWS, 1))) void apply_watermark_row_major(__global const float* restrict input, __global const half* restrict u,
     __global const ulong* restrict sumSq, __global uchar* restrict output, const float strengthNumerator, const int width, const int height)

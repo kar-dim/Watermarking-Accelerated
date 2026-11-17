@@ -105,6 +105,7 @@ class WatermarkingUI : public QMainWindow {
     QWidget* devicePickerArea = nullptr;
 
     // Single image tab controls
+    QWidget* singlePage = nullptr;
     QLineEdit* singleInput = nullptr;
     QLineEdit* singleOutput = nullptr;
     QComboBox* singleMode = nullptr;
@@ -119,6 +120,7 @@ class WatermarkingUI : public QMainWindow {
     SingleImageWorker* singleWorker = nullptr;
 
     // Batch processing tab controls
+    QWidget* batchPage = nullptr;
     QLineEdit* batchOutput = nullptr;
     QWidget* batchOutputRow = nullptr;
     QPushButton* batchAddFiles = nullptr;

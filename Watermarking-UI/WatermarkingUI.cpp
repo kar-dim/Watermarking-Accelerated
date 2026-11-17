@@ -197,7 +197,7 @@ WatermarkingUI::WatermarkingUI(QWidget* parent) : QMainWindow(parent) {
     tabs->setObjectName("workflowTabs");
     root->addWidget(tabs, 1);
 
-    auto* singlePage = new QWidget(tabs);
+    singlePage = new QWidget(tabs);
     singlePage->setObjectName("workflowPage");
     auto* singleLayout = new QVBoxLayout(singlePage);
     singleLayout->setContentsMargins(18, 20, 18, 18);
@@ -291,7 +291,7 @@ WatermarkingUI::WatermarkingUI(QWidget* parent) : QMainWindow(parent) {
     singleLayout->addWidget(singleDetectArea, 1);
     tabs->addTab(singlePage, "Single image");
 
-    auto* batchPage = new QWidget(tabs);
+    batchPage = new QWidget(tabs);
     batchPage->setObjectName("workflowPage");
     auto* batchLayout = new QVBoxLayout(batchPage);
     batchLayout->setContentsMargins(18, 20, 18, 18);
@@ -492,7 +492,7 @@ WatermarkingUI::WatermarkingUI(QWidget* parent) : QMainWindow(parent) {
     connect(benchmarkStartButton, &QPushButton::clicked, this, [this] { startBenchmark(); });
     connect(tabs, &QTabWidget::currentChanged, this, [this] {
         dropOverlay->hide();
-        devicePickerArea->setVisible(tabs->currentWidget() != videoBatchPage && tabs->currentIndex() != 2);
+        devicePickerArea->setVisible(tabs->currentWidget() != videoBatchPage && tabs->currentWidget() != batchPage);
     });
     refreshBatchQueue();
     qApp->installEventFilter(this);
@@ -789,7 +789,7 @@ void WatermarkingUI::pollImageBatch() {
                              : update.state == ImageBatchState::Cancelled ? themePalette().muted
                                                                           : themePalette().text);
         auto* device = batchTable->item(row, 2);
-        device->setText(update.deviceIndex >= 0 && update.deviceIndex < imageBatchDevices->count() ? imageBatchDevices->itemText(update.deviceIndex) : QString());
+        device->setText(imageBatchDevices->deviceName(update.deviceIndex));
         device->setToolTip(device->text());
         const QString detail = update.correlation ? QString("Correlation: %1").arg(QString::fromStdString(formatCorrelationPercent(*update.correlation))) : QString::fromStdString(update.detail);
         batchTable->item(row, 3)->setText(detail);
@@ -907,9 +907,9 @@ void WatermarkingUI::onBenchmarkResult(
 
 void WatermarkingUI::updateImageViews() {
     if (!videoPreviewImage.isNull() && videoPreviewEnabled->isChecked())
-        videoPreview->setPixmap(QPixmap::fromImage(videoPreviewImage).scaled(videoPreview->contentsRect().size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+        videoPreview->setPixmap(QPixmap::fromImage(videoPreviewImage.scaled(videoPreview->contentsRect().size(), Qt::KeepAspectRatio, Qt::SmoothTransformation)));
     if (!benchmarkPreviewImage.isNull())
-        benchmarkImageView->setPixmap(QPixmap::fromImage(benchmarkPreviewImage).scaled(benchmarkImageView->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+        benchmarkImageView->setPixmap(QPixmap::fromImage(benchmarkPreviewImage.scaled(benchmarkImageView->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation)));
 }
 
 void WatermarkingUI::resizeEvent(QResizeEvent* event) {
@@ -933,10 +933,11 @@ bool WatermarkingUI::eventFilter(QObject* watched, QEvent* event) {
     }
 
     auto* drop = static_cast<QDropEvent*>(event);
-    const int tab = tabs->currentIndex();
-    const bool batch = tab == 2;
-    const bool video = tab == 1;
-    const bool videoBatch = tabs->currentWidget() == videoBatchPage;
+    QWidget* const current = tabs->currentWidget();
+    const bool batch = current == batchPage;
+    const bool video = current == videoPage;
+    const bool videoBatch = current == videoBatchPage;
+    const bool single = current == singlePage;
     QStringList videoBatchPaths;
     QStringList imageBatchPaths;
     if (!busy && videoBatch && drop->mimeData()->hasUrls())
@@ -947,7 +948,7 @@ bool WatermarkingUI::eventFilter(QObject* watched, QEvent* event) {
         for (const auto& url : drop->mimeData()->urls())
             if (url.isLocalFile() && (QFileInfo(url.toLocalFile()).isDir() || WatermarkCore::hasSupportedImageExtension(fs::path(url.toLocalFile().toStdWString()))))
                 imageBatchPaths.push_back(url.toLocalFile());
-    QString path = !busy && tab == 0 ? supportedDropPath(drop->mimeData(), false) : QString();
+    QString path = !busy && single ? supportedDropPath(drop->mimeData(), false) : QString();
     if (!imageBatchPaths.isEmpty())
         path = imageBatchPaths.front();
     if (!videoBatchPaths.isEmpty())

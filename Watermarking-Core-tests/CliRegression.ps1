@@ -83,6 +83,8 @@ Invoke-Case 'image-batch-unavailable-device' ($baseArguments + @('--image.mode',
 Invoke-Case 'image-batch-malformed-devices' ($baseArguments + @('--image.mode', 'batch_detect', '--image.path', $batchDirectory, '--image.devices', '0,')) 1 'device index is missing'
 Invoke-Case 'image-devices-single-mode' ($baseArguments + @('--image.devices', '0')) 1 'applies to image batch modes'
 Invoke-Case 'video-devices-single-mode' ($baseArguments + @('--video.devices', '0')) 1 'applies to video batch modes'
+Invoke-Case 'orphaned-video-mode' ($baseArguments + @('--video.mode', 'detect')) 1 'requires.*--video\.path'
+Invoke-Case 'empty-video-path' @('--watermark_password', 'regression-password', '--video.path', '') 1 '--video\.path cannot be empty'
 Invoke-Case 'ambiguous-devices-option' @('--devices', '0') 1 'Ambiguous setting'
 Invoke-Case 'no-interactive-pause' ($baseArguments + @('--image.mode', 'invalid')) 1 'Invalid mode'
 Write-Output "$passed CLI regression cases passed. Logs: $fixtureDirectory"

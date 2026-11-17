@@ -4,6 +4,7 @@
 #include "common_utils.hpp"
 #include "ImageFileBuffer.hpp"
 #include "ImagePixels.hpp"
+#include "include/Utf8Path.hpp"
 #include "TinyEXIF.h"
 #include "utils.hpp"
 #include <algorithm>
@@ -43,14 +44,18 @@ using namespace CommonUtils;
 
 namespace {
 string addSuffixBeforeExtension(const string& file, const string& suffix) {
-    const auto dot = file.find_last_of('.');
-    checkError(dot == string::npos || dot == file.size() - 1, "Filename has no valid extension: " + file);
+    const std::u8string ext = WatermarkCore::pathFromUtf8(file).extension().u8string();
+    checkError(ext.size() <= 1 || ext.size() > file.size() || file[file.size() - ext.size()] != '.', "Filename has no valid extension: " + file);
+    const size_t dot = file.size() - ext.size();
     return file.substr(0, dot) + suffix + file.substr(dot);
 }
 
-string lowercaseExtension(const string& path) {
-    string extension = path.substr(path.find_last_of('.') + 1);
-    std::transform(extension.begin(), extension.end(), extension.begin(), ::tolower);
+string lowercaseExtension(const string& filePath) {
+    const std::u8string ext = WatermarkCore::pathFromUtf8(filePath).extension().u8string();
+    if (ext.size() <= 1)
+        return {};
+    string extension(reinterpret_cast<const char*>(ext.data() + 1), ext.size() - 1);
+    std::transform(extension.begin(), extension.end(), extension.begin(), [](const unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
     return extension;
 }
 
@@ -131,6 +136,15 @@ bool writePngRows(png_structp png, png_infop info, const uint8_t* const* planes,
     png_write_info(png, info);
     for (png_uint_32 y = 0; y < height; y++) {
         const size_t rowOffset = static_cast<size_t>(y) * width;
+        if (channels == 1) {
+            png_write_row(png, const_cast<png_bytep>(planes[0] + rowOffset));
+            continue;
+        }
+        if (channels == 3 || channels == 4) {
+            ImagePixels::interleaveRow(planes[0] + rowOffset, planes[1] + rowOffset, planes[2] + rowOffset, channels == 4 ? planes[3] + rowOffset : nullptr, row, width, channels);
+            png_write_row(png, row);
+            continue;
+        }
         for (int channel = 0; channel < channels; channel++) {
             const uint8_t* plane = planes[channel] + rowOffset;
             for (png_uint_32 x = 0; x < width; x++)
@@ -168,18 +182,21 @@ void savePng(const Gray8BufferIO& image, const string& path) {
 // save image using encoder for file extension
 void saveCimgByExtension(const Gray8BufferIO& cimgToSave, const string& path) {
     const string extension = lowercaseExtension(path);
-    if (extension == "png")
+    if (extension == "png") {
         savePng(cimgToSave, path);
-    else if (extension == "bmp")
+    } else if (extension == "bmp") {
+        checkError(cimgToSave.spectrum() == 4, "BMP format does not support an alpha channel, save as PNG, TIFF or WebP instead: " + path);
         saveBmp(cimgToSave, path);
-    else if (hasJpegExtension(path))
+    } else if (hasJpegExtension(path)) {
+        checkError(cimgToSave.spectrum() == 4, "JPEG format does not support an alpha channel, save as PNG, TIFF or WebP instead: " + path);
         cimgToSave.save_jpeg(path.c_str());
-    else if (extension == "webp")
+    } else if (extension == "webp") {
         cimgToSave.save_webp(path.c_str());
-    else if (extension == "tif" || extension == "tiff")
+    } else if (extension == "tif" || extension == "tiff") {
         cimgToSave.save_tiff(path.c_str(), 20);
-    else
+    } else {
         throw std::runtime_error("Unsupported image format: " + extension);
+    }
 }
 
 // unhandled orientations skip rotation
@@ -288,8 +305,11 @@ std::vector<uint8_t> readJpegFile(const string& imageFile) {
 } // namespace
 #endif
 
-void InternalUtils::saveImage(const string& imagePath, const string& suffix, const ImageOutputBuffer& watermark, const std::vector<uint8_t>& alphaChannel) {
+void InternalUtils::saveImage(const string& imagePath, const string& suffix, const ImageOutputBuffer& watermark, const std::vector<uint8_t>& alphaChannel, [[maybe_unused]] const bool parallel) {
     const string watermarkedFile = addSuffixBeforeExtension(imagePath, suffix);
+    const string extension = lowercaseExtension(watermarkedFile);
+    if (!alphaChannel.empty() && (extension == "bmp" || extension == "jpg" || extension == "jpeg"))
+        throw std::runtime_error((extension == "bmp" ? "BMP" : "JPEG") + string(" format does not support an alpha channel, save as PNG, TIFF or WebP instead: ") + watermarkedFile);
 #if defined(_USE_GPU_)
     const int rows = watermark.getRows();
     const int cols = watermark.getCols();
@@ -321,12 +341,12 @@ void InternalUtils::saveImage(const string& imagePath, const string& suffix, con
         std::memcpy(output.data() + (3 * cols * rows), alphaChannel.data(), cols * rows);
     saveCimgByExtension(output, watermarkedFile);
 #elif defined(_USE_EIGEN_)
-    const auto cimgToSave = watermark.isRGB() ? eigen_utils::eigenRgbToCimg(watermark.getRGB(), alphaChannel) : eigen_utils::eigenGrayToCimg(watermark.getGray());
+    const auto cimgToSave = watermark.isRGB() ? eigen_utils::eigenRgbToCimg(watermark.getRGB(), alphaChannel, parallel) : eigen_utils::eigenGrayToCimg(watermark.getGray(), parallel);
     saveCimgByExtension(cimgToSave, watermarkedFile);
 #endif
 }
 
-ImageFileBuffer InternalUtils::loadImage(const string& imageFile, const bool captureOriginal) {
+ImageFileBuffer InternalUtils::loadImage(const string& imageFile, const bool captureOriginal, [[maybe_unused]] const bool parallel) {
     ImageFileBuffer buf;
     auto& rgbImage = buf.rgbImage;
     auto& image = buf.image;
@@ -350,7 +370,8 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile, const bool cap
             isRGB = !rgb.empty();
             rgbImage = std::move(rgb);
             image = std::move(gray);
-            CUDA_CHECK(cudaStreamSynchronize(stream));
+            if (!captureOriginal)
+                CUDA_CHECK(cudaStreamSynchronize(stream));
             return buf;
         }
     }
@@ -413,18 +434,20 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile, const bool cap
         isRGB = true;
         break;
     }
+    case 2: throw std::runtime_error("Unsupported 2-channel grayscale+alpha image format: " + imageFile);
     default: throw std::runtime_error("Invalid image dimensions");
     }
 #if defined(_USE_CUDA_)
-    CUDA_CHECK(cudaStreamSynchronize(stream));
+    if (!devicePreview)
+        CUDA_CHECK(cudaStreamSynchronize(stream));
 #elif defined(_USE_OPENCL_)
     clFinish(stream);
 #endif
 #elif defined(_USE_EIGEN_)
     switch (channels) {
-    case 1: image = eigen_utils::cimgToEigenGray(cimgRgb); break;
+    case 1: image = eigen_utils::cimgToEigenGray(cimgRgb, parallel); break;
     case 3: {
-        auto [rgb, gray] = eigen_utils::cimgToEigenRgbAndGray(cimgRgb);
+        auto [rgb, gray] = eigen_utils::cimgToEigenRgbAndGray(cimgRgb, parallel);
         rgbImage = std::move(rgb);
         image = std::move(gray);
         break;
@@ -433,12 +456,16 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile, const bool cap
         const uint8_t* alphaPlane = cimgRgb.data(0, 0, 0, 3);
         alphaChannel.assign(alphaPlane, alphaPlane + static_cast<size_t>(cimgRgb.width()) * cimgRgb.height());
         auto rgbView = cimgRgb.get_shared_channels(0, 2);
-        ImagePixels::clearTransparent(rgbView.data(), alphaChannel.data(), alphaChannel.size());
-        auto [rgb, gray] = eigen_utils::cimgToEigenRgbAndGray(rgbView);
+        if (parallel)
+            ImagePixels::clearTransparent(rgbView.data(), alphaChannel.data(), alphaChannel.size());
+        else
+            ImagePixels::clearTransparentSerial(rgbView.data(), alphaChannel.data(), alphaChannel.size());
+        auto [rgb, gray] = eigen_utils::cimgToEigenRgbAndGray(rgbView, parallel);
         rgbImage = std::move(rgb);
         image = std::move(gray);
         break;
     }
+    case 2: throw std::runtime_error("Unsupported 2-channel grayscale+alpha image format: " + imageFile);
     default: throw std::runtime_error("Invalid image dimensions");
     }
     isRGB = rgbImage.isRGB();

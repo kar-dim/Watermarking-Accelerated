@@ -25,30 +25,12 @@ using namespace Eigen;
 
 namespace {
 constexpr int kBlock = 16;
-// transposed column j of a block goes in register kColumnRegister[j] (4-bit bit reversal)
-constexpr std::array<int, kBlock> kColumnRegister{0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15};
 
-// loads a 16x16 byte block (16 rows "stride" bytes apart) and transposes it with 4 unpack stages (8/16/32/64 bit), col j goes in m[kColumnRegister[j]]
+// loads a 16x16 byte block (16 rows "stride" bytes apart) and transposes it with 4 unpack stages (8/16/32/64 bit), col j goes in m[Simd::kTransposeRegister[j]]
 void loadTransposedBlock(const uint8_t* source, const size_t stride, __m128i m[kBlock]) {
-    __m128i t[kBlock];
     for (int i = 0; i < kBlock; i++)
         m[i] = _mm_loadu_si128(reinterpret_cast<const __m128i*>(source + i * stride));
-    for (int i = 0; i < kBlock / 2; i++) {
-        t[i] = _mm_unpacklo_epi8(m[2 * i], m[(2 * i) + 1]);
-        t[i + (kBlock / 2)] = _mm_unpackhi_epi8(m[2 * i], m[(2 * i) + 1]);
-    }
-    for (int i = 0; i < kBlock / 2; i++) {
-        m[i] = _mm_unpacklo_epi16(t[2 * i], t[(2 * i) + 1]);
-        m[i + (kBlock / 2)] = _mm_unpackhi_epi16(t[2 * i], t[(2 * i) + 1]);
-    }
-    for (int i = 0; i < kBlock / 2; i++) {
-        t[i] = _mm_unpacklo_epi32(m[2 * i], m[(2 * i) + 1]);
-        t[i + (kBlock / 2)] = _mm_unpackhi_epi32(m[2 * i], m[(2 * i) + 1]);
-    }
-    for (int i = 0; i < kBlock / 2; i++) {
-        m[i] = _mm_unpacklo_epi64(t[2 * i], t[(2 * i) + 1]);
-        m[i + (kBlock / 2)] = _mm_unpackhi_epi64(t[2 * i], t[(2 * i) + 1]);
-    }
+    Simd::transposeU8_16x16(m);
 }
 
 // the 8 low bytes as floats
@@ -79,56 +61,73 @@ void storeLuma(const __m128i r, const __m128i g, const __m128i b, float* destina
     }
 }
 
-// row-major byte plane (height x width) -> its transpose (width x height, row-major) is the col-major plane of a row-major image and back
-void transposePlane(const uint8_t* source, uint8_t* destination, const int height, const int width) {
-    const int blockRows = height - (height % kBlock);
-    const int blockCols = width - (width % kBlock);
-    // each thread writes whole destination rows (16 source columns)
-#pragma omp parallel for schedule(static)
-    for (int col = 0; col < blockCols; col += kBlock) {
-        int row = 0;
-        for (; row < blockRows; row += kBlock) {
-            __m128i m[kBlock];
-            loadTransposedBlock(source + (static_cast<size_t>(row) * width) + col, width, m);
-            for (int j = 0; j < kBlock; j++)
-                _mm_storeu_si128(reinterpret_cast<__m128i*>(destination + (static_cast<size_t>(col + j) * height) + row), m[kColumnRegister[j]]);
-        }
-        for (; row < height; row++)
-            for (int j = 0; j < kBlock; j++)
-                destination[(static_cast<size_t>(col + j) * height) + row] = source[(static_cast<size_t>(row) * width) + col + j];
+void transposeBlockStripe(const uint8_t* source, uint8_t* destination, const int height, const int width, const int blockRows, const int col) {
+    int row = 0;
+    for (; row < blockRows; row += kBlock) {
+        __m128i m[kBlock];
+        loadTransposedBlock(source + (static_cast<size_t>(row) * width) + col, width, m);
+        for (int j = 0; j < kBlock; j++)
+            _mm_storeu_si128(reinterpret_cast<__m128i*>(destination + (static_cast<size_t>(col + j) * height) + row), m[Simd::kTransposeRegister[j]]);
     }
-    // tail columns that don't fill a block
+    for (; row < height; row++)
+        for (int j = 0; j < kBlock; j++)
+            destination[(static_cast<size_t>(col + j) * height) + row] = source[(static_cast<size_t>(row) * width) + col + j];
+}
+
+void transposeTailColumns(const uint8_t* source, uint8_t* destination, const int height, const int width, const int blockCols) {
     for (int col = blockCols; col < width; col++)
         for (int row = 0; row < height; row++)
             destination[(static_cast<size_t>(col) * height) + row] = source[(static_cast<size_t>(row) * width) + col];
+}
+
+// row-major byte plane (height x width) -> its transpose (width x height, row-major) is the col-major plane of a row-major image and back
+void transposePlane(const uint8_t* source, uint8_t* destination, const int height, const int width, const bool parallel) {
+    const int blockRows = height - (height % kBlock);
+    const int blockCols = width - (width % kBlock);
+    // each thread writes whole destination rows (16 source columns)
+#pragma omp parallel for if (parallel) schedule(static)
+    for (int col = 0; col < blockCols; col += kBlock)
+        transposeBlockStripe(source, destination, height, width, blockRows, col);
+    transposeTailColumns(source, destination, height, width, blockCols);
 }
 } // namespace
 
 namespace eigen_utils {
 // column-major 8-bit RGB (+ optional alpha) -> row-major planar CImg
-Gray8BufferIO eigenRgbToCimg(const EigenArrayU8RGB& arrayRgb, const std::vector<uint8_t>& alphaChannel) {
+Gray8BufferIO eigenRgbToCimg(const EigenArrayU8RGB& arrayRgb, const std::vector<uint8_t>& alphaChannel, const bool parallel) {
     const auto rows = arrayRgb[0].rows();
     const auto cols = arrayRgb[0].cols();
+    const int height = static_cast<int>(cols);
+    const int width = static_cast<int>(rows);
+    const int blockRows = height - (height % kBlock);
+    const int blockCols = width - (width % kBlock);
+    const int colBlocks = blockCols / kBlock;
     const int channels = alphaChannel.empty() ? 3 : 4;
     Gray8BufferIO output(static_cast<unsigned int>(cols), static_cast<unsigned int>(rows), 1, channels);
     const size_t planeSize = static_cast<size_t>(rows) * cols;
+#pragma omp parallel for if (parallel) schedule(static)
+    for (int task = 0; task < 3 * colBlocks; task++) {
+        const int channel = task / colBlocks;
+        const int col = (task % colBlocks) * kBlock;
+        transposeBlockStripe(arrayRgb[channel].data(), output.data() + (channel * planeSize), height, width, blockRows, col);
+    }
     for (int channel = 0; channel < 3; channel++)
-        transposePlane(arrayRgb[channel].data(), output.data() + (channel * planeSize), static_cast<int>(cols), static_cast<int>(rows));
+        transposeTailColumns(arrayRgb[channel].data(), output.data() + (channel * planeSize), height, width, blockCols);
     if (channels == 4)
         std::memcpy(output.data() + (3 * planeSize), alphaChannel.data(), planeSize);
     return output;
 }
 
-Gray8BufferIO eigenGrayToCimg(const Gray8Buffer& arrayGray) {
+Gray8BufferIO eigenGrayToCimg(const Gray8Buffer& arrayGray, const bool parallel) {
     const auto rows = arrayGray.rows();
     const auto cols = arrayGray.cols();
     Gray8BufferIO output(static_cast<unsigned int>(cols), static_cast<unsigned int>(rows));
-    transposePlane(arrayGray.data(), output.data(), static_cast<int>(cols), static_cast<int>(rows));
+    transposePlane(arrayGray.data(), output.data(), static_cast<int>(cols), static_cast<int>(rows), parallel);
     return output;
 }
 
 // row-major planar 8-bit RGB (CImg) -> column-major 8-bit RGB + float luma
-std::pair<EigenArrayU8RGB, ArrayXXf> cimgToEigenRgbAndGray(const Gray8BufferIO& rgbImage) {
+std::pair<EigenArrayU8RGB, ArrayXXf> cimgToEigenRgbAndGray(const Gray8BufferIO& rgbImage, const bool parallel) {
     const int rows = rgbImage.height();
     const int cols = rgbImage.width();
     const size_t planeSize = static_cast<size_t>(rows) * cols;
@@ -153,7 +152,7 @@ std::pair<EigenArrayU8RGB, ArrayXXf> cimgToEigenRgbAndGray(const Gray8BufferIO& 
     const int blockRows = rows - (rows % kBlock);
     const int blockCols = cols - (cols % kBlock);
     // 16x16 blocks of the 3 planes transposed in registers, each thread writes whole output columns
-#pragma omp parallel for schedule(static)
+#pragma omp parallel for if (parallel) schedule(static)
     for (int col = 0; col < blockCols; col += kBlock) {
         int row = 0;
         for (; row < blockRows; row += kBlock) {
@@ -166,7 +165,7 @@ std::pair<EigenArrayU8RGB, ArrayXXf> cimgToEigenRgbAndGray(const Gray8BufferIO& 
             loadTransposedBlock(blue + inputOffset, cols, b);
             for (int j = 0; j < kBlock; j++) {
                 const size_t outputOffset = (static_cast<size_t>(col + j) * rows) + row;
-                const int k = kColumnRegister[j];
+                const int k = Simd::kTransposeRegister[j];
                 _mm_storeu_si128(reinterpret_cast<__m128i*>(outputRed + outputOffset), r[k]);
                 _mm_storeu_si128(reinterpret_cast<__m128i*>(outputGreen + outputOffset), g[k]);
                 _mm_storeu_si128(reinterpret_cast<__m128i*>(outputBlue + outputOffset), b[k]);
@@ -184,31 +183,33 @@ std::pair<EigenArrayU8RGB, ArrayXXf> cimgToEigenRgbAndGray(const Gray8BufferIO& 
     return {std::move(output), std::move(gray)};
 }
 
-ImageBuffer cimgToEigenGray(const Gray8BufferIO& grayImage) {
-    const int rows = grayImage.height();
-    const int cols = grayImage.width();
-    const uint8_t* input = grayImage.data();
-    ArrayXXf output(rows, cols);
-    float* outputData = output.data();
+void pitchedRowMajorU8ToColMajorFloat(const uint8_t* source, const int rows, const int cols, const int srcPitch, float* destination, const bool parallel) {
     const int blockRows = rows - (rows % kBlock);
     const int blockCols = cols - (cols % kBlock);
-#pragma omp parallel for schedule(static)
+#pragma omp parallel for if (parallel) schedule(static)
     for (int col = 0; col < blockCols; col += kBlock) {
         int row = 0;
         for (; row < blockRows; row += kBlock) {
             __m128i m[kBlock];
-            loadTransposedBlock(input + (static_cast<size_t>(row) * cols) + col, cols, m);
+            loadTransposedBlock(source + (static_cast<size_t>(row) * srcPitch) + col, srcPitch, m);
             for (int j = 0; j < kBlock; j++)
-                storeFloats(m[kColumnRegister[j]], outputData + (static_cast<size_t>(col + j) * rows) + row);
+                storeFloats(m[Simd::kTransposeRegister[j]], destination + (static_cast<size_t>(col + j) * rows) + row);
         }
         for (; row < rows; row++)
             for (int j = 0; j < kBlock; j++)
-                outputData[(static_cast<size_t>(col + j) * rows) + row] = input[(static_cast<size_t>(row) * cols) + col + j];
+                destination[(static_cast<size_t>(col + j) * rows) + row] = source[(static_cast<size_t>(row) * srcPitch) + col + j];
     }
     // tail columns that don't fill a block
     for (int col = blockCols; col < cols; col++)
         for (int row = 0; row < rows; row++)
-            outputData[(static_cast<size_t>(col) * rows) + row] = input[(static_cast<size_t>(row) * cols) + col];
+            destination[(static_cast<size_t>(col) * rows) + row] = source[(static_cast<size_t>(row) * srcPitch) + col];
+}
+
+ImageBuffer cimgToEigenGray(const Gray8BufferIO& grayImage, const bool parallel) {
+    const int rows = grayImage.height();
+    const int cols = grayImage.width();
+    ArrayXXf output(rows, cols);
+    pitchedRowMajorU8ToColMajorFloat(grayImage.data(), rows, cols, cols, output.data(), parallel);
     return ImageBuffer(std::move(output));
 }
 

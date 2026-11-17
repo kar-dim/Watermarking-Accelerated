@@ -39,6 +39,7 @@ extern "C" {
 #include <bit>
 #include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 #include <deque>
@@ -78,6 +79,7 @@ extern "C" {
 #include "libavutil/common.h"
 #include "libavutil/dict.h"
 #include "libavutil/hwcontext.h"
+#include "libavutil/log.h"
 #include "libavutil/opt.h"
 #include "libavutil/pixdesc.h"
 }
@@ -950,6 +952,19 @@ TEST(WatermarkCryptoTest, HostWatermarkMatchesTheScalarReference) {
         const auto host = WatermarkCrypto::generateHalfWatermark(baseState, numElements);
         const std::vector<uint16_t> hostBits(host.get(), host.get() + numElements);
         EXPECT_EQ(bitDifferences(hostBits, referenceWatermark(baseState, numElements)), "") << numElements << " values";
+    }
+}
+
+TEST(WatermarkCryptoTest, FloatRoundedWatermarkMatchesGenerateHalfWatermarkBitForBit) {
+    const std::array<uint32_t, 16> baseState = WatermarkCrypto::computeBaseState(defaultPassword);
+    for (const int64_t numElements : {1, 7, 8, 9, 15, 16, 63, 64, 65, 127, 128, 129, 136, 324, 1000, 12293, 1920 * 1080 + 3}) {
+        const auto halfBits = WatermarkCrypto::generateHalfWatermark(baseState, numElements);
+        std::vector<float> expected(static_cast<size_t>(numElements));
+        for (int64_t i = 0; i < numElements; ++i)
+            expected[static_cast<size_t>(i)] = HalfFloat::toFloat(halfBits[i]);
+        std::vector<float> actual(static_cast<size_t>(numElements));
+        WatermarkCrypto::generateFloatRoundedHalfWatermark(baseState, actual.data(), numElements);
+        EXPECT_EQ(bitDifferences(actual, expected), "") << numElements << " values";
     }
 }
 
@@ -2448,6 +2463,31 @@ TEST(OpenCLVideoTest, PacksEncoderPlanesExactlyAndRetainsEarlierOutputSurfaces) 
             EXPECT_EQ(lumaError, 0);
             EXPECT_EQ(chromaError, 0);
         }
+        cl::Buffer shortLuma(manager.getContext(), CL_MEM_READ_ONLY, pixels - 1);
+        std::future<bool> rejectedUpload;
+        cl::UserEvent gate(manager.getContext());
+        struct ReleaseGate {
+            cl_event event;
+            ~ReleaseGate() { clSetUserEventStatus(event, CL_COMPLETE); }
+        } releaseGate{gate()};
+        const std::vector<cl::Event> waits{gate};
+        manager.getQueue().enqueueBarrierWithWaitList(&waits);
+        std::promise<void> started;
+        auto startedFuture = started.get_future();
+        const auto owner = OclQueueManager::current();
+        rejectedUpload = std::async(std::launch::async, [&] {
+            const OclQueueManager::Binding binding(owner);
+            started.set_value();
+            try {
+                AVFramePtr unexpected(output->copyFrom(source.get(), shortLuma));
+                return false;
+            } catch (const std::invalid_argument&) { return true; }
+        });
+        startedFuture.wait();
+        const auto earlyExit = rejectedUpload.wait_for(std::chrono::milliseconds(100));
+        ASSERT_EQ(clSetUserEventStatus(gate(), CL_COMPLETE), CL_SUCCESS);
+        EXPECT_TRUE(rejectedUpload.get());
+        EXPECT_EQ(earlyExit, std::future_status::timeout) << "Upload failure must wait for queued reads of the CPU frame";
         ++checked;
     }
     if (!checked)
@@ -5054,6 +5094,174 @@ TEST(WatermarkThreadingTest, EmbedsAndDetectsWhileAnotherThreadPreloadsImages) {
         worker.join();
         EXPECT_EQ(error, "") << "run " << run;
     }
+}
+
+TEST_F(WatermarkTest, NullUpdateSessionParamsThrows) { EXPECT_THROW(updateSessionParams(nullptr, 3, 40.0f), std::runtime_error); }
+
+TEST_F(WatermarkTest, RejectsAlphaToBmpOrJpegTwoChannelPngAndMissingFilenameExtension) {
+    // 16x16 RGBA PNG: saving to PNG succeeds while BMP and JPEG reject alpha cleanly
+    png_image rgba{};
+    rgba.version = PNG_IMAGE_VERSION;
+    rgba.width = 16;
+    rgba.height = 16;
+    rgba.format = PNG_FORMAT_RGBA;
+    std::vector<uint8_t> rgbaPixels(16 * 16 * 4);
+    for (size_t i = 0; i < rgbaPixels.size(); ++i)
+        rgbaPixels[i] = static_cast<uint8_t>((i * 37 + 11) % 256);
+    const fs::path rgbaInput = tempDir / "rgba_input.png";
+    ASSERT_NE(png_image_write_to_file(&rgba, rgbaInput.string().c_str(), 0, rgbaPixels.data(), 0, nullptr), 0);
+
+    loadImage(session.get(), rgbaInput.string());
+    embedImage(session.get());
+    EXPECT_THROW(saveImage(session.get(), (tempDir / "alpha_out.jpg").string()), std::runtime_error);
+    EXPECT_THROW(saveImage(session.get(), (tempDir / "alpha_out.jpeg").string()), std::runtime_error);
+    EXPECT_THROW(saveImage(session.get(), (tempDir / "alpha_out.bmp").string()), std::runtime_error);
+    EXPECT_NO_THROW(saveImage(session.get(), (tempDir / "alpha_out.png").string()));
+    EXPECT_TRUE(fs::exists(tempDir / "alpha_outW_ME.png"));
+
+    // 16x16 2-channel Gray+Alpha PNG should fail with clear format message
+    png_image ga{};
+    ga.version = PNG_IMAGE_VERSION;
+    ga.width = 16;
+    ga.height = 16;
+    ga.format = PNG_FORMAT_GA;
+    std::vector<uint8_t> gaPixels(16 * 16 * 2, 128);
+    const fs::path gaInput = tempDir / "gray_alpha.png";
+    ASSERT_NE(png_image_write_to_file(&ga, gaInput.string().c_str(), 0, gaPixels.data(), 0, nullptr), 0);
+    try {
+        loadImage(session.get(), gaInput.string());
+        FAIL() << "Expected exception for 2-channel grayscale+alpha image";
+    } catch (const std::runtime_error& error) { EXPECT_NE(std::string_view(error.what()).find("2-channel"), std::string_view::npos) << error.what(); }
+
+    // Parent folder containing a dot must not be treated as the filename extension
+    const fs::path dottedDir = tempDir / "folder.v1";
+    fs::create_directories(dottedDir);
+    const fs::path bmpInput = dottedDir / "sample.bmp";
+    writeNoiseBmp(bmpInput, 16, 16);
+    loadImage(session.get(), bmpInput.string());
+    embedImage(session.get());
+    EXPECT_THROW(saveImage(session.get(), (dottedDir / "noext").string()), std::runtime_error);
+    EXPECT_NO_THROW(saveImage(session.get(), (dottedDir / "valid.png").string()));
+    EXPECT_TRUE(fs::exists(dottedDir / "validW_ME.png"));
+}
+
+TEST(EncodeOptionsTest, SupportsStreamZeroVcodecAndOtherStreamFilters) {
+    const auto parsed = video_utils::parseEncodeOptions("-c:v:0 libx265 -b:v:0 4M -acodec aac -an -sn -dn -vn");
+    EXPECT_EQ(parsed.codecName, "libx265");
+    EXPECT_EQ(dictValue(parsed, "b"), "4M");
+    EXPECT_EQ(parsed.ignored, (std::vector<std::string>{"-acodec", "-an", "-sn", "-dn", "-vn"}));
+    EXPECT_EQ(video_utils::parseEncodeOptions("-vcodec h264").codecName, "h264");
+}
+
+TEST(VideoObserverTest, AcceptsWhitespaceOnlyHardwareEncoderOptions) {
+#if defined(_USE_GPU_)
+    EXPECT_NO_THROW(validateVideoEncoderOptions("   \t\n ", true));
+#else
+    EXPECT_THROW(validateVideoEncoderOptions("   \t\n ", true), std::invalid_argument);
+#endif
+}
+
+TEST(VideoObserverTest, LibavWorkerLogsFollowCodecOwnersAcrossScopes) {
+    using namespace video_utils;
+    struct LogObserver : VideoObserver {
+        std::vector<std::string> lines;
+        void onLog(const std::string& text) override { lines.push_back(text); }
+    } first, second;
+    VideoSession firstSession, secondSession;
+    firstSession.settings.observer = &first;
+    secondSession.settings.observer = &second;
+    AVCodecContextPtr firstCodec(avcodec_alloc_context3(nullptr)), secondCodec(avcodec_alloc_context3(nullptr)), workerCodec(avcodec_alloc_context3(nullptr));
+    ASSERT_TRUE(firstCodec && secondCodec && workerCodec);
+    {
+        const LibavLogScope scope(&firstSession);
+        attachLibavLog(firstCodec.get());
+    }
+    workerCodec->opaque = firstCodec->opaque;
+    struct ChildLogContext {
+        const AVClass* type;
+        AVCodecContext* parent;
+    };
+    AVClass childType{};
+    childType.class_name = "child";
+    childType.item_name = [](void*) { return "child"; };
+    childType.version = LIBAVUTIL_VERSION_INT;
+    childType.parent_log_context_offset = offsetof(ChildLogContext, parent);
+    ChildLogContext child{&childType, workerCodec.get()};
+    {
+        const LibavLogScope firstScope(&firstSession);
+        {
+            const LibavLogScope secondScope(&secondSession);
+            attachLibavLog(secondCodec.get());
+            std::thread worker([&] {
+                av_log(workerCodec.get(), AV_LOG_WARNING, "first fragment");
+                av_log(secondCodec.get(), AV_LOG_WARNING, "second message\n");
+                av_log(workerCodec.get(), AV_LOG_WARNING, "first tail\n");
+                av_log(&child, AV_LOG_WARNING, "first child context\n");
+            });
+            worker.join();
+            av_log(firstCodec.get(), AV_LOG_ERROR, "first context wins over thread scope\n");
+            av_log(nullptr, AV_LOG_WARNING, "second thread scope\n");
+        }
+        std::thread encoder([&] {
+            const LibavLogScope sameSession(&firstSession);
+            av_log(workerCodec.get(), AV_LOG_WARNING, "first encoder thread\n");
+        });
+        encoder.join();
+        const std::string longMessage(2048, 'x');
+        av_log(nullptr, AV_LOG_WARNING, "first long %s %d\n", longMessage.c_str(), 42);
+    }
+    const auto contains = [](const auto& lines, const std::string& text) { return std::ranges::any_of(lines, [&](const auto& line) { return line.find(text) != std::string::npos; }); };
+    ASSERT_EQ(first.lines.size(), 6u);
+    EXPECT_TRUE(contains(first.lines, "first fragment"));
+    EXPECT_TRUE(contains(first.lines, "first tail"));
+    EXPECT_TRUE(contains(first.lines, "first child context"));
+    EXPECT_TRUE(contains(first.lines, "first context wins"));
+    EXPECT_TRUE(contains(first.lines, "first encoder thread"));
+    EXPECT_TRUE(contains(first.lines, "first long " + std::string(2048, 'x') + " 42"));
+    EXPECT_FALSE(contains(first.lines, "second"));
+    ASSERT_EQ(second.lines.size(), 2u);
+    EXPECT_TRUE(contains(second.lines, "second message"));
+    EXPECT_TRUE(contains(second.lines, "second thread scope"));
+    EXPECT_FALSE(contains(second.lines, "first"));
+    testing::internal::CaptureStderr();
+    av_log(firstCodec.get(), AV_LOG_WARNING, "retired session goes to stderr\n");
+    EXPECT_NE(testing::internal::GetCapturedStderr().find("retired session goes to stderr"), std::string::npos);
+    EXPECT_EQ(first.lines.size(), 6u);
+}
+
+TEST(VideoObserverTest, LibavWarningsCannotUnwindThroughCodecFrames) {
+    struct ThrowingLogObserver : VideoObserver {
+        void onLog(const std::string&) override { throw std::runtime_error("Observer log failure"); }
+    } observer;
+    VideoSession session;
+    session.settings.observer = &observer;
+    const video_utils::LibavLogScope scope(&session);
+    EXPECT_NO_THROW(av_log(nullptr, AV_LOG_WARNING, "warning with throwing observer\n"));
+}
+
+TEST_F(WatermarkTest, ForwardsWarningsFromFfmpegDecoderThreads) {
+    struct DecoderLogObserver : VideoObserver {
+        const std::thread::id caller = std::this_thread::get_id();
+        std::atomic<int> workerWarnings = 0;
+        void onLog(const std::string& text) override {
+            if (text.find("decoder worker warning") != std::string::npos && std::this_thread::get_id() != caller)
+                ++workerWarnings;
+        }
+    } observer;
+    const auto input = tempDir / "threaded-decoder.mkv";
+    writeVideoFixture(input, false, AVCOL_TRC_BT709, true);
+    auto settings = makeVideoSettings(input.string());
+    settings.useHwDecoder = false;
+    settings.cpuThreads = 4;
+    settings.observer = &observer;
+    auto video = initVideo(settings);
+    ASSERT_TRUE(video->inputDecoderCtx->active_thread_type & FF_THREAD_FRAME);
+    video->inputDecoderCtx->get_buffer2 = [](AVCodecContext* context, AVFrame* frame, const int flags) {
+        av_log(context, AV_LOG_WARNING, "decoder worker warning\n");
+        return avcodec_default_get_buffer2(context, frame, flags);
+    };
+    EXPECT_EQ(detectVideo(video.get()), 100);
+    EXPECT_GT(observer.workerWarnings.load(), 0);
 }
 
 #include "VideoBatchSchedulerTests.hpp"

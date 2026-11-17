@@ -170,6 +170,19 @@ inline void sinCosAvx2(const __m256 x, __m256& sinOut, __m256& cosOut) {
 // take the top 24 bits of four uint64 lanes into the low 128 bits as four int32
 inline __m128i unpackTop24(const __m256i v) { return _mm256_castsi256_si128(_mm256_permutevar8x32_epi32(_mm256_srli_epi64(v, 40), _mm256_setr_epi32(0, 2, 4, 6, 0, 2, 4, 6))); }
 
+inline void boxMullerAvx2(const __m256i top24U1, const __m256i top24U2, __m256& z0, __m256& z1) {
+    // exactly toUniformFloat: both the multiply and the add are exact for a 24-bit integer
+    const __m256 scale = _mm256_set1_ps(0x1.0p-24f);
+    const __m256 u1 = _mm256_fmadd_ps(_mm256_cvtepi32_ps(top24U1), scale, scale);
+    const __m256 u2 = _mm256_fmadd_ps(_mm256_cvtepi32_ps(top24U2), scale, scale);
+
+    const __m256 radius = _mm256_sqrt_ps(_mm256_mul_ps(_mm256_set1_ps(-2.0f), logAvx2(u1)));
+    __m256 sinTheta, cosTheta;
+    sinCosAvx2(_mm256_mul_ps(_mm256_set1_ps(kTwoPi), u2), sinTheta, cosTheta);
+    z0 = _mm256_mul_ps(radius, cosTheta);
+    z1 = _mm256_mul_ps(radius, sinTheta);
+}
+
 } // namespace detail
 
 // vectorized Box-Muller transform of two ChaCha20 blocks (16 uint64 = 8 pairs), writes 16 floats
@@ -186,16 +199,8 @@ inline void generateBoxMullerNormalBlockPair(const std::array<uint64_t, 8>& bloc
     const __m128 even1 = _mm_shuffle_ps(_mm_castsi128_ps(k2), _mm_castsi128_ps(k3), _MM_SHUFFLE(2, 0, 2, 0));
     const __m128 odd1 = _mm_shuffle_ps(_mm_castsi128_ps(k2), _mm_castsi128_ps(k3), _MM_SHUFFLE(3, 1, 3, 1));
 
-    // exactly toUniformFloat: both the multiply and the add are exact for a 24-bit integer
-    const __m256 scale = _mm256_set1_ps(0x1.0p-24f);
-    const __m256 u1 = _mm256_fmadd_ps(_mm256_cvtepi32_ps(_mm256_castps_si256(_mm256_set_m128(even1, even0))), scale, scale);
-    const __m256 u2 = _mm256_fmadd_ps(_mm256_cvtepi32_ps(_mm256_castps_si256(_mm256_set_m128(odd1, odd0))), scale, scale);
-
-    const __m256 radius = _mm256_sqrt_ps(_mm256_mul_ps(_mm256_set1_ps(-2.0f), detail::logAvx2(u1)));
-    __m256 sinTheta, cosTheta;
-    detail::sinCosAvx2(_mm256_mul_ps(_mm256_set1_ps(kTwoPi), u2), sinTheta, cosTheta);
-    const __m256 z0 = _mm256_mul_ps(radius, cosTheta);
-    const __m256 z1 = _mm256_mul_ps(radius, sinTheta);
+    __m256 z0, z1;
+    detail::boxMullerAvx2(_mm256_castps_si256(_mm256_set_m128(even1, even0)), _mm256_castps_si256(_mm256_set_m128(odd1, odd0)), z0, z1);
 
     // interleave back into (z0, z1) pairs: block0's 8 floats, then block1's 8 floats
     const __m256 lo = _mm256_unpacklo_ps(z0, z1);
@@ -267,6 +272,17 @@ inline void sinCosAvx512(const __m512 x, __m512& sinOut, __m512& cosOut) {
     sinOut = xorPs(_mm512_mask_blend_ps(polyMask, cosPoly, sinPoly), swapSinSign);
     cosOut = xorPs(_mm512_mask_blend_ps(polyMask, sinPoly, cosPoly), cosSign);
 }
+
+inline void boxMullerAvx512(const __m512i top24U1, const __m512i top24U2, __m512& z0, __m512& z1) {
+    const __m512 scale = _mm512_set1_ps(0x1.0p-24f);
+    const __m512 u1 = _mm512_fmadd_ps(_mm512_cvtepi32_ps(top24U1), scale, scale);
+    const __m512 u2 = _mm512_fmadd_ps(_mm512_cvtepi32_ps(top24U2), scale, scale);
+    const __m512 radius = _mm512_sqrt_ps(_mm512_mul_ps(_mm512_set1_ps(-2.0f), logAvx512(u1)));
+    __m512 sinTheta, cosTheta;
+    sinCosAvx512(_mm512_mul_ps(_mm512_set1_ps(kTwoPi), u2), sinTheta, cosTheta);
+    z0 = _mm512_mul_ps(radius, cosTheta);
+    z1 = _mm512_mul_ps(radius, sinTheta);
+}
 } // namespace detail
 
 // vectorized Box-Muller transform of four ChaCha20 blocks (32 uint64 = 16 pairs), writes 32 floats
@@ -279,15 +295,8 @@ inline void generateBoxMullerNormalBlockQuad(const std::array<uint64_t, 8>* bloc
     // deinterleave into the x1 (even) and x2 (odd) member of every pair, pair order kept
     const __m512i evenIndex = _mm512_setr_epi32(0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30);
     const __m512i oddIndex = _mm512_setr_epi32(1, 3, 5, 7, 9, 11, 13, 15, 17, 19, 21, 23, 25, 27, 29, 31);
-    const __m512 scale = _mm512_set1_ps(0x1.0p-24f);
-    const __m512 u1 = _mm512_fmadd_ps(_mm512_cvtepi32_ps(_mm512_permutex2var_epi32(first, evenIndex, second)), scale, scale);
-    const __m512 u2 = _mm512_fmadd_ps(_mm512_cvtepi32_ps(_mm512_permutex2var_epi32(first, oddIndex, second)), scale, scale);
-
-    const __m512 radius = _mm512_sqrt_ps(_mm512_mul_ps(_mm512_set1_ps(-2.0f), detail::logAvx512(u1)));
-    __m512 sinTheta, cosTheta;
-    detail::sinCosAvx512(_mm512_mul_ps(_mm512_set1_ps(kTwoPi), u2), sinTheta, cosTheta);
-    const __m512 z0 = _mm512_mul_ps(radius, cosTheta);
-    const __m512 z1 = _mm512_mul_ps(radius, sinTheta);
+    __m512 z0, z1;
+    detail::boxMullerAvx512(_mm512_permutex2var_epi32(first, evenIndex, second), _mm512_permutex2var_epi32(first, oddIndex, second), z0, z1);
 
     // interleave back into (z0, z1) pairs
     _mm512_storeu_ps(dst, _mm512_permutex2var_ps(z0, _mm512_setr_epi32(0, 16, 1, 17, 2, 18, 3, 19, 4, 20, 5, 21, 6, 22, 7, 23), z1));
@@ -434,36 +443,37 @@ inline void QR8(__m256i& a, __m256i& b, __m256i& c, __m256i& d) {
     c = _mm256_add_epi32(c, d);
     b = rotl32<7>(_mm256_xor_si256(b, c));
 }
+inline void chacha20Rounds8(const std::array<uint32_t, 16>& baseState, const uint64_t firstBlock, __m256i& c0, __m256i& c1, __m256i (&x)[16]) {
+    for (int i = 0; i < 16; i++)
+        x[i] = _mm256_set1_epi32(static_cast<int>(baseState[i]));
+    // per lane 64-bit block counter: low words firstBlock + lane, wrapped low word carries into high word
+    const __m256i firstLow = _mm256_set1_epi32(static_cast<int>(static_cast<uint32_t>(firstBlock)));
+    c0 = _mm256_add_epi32(firstLow, _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7));
+    const __m256i signBit = _mm256_set1_epi32(static_cast<int>(0x80000000u));
+    const __m256i carry = _mm256_cmpgt_epi32(_mm256_xor_si256(firstLow, signBit), _mm256_xor_si256(c0, signBit));
+    c1 = _mm256_sub_epi32(_mm256_set1_epi32(static_cast<int>(static_cast<uint32_t>(firstBlock >> 32))), carry);
+    x[12] = c0;
+    x[13] = c1;
+
+    for (int i = 0; i < 10; i++) {
+        QR8(x[0], x[4], x[8], x[12]);
+        QR8(x[1], x[5], x[9], x[13]);
+        QR8(x[2], x[6], x[10], x[14]);
+        QR8(x[3], x[7], x[11], x[15]);
+        QR8(x[0], x[5], x[10], x[15]);
+        QR8(x[1], x[6], x[11], x[12]);
+        QR8(x[2], x[7], x[8], x[13]);
+        QR8(x[3], x[4], x[9], x[14]);
+    }
+}
 } // namespace detail
 
 // 8 consecutive ChaCha20 blocks (firstBlock ... firstBlock + 7) at once, one block per 32-bit lane, bit identical to chacha20Block
 inline std::array<std::array<uint64_t, 8>, 8> chacha20Blocks8(const std::array<uint32_t, 16>& baseState, const uint64_t firstBlock) {
-    // NOTE: clang ignores the alignment of the vector type in template arguments! without alignas the array is 8-byte aligned
-    alignas(32) std::array<__m256i, 16> x;
-    for (int i = 0; i < 16; i++)
-        x[i] = _mm256_set1_epi32(static_cast<int>(baseState[i]));
-    // per lane 64-bit block counter: the low words firstBlock + lane, a wrapped low word carries into the high word
-    // (unsigned compare: both sides biased by the sign bit)
-    const __m256i firstLow = _mm256_set1_epi32(static_cast<int>(static_cast<uint32_t>(firstBlock)));
-    const __m256i c0 = _mm256_add_epi32(firstLow, _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7));
-    const __m256i signBit = _mm256_set1_epi32(static_cast<int>(0x80000000u));
-    const __m256i carry = _mm256_cmpgt_epi32(_mm256_xor_si256(firstLow, signBit), _mm256_xor_si256(c0, signBit));
-    const __m256i c1 = _mm256_sub_epi32(_mm256_set1_epi32(static_cast<int>(static_cast<uint32_t>(firstBlock >> 32))), carry);
-    x[12] = c0;
-    x[13] = c1;
-
-    // 20 rounds
-    for (int i = 0; i < 10; i++) {
-        detail::QR8(x[0], x[4], x[8], x[12]);
-        detail::QR8(x[1], x[5], x[9], x[13]);
-        detail::QR8(x[2], x[6], x[10], x[14]);
-        detail::QR8(x[3], x[7], x[11], x[15]);
-        detail::QR8(x[0], x[5], x[10], x[15]);
-        detail::QR8(x[1], x[6], x[11], x[12]);
-        detail::QR8(x[2], x[7], x[8], x[13]);
-        detail::QR8(x[3], x[4], x[9], x[14]);
-    }
-    // ChaCha final addition
+    // clang ignores alignment of vector types in std::array
+    alignas(32) __m256i x[16];
+    __m256i c0, c1;
+    detail::chacha20Rounds8(baseState, firstBlock, c0, c1, x);
     for (int i = 0; i < 16; i++)
         x[i] = _mm256_add_epi32(x[i], i == 12 ? c0 : (i == 13 ? c1 : _mm256_set1_epi32(static_cast<int>(baseState[i]))));
 
@@ -494,34 +504,35 @@ inline void QR16(__m512i& a, __m512i& b, __m512i& c, __m512i& d) {
     c = _mm512_add_epi32(c, d);
     b = _mm512_rol_epi32(_mm512_xor_si512(b, c), 7);
 }
+
+inline void chacha20Rounds16(const std::array<uint32_t, 16>& baseState, const uint64_t firstBlock, __m512i& c0, __m512i& c1, __m512i (&x)[16]) {
+    for (int i = 0; i < 16; i++)
+        x[i] = _mm512_set1_epi32(static_cast<int>(baseState[i]));
+    const __m512i firstLow = _mm512_set1_epi32(static_cast<int>(static_cast<uint32_t>(firstBlock)));
+    c0 = _mm512_add_epi32(firstLow, _mm512_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15));
+    const __m512i firstHigh = _mm512_set1_epi32(static_cast<int>(static_cast<uint32_t>(firstBlock >> 32)));
+    c1 = _mm512_mask_add_epi32(firstHigh, _mm512_cmplt_epu32_mask(c0, firstLow), firstHigh, _mm512_set1_epi32(1));
+    x[12] = c0;
+    x[13] = c1;
+
+    for (int i = 0; i < 10; i++) {
+        QR16(x[0], x[4], x[8], x[12]);
+        QR16(x[1], x[5], x[9], x[13]);
+        QR16(x[2], x[6], x[10], x[14]);
+        QR16(x[3], x[7], x[11], x[15]);
+        QR16(x[0], x[5], x[10], x[15]);
+        QR16(x[1], x[6], x[11], x[12]);
+        QR16(x[2], x[7], x[8], x[13]);
+        QR16(x[3], x[4], x[9], x[14]);
+    }
+}
 } // namespace detail
 
 // 16 consecutive ChaCha20 blocks (firstBlock ... firstBlock + 15) at once, one block per 32-bit lane, bit identical to chacha20Block
 inline std::array<std::array<uint64_t, 8>, 16> chacha20Blocks16(const std::array<uint32_t, 16>& baseState, const uint64_t firstBlock) {
-    // without alignas the array is 8-byte aligned (check chacha20Blocks8 too)
-    alignas(64) std::array<__m512i, 16> x;
-    for (int i = 0; i < 16; i++)
-        x[i] = _mm512_set1_epi32(static_cast<int>(baseState[i]));
-    // per lane 64-bit block counter: the low words firstBlock + lane, a wrapped low word carries into the high word
-    const __m512i firstLow = _mm512_set1_epi32(static_cast<int>(static_cast<uint32_t>(firstBlock)));
-    const __m512i c0 = _mm512_add_epi32(firstLow, _mm512_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15));
-    const __m512i firstHigh = _mm512_set1_epi32(static_cast<int>(static_cast<uint32_t>(firstBlock >> 32)));
-    const __m512i c1 = _mm512_mask_add_epi32(firstHigh, _mm512_cmplt_epu32_mask(c0, firstLow), firstHigh, _mm512_set1_epi32(1));
-    x[12] = c0;
-    x[13] = c1;
-
-    // 20 rounds
-    for (int i = 0; i < 10; i++) {
-        detail::QR16(x[0], x[4], x[8], x[12]);
-        detail::QR16(x[1], x[5], x[9], x[13]);
-        detail::QR16(x[2], x[6], x[10], x[14]);
-        detail::QR16(x[3], x[7], x[11], x[15]);
-        detail::QR16(x[0], x[5], x[10], x[15]);
-        detail::QR16(x[1], x[6], x[11], x[12]);
-        detail::QR16(x[2], x[7], x[8], x[13]);
-        detail::QR16(x[3], x[4], x[9], x[14]);
-    }
-    // ChaCha final addition
+    alignas(64) __m512i x[16];
+    __m512i c0, c1;
+    detail::chacha20Rounds16(baseState, firstBlock, c0, c1, x);
     for (int i = 0; i < 16; i++)
         x[i] = _mm512_add_epi32(x[i], i == 12 ? c0 : (i == 13 ? c1 : _mm512_set1_epi32(static_cast<int>(baseState[i]))));
 
@@ -591,5 +602,117 @@ inline std::unique_ptr<uint16_t[]> generateHalfWatermark(const std::array<uint32
         storeBlock(block, values.data());
     }
     return halfBits;
+}
+
+// single-pass float generation rounded through fp16 directly into dst, bit identical to generateHalfWatermark + HalfFloat::toFloat
+inline void generateFloatRoundedHalfWatermark(const std::array<uint32_t, 16>& baseState, float* dst, const int64_t numElements) {
+    const int64_t fullBlocks = numElements / 8;
+    const int64_t numBlocks = (numElements + 7) / 8;
+#if defined(__AVX512F__)
+    constexpr int groupBlocks = 16;
+#else
+    constexpr int groupBlocks = 8;
+#endif
+    const int64_t numGroups = fullBlocks / groupBlocks;
+#pragma omp parallel for schedule(static)
+    for (int64_t group = 0; group < numGroups; group++) {
+        const uint64_t firstBlock = static_cast<uint64_t>(group) * groupBlocks;
+#if defined(__AVX512F__)
+        alignas(64) __m512i x[16];
+        __m512i c0, c1;
+        detail::chacha20Rounds16(baseState, firstBlock, c0, c1, x);
+        // Box-Muller reads only the high 32-bit word of each uint64, skip final add on even words
+        __m512 z0[4], z1[4];
+        const auto roundHalf = [](const __m512 v) { return _mm512_cvtph_ps(_mm512_cvtps_ph(v, _MM_FROUND_TO_NEAREST_INT)); };
+        for (int p = 0; p < 4; ++p) {
+            const int i1 = 4 * p + 1;
+            const int i2 = 4 * p + 3;
+            const __m512i u1 = _mm512_srli_epi32(_mm512_add_epi32(x[i1], i1 == 13 ? c1 : _mm512_set1_epi32(static_cast<int>(baseState[i1]))), 8);
+            const __m512i u2 = _mm512_srli_epi32(_mm512_add_epi32(x[i2], i2 == 13 ? c1 : _mm512_set1_epi32(static_cast<int>(baseState[i2]))), 8);
+            detail::boxMullerAvx512(u1, u2, z0[p], z1[p]);
+            z0[p] = roundHalf(z0[p]);
+            z1[p] = roundHalf(z1[p]);
+        }
+        const __m512 t0 = _mm512_unpacklo_ps(z0[0], z1[0]);
+        const __m512 t1 = _mm512_unpackhi_ps(z0[0], z1[0]);
+        const __m512 t2 = _mm512_unpacklo_ps(z0[1], z1[1]);
+        const __m512 t3 = _mm512_unpackhi_ps(z0[1], z1[1]);
+        const __m512 t4 = _mm512_unpacklo_ps(z0[2], z1[2]);
+        const __m512 t5 = _mm512_unpackhi_ps(z0[2], z1[2]);
+        const __m512 t6 = _mm512_unpacklo_ps(z0[3], z1[3]);
+        const __m512 t7 = _mm512_unpackhi_ps(z0[3], z1[3]);
+        const __m512 u[8] = {
+            _mm512_shuffle_ps(t0, t2, _MM_SHUFFLE(1, 0, 1, 0)),
+            _mm512_shuffle_ps(t0, t2, _MM_SHUFFLE(3, 2, 3, 2)),
+            _mm512_shuffle_ps(t1, t3, _MM_SHUFFLE(1, 0, 1, 0)),
+            _mm512_shuffle_ps(t1, t3, _MM_SHUFFLE(3, 2, 3, 2)),
+            _mm512_shuffle_ps(t4, t6, _MM_SHUFFLE(1, 0, 1, 0)),
+            _mm512_shuffle_ps(t4, t6, _MM_SHUFFLE(3, 2, 3, 2)),
+            _mm512_shuffle_ps(t5, t7, _MM_SHUFFLE(1, 0, 1, 0)),
+            _mm512_shuffle_ps(t5, t7, _MM_SHUFFLE(3, 2, 3, 2)),
+        };
+        for (int k = 0; k < 4; ++k) {
+            const __m512 lo = _mm512_shuffle_f32x4(u[k], u[k + 4], _MM_SHUFFLE(1, 0, 1, 0));
+            const __m512 hi = _mm512_shuffle_f32x4(u[k], u[k + 4], _MM_SHUFFLE(3, 2, 3, 2));
+            const __m512 pk = _mm512_shuffle_f32x4(lo, lo, _MM_SHUFFLE(3, 1, 2, 0));
+            const __m512 qk = _mm512_shuffle_f32x4(hi, hi, _MM_SHUFFLE(3, 1, 2, 0));
+            _mm256_storeu_ps(dst + ((firstBlock + k) * 8), _mm512_castps512_ps256(pk));
+            _mm256_storeu_ps(dst + ((firstBlock + k + 4) * 8), _mm512_extractf32x8_ps(pk, 1));
+            _mm256_storeu_ps(dst + ((firstBlock + k + 8) * 8), _mm512_castps512_ps256(qk));
+            _mm256_storeu_ps(dst + ((firstBlock + k + 12) * 8), _mm512_extractf32x8_ps(qk, 1));
+        }
+#else
+        alignas(32) __m256i x[16];
+        __m256i c0, c1;
+        detail::chacha20Rounds8(baseState, firstBlock, c0, c1, x);
+        // Box-Muller reads only the high 32-bit word of each uint64, skip final add on even words
+        __m256 z0[4], z1[4];
+        for (int p = 0; p < 4; ++p) {
+            const int i1 = 4 * p + 1;
+            const int i2 = 4 * p + 3;
+            const __m256i u1 = _mm256_srli_epi32(_mm256_add_epi32(x[i1], i1 == 13 ? c1 : _mm256_set1_epi32(static_cast<int>(baseState[i1]))), 8);
+            const __m256i u2 = _mm256_srli_epi32(_mm256_add_epi32(x[i2], i2 == 13 ? c1 : _mm256_set1_epi32(static_cast<int>(baseState[i2]))), 8);
+            detail::boxMullerAvx2(u1, u2, z0[p], z1[p]);
+        }
+        const __m256 t0 = _mm256_unpacklo_ps(z0[0], z1[0]);
+        const __m256 t1 = _mm256_unpackhi_ps(z0[0], z1[0]);
+        const __m256 t2 = _mm256_unpacklo_ps(z0[1], z1[1]);
+        const __m256 t3 = _mm256_unpackhi_ps(z0[1], z1[1]);
+        const __m256 t4 = _mm256_unpacklo_ps(z0[2], z1[2]);
+        const __m256 t5 = _mm256_unpackhi_ps(z0[2], z1[2]);
+        const __m256 t6 = _mm256_unpacklo_ps(z0[3], z1[3]);
+        const __m256 t7 = _mm256_unpackhi_ps(z0[3], z1[3]);
+        const __m256 u0 = _mm256_shuffle_ps(t0, t2, _MM_SHUFFLE(1, 0, 1, 0));
+        const __m256 u1 = _mm256_shuffle_ps(t0, t2, _MM_SHUFFLE(3, 2, 3, 2));
+        const __m256 u2 = _mm256_shuffle_ps(t1, t3, _MM_SHUFFLE(1, 0, 1, 0));
+        const __m256 u3 = _mm256_shuffle_ps(t1, t3, _MM_SHUFFLE(3, 2, 3, 2));
+        const __m256 u4 = _mm256_shuffle_ps(t4, t6, _MM_SHUFFLE(1, 0, 1, 0));
+        const __m256 u5 = _mm256_shuffle_ps(t4, t6, _MM_SHUFFLE(3, 2, 3, 2));
+        const __m256 u6 = _mm256_shuffle_ps(t5, t7, _MM_SHUFFLE(1, 0, 1, 0));
+        const __m256 u7 = _mm256_shuffle_ps(t5, t7, _MM_SHUFFLE(3, 2, 3, 2));
+        const auto roundAndStore = [&](const int b, const __m256 row) { _mm256_storeu_ps(dst + ((firstBlock + b) * 8), _mm256_cvtph_ps(_mm256_cvtps_ph(row, _MM_FROUND_TO_NEAREST_INT))); };
+        roundAndStore(0, _mm256_permute2f128_ps(u0, u4, 0x20));
+        roundAndStore(1, _mm256_permute2f128_ps(u1, u5, 0x20));
+        roundAndStore(2, _mm256_permute2f128_ps(u2, u6, 0x20));
+        roundAndStore(3, _mm256_permute2f128_ps(u3, u7, 0x20));
+        roundAndStore(4, _mm256_permute2f128_ps(u0, u4, 0x31));
+        roundAndStore(5, _mm256_permute2f128_ps(u1, u5, 0x31));
+        roundAndStore(6, _mm256_permute2f128_ps(u2, u6, 0x31));
+        roundAndStore(7, _mm256_permute2f128_ps(u3, u7, 0x31));
+#endif
+    }
+    for (int64_t block = numGroups * groupBlocks; block < numBlocks; block++) {
+        const std::array<uint64_t, 8> randomBits = chacha20Block(baseState, static_cast<uint64_t>(block));
+        std::array<float, 8> values;
+        for (int j = 0; j < 4; j++)
+            std::tie(values[j * 2], values[(j * 2) + 1]) = generateBoxMullerNormalPair(randomBits[j * 2], randomBits[(j * 2) + 1]);
+        const int64_t first = block * 8;
+        const int64_t count = std::min<int64_t>(8, numElements - first);
+        if (count == 8)
+            _mm256_storeu_ps(dst + first, _mm256_cvtph_ps(_mm256_cvtps_ph(_mm256_loadu_ps(values.data()), _MM_FROUND_TO_NEAREST_INT)));
+        else
+            for (int64_t i = 0; i < count; i++)
+                dst[first + i] = HalfFloat::toFloat(HalfFloat::fromFloat(values[i]));
+    }
 }
 } // namespace WatermarkCrypto

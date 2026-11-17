@@ -10,6 +10,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <omp.h>
 #include <optional>
 #include <utility>
@@ -37,7 +38,7 @@ class WatermarkEigen final : public WatermarkBase {
     using ArrayXXf = Eigen::ArrayXXf;
 
   public:
-    WatermarkEigen<p>(const int rows, const int cols, WatermarkBuffer watermark, const float psnr) : WatermarkBase(rows, cols, std::move(watermark), psnr), u(rows, cols), predictionData(rows, cols) {
+    WatermarkEigen<p>(const int rows, const int cols, WatermarkBuffer watermark, const float psnr) : WatermarkBase(rows, cols, std::move(watermark), psnr), predictionData(rows, cols) {
         prepareWorkspaces();
     }
 
@@ -49,7 +50,10 @@ class WatermarkEigen final : public WatermarkBase {
         const auto& rgbIn = inputImage.getRGB();
         auto& rgbOut = output.getRGB();
         if (!scale) {
-            rgbOut = rgbIn;
+#pragma omp parallel for schedule(static)
+            for (int col = 0; col < baseCols; col++)
+                for (int channel = 0; channel < 3; channel++)
+                    std::memcpy(rgbOut[channel].col(col).data(), rgbIn[channel].col(col).data(), static_cast<size_t>(baseRows));
             return;
         }
 #pragma omp parallel for schedule(static)
@@ -58,7 +62,7 @@ class WatermarkEigen final : public WatermarkBase {
                 watermarkColumn(rgbIn[channel].col(col).data(), u.col(col).data(), *scale, rgbOut[channel].col(col).data());
     }
 
-    // grayscale embedding: watermark added to luma, row-major output transposed in small tiles
+    // grayscale embedding: watermark added to luma, row-major output transposed in 16x16 SIMD tiles
     void makeWatermark(const ImageBuffer& inputGrayImage, ImageOutputBuffer& output, const Layout outputLayout) override {
         const auto& gray = inputGrayImage.getGray();
         const auto scale = computeStrengthenedWatermark(gray);
@@ -79,20 +83,31 @@ class WatermarkEigen final : public WatermarkBase {
             }
             return;
         }
-        constexpr int tile = 64;
-        const int rowTiles = (baseRows + tile - 1) / tile;
-        const int colTiles = (baseCols + tile - 1) / tile;
-#pragma omp parallel for collapse(2) schedule(static)
-        for (int rowTile = 0; rowTile < rowTiles; rowTile++) {
-            for (int colTile = 0; colTile < colTiles; colTile++) {
-                const int row = rowTile * tile;
-                const int col = colTile * tile;
-                const int rows = std::min(tile, baseRows - row);
-                const int cols = std::min(tile, baseCols - col);
-                if (scale)
-                    out.block(col, row, cols, rows) = toPixels(gray.block(row, col, rows, cols) + u.block(row, col, rows, cols) * strength).transpose();
-                else
-                    out.block(col, row, cols, rows) = toPixels(gray.block(row, col, rows, cols)).transpose();
+#pragma omp parallel for schedule(static)
+        for (int row = 0; row < baseRows; row += 16) {
+            if (row + 16 <= baseRows) {
+                int col = 0;
+                for (; col + 16 <= baseCols; col += 16) {
+                    __m128i blockCols[16];
+                    for (int c = 0; c < 16; ++c)
+                        blockCols[c] = watermark16Rows(gray.col(col + c).data() + row, scale ? u.col(col + c).data() + row : nullptr, strength);
+                    Simd::transposeU8_16x16(blockCols);
+                    for (int r = 0; r < 16; ++r)
+                        _mm_storeu_si128(reinterpret_cast<__m128i*>(out.data() + (static_cast<size_t>(row + r) * baseCols) + col), blockCols[Simd::kTransposeRegister[r]]);
+                }
+                for (; col < baseCols; ++col) {
+                    const float* gCol = gray.col(col).data() + row;
+                    const float* uCol = scale ? u.col(col).data() + row : nullptr;
+                    for (int r = 0; r < 16; ++r)
+                        out.data()[(static_cast<size_t>(row + r) * baseCols) + col] = toPixelScalar(uCol ? gCol[r] + (uCol[r] * strength) : gCol[r]);
+                }
+            } else {
+                for (int col = 0; col < baseCols; ++col) {
+                    const float* gCol = gray.col(col).data() + row;
+                    const float* uCol = scale ? u.col(col).data() + row : nullptr;
+                    for (int r = 0; r < baseRows - row; ++r)
+                        out.data()[(static_cast<size_t>(row + r) * baseCols) + col] = toPixelScalar(uCol ? gCol[r] + (uCol[r] * strength) : gCol[r]);
+                }
             }
         }
     }
@@ -116,19 +131,46 @@ class WatermarkEigen final : public WatermarkBase {
             const int first = static_cast<int>((static_cast<int64_t>(baseCols) * omp_get_thread_num()) / threads);
             const int last = static_cast<int>((static_cast<int64_t>(baseCols) * (omp_get_thread_num() + 1)) / threads);
             const auto maskedColumn = [&](const int col) { return columns.col(p + (std::clamp(col, 0, baseCols - 1) % p)).data(); };
-            auto maskedError = columns.col(2 * p);
+            float* const maskedErrorPtr = columns.col(2 * p).data();
             int next = std::max(first - pad, 0);
             for (int col = first; col < last; col++) {
                 for (; next <= std::min(col + pad, baseCols - 1); next++) {
-                    auto error = columns.col(next % p);
-                    errorColumn(imageColumn, next, error.data());
-                    columns.col(p + (next % p)) = error.abs() * w.col(next);
+                    float* const errPtr = columns.col(next % p).data();
+                    float* const maskOutPtr = columns.col(p + (next % p)).data();
+                    const float* const wPtr = w.col(next).data();
+                    errorColumn(imageColumn, next, errPtr);
+                    int r = 0;
+                    for (; r + Simd::lanes <= baseRows; r += Simd::lanes)
+                        Simd::store(maskOutPtr + r, Simd::mul(Simd::abs(Simd::load(errPtr + r)), Simd::load(wPtr + r)));
+                    for (; r < baseRows; ++r)
+                        maskOutPtr[r] = std::abs(errPtr[r]) * wPtr[r];
                 }
-                errorColumn(maskedColumn, col, maskedError.data());
-                const auto error = columns.col(col % p);
-                dot += (error * maskedError).sum();
-                sqError += error.square().sum();
-                sqMaskedError += maskedError.square().sum();
+                errorColumn(maskedColumn, col, maskedErrorPtr);
+                const float* const errPtr = columns.col(col % p).data();
+                Simd::Vec dotAcc = Simd::zero();
+                Simd::Vec sqEAcc = Simd::zero();
+                Simd::Vec sqMAcc = Simd::zero();
+                int r = 0;
+                for (; r + Simd::lanes <= baseRows; r += Simd::lanes) {
+                    const Simd::Vec ev = Simd::load(errPtr + r);
+                    const Simd::Vec mv = Simd::load(maskedErrorPtr + r);
+                    dotAcc = Simd::fmadd(ev, mv, dotAcc);
+                    sqEAcc = Simd::fmadd(ev, ev, sqEAcc);
+                    sqMAcc = Simd::fmadd(mv, mv, sqMAcc);
+                }
+                double colDot = Simd::sum(dotAcc);
+                double colSqE = Simd::sum(sqEAcc);
+                double colSqM = Simd::sum(sqMAcc);
+                for (; r < baseRows; ++r) {
+                    const double ev = errPtr[r];
+                    const double mv = maskedErrorPtr[r];
+                    colDot += ev * mv;
+                    colSqE += ev * ev;
+                    colSqM += mv * mv;
+                }
+                dot += colDot;
+                sqError += colSqE;
+                sqMaskedError += colSqM;
             }
         }
         const float correlation = static_cast<float>(dot / (std::sqrt(sqError) * std::sqrt(sqMaskedError)));
@@ -153,6 +195,23 @@ class WatermarkEigen final : public WatermarkBase {
     template <typename Expr>
     static auto toPixels(const Expr& values) {
         return (values + 0.5f).cwiseMax(0.0f).cwiseMin(255.0f).template cast<uint8_t>();
+    }
+
+    static uint8_t toPixelScalar(const float value) { return static_cast<uint8_t>(std::min(std::max(value + 0.5f, 0.0f), 255.0f)); }
+
+    // truncation matches scalar float->uint8 cast after [0, 255] clamp
+    static __m128i watermark16Rows(const float* __restrict grayCol, const float* __restrict uCol, const float strength) {
+        const __m256 half = _mm256_set1_ps(0.5f);
+        const __m256 zero = _mm256_setzero_ps();
+        const __m256 limit = _mm256_set1_ps(255.0f);
+        const __m256 vStrength = _mm256_set1_ps(strength);
+        const auto clamp8 = [&](const int offset) {
+            const __m256 base = _mm256_loadu_ps(grayCol + offset);
+            const __m256 val = uCol ? _mm256_add_ps(base, _mm256_mul_ps(_mm256_loadu_ps(uCol + offset), vStrength)) : base;
+            return _mm256_cvttps_epi32(_mm256_min_ps(_mm256_max_ps(_mm256_add_ps(val, half), zero), limit));
+        };
+        const __m256i u16 = _mm256_permute4x64_epi64(_mm256_packus_epi32(clamp8(0), clamp8(8)), 0b11'01'10'00);
+        return _mm_packus_epi16(_mm256_castsi256_si128(u16), _mm256_extracti128_si256(u16, 1));
     }
 
     // one watermarked column: output = input + strength * u
@@ -259,10 +318,12 @@ class WatermarkEigen final : public WatermarkBase {
         }
     }
 
-    // unscaled watermark u = |e| * w and the scale that reaches the PSNR, empty for flat images
+    // unscaled watermark u = |e| * w and scale that reaches PSNR, empty for flat images
     std::optional<float> computeStrengthenedWatermark(const ArrayXXf& inputImage) {
         if (!predictionData.computeCoefficients(inputImage.data()))
             return std::nullopt;
+        if (u.size() == 0)
+            u.resize(baseRows, baseCols);
         prepareWorkspaces();
         const auto& w = randomMatrix.getGray();
         const auto imageColumn = [&](const int col) { return inputImage.data() + (static_cast<size_t>(std::clamp(col, 0, baseCols - 1)) * baseRows); };
@@ -270,14 +331,34 @@ class WatermarkEigen final : public WatermarkBase {
         double sumSq = 0.0;
 #pragma omp parallel reduction(max : maxAbs) reduction(+ : sumSq)
         {
-            // the error column stays in cache between its passes, the full size error is never stored
-            auto error = workspaces[omp_get_thread_num()].col(0);
+            // error column stays in cache between passes, full size error never stored
+            float* const errPtr = workspaces[omp_get_thread_num()].col(0).data();
 #pragma omp for schedule(static)
             for (int col = 0; col < baseCols; col++) {
-                errorColumn(imageColumn, col, error.data());
-                maxAbs = std::max(maxAbs, error.abs().maxCoeff());
-                u.col(col) = error.abs() * w.col(col);
-                sumSq += u.col(col).square().sum();
+                errorColumn(imageColumn, col, errPtr);
+                const float* const wPtr = w.col(col).data();
+                float* const uPtr = u.col(col).data();
+                Simd::Vec maxVec = Simd::zero();
+                Simd::Vec sqVec = Simd::zero();
+                int r = 0;
+                for (; r + Simd::lanes <= baseRows; r += Simd::lanes) {
+                    const Simd::Vec eAbs = Simd::abs(Simd::load(errPtr + r));
+                    maxVec = Simd::max(maxVec, eAbs);
+                    const Simd::Vec uv = Simd::mul(eAbs, Simd::load(wPtr + r));
+                    Simd::store(uPtr + r, uv);
+                    sqVec = Simd::fmadd(uv, uv, sqVec);
+                }
+                float colMax = Simd::reduceMax(maxVec);
+                double colSq = Simd::sum(sqVec);
+                for (; r < baseRows; ++r) {
+                    const float eAbs = std::abs(errPtr[r]);
+                    colMax = std::max(colMax, eAbs);
+                    const float uv = eAbs * wPtr[r];
+                    uPtr[r] = uv;
+                    colSq += static_cast<double>(uv) * uv;
+                }
+                maxAbs = std::max(maxAbs, colMax);
+                sumSq += colSq;
             }
         }
         // flat image: sum(u^2) with u normalized by max|e|

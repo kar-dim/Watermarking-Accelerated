@@ -4,6 +4,7 @@
 #include "EncodeOptions.hpp"
 #include "common_utils.hpp"
 #include "ImageFileBuffer.hpp"
+#include "ImagePixels.hpp"
 #include "include/WatermarkCore.hpp"
 #include "utils.hpp"
 #include "video_utils.hpp"
@@ -47,7 +48,6 @@
 extern "C" {
 #include "libavcodec/codec_par.h"
 #include "libavformat/avformat.h"
-#include "libavutil/log.h"
 }
 
 /*!
@@ -118,18 +118,6 @@ void exportForSave(ImageSession* s, ExportedImage* p) {
 namespace {
 // appended to filename before extension
 constexpr const char* kWatermarkedSuffix = "W_ME";
-
-// async workers run serially to avoid nested OpenMP teams, restore setting when done
-class SerialOpenMPScope {
-  public:
-    SerialOpenMPScope() : previous(omp_get_max_threads()) { omp_set_num_threads(1); }
-    ~SerialOpenMPScope() { omp_set_num_threads(previous); }
-    SerialOpenMPScope(const SerialOpenMPScope&) = delete;
-    SerialOpenMPScope& operator=(const SerialOpenMPScope&) = delete;
-
-  private:
-    int previous;
-};
 
 // NaN and infinity would reach the pixels through the watermark strength
 void checkPsnr(const float psnr) {
@@ -243,7 +231,8 @@ void transposePreviewBlock(const uint8_t* source, const size_t columnStride, __m
 }
 
 // column-major planes into row-major interleaved display buffer
-void interleavePlanes(const uint8_t* red, const uint8_t* green, const uint8_t* blue, const int rows, const int cols, const int channels, uint8_t* destination, const size_t bytesPerLine) {
+void interleavePlanes(
+    const uint8_t* red, const uint8_t* green, const uint8_t* blue, const uint8_t* alpha, const int rows, const int cols, const int channels, uint8_t* destination, const size_t bytesPerLine) {
     // small row tiles keep cache lines hot while reading planar columns
     constexpr int tileRows = 32;
     const __m128i zero = _mm_setzero_si128();
@@ -268,14 +257,20 @@ void interleavePlanes(const uint8_t* red, const uint8_t* green, const uint8_t* b
                     transposePreviewBlock(blue + sourceOffset, rows, blueRows);
                     for (int lane = 0; lane < 8; ++lane) {
                         const __m128i rg = _mm_unpacklo_epi8(redRows[lane], greenRows[lane]);
-                        const __m128i bz = _mm_unpacklo_epi8(blueRows[lane], zero);
-                        const __m128i rgbaFirst = _mm_unpacklo_epi16(rg, bz);
-                        const __m128i rgbaSecond = _mm_unpackhi_epi16(rg, bz);
-                        const __m128i rgbFirst = _mm_shuffle_epi8(rgbaFirst, rgbMask);
-                        const __m128i rgbSecond = _mm_shuffle_epi8(rgbaSecond, rgbMask);
-                        uint8_t* pixel = destination + static_cast<size_t>(row + lane) * bytesPerLine + static_cast<size_t>(col) * 3;
-                        _mm_storeu_si128(reinterpret_cast<__m128i*>(pixel), _mm_or_si128(rgbFirst, _mm_slli_si128(rgbSecond, 12)));
-                        _mm_storel_epi64(reinterpret_cast<__m128i*>(pixel + 16), _mm_srli_si128(rgbSecond, 4));
+                        const __m128i ba =
+                            _mm_unpacklo_epi8(blueRows[lane], channels == 4 ? _mm_loadl_epi64(reinterpret_cast<const __m128i*>(alpha + static_cast<size_t>(row + lane) * cols + col)) : zero);
+                        const __m128i rgbaFirst = _mm_unpacklo_epi16(rg, ba);
+                        const __m128i rgbaSecond = _mm_unpackhi_epi16(rg, ba);
+                        uint8_t* pixel = destination + static_cast<size_t>(row + lane) * bytesPerLine + static_cast<size_t>(col) * channels;
+                        if (channels == 4) {
+                            _mm_storeu_si128(reinterpret_cast<__m128i*>(pixel), rgbaFirst);
+                            _mm_storeu_si128(reinterpret_cast<__m128i*>(pixel + 16), rgbaSecond);
+                        } else {
+                            const __m128i rgbFirst = _mm_shuffle_epi8(rgbaFirst, rgbMask);
+                            const __m128i rgbSecond = _mm_shuffle_epi8(rgbaSecond, rgbMask);
+                            _mm_storeu_si128(reinterpret_cast<__m128i*>(pixel), _mm_or_si128(rgbFirst, _mm_slli_si128(rgbSecond, 12)));
+                            _mm_storel_epi64(reinterpret_cast<__m128i*>(pixel + 16), _mm_srli_si128(rgbSecond, 4));
+                        }
                     }
                 }
             }
@@ -285,10 +280,12 @@ void interleavePlanes(const uint8_t* red, const uint8_t* green, const uint8_t* b
                     const size_t sourceIndex = static_cast<size_t>(col) * rows + row + lane;
                     uint8_t* pixel = destination + static_cast<size_t>(row + lane) * bytesPerLine + static_cast<size_t>(col) * channels;
                     pixel[0] = red[sourceIndex];
-                    if (channels == 3) {
+                    if (channels >= 3) {
                         pixel[1] = green[sourceIndex];
                         pixel[2] = blue[sourceIndex];
                     }
+                    if (channels == 4)
+                        pixel[3] = alpha[static_cast<size_t>(row + lane) * cols + col];
                 }
         }
         // tail rows that do not fit 8x8 block
@@ -297,10 +294,12 @@ void interleavePlanes(const uint8_t* red, const uint8_t* green, const uint8_t* b
                 const size_t sourceIndex = static_cast<size_t>(col) * rows + row;
                 uint8_t* pixel = destination + static_cast<size_t>(row) * bytesPerLine + static_cast<size_t>(col) * channels;
                 pixel[0] = red[sourceIndex];
-                if (channels == 3) {
+                if (channels >= 3) {
                     pixel[1] = green[sourceIndex];
                     pixel[2] = blue[sourceIndex];
                 }
+                if (channels == 4)
+                    pixel[3] = alpha[static_cast<size_t>(row) * cols + col];
             }
     }
 }
@@ -326,22 +325,36 @@ void copySessionPreview(const ImageSession* session, uint8_t* destination, const
     if (width <= 0 || height <= 0 || (channels != 1 && channels != 3 && channels != 4) || !destination || bytesPerLine < static_cast<size_t>(width) * channels)
         throw std::invalid_argument("Invalid session pixels for preview");
     InternalUtils::checkedProduct(bytesPerLine, static_cast<size_t>(height));
+    const ImageOutputBuffer& buffer = session->watermarkBuffer;
+#if defined(_USE_GPU_)
     if (channels == 4) {
-        const auto pixels = getSessionPixelData(session);
         const size_t planeSize = static_cast<size_t>(width) * height;
-        if (pixels.channels != 3 || session->imgBuffer.alphaChannel.size() != planeSize)
+        if (buffer.getChannels() != 3 || session->imgBuffer.alphaChannel.size() != planeSize)
             throw std::logic_error("Invalid alpha plane for preview");
-        for (int row = 0; row < height; ++row)
-            for (int col = 0; col < width; ++col) {
-                const size_t source = static_cast<size_t>(col) * height + row;
-                uint8_t* pixel = destination + static_cast<size_t>(row) * bytesPerLine + static_cast<size_t>(col) * 4;
-                for (int channel = 0; channel < 3; ++channel)
-                    pixel[channel] = pixels.pixels[static_cast<size_t>(channel) * planeSize + source];
-                pixel[3] = session->imgBuffer.alphaChannel[static_cast<size_t>(row) * width + col];
-            }
+        std::vector<uint8_t> planar(planeSize * 3);
+#if defined(_USE_CUDA_)
+        CUDA_CHECK(cudaSetDevice(buffer.getDeviceIndex()));
+        const cudaStream_t stream = CudaStreamManager::getInstance().getComputeStream();
+        CudaArray<uint8_t> rowMajor(height, width, 3, stream);
+        cuda_utils::launchColMajorToRowMajorU8Kernel(buffer.data(), rowMajor.data(), width, height, 3, stream);
+        rowMajor.toHost(planar.data());
+#elif defined(_USE_OPENCL_)
+        const OclQueueManager::Binding binding(buffer.getOwner());
+        auto& mgr = OclQueueManager::getInstance();
+        OclArray<uint8_t> rowMajor(height, width, 3, mgr.getQueueRaw());
+        cl_utils::launchColMajorToRowMajorU8(buffer.clBuffer(), rowMajor.clBuffer(), width, height, 3, mgr.getQueue());
+        rowMajor.toHost(planar.data());
+#endif
+        const uint8_t* red = planar.data();
+        const uint8_t* green = red + planeSize;
+        const uint8_t* blue = green + planeSize;
+        const uint8_t* alpha = session->imgBuffer.alphaChannel.data();
+        for (int row = 0; row < height; ++row) {
+            const size_t rowOffset = static_cast<size_t>(row) * width;
+            ImagePixels::interleaveRow(red + rowOffset, green + rowOffset, blue + rowOffset, alpha + rowOffset, destination + static_cast<size_t>(row) * bytesPerLine, width, 4);
+        }
         return;
     }
-    const ImageOutputBuffer& buffer = session->watermarkBuffer;
 #if defined(_USE_CUDA_)
     CUDA_CHECK(cudaSetDevice(buffer.getDeviceIndex()));
     const cudaStream_t stream = CudaStreamManager::getInstance().getComputeStream();
@@ -354,12 +367,19 @@ void copySessionPreview(const ImageSession* session, uint8_t* destination, const
     OclArray<uint8_t> interleaved(height, width, channels, mgr.getQueueRaw());
     cl_utils::launchColMajorToInterleavedU8(buffer.clBuffer(), interleaved.clBuffer(), width, height, channels, mgr.getQueue());
     interleaved.toHostPitched(destination, width * channels, bytesPerLine);
+#endif
 #else
-    if (channels == 3) {
+    if (channels == 4) {
+        const size_t planeSize = static_cast<size_t>(width) * height;
+        if (!buffer.isRGB() || session->imgBuffer.alphaChannel.size() != planeSize)
+            throw std::logic_error("Invalid alpha plane for preview");
         const auto& rgb = buffer.getRGB();
-        interleavePlanes(rgb[0].data(), rgb[1].data(), rgb[2].data(), height, width, channels, destination, bytesPerLine);
+        interleavePlanes(rgb[0].data(), rgb[1].data(), rgb[2].data(), session->imgBuffer.alphaChannel.data(), height, width, 4, destination, bytesPerLine);
+    } else if (channels == 3) {
+        const auto& rgb = buffer.getRGB();
+        interleavePlanes(rgb[0].data(), rgb[1].data(), rgb[2].data(), nullptr, height, width, 3, destination, bytesPerLine);
     } else {
-        interleavePlanes(buffer.getGray().data(), nullptr, nullptr, height, width, channels, destination, bytesPerLine);
+        interleavePlanes(buffer.getGray().data(), nullptr, nullptr, nullptr, height, width, 1, destination, bytesPerLine);
     }
 #endif
 }
@@ -487,6 +507,7 @@ void buildOpenCLKernels() {
 }
 
 void updateSessionParams(ImageSession* s, const int p, const float psnr) {
+    checkError(!s, "No active image session");
 #if defined(_USE_OPENCL_)
     const OclQueueManager::Binding binding(s->imgBuffer.image.getOwner());
 #endif
@@ -515,7 +536,8 @@ ImageHandle createImageSession(const string& watermarkPassword, const int p, con
     return session;
 }
 
-PreloadedHandle preloadImageFromDisk(const string& imagePath, const int deviceIndex, const bool captureOriginal) {
+namespace detail {
+PreloadedHandle preloadImageInternal(const string& imagePath, const int deviceIndex, const bool captureOriginal, const bool parallel) {
 #if defined(_USE_CUDA_)
     // each prefetch thread must activate owning session GPU
     if (deviceIndex >= 0)
@@ -525,9 +547,12 @@ PreloadedHandle preloadImageFromDisk(const string& imagePath, const int deviceIn
         OclQueueManager::initialize(deviceIndex);
 #endif
     PreloadedHandle p(new PreloadedImage());
-    p->buffer = InternalUtils::loadImage(imagePath, captureOriginal);
+    p->buffer = InternalUtils::loadImage(imagePath, captureOriginal, parallel);
     return p;
 }
+} // namespace detail
+
+PreloadedHandle preloadImageFromDisk(const string& imagePath, const int deviceIndex, const bool captureOriginal) { return detail::preloadImageInternal(imagePath, deviceIndex, captureOriginal, true); }
 
 ImagePrefetcher::ImagePrefetcher(std::vector<std::filesystem::path> files, const int deviceIndex, const size_t depth) : files(std::move(files)), deviceIndex(deviceIndex) {
     const size_t loads = depth > 0 ? depth : static_cast<size_t>(batchLoadThreads());
@@ -582,30 +607,33 @@ void ImageSaver::saveImpl(ImageSession* session, const string& outPath, const si
         if (slot.task.valid())
             slot.task.get();
         exportForSave(session, slot.buffer.get());
-        slot.task = std::async(std::launch::async, [this, index, id, outPath, exactPath, bytes] {
-            string error;
-            try {
-                if (exactPath) {
-                    const SerialOpenMPScope serial;
-                    const auto& output = *saveSlots[index].buffer;
-                    InternalUtils::saveImage(outPath, "", output.finalPixels, output.alpha);
-                } else {
-                    flushToDiskAsync(saveSlots[index].buffer.get(), outPath);
+        // assign under mutex so worker cannot recycle index before future is stored
+        {
+            std::lock_guard assignLock(mutex);
+            slot.task = std::async(std::launch::async, [this, index, id, outPath, exactPath, bytes] {
+                string error;
+                try {
+                    if (exactPath) {
+                        const auto& output = *saveSlots[index].buffer;
+                        InternalUtils::saveImage(outPath, "", output.finalPixels, output.alpha, false);
+                    } else {
+                        flushToDiskAsync(saveSlots[index].buffer.get(), outPath);
+                    }
+                } catch (const std::exception& e) { error = *e.what() ? e.what() : "Unknown save error"; } catch (...) {
+                    error = "Unknown save error";
                 }
-            } catch (const std::exception& e) { error = *e.what() ? e.what() : "Unknown save error"; } catch (...) {
-                error = "Unknown save error";
-            }
-            // Idle slots must not retain GPU buffers outside the active save budget
-            if (maxInFlightBytes)
-                *saveSlots[index].buffer = {};
-            {
-                std::lock_guard finishedLock(mutex);
-                finished.push_back(SaveResult{id, std::move(error)});
-                freeSlots.push_back(index);
-                inFlightBytes -= bytes;
-            }
-            slotFreed.notify_all();
-        });
+                // Idle slots must not retain GPU buffers outside the active save budget
+                if (maxInFlightBytes)
+                    *saveSlots[index].buffer = {};
+                {
+                    std::lock_guard finishedLock(mutex);
+                    finished.push_back(SaveResult{id, std::move(error)});
+                    freeSlots.push_back(index);
+                    inFlightBytes -= bytes;
+                }
+                slotFreed.notify_all();
+            });
+        }
     } catch (...) {
         if (maxInFlightBytes)
             *slot.buffer = {};
@@ -632,10 +660,7 @@ std::vector<SaveResult> ImageSaver::finish() {
 
 void ImagePrefetcher::launch() {
     if (launched < files.size()) {
-        pending.push_back(std::async(std::launch::async, [path = files[launched].string(), device = deviceIndex] {
-            const SerialOpenMPScope serial;
-            return preloadImageFromDisk(path, device, false);
-        }));
+        pending.push_back(std::async(std::launch::async, [path = files[launched].string(), device = deviceIndex] { return detail::preloadImageInternal(path, device, false, false); }));
         launched++;
     }
 }
@@ -657,22 +682,30 @@ void bindPreloadedImage(ImageSession* s, PreloadedHandle preloadedData) {
     const auto rows = preloadedData->buffer.rows;
     const auto cols = preloadedData->buffer.cols;
     const auto isRGB = preloadedData->buffer.isRGB;
-    // lazy init when dimensions change or on first frame
-    if (!s->watermarkObj || s->currentRows != rows || s->currentCols != cols || s->currentIsRGB != isRGB || deviceChanged) {
-        auto engine = createWatermarkObject(rows, cols, s->watermarkPassword, s->p, s->psnr);
+    const bool rebuildEngine = !s->watermarkObj || s->currentRows != rows || s->currentCols != cols || deviceChanged;
+    std::unique_ptr<WatermarkBase> engine;
+    // watermark engine depends only on dimensions and device, RGB<->gray swap reuses it
+    if (rebuildEngine)
+        engine = createWatermarkObject(rows, cols, s->watermarkPassword, s->p, s->psnr);
 #if defined(_USE_EIGEN_)
-        auto output = isRGB ? ImageOutputBuffer(eigen_utils::makeEigenRGBu8(rows, cols)) : ImageOutputBuffer(Gray8Buffer(rows, cols));
-        s->watermarkBuffer = std::move(output);
+    ImageOutputBuffer output;
+    const bool replaceOutput = rebuildEngine || s->currentIsRGB != isRGB;
+    if (replaceOutput)
+        output = isRGB ? ImageOutputBuffer(eigen_utils::makeEigenRGBu8(rows, cols)) : ImageOutputBuffer(Gray8Buffer(rows, cols));
 #endif
+    // Commit only after every allocation succeeds because failed loads KEEP the old session usable
+    if (rebuildEngine)
         s->watermarkObj = std::move(engine);
-#if defined(_USE_OPENCL_)
-        if (deviceChanged)
-            s->watermarkBuffer = {};
+#if defined(_USE_EIGEN_)
+    if (replaceOutput)
+        s->watermarkBuffer = std::move(output);
+#elif defined(_USE_OPENCL_)
+    if (deviceChanged)
+        s->watermarkBuffer = {};
 #endif
-        s->currentRows = rows;
-        s->currentCols = cols;
-        s->currentIsRGB = isRGB;
-    }
+    s->currentRows = rows;
+    s->currentCols = cols;
+    s->currentIsRGB = isRGB;
     s->imgBuffer = std::move(preloadedData->buffer);
     s->detectGrayBuffer = ImageBuffer();
     s->outputReady = false;
@@ -734,10 +767,7 @@ void saveImage(const ImageSession* s, const string& outPath) {
     InternalUtils::saveImage(outPath, kWatermarkedSuffix, s->watermarkBuffer, s->imgBuffer.alphaChannel);
 }
 
-void flushToDiskAsync(ExportedImage* handle, const string& outPath) {
-    const SerialOpenMPScope serial;
-    InternalUtils::saveImage(outPath, kWatermarkedSuffix, handle->finalPixels, handle->alpha);
-}
+void flushToDiskAsync(ExportedImage* handle, const string& outPath) { InternalUtils::saveImage(outPath, kWatermarkedSuffix, handle->finalPixels, handle->alpha, false); }
 
 void saveImageExact(const ImageSession* s, const string& outPath) {
     checkOutput(s);
@@ -763,7 +793,7 @@ void validateVideoEncoderOptions(const std::string& options, const bool hardware
     if (hardware)
         throw std::invalid_argument("Eigen uses CPU encoding, select a GPU build for hardware encoding");
 #endif
-    if (hardware && options.empty())
+    if (hardware && std::ranges::all_of(options, [](const unsigned char ch) { return std::isspace(ch) != 0; }))
         return;
     const auto parsed = parseEncodeOptions(options);
     try {
@@ -779,9 +809,9 @@ static VideoHandle openVideo(const VideoSettings& settings) {
 #endif
     if (settings.watermarkInterval < 1)
         throw std::invalid_argument("Video watermark interval must be at least 1");
-    av_log_set_level(AV_LOG_INFO);
     VideoHandle session(new VideoSession());
     session->settings = settings;
+    const LibavLogScope logScope(session.get());
 #if defined(_USE_OPENCL_)
     session->openclDevice = OclQueueManager::current();
 #endif
@@ -843,6 +873,7 @@ int embedVideo(VideoSession* s) { return embedVideo(s, true); }
 
 int embedVideo(VideoSession* s, const bool replaceExistingOutput) {
     try {
+        const video_utils::LibavLogScope logScope(s);
 #if defined(_USE_OPENCL_)
         const OclQueueManager::Binding binding(s->openclDevice);
 #elif defined(_USE_CUDA_)
@@ -871,6 +902,7 @@ int embedVideo(VideoSession* s, const bool replaceExistingOutput) {
 
 int detectVideo(VideoSession* s) {
     try {
+        const video_utils::LibavLogScope logScope(s);
 #if defined(_USE_OPENCL_)
         const OclQueueManager::Binding binding(s->openclDevice);
 #elif defined(_USE_CUDA_)
@@ -922,3 +954,7 @@ std::vector<std::filesystem::path> getValidImageFiles(const std::filesystem::pat
 }
 
 } // namespace WatermarkCore
+
+namespace InternalUtils {
+WatermarkCore::PreloadedHandle preloadImageSerial(const std::string& imagePath, const int deviceIndex) { return WatermarkCore::detail::preloadImageInternal(imagePath, deviceIndex, false, false); }
+} // namespace InternalUtils

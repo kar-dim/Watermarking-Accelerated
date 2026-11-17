@@ -22,11 +22,9 @@ void launchColMajorToRowMajorU8Kernel(const uint8_t* src, uint8_t* dst, const in
 void launchColMajorToInterleavedU8Kernel(const uint8_t* src, uint8_t* dst, const int width, const int height, const int channels, const cudaStream_t stream);
 void launchOrientRowMajorToColMajorKernel(
     const uint8_t* src, uint8_t* rgbDst, float* grayDst, uint8_t* display, const int srcWidth, const int srcHeight, const int channels, const int orientation, const cudaStream_t stream);
-// packed planar 10-bit YUV420 to P010 Y and interleaved UV planes
-void launchYUV420p10ToP010Kernel(const uint16_t* planar, uint16_t* yDst, uint16_t* uvDst, const int width, const int height, const cudaStream_t stream);
-// HDR (P010LE BT.2020 PQ) to SDR (BT.709) conversion, outputs optional
+// HDR (P010LE or planar yuv420p10le BT.2020 PQ) to SDR (BT.709) conversion, outputs optional
 void launchP010HdrToSdrKernel(const uint16_t* ySrc, const int yPitchBytes, const uint16_t* uvSrc, const int uvPitchBytes, uint8_t* yDst, const int yDstPitch, float* lumaDst, uint8_t* uvDst,
-    const int uvDstPitch, const int width, const int height, const video_utils::ChromaSiting& siting, const video_utils::MobiusParams& mobius, const cudaStream_t stream);
+    const int uvDstPitch, const int width, const int height, const video_utils::ChromaSiting& siting, const video_utils::MobiusParams& mobius, const cudaStream_t stream, bool planar10 = false);
 // watermark generation: numElements half values from ChaCha20 start state
 void launchGenerateWatermarkKernel(const std::array<uint32_t, 16>& baseState, __half* watermark, const int64_t numElements, const cudaStream_t stream);
 // test-only Box-Muller transform on (x1, x2) pairs

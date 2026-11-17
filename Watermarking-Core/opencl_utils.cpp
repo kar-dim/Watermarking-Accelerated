@@ -251,7 +251,7 @@ cl::Program buildGenerationKernels() {
 }
 
 namespace {
-// work-group size of one dimensional generation kernels
+// 1D generation work-group size
 int generationGroupSize() { return static_cast<int>(std::min(256u, maxPow2WorkGroupSize(OclQueueManager::getInstance().getDevice()))); }
 } // namespace
 
@@ -303,6 +303,29 @@ std::size_t reductionScratchBytes(const cl::Program& program, const char* kernel
     return scratchSlots * valuesPerReduction * sizeof(float);
 }
 
+namespace {
+
+enum class UtilityKernel : size_t { Orient = 0, U8ToFloatGray, ColMajorToRowMajor, ColMajorToInterleaved, PitchedToFloat, Count };
+
+cl::Kernel& cachedUtilityKernel(const UtilityKernel id, const char* name) {
+    struct Cache {
+        uint64_t generation = 0;
+        std::array<cl::Kernel, static_cast<size_t>(UtilityKernel::Count)> kernels;
+    };
+    // per-thread cache avoids locking and clSetKernelArg races across concurrent GPU threads
+    thread_local Cache cache;
+    const uint64_t generation = OclQueueManager::getInstance().getContextGeneration();
+    if (cache.generation != generation) {
+        cache.kernels = {};
+        cache.generation = generation;
+    }
+    cl::Kernel& kernel = cache.kernels[static_cast<size_t>(id)];
+    if (!kernel())
+        kernel = cl::Kernel(UtilityKernelCache::getProgram(), name);
+    return kernel;
+}
+} // namespace
+
 void launchOrientRowMajorToColMajor(const cl::Buffer& src, const cl::Buffer& rgbDst, const cl::Buffer& grayDst, const cl::Buffer& display, const int srcWidth, const int srcHeight, const int channels,
     const int orientation, cl::CommandQueue& queue) {
     // 32x32 tiles, 32x8 work-group covers one (4 rows per work-item)
@@ -311,32 +334,40 @@ void launchOrientRowMajorToColMajor(const cl::Buffer& src, const cl::Buffer& rgb
     const bool swapAxes = orientation >= 5;
     const int width = swapAxes ? srcHeight : srcWidth;
     const int height = swapAxes ? srcWidth : srcHeight;
-    queue.enqueueNDRangeKernel(KernelBuilder(UtilityKernelCache::getProgram(), "orient_row_major_to_col_major").args(src, rgbDst, grayDst, display, srcWidth, srcHeight, channels, orientation).build(),
-        cl::NullRange, cl::NDRange(roundUp(width, tileSize), roundUp(height, tileSize) / rowsPerItem), cl::NDRange(tileSize, tileSize / rowsPerItem));
+    cl::Kernel& kernel = cachedUtilityKernel(UtilityKernel::Orient, "orient_row_major_to_col_major");
+    setArgs(kernel, src, rgbDst, grayDst, display, srcWidth, srcHeight, channels, orientation);
+    queue.enqueueNDRangeKernel(kernel, cl::NullRange, cl::NDRange(roundUp(width, tileSize), roundUp(height, tileSize) / rowsPerItem), cl::NDRange(tileSize, tileSize / rowsPerItem));
 }
 
 void launchU8ToFloatGray(const cl::Buffer& input, const cl::Buffer& output, const int planeSize, const int numChannels, cl::CommandQueue& queue) {
     constexpr int localSize = 256;
     const int globalSize = calculateLocalGroupsNumber(planeSize, localSize) * localSize;
-    queue.enqueueNDRangeKernel(
-        KernelBuilder(UtilityKernelCache::getProgram(), "u8_to_float_gray").args(input, output, planeSize, numChannels).build(), cl::NullRange, cl::NDRange(globalSize), cl::NDRange(localSize));
+    cl::Kernel& kernel = cachedUtilityKernel(UtilityKernel::U8ToFloatGray, "u8_to_float_gray");
+    setArgs(kernel, input, output, planeSize, numChannels);
+    queue.enqueueNDRangeKernel(kernel, cl::NullRange, cl::NDRange(globalSize), cl::NDRange(localSize));
 }
 
 void launchColMajorToRowMajorU8(const cl::Buffer& src, const cl::Buffer& dst, const int width, const int height, const int channels, cl::CommandQueue& queue) {
-    constexpr int blockSize = 16;
-    queue.enqueueNDRangeKernel(KernelBuilder(UtilityKernelCache::getProgram(), "col_major_to_row_major_u8").args(src, dst, width, height).build(), cl::NullRange,
-        cl::NDRange(roundUp(width, blockSize), roundUp(height, blockSize), channels), cl::NDRange(blockSize, blockSize));
+    constexpr int tileSize = 32;
+    constexpr int rowsPerItem = 4;
+    cl::Kernel& kernel = cachedUtilityKernel(UtilityKernel::ColMajorToRowMajor, "col_major_to_row_major_u8");
+    setArgs(kernel, src, dst, width, height);
+    queue.enqueueNDRangeKernel(kernel, cl::NullRange, cl::NDRange(roundUp(width, tileSize), roundUp(height, tileSize) / rowsPerItem, channels), cl::NDRange(tileSize, tileSize / rowsPerItem, 1));
 }
 
 void launchColMajorToInterleavedU8(const cl::Buffer& src, const cl::Buffer& dst, const int width, const int height, const int channels, cl::CommandQueue& queue) {
-    constexpr int blockSize = 16;
-    queue.enqueueNDRangeKernel(KernelBuilder(UtilityKernelCache::getProgram(), "col_major_to_interleaved_u8").args(src, dst, width, height, channels).build(), cl::NullRange,
-        cl::NDRange(roundUp(width, blockSize), roundUp(height, blockSize)), cl::NDRange(blockSize, blockSize));
+    constexpr int tileSize = 32;
+    constexpr int rowsPerItem = 4;
+    cl::Kernel& kernel = cachedUtilityKernel(UtilityKernel::ColMajorToInterleaved, "col_major_to_interleaved_u8");
+    setArgs(kernel, src, dst, width, height, channels);
+    queue.enqueueNDRangeKernel(kernel, cl::NullRange, cl::NDRange(roundUp(width, tileSize), roundUp(height, tileSize) / rowsPerItem), cl::NDRange(tileSize, tileSize / rowsPerItem));
 }
 
 void launchPitchedToFloat(const cl::Buffer& src, const cl::Buffer& dst, const int width, const int height, const int pitch, cl::CommandQueue& queue) {
-    constexpr int blockSize = 16;
-    queue.enqueueNDRangeKernel(KernelBuilder(UtilityKernelCache::getProgram(), "pitched_to_float").args(src, dst, width, height, pitch).build(), cl::NullRange,
-        cl::NDRange(roundUp(width, blockSize), roundUp(height, blockSize)), cl::NDRange(blockSize, blockSize));
+    constexpr int tileSize = 32;
+    constexpr int rowsPerItem = 4;
+    cl::Kernel& kernel = cachedUtilityKernel(UtilityKernel::PitchedToFloat, "pitched_to_float");
+    setArgs(kernel, src, dst, width, height, pitch);
+    queue.enqueueNDRangeKernel(kernel, cl::NullRange, cl::NDRange(roundUp(width, tileSize), roundUp(height, tileSize) / rowsPerItem), cl::NDRange(tileSize, tileSize / rowsPerItem));
 }
 } // namespace cl_utils

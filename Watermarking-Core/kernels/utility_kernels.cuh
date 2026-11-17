@@ -20,7 +20,29 @@ __global__ void u8ToFloatGray(const uint8_t* __restrict__ input, float* __restri
 
 __global__ void colMajorToRowMajorU8(const uint8_t* __restrict__ src, uint8_t* __restrict__ dst, const int width, const int height);
 
-__global__ void colMajorToInterleavedU8(const uint8_t* __restrict__ src, uint8_t* __restrict__ dst, const int width, const int height, const int channels);
+template <int CHANNELS>
+__global__ void colMajorToInterleavedU8(const uint8_t* __restrict__ src, uint8_t* __restrict__ dst, const int width, const int height) {
+    __shared__ uint8_t tile[CHANNELS][32][33];
+    const int planeSize = width * height;
+    const int tileCol = blockIdx.x * 32;
+    const int tileRow = blockIdx.y * 32;
+    const int col = tileCol + threadIdx.y;
+    const int row = tileRow + threadIdx.x;
+    for (int channel = 0; channel < CHANNELS; channel++) {
+#pragma unroll
+        for (int i = 0; i < 32; i += 8) {
+            if ((col + i) < width && row < height)
+                tile[channel][threadIdx.y + i][threadIdx.x] = src[channel * planeSize + (col + i) * height + row];
+        }
+    }
+    __syncthreads();
+    const int rowBytes = min(32, width - tileCol) * CHANNELS;
+    for (int i = threadIdx.y; i < 32 && (tileRow + i) < height; i += 8) {
+        uint8_t* output = dst + ((tileRow + i) * width + tileCol) * CHANNELS;
+        for (int byte = threadIdx.x; byte < rowBytes; byte += 32)
+            output[byte] = CHANNELS == 1 ? tile[0][byte][i] : tile[byte % CHANNELS][byte / CHANNELS][i];
+    }
+}
 
 // EXIF mapping must match the CPU rotation in utils.cpp
 __device__ __forceinline__ int2 orientedSource(const int x, const int y, const int srcWidth, const int srcHeight, const int orientation) {
@@ -121,10 +143,11 @@ __global__ void generate_watermark(const ChaChaState baseState, __half* __restri
 // Box-Muller transform of (x1, x2) pairs of 24-bit random values, the transform of generate_watermark (tested against the CPU)
 __global__ void box_muller_pairs(const uint32_t* __restrict__ randomPairs, float* __restrict__ normals, const int pairs);
 
-// planar 10-bit YUV420 (samples in the low bits, packed Y, U then V) to P010 (high bits, interleaved chroma): one thread per chroma pair and its 2x2 luma
-__global__ void yuv420p10ToP010(const uint16_t* __restrict__ planar, uint16_t* __restrict__ yDst, uint16_t* __restrict__ uvDst, const int width, const int height);
-
-// HDR uses an apron for the chroma filter, output planes can be omitted with null pointers
+// HDR uses an apron for chroma filter, planar10HdrToSdr reads low-10-bit yuv420p10le planes directly
 __global__ void p010HdrToSdr(const uint16_t* __restrict__ ySrc, const int yPitchBytes, const uint16_t* __restrict__ uvSrc, const int uvPitchBytes, uint8_t* __restrict__ yDst, const int yDstPitch,
+    float* __restrict__ lumaDst, uint8_t* __restrict__ uvDst, const int uvDstPitch, const int width, const int height, const float siteX, const float siteY, const float mobA, const float mobB,
+    const float mobK);
+
+__global__ void planar10HdrToSdr(const uint16_t* __restrict__ ySrc, const int yPitchBytes, const uint16_t* __restrict__ uvSrc, const int uvPitchBytes, uint8_t* __restrict__ yDst, const int yDstPitch,
     float* __restrict__ lumaDst, uint8_t* __restrict__ uvDst, const int uvDstPitch, const int width, const int height, const float siteX, const float siteY, const float mobA, const float mobB,
     const float mobK);

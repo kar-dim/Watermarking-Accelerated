@@ -34,43 +34,55 @@ bool detectAvx512() {
 
 struct Kernels {
     void (*clearTransparent)(uint8_t*, const uint8_t*, size_t);
+    void (*clearTransparentSerial)(uint8_t*, const uint8_t*, size_t);
     void (*interleave)(const uint8_t*, uint8_t*, size_t, int);
+    void (*interleaveRow)(const uint8_t*, const uint8_t*, const uint8_t*, const uint8_t*, uint8_t*, size_t, int);
 };
 
 const Kernels& selectedKernels() {
     static const Kernels kernels =
-        ImagePixels::supportsAvx512() ? Kernels{ImagePixels::Avx512::clearTransparent, ImagePixels::Avx512::interleave} : Kernels{ImagePixels::Avx2::clearTransparent, ImagePixels::Avx2::interleave};
+        ImagePixels::supportsAvx512() ? Kernels{ImagePixels::Avx512::clearTransparent, ImagePixels::Avx512::clearTransparentSerial, ImagePixels::Avx512::interleave, ImagePixels::Avx512::interleaveRow}
+                                      : Kernels{ImagePixels::Avx2::clearTransparent, ImagePixels::Avx2::clearTransparentSerial, ImagePixels::Avx2::interleave, ImagePixels::Avx2::interleaveRow};
     return kernels;
 }
-} // namespace
 
-bool ImagePixels::supportsAvx512() {
-    static const bool supported = detectAvx512();
-    return supported;
-}
-
-void ImagePixels::clearTransparent(uint8_t* rgb, const uint8_t* alpha, const size_t pixelCount) { selectedKernels().clearTransparent(rgb, alpha, pixelCount); }
-
-void ImagePixels::makePreview(const uint8_t* source, uint8_t* preview, const size_t pixelCount, const int channels) {
-    if (channels == 1) {
-        constexpr size_t chunkBytes = 64 * 1024;
-        const size_t chunks = (pixelCount + chunkBytes - 1) / chunkBytes;
-#pragma omp parallel for if (pixelCount > 1000000) schedule(static)
-        for (std::ptrdiff_t chunk = 0; chunk < static_cast<std::ptrdiff_t>(chunks); ++chunk) {
-            const size_t offset = static_cast<size_t>(chunk) * chunkBytes;
-            std::memcpy(preview + offset, source + offset, std::min(chunkBytes, pixelCount - offset));
-        }
+void interleaveBlockAvx2(
+    const uint8_t* red, const uint8_t* green, const uint8_t* blue, const uint8_t* alpha, uint8_t* dst, const size_t offset, const int channels, const __m128i zero, const __m128i rgbMask) {
+    const __m128i redBytes = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(red + offset));
+    const __m128i greenBytes = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(green + offset));
+    const __m128i blueBytes = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(blue + offset));
+    const __m128i rg = _mm_unpacklo_epi8(redBytes, greenBytes);
+    const __m128i ba = _mm_unpacklo_epi8(blueBytes, channels == 4 ? _mm_loadl_epi64(reinterpret_cast<const __m128i*>(alpha + offset)) : zero);
+    const __m128i first = _mm_unpacklo_epi16(rg, ba);
+    const __m128i second = _mm_unpackhi_epi16(rg, ba);
+    if (channels == 4) {
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(dst + offset * 4), first);
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(dst + offset * 4 + 16), second);
     } else {
-        selectedKernels().interleave(source, preview, pixelCount, channels);
+        const __m128i packedFirst = _mm_shuffle_epi8(first, rgbMask);
+        const __m128i packedSecond = _mm_shuffle_epi8(second, rgbMask);
+        const __m128i front = _mm_or_si128(packedFirst, _mm_slli_si128(packedSecond, 12));
+        _mm_storeu_si128(reinterpret_cast<__m128i*>(dst + offset * 3), front);
+        _mm_storel_epi64(reinterpret_cast<__m128i*>(dst + offset * 3 + 16), _mm_srli_si128(packedSecond, 4));
     }
 }
 
-void ImagePixels::Avx2::clearTransparent(uint8_t* rgb, const uint8_t* alpha, const size_t pixelCount) {
+void interleaveTailScalar(const uint8_t* red, const uint8_t* green, const uint8_t* blue, const uint8_t* alpha, uint8_t* dst, const size_t start, const size_t pixelCount, const int channels) {
+    for (size_t pixel = start; pixel < pixelCount; ++pixel) {
+        dst[pixel * channels + 0] = red[pixel];
+        dst[pixel * channels + 1] = green[pixel];
+        dst[pixel * channels + 2] = blue[pixel];
+        if (channels == 4)
+            dst[pixel * channels + 3] = alpha[pixel];
+    }
+}
+
+void clearTransparentAvx2Impl(uint8_t* rgb, const uint8_t* alpha, const size_t pixelCount, [[maybe_unused]] const bool parallel) {
     constexpr size_t lanes = 32;
     const size_t blocks = pixelCount / lanes;
     // GPU loaders run on prefetch threads, keep their alpha work serial
 #if !defined(_USE_GPU_)
-#pragma omp parallel for schedule(static)
+#pragma omp parallel for if (parallel) schedule(static)
 #endif
     for (std::ptrdiff_t block = 0; block < static_cast<std::ptrdiff_t>(blocks); ++block) {
         const size_t offset = static_cast<size_t>(block) * lanes;
@@ -84,6 +96,40 @@ void ImagePixels::Avx2::clearTransparent(uint8_t* rgb, const uint8_t* alpha, con
         for (size_t channel = 0; channel < 3; ++channel)
             rgb[channel * pixelCount + pixel] &= alpha[pixel] ? 0xff : 0;
 }
+} // namespace
+
+bool ImagePixels::supportsAvx512() {
+    static const bool supported = detectAvx512();
+    return supported;
+}
+
+void ImagePixels::clearTransparent(uint8_t* rgb, const uint8_t* alpha, const size_t pixelCount) { selectedKernels().clearTransparent(rgb, alpha, pixelCount); }
+
+void ImagePixels::clearTransparentSerial(uint8_t* rgb, const uint8_t* alpha, const size_t pixelCount) { selectedKernels().clearTransparentSerial(rgb, alpha, pixelCount); }
+
+void ImagePixels::makePreview(const uint8_t* source, uint8_t* preview, const size_t pixelCount, const int channels) {
+    if (channels == 1) {
+        constexpr size_t chunkBytes = 64 * 1024;
+        const size_t chunks = (pixelCount + chunkBytes - 1) / chunkBytes;
+#if !defined(_USE_GPU_)
+#pragma omp parallel for if (pixelCount > 1000000) schedule(static)
+#endif
+        for (std::ptrdiff_t chunk = 0; chunk < static_cast<std::ptrdiff_t>(chunks); ++chunk) {
+            const size_t offset = static_cast<size_t>(chunk) * chunkBytes;
+            std::memcpy(preview + offset, source + offset, std::min(chunkBytes, pixelCount - offset));
+        }
+    } else {
+        selectedKernels().interleave(source, preview, pixelCount, channels);
+    }
+}
+
+void ImagePixels::interleaveRow(const uint8_t* red, const uint8_t* green, const uint8_t* blue, const uint8_t* alpha, uint8_t* destination, const size_t pixelCount, const int channels) {
+    selectedKernels().interleaveRow(red, green, blue, alpha, destination, pixelCount, channels);
+}
+
+void ImagePixels::Avx2::clearTransparent(uint8_t* rgb, const uint8_t* alpha, const size_t pixelCount) { clearTransparentAvx2Impl(rgb, alpha, pixelCount, true); }
+
+void ImagePixels::Avx2::clearTransparentSerial(uint8_t* rgb, const uint8_t* alpha, const size_t pixelCount) { clearTransparentAvx2Impl(rgb, alpha, pixelCount, false); }
 
 void ImagePixels::Avx2::interleave(const uint8_t* source, uint8_t* preview, const size_t pixelCount, const int channels) {
     constexpr size_t lanes = 8;
@@ -93,28 +139,20 @@ void ImagePixels::Avx2::interleave(const uint8_t* source, uint8_t* preview, cons
     const uint8_t* alpha = blue + pixelCount;
     const __m128i zero = _mm_setzero_si128();
     const __m128i rgbMask = _mm_setr_epi8(0, 1, 2, 4, 5, 6, 8, 9, 10, 12, 13, 14, -1, -1, -1, -1);
+#if !defined(_USE_GPU_)
 #pragma omp parallel for if (pixelCount > 1000000) schedule(static)
-    for (std::ptrdiff_t block = 0; block < static_cast<std::ptrdiff_t>(blocks); ++block) {
-        const size_t offset = static_cast<size_t>(block) * lanes;
-        const __m128i redBytes = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(source + offset));
-        const __m128i greenBytes = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(green + offset));
-        const __m128i blueBytes = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(blue + offset));
-        const __m128i rg = _mm_unpacklo_epi8(redBytes, greenBytes);
-        const __m128i ba = _mm_unpacklo_epi8(blueBytes, channels == 4 ? _mm_loadl_epi64(reinterpret_cast<const __m128i*>(alpha + offset)) : zero);
-        const __m128i first = _mm_unpacklo_epi16(rg, ba);
-        const __m128i second = _mm_unpackhi_epi16(rg, ba);
-        if (channels == 4) {
-            _mm_storeu_si128(reinterpret_cast<__m128i*>(preview + offset * 4), first);
-            _mm_storeu_si128(reinterpret_cast<__m128i*>(preview + offset * 4 + 16), second);
-        } else {
-            const __m128i packedFirst = _mm_shuffle_epi8(first, rgbMask);
-            const __m128i packedSecond = _mm_shuffle_epi8(second, rgbMask);
-            const __m128i front = _mm_or_si128(packedFirst, _mm_slli_si128(packedSecond, 12));
-            _mm_storeu_si128(reinterpret_cast<__m128i*>(preview + offset * 3), front);
-            _mm_storel_epi64(reinterpret_cast<__m128i*>(preview + offset * 3 + 16), _mm_srli_si128(packedSecond, 4));
-        }
-    }
-    for (size_t pixel = blocks * lanes; pixel < pixelCount; ++pixel)
-        for (int channel = 0; channel < channels; ++channel)
-            preview[pixel * channels + channel] = source[static_cast<size_t>(channel) * pixelCount + pixel];
+#endif
+    for (std::ptrdiff_t block = 0; block < static_cast<std::ptrdiff_t>(blocks); ++block)
+        interleaveBlockAvx2(source, green, blue, alpha, preview, static_cast<size_t>(block) * lanes, channels, zero, rgbMask);
+    interleaveTailScalar(source, green, blue, alpha, preview, blocks * lanes, pixelCount, channels);
+}
+
+void ImagePixels::Avx2::interleaveRow(const uint8_t* red, const uint8_t* green, const uint8_t* blue, const uint8_t* alpha, uint8_t* destination, const size_t pixelCount, const int channels) {
+    constexpr size_t lanes = 8;
+    const size_t blocks = pixelCount / lanes;
+    const __m128i zero = _mm_setzero_si128();
+    const __m128i rgbMask = _mm_setr_epi8(0, 1, 2, 4, 5, 6, 8, 9, 10, 12, 13, 14, -1, -1, -1, -1);
+    for (size_t block = 0; block < blocks; ++block)
+        interleaveBlockAvx2(red, green, blue, alpha, destination, block * lanes, channels, zero, rgbMask);
+    interleaveTailScalar(red, green, blue, alpha, destination, blocks * lanes, pixelCount, channels);
 }

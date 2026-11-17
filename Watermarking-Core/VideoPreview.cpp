@@ -8,10 +8,15 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdarg>
 #include <format>
 #include <iostream>
+#include <limits>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <unordered_map>
+#include <utility>
 
 #if defined(_USE_CUDA_)
 #include "cuda_utils.hpp"
@@ -28,6 +33,7 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavcodec/packet.h>
 #include "libavutil/avutil.h"
+#include "libavutil/log.h"
 #include <libavutil/hwcontext.h>
 #include <libavutil/pixdesc.h>
 #include <libswscale/swscale.h>
@@ -68,8 +74,165 @@ void checkCancelled(const VideoSession* s) {
 
 int interruptVideo(void* session) { return static_cast<VideoSession*>(session)->settings.stopToken.stop_requested() ? 1 : 0; }
 
+struct LibavLogTarget {
+    const VideoSession* session;
+    VideoObserver* observer;
+    size_t scopes = 0;
+    std::recursive_mutex mutex;
+
+    explicit LibavLogTarget(const VideoSession* session) : session(session), observer(session->settings.observer) {}
+
+    void write(const std::string& text) {
+        const std::lock_guard lock(mutex);
+        observer->onLog(text);
+    }
+};
+
+namespace {
+struct LibavLogRegistry {
+    std::mutex mutex;
+    std::unordered_map<const void*, std::weak_ptr<LibavLogTarget>> targets;
+};
+
+LibavLogRegistry& libavLogRegistry() {
+    static LibavLogRegistry registry;
+    return registry;
+}
+
+std::shared_ptr<LibavLogTarget> registeredLogTarget(const void* key) {
+    auto& registry = libavLogRegistry();
+    const std::lock_guard lock(registry.mutex);
+    const auto found = registry.targets.find(key);
+    return found == registry.targets.end() ? nullptr : found->second.lock();
+}
+
+struct LibavLogThreadState {
+    int printPrefix = 1;
+    std::string pending;
+    std::weak_ptr<LibavLogTarget> owner;
+};
+
+thread_local std::shared_ptr<LibavLogTarget> activeLogTarget;
+thread_local LibavLogThreadState libavLogState;
+
+void flushLibavLog() noexcept {
+    try {
+        const auto owner = libavLogState.owner.lock();
+        std::string pending = std::move(libavLogState.pending);
+        libavLogState.pending.clear();
+        libavLogState.printPrefix = 1;
+        libavLogState.owner.reset();
+        if (owner && !pending.empty())
+            owner->write(pending + '\n');
+    } catch (...) {}
+}
+
+std::shared_ptr<LibavLogTarget> contextLogTarget(const void* context) {
+    for (int depth = 0; context && depth < 8; ++depth) {
+        const auto* type = *static_cast<const AVClass* const*>(context);
+        if (!type)
+            break;
+        if (type == avcodec_get_class()) {
+            const auto* codec = static_cast<const AVCodecContext*>(context);
+            if (auto target = registeredLogTarget(codec->opaque))
+                return target;
+        }
+        if (!type->parent_log_context_offset)
+            break;
+        context = *reinterpret_cast<void* const*>(static_cast<const char*>(context) + type->parent_log_context_offset);
+    }
+    return activeLogTarget;
+}
+
+void forwardLibavLog(void* context, const int level, const char* format, va_list arguments) noexcept {
+    try {
+        if (level > av_log_get_level())
+            return;
+        const auto target = contextLogTarget(context);
+        if (!target) {
+            av_log_default_callback(context, level, format, arguments);
+            return;
+        }
+        if (level > AV_LOG_WARNING)
+            return;
+        if (libavLogState.owner.lock() != target) {
+            flushLibavLog();
+            libavLogState.owner = target;
+        }
+        char piece[1024];
+        int nextPrefix = libavLogState.printPrefix;
+        va_list copiedArguments;
+        va_copy(copiedArguments, arguments);
+        const int messageSize = av_log_format_line2(context, level, format, copiedArguments, piece, sizeof(piece), &nextPrefix);
+        va_end(copiedArguments);
+        if (messageSize < 0 || messageSize == std::numeric_limits<int>::max())
+            return;
+        if (static_cast<size_t>(messageSize) >= sizeof(piece)) {
+            std::string expanded(static_cast<size_t>(messageSize) + 1, '\0');
+            av_log_format_line2(context, level, format, arguments, expanded.data(), static_cast<int>(expanded.size()), &libavLogState.printPrefix);
+            libavLogState.pending.append(expanded.data(), static_cast<size_t>(messageSize));
+        } else {
+            libavLogState.printPrefix = nextPrefix;
+            libavLogState.pending += piece;
+        }
+        const size_t lastNewline = libavLogState.pending.rfind('\n');
+        if (lastNewline == std::string::npos)
+            return;
+        const std::string complete = libavLogState.pending.substr(0, lastNewline + 1);
+        libavLogState.pending.erase(0, lastNewline + 1);
+        target->write(complete);
+    } catch (...) {
+        // C++ exceptions must not unwind across FFmpeg C frames
+    }
+}
+
+void installLibavLogCallback() {
+    static std::once_flag once;
+    std::call_once(once, [] {
+        av_log_set_level(AV_LOG_INFO);
+        av_log_set_callback(forwardLibavLog);
+    });
+}
+} // namespace
+
+LibavLogScope::LibavLogScope(const VideoSession* session) : previous(activeLogTarget) {
+    installLibavLogCallback();
+    if (session && session->settings.observer) {
+        auto& registry = libavLogRegistry();
+        const std::lock_guard lock(registry.mutex);
+        auto& entry = registry.targets[session];
+        target = entry.lock();
+        if (!target) {
+            target = std::make_shared<LibavLogTarget>(session);
+            entry = target;
+        }
+        ++target->scopes;
+    }
+    flushLibavLog();
+    activeLogTarget = target;
+}
+
+LibavLogScope::~LibavLogScope() {
+    flushLibavLog();
+    activeLogTarget = std::move(previous);
+    if (target) {
+        auto& registry = libavLogRegistry();
+        const std::lock_guard lock(registry.mutex);
+        if (--target->scopes == 0)
+            registry.targets.erase(target->session);
+    }
+}
+
+void attachLibavLog(AVCodecContext* context) {
+    // Frame-threaded codecs copy opaque into their worker contexts
+    if (context && !context->opaque && activeLogTarget)
+        context->opaque = const_cast<VideoSession*>(activeLogTarget->session);
+}
+
 void videoLog(const VideoSession* s, const std::string& text) {
-    if (s->settings.observer)
+    if (const auto target = registeredLogTarget(s))
+        target->write(text);
+    else if (s->settings.observer)
         s->settings.observer->onLog(text);
     else
         std::cout << CommonUtils::info(text);
@@ -247,7 +410,7 @@ void renderPreview(VideoSession* s, const AVFrame* original, const bool encoded,
         auto& manager = OclQueueManager::getInstance();
         // Encoder copies can still be pending when the preview reads the frame
         if (encoded && s->openclVideoOutput)
-            s->openclVideoOutput->waitUntilCopied(frame);
+            s->openclVideoOutput->waitForPreview(frame);
         if (frame->format == AV_PIX_FMT_QSV) {
             mapped.reset(av_frame_alloc());
             if (!mapped)

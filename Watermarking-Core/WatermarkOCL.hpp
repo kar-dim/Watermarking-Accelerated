@@ -44,21 +44,16 @@ class WatermarkOCL final : public WatermarkBase {
         const int detectTileColumns = detectionTilePatches * (groupSize / 16);
         const int detectTilesSlow = (this->baseCols + detectTileColumns - 1) / detectTileColumns;
         detectGlobal = cl::NDRange(static_cast<size_t>(tilesFast) * groupSize, detectTilesSlow);
-        const int corrGroups = tilesFast * detectTilesSlow;
+        corrGroups = tilesFast * detectTilesSlow;
 
-        // buffers: shift sums, border rows, solver system, u, stats and correlation sums
+        // buffers shared across embed and detect (mode-exclusive buffers allocated lazily)
         shiftSums = OclArray<uint64_t>::zeros(shiftSumsSize, rawQueue);
         if constexpr (copyBorderRows)
             borderRowsCopy = OclArray<float>(borderCopyRows * this->baseCols, rawQueue);
         solverSystem = OclArray<uint64_t>(solverSystemSize, rawQueue);
-        u = OclArray<cl_half>(this->baseRows, this->baseCols, rawQueue);
         sumSq = OclArray<uint64_t>::zeros(2, rawQueue);
-        dotPartial = ImageBuffer(corrGroups, rawQueue);
-        uNormPartial = ImageBuffer(corrGroups, rawQueue);
-        zNormPartial = ImageBuffer(corrGroups, rawQueue);
-        correlation = ImageBuffer(1, rawQueue);
 
-        // kernels with per-call buffer bindings
+        // shared prediction-solver kernels
         const cl::Buffer borderCopy = copyBorderRows ? borderRowsCopy.clBuffer() : cl::Buffer();
         copyBorderRowsKernel = cl::Kernel(program, "me_copy_border_rows");
         shiftSumsKernel = cl::Kernel(program, "me_shift_sums");
@@ -72,20 +67,7 @@ class WatermarkOCL final : public WatermarkBase {
         if constexpr (copyBorderRows)
             setArgs(copyBorderRowsKernel, cl::Buffer(), borderCopy, this->baseCols, this->baseRows);
 
-        const cl::NDRange errorLocal(groupSize);
-        meErrorKernel = cl::Kernel(program, "me_error_sequence_u_sumsq_fused");
-        setArgs(meErrorKernel, cl::Buffer(), this->randomMatrix.clBuffer(), u.clBuffer(), coefficients.clBuffer(), sumSq.clBuffer(), this->baseCols, this->baseRows, stopFlag.clBuffer(),
-            cl::Local(reductionScratchBytes(program, "me_error_sequence_u_sumsq_fused", errorLocal, 1)));
-        detectKernel = cl::Kernel(program, "detect_correlation_fused");
-        setArgs(detectKernel, cl::Buffer(), this->randomMatrix.clBuffer(), coefficients.clBuffer(), dotPartial.clBuffer(), uNormPartial.clBuffer(), zNormPartial.clBuffer(), this->baseCols,
-            this->baseRows, stopFlag.clBuffer());
-        corrFinalizeKernel = cl::Kernel(program, "finalize_correlation");
-        setArgs(corrFinalizeKernel, dotPartial.clBuffer(), uNormPartial.clBuffer(), zNormPartial.clBuffer(), correlation.clBuffer(), corrGroups, cl::Local(3 * groupSize * sizeof(float)));
-
         applyGlobal = cl::NDRange(static_cast<size_t>(calculateLocalGroupsNumber((this->totalPixels + 3) / 4, groupSize)) * groupSize);
-        applyRgbKernel = cl::Kernel(program, "apply_watermark_rgb");
-        applyGrayKernel = cl::Kernel(program, "apply_watermark_gray");
-        applyRowMajorKernel = cl::Kernel(program, "apply_watermark_row_major");
     }
 
     // RGB embedding: computes watermark u from luma mask, adds to all channels
@@ -96,6 +78,7 @@ class WatermarkOCL final : public WatermarkBase {
 
     // detection: correlation between image prediction error and watermark error
     float detectWatermark(const ImageBuffer& inputImage) override {
+        ensureDetectReady();
         cl_utils::executeKernel(
             [&]() {
                 const cl::Buffer input = inputImage.clBuffer();
@@ -148,6 +131,7 @@ class WatermarkOCL final : public WatermarkBase {
     FlagBuffer stopFlag;
 
     int borderBlocksPerLine;
+    int corrGroups;
     cl::NDRange shiftSumsGlobal, errorGlobal, detectGlobal, applyGlobal;
     OclArray<uint64_t> shiftSums;
     OclArray<float> borderRowsCopy;
@@ -163,12 +147,55 @@ class WatermarkOCL final : public WatermarkBase {
     cl::Kernel meErrorKernel, detectKernel, corrFinalizeKernel;
     cl::Kernel applyRgbKernel, applyGrayKernel, applyRowMajorKernel;
 
+    void ensureEmbedReady() {
+        if (meErrorKernel())
+            return;
+        using namespace cl_utils;
+        const cl_command_queue rawQueue = queue.get();
+        OclArray<cl_half> localU(this->baseRows, this->baseCols, rawQueue);
+        const cl::NDRange errorLocal(groupSize);
+        cl::Kernel errorK(program, "me_error_sequence_u_sumsq_fused");
+        setArgs(errorK, cl::Buffer(), this->randomMatrix.clBuffer(), localU.clBuffer(), coefficients.clBuffer(), sumSq.clBuffer(), this->baseCols, this->baseRows, stopFlag.clBuffer(),
+            cl::Local(reductionScratchBytes(program, "me_error_sequence_u_sumsq_fused", errorLocal, 1)));
+        cl::Kernel rgbK(program, "apply_watermark_rgb");
+        cl::Kernel grayK(program, "apply_watermark_gray");
+        cl::Kernel rowMajorK(program, "apply_watermark_row_major");
+        u = std::move(localU);
+        meErrorKernel = std::move(errorK);
+        applyRgbKernel = std::move(rgbK);
+        applyGrayKernel = std::move(grayK);
+        applyRowMajorKernel = std::move(rowMajorK);
+    }
+
+    void ensureDetectReady() {
+        if (detectKernel())
+            return;
+        using namespace cl_utils;
+        const cl_command_queue rawQueue = queue.get();
+        ImageBuffer localDot(corrGroups, rawQueue);
+        ImageBuffer localUNorm(corrGroups, rawQueue);
+        ImageBuffer localZNorm(corrGroups, rawQueue);
+        ImageBuffer localCorr(1, rawQueue);
+        cl::Kernel detectK(program, "detect_correlation_fused");
+        setArgs(detectK, cl::Buffer(), this->randomMatrix.clBuffer(), coefficients.clBuffer(), localDot.clBuffer(), localUNorm.clBuffer(), localZNorm.clBuffer(), this->baseCols, this->baseRows,
+            stopFlag.clBuffer());
+        cl::Kernel finalizeK(program, "finalize_correlation");
+        setArgs(finalizeK, localDot.clBuffer(), localUNorm.clBuffer(), localZNorm.clBuffer(), localCorr.clBuffer(), corrGroups, cl::Local(3 * groupSize * sizeof(float)));
+        dotPartial = std::move(localDot);
+        uNormPartial = std::move(localUNorm);
+        zNormPartial = std::move(localZNorm);
+        correlation = std::move(localCorr);
+        detectKernel = std::move(detectK);
+        corrFinalizeKernel = std::move(finalizeK);
+    }
+
     // enqueues kernel on in-order queue
     void enqueue(const cl::Kernel& kernel, const cl::NDRange& global, const cl::NDRange& local) { queue.enqueueNDRangeKernel(kernel, cl::NullRange, global, local); }
 
     // watermark added to 8-bit RGB or luma when inputImage is null
     void embed(const ImageBuffer& inputGrayImage, const ImageOutputBuffer* inputImage, ImageOutputBuffer& output, const Layout outputLayout) {
         using namespace cl_utils;
+        ensureEmbedReady();
         const int channels = inputImage ? inputImage->getChannels() : 1;
         // output buffer reused, reallocated only when dimensions or channels change
         if (output.empty() || output.getRows() != this->baseRows || output.getCols() != this->baseCols || output.getChannels() != channels)
@@ -185,8 +212,8 @@ class WatermarkOCL final : public WatermarkBase {
                 const cl::Buffer source = inputImage ? inputImage->clBuffer() : gray;
                 if (&apply == &applyRowMajorKernel) {
                     setArgs(apply, source, u.clBuffer(), sumSq.clBuffer(), output.clBuffer(), this->strengthNumerator, this->baseCols, this->baseRows);
-                    const int tileRows = groupSize / 16;
-                    enqueue(apply, cl::NDRange(roundUp(this->baseRows, 16), ((this->baseCols + 15) / 16) * tileRows), cl::NDRange(16, tileRows));
+                    const int tileRows = groupSize / 32;
+                    enqueue(apply, cl::NDRange(roundUp(this->baseRows, 32), ((this->baseCols + 31) / 32) * tileRows), cl::NDRange(32, tileRows));
                 } else {
                     setArgs(apply, source, u.clBuffer(), sumSq.clBuffer(), output.clBuffer(), this->strengthNumerator, this->totalPixels);
                     enqueue(apply, applyGlobal, cl::NDRange(groupSize));

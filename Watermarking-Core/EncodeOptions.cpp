@@ -85,6 +85,12 @@ bool isOptionValue(const std::string& token) {
     return true;
 }
 
+// stream selection and other streams' codecs, audio and subtitles follow container rules
+bool selectsStreams(const std::string& key) {
+    static constexpr std::string_view kStreamKeys[] = {"map", "acodec", "scodec", "dcodec", "an", "sn", "dn", "vn", "pix_fmt", "pixel_format", "max_interleave_delta"};
+    return std::ranges::find(kStreamKeys, key) != std::end(kStreamKeys);
+}
+
 bool clashesWithPipeline(const std::string& key) {
     static constexpr std::string_view kOwned[] = {"color_range", "color_primaries", "color_trc", "colorspace", "aspect"};
     return std::ranges::find(kOwned, key) != std::end(kOwned);
@@ -94,17 +100,16 @@ bool clashesWithPipeline(const std::string& key) {
 
 ParsedEncodeOptions parseEncodeOptions(const std::string& text) {
     ParsedEncodeOptions result;
-    const auto splitSpecifier = [](const std::string& key, char& specifier) {
-        specifier = 0;
-        const size_t position = key.rfind(':');
-        if (position != std::string::npos && position + 2 == key.size()) {
-            const char value = key[position + 1];
-            if (value == 'v' || value == 'a' || value == 's' || value == 'd' || value == 't') {
-                specifier = value;
-                return key.substr(0, position);
-            }
+    // name[:stream specifier], output has one video stream, only v and v:0 apply
+    const auto splitSpecifier = [](const std::string& key, bool& otherStream) {
+        const size_t colon = key.find(':');
+        if (colon == std::string::npos) {
+            otherStream = false;
+            return key;
         }
-        return key;
+        const std::string_view stream = std::string_view(key).substr(colon + 1);
+        otherStream = stream != "v" && stream != "v:0";
+        return key.substr(0, colon);
     };
     const std::vector<std::string> tokens = tokenizeOptions(text);
     for (size_t index = 0; index < tokens.size();) {
@@ -112,11 +117,11 @@ ParsedEncodeOptions parseEncodeOptions(const std::string& text) {
             ++index;
             continue;
         }
-        char specifier = 0;
-        const std::string key = splitSpecifier(tokens[index].substr(1), specifier);
+        bool otherStream = false;
+        const std::string key = splitSpecifier(tokens[index].substr(1), otherStream);
         const bool hasValue = index + 1 < tokens.size() && isOptionValue(tokens[index + 1]);
         const size_t step = hasValue ? 2 : 1;
-        if (key == "map" || (specifier != 0 && specifier != 'v') || key == "pix_fmt" || key == "pixel_format" || key == "max_interleave_delta") {
+        if (otherStream || selectsStreams(key)) {
             result.ignored.push_back(tokens[index]);
             index += step;
             continue;
@@ -127,7 +132,7 @@ ParsedEncodeOptions parseEncodeOptions(const std::string& text) {
             continue;
         }
         const std::string& value = tokens[index + 1];
-        if (key == "c" || key == "codec") {
+        if (key == "c" || key == "codec" || key == "vcodec") {
             result.codecName = value;
         } else if (key == "tag" || key == "vtag") {
             result.codecTag = value;

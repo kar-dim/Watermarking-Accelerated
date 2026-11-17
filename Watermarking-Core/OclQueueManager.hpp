@@ -42,7 +42,12 @@ class OclQueueManager {
         cl::Platform::get(&platforms);
         for (auto& plat : platforms) {
             std::vector<cl::Device> devices;
-            plat.getDevices(CL_DEVICE_TYPE_GPU, &devices);
+            try {
+                plat.getDevices(CL_DEVICE_TYPE_GPU, &devices);
+            } catch (const cl::Error& error) {
+                if (error.err() != CL_DEVICE_NOT_FOUND)
+                    throw;
+            }
             for (auto& dev : devices)
                 gpus.emplace_back(plat, dev);
         }

@@ -1,5 +1,6 @@
 #include "VideoObserver.hpp"
 #include "VideoWorker.hpp"
+#include <cstring>
 #include <exception>
 #include <memory>
 #include <QByteArray>
@@ -123,10 +124,22 @@ void VideoWorker::previewSize(int& width, int& height) const {
 }
 
 void VideoWorker::onPreview(const std::uint8_t* rgba, const int width, const int height, const int pitch) {
-    // The core reuses these pixels as soon as this callback returns
-    const QImage owned = QImage(rgba, width, height, pitch, QImage::Format_RGBA8888).copy();
+    // core reuses pixels on return, ping-pong two QImages to avoid per-frame allocations
+    QImage& owned = previews_[previewIndex_];
+    if (owned.width() != width || owned.height() != height || owned.format() != QImage::Format_RGBA8888)
+        owned = QImage(width, height, QImage::Format_RGBA8888);
+    uchar* dst = owned.bits();
+    const qsizetype dstPitch = owned.bytesPerLine();
+    if (pitch == dstPitch) {
+        std::memcpy(dst, rgba, static_cast<size_t>(height) * pitch);
+    } else {
+        const size_t rowBytes = static_cast<size_t>(width) * 4;
+        for (int row = 0; row < height; ++row)
+            std::memcpy(dst + static_cast<size_t>(row) * dstPitch, rgba + static_cast<size_t>(row) * pitch, rowBytes);
+    }
     const std::lock_guard lock(mutex_);
     pending_.preview = owned;
+    previewIndex_ ^= 1;
     previewPending_.store(true);
 }
 

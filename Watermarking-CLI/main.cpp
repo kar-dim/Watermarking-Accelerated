@@ -653,6 +653,15 @@ int main(const int argc, char* argv[]) {
             throw std::invalid_argument("--image.devices applies to image batch modes");
         if (!videoBatch && !options.Get("video", "devices", "").empty())
             throw std::invalid_argument("--video.devices applies to video batch modes");
+        if (videoFile.empty()) {
+            if (commandLine.settings.contains("video.path"))
+                throw std::invalid_argument("--video.path cannot be empty");
+            for (const auto& [key, value] : commandLine.settings) {
+                (void)value;
+                if (key.starts_with("video."))
+                    throw std::invalid_argument("Video option '--" + key + "' requires '--video.path'");
+            }
+        }
         // Batch workers choose their own devices, avoid an unused main-thread GPU context
         if (!videoBatch && !imageBatch)
             initializeEnvironment(options.GetInteger("compute", "gpu_device_id", 0));

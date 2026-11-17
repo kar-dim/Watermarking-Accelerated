@@ -27,9 +27,9 @@ __device__ __forceinline__ float mobiusTonemap(const float x, const float mobA, 
 }
 
 // Match FFmpeg's zscale and Mobius chain, keep chroma precision until YUV conversion
-__device__ __forceinline__ float3 hdrPixelToSdrRgb(const uint16_t yRaw, const float2 chroma, const float mobA, const float mobB, const float mobK) {
-    // P010LE limited range -> normalized [0,1] / [-0.5,0.5]
-    const float Y2020 = fmaf(static_cast<float>(yRaw >> 6), 1.0f / 876.0f, -64.0f / 876.0f);
+__device__ __forceinline__ float3 hdrPixelToSdrRgb(const uint16_t y10, const float2 chroma, const float mobA, const float mobB, const float mobK) {
+    // 10-bit limited range -> normalized [0,1] / [-0.5,0.5]
+    const float Y2020 = fmaf(static_cast<float>(y10), 1.0f / 876.0f, -64.0f / 876.0f);
     const float Cb2020 = fmaf(chroma.x, 1.0f / 896.0f, -512.0f / 896.0f);
     const float Cr2020 = fmaf(chroma.y, 1.0f / 896.0f, -512.0f / 896.0f);
     // BT.2020 YCbCr -> PQ-encoded R'G'B' (Kr=0.2627, Kb=0.0593), explicit FMAs! (not clipped, like zimg)
@@ -89,14 +89,14 @@ __global__ void apply_watermark_row_major(
 }
 
 __global__ void nV12ToYUV420p(const uint8_t* __restrict__ uvSrc, const int uvPitch, uint8_t* __restrict__ uvDst, const int uvWidth, const int uvHeight) {
-    const int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    if (idx >= uvWidth * uvHeight)
+    const int x = blockIdx.x * blockDim.x + threadIdx.x;
+    const int y = blockIdx.y * blockDim.y + threadIdx.y;
+    if (x >= uvWidth || y >= uvHeight)
         return;
-    const int y = idx / uvWidth;
-    const int x = idx % uvWidth;
-    const uint8_t* src = uvSrc + y * uvPitch + 2 * x;
-    uvDst[idx] = src[0];
-    uvDst[uvWidth * uvHeight + idx] = src[1];
+    const uchar2 uv = reinterpret_cast<const uchar2*>(uvSrc + y * uvPitch)[x];
+    const int idx = y * uvWidth + x;
+    uvDst[idx] = uv.x;
+    uvDst[uvWidth * uvHeight + idx] = uv.y;
 }
 
 __global__ void yuv420pToNV12(const uint8_t* __restrict__ uvSrc, uint8_t* __restrict__ uvDst, const int uvPitch, const int uvWidth, const int uvHeight) {
@@ -140,29 +140,6 @@ __global__ void colMajorToRowMajorU8(const uint8_t* __restrict__ src, uint8_t* _
     }
 }
 
-__global__ void colMajorToInterleavedU8(const uint8_t* __restrict__ src, uint8_t* __restrict__ dst, const int width, const int height, const int channels) {
-    __shared__ uint8_t tile[3][32][33];
-    const int planeSize = width * height;
-    const int tileCol = blockIdx.x * 32;
-    const int tileRow = blockIdx.y * 32;
-    const int col = tileCol + threadIdx.y;
-    const int row = tileRow + threadIdx.x;
-    for (int channel = 0; channel < channels; channel++) {
-#pragma unroll
-        for (int i = 0; i < 32; i += 8) {
-            if ((col + i) < width && row < height)
-                tile[channel][threadIdx.y + i][threadIdx.x] = src[channel * planeSize + (col + i) * height + row];
-        }
-    }
-    __syncthreads();
-    const int rowBytes = min(32, width - tileCol) * channels;
-    for (int i = threadIdx.y; i < 32 && (tileRow + i) < height; i += 8) {
-        uint8_t* output = dst + ((tileRow + i) * width + tileCol) * channels;
-        for (int byte = threadIdx.x; byte < rowBytes; byte += 32)
-            output[byte] = tile[byte % channels][byte / channels][i];
-    }
-}
-
 __global__ void pitchedToFloat(const uint8_t* __restrict__ input, float* __restrict__ output, const int width, const int height, const int pitch) {
 
     __shared__ float tile[32][33]; // 32x32 tile, +1 to avoid bank conflicts
@@ -192,7 +169,8 @@ __global__ void pitchedToFloat(const uint8_t* __restrict__ input, float* __restr
 }
 
 namespace {
-// the 10-bit chroma of a luma pixel: bilinear between the nearest samples of the interleaved P010 chroma plane at the chroma siting, edges replicated
+// 10-bit chroma of a luma pixel from either interleaved P010 or packed planar yuv420p10le
+template <bool Planar10>
 __device__ __forceinline__ float2 hdrChromaAt(
     const uint16_t* __restrict__ uvSrc, const int uvPitchBytes, const int chromaWidth, const int chromaHeight, const int x, const int y, const float siteX, const float siteY) {
     const float u = (static_cast<float>(x) - siteX) * 0.5f;
@@ -200,11 +178,27 @@ __device__ __forceinline__ float2 hdrChromaAt(
     const float u0 = floorf(u), v0 = floorf(v);
     const int x0 = clamp(static_cast<int>(u0), 0, chromaWidth - 1), x1 = clamp(static_cast<int>(u0) + 1, 0, chromaWidth - 1);
     const int y0 = clamp(static_cast<int>(v0), 0, chromaHeight - 1), y1 = clamp(static_cast<int>(v0) + 1, 0, chromaHeight - 1);
-    // each 32-bit word holds a Cb (low) and Cr (high) sample
-    const auto* row0 = reinterpret_cast<const uint32_t*>(reinterpret_cast<const uint8_t*>(uvSrc) + y0 * uvPitchBytes);
-    const auto* row1 = reinterpret_cast<const uint32_t*>(reinterpret_cast<const uint8_t*>(uvSrc) + y1 * uvPitchBytes);
-    const auto sample = [](const uint32_t pair) { return make_float2(static_cast<float>((pair & 0xFFFF) >> 6), static_cast<float>(pair >> 22)); };
-    const float2 c00 = sample(__ldg(row0 + x0)), c10 = sample(__ldg(row0 + x1)), c01 = sample(__ldg(row1 + x0)), c11 = sample(__ldg(row1 + x1));
+    float2 c00, c10, c01, c11;
+    if constexpr (Planar10) {
+        const size_t chromaPlane = static_cast<size_t>(chromaWidth) * chromaHeight;
+        const uint16_t* const u0Row = uvSrc + y0 * chromaWidth;
+        const uint16_t* const u1Row = uvSrc + y1 * chromaWidth;
+        const uint16_t* const v0Row = u0Row + chromaPlane;
+        const uint16_t* const v1Row = u1Row + chromaPlane;
+        c00 = make_float2(static_cast<float>(__ldg(u0Row + x0) & 0x3FFu), static_cast<float>(__ldg(v0Row + x0) & 0x3FFu));
+        c10 = make_float2(static_cast<float>(__ldg(u0Row + x1) & 0x3FFu), static_cast<float>(__ldg(v0Row + x1) & 0x3FFu));
+        c01 = make_float2(static_cast<float>(__ldg(u1Row + x0) & 0x3FFu), static_cast<float>(__ldg(v1Row + x0) & 0x3FFu));
+        c11 = make_float2(static_cast<float>(__ldg(u1Row + x1) & 0x3FFu), static_cast<float>(__ldg(v1Row + x1) & 0x3FFu));
+    } else {
+        // each 32-bit word holds a Cb (low) and Cr (high) sample
+        const auto* row0 = reinterpret_cast<const uint32_t*>(reinterpret_cast<const uint8_t*>(uvSrc) + y0 * uvPitchBytes);
+        const auto* row1 = reinterpret_cast<const uint32_t*>(reinterpret_cast<const uint8_t*>(uvSrc) + y1 * uvPitchBytes);
+        const auto sample = [](const uint32_t pair) { return make_float2(static_cast<float>((pair & 0xFFFF) >> 6), static_cast<float>(pair >> 22)); };
+        c00 = sample(__ldg(row0 + x0));
+        c10 = sample(__ldg(row0 + x1));
+        c01 = sample(__ldg(row1 + x0));
+        c11 = sample(__ldg(row1 + x1));
+    }
     const float fu = u - u0, fv = v - v0;
     const float2 top = make_float2(fmaf(fu, c10.x - c00.x, c00.x), fmaf(fu, c10.y - c00.y, c00.y));
     const float2 bottom = make_float2(fmaf(fu, c11.x - c01.x, c01.x), fmaf(fu, c11.y - c01.y, c01.y));
@@ -216,24 +210,9 @@ __device__ __forceinline__ float decimationWeight(const int offset, const float 
 
 constexpr int HDR_TILE_WIDTH = 66;
 constexpr int HDR_TILE_HEIGHT = 18;
-} // namespace
 
-__global__ void yuv420p10ToP010(const uint16_t* __restrict__ planar, uint16_t* __restrict__ yDst, uint16_t* __restrict__ uvDst, const int width, const int height) {
-    const int cx = blockIdx.x * blockDim.x + threadIdx.x;
-    const int cy = blockIdx.y * blockDim.y + threadIdx.y;
-    const int chromaWidth = width / 2, chromaHeight = height / 2;
-    if (cx >= chromaWidth || cy >= chromaHeight)
-        return;
-    // two luma samples per 32-bit word
-    for (int row = 2 * cy; row < 2 * cy + 2; ++row) {
-        const uint32_t pair = reinterpret_cast<const uint32_t*>(planar + row * width)[cx];
-        reinterpret_cast<uint32_t*>(yDst + row * width)[cx] = (pair << 6) & 0xFFC0FFC0u;
-    }
-    const int chroma = cy * chromaWidth + cx, pixels = width * height;
-    reinterpret_cast<ushort2*>(uvDst + cy * width)[cx] = make_ushort2(static_cast<uint16_t>(planar[pixels + chroma] << 6), static_cast<uint16_t>(planar[pixels + pixels / 4 + chroma] << 6));
-}
-
-__global__ void __launch_bounds__(256) p010HdrToSdr(const uint16_t* __restrict__ ySrc, const int yPitchBytes, const uint16_t* __restrict__ uvSrc, const int uvPitchBytes, uint8_t* __restrict__ yDst,
+template <bool Planar10>
+__device__ __forceinline__ void p010HdrToSdrImpl(const uint16_t* __restrict__ ySrc, const int yPitchBytes, const uint16_t* __restrict__ uvSrc, const int uvPitchBytes, uint8_t* __restrict__ yDst,
     const int yDstPitch, float* __restrict__ lumaDst, uint8_t* __restrict__ uvDst, const int uvDstPitch, const int width, const int height, const float siteX, const float siteY, const float mobA,
     const float mobB, const float mobK) {
     __shared__ float2 chroma[HDR_TILE_HEIGHT][HDR_TILE_WIDTH];
@@ -248,7 +227,9 @@ __global__ void __launch_bounds__(256) p010HdrToSdr(const uint16_t* __restrict__
     for (int index = thread; index < HDR_TILE_WIDTH * HDR_TILE_HEIGHT; index += 256) {
         const int tileX = index % HDR_TILE_WIDTH, tileY = index / HDR_TILE_WIDTH;
         const int x = clamp(left + tileX, 0, width - 1), y = clamp(top + tileY, 0, height - 1);
-        const float3 rgb = hdrPixelToSdrRgb(__ldg(&ySrc[y * yPitchU16 + x]), hdrChromaAt(uvSrc, uvPitchBytes, chromaWidth, chromaHeight, x, y, siteX, siteY), mobA, mobB, mobK);
+        const uint16_t rawY = __ldg(&ySrc[y * yPitchU16 + x]);
+        const uint16_t y10 = Planar10 ? (rawY & 0x3FFu) : (rawY >> 6);
+        const float3 rgb = hdrPixelToSdrRgb(y10, hdrChromaAt<Planar10>(uvSrc, uvPitchBytes, chromaWidth, chromaHeight, x, y, siteX, siteY), mobA, mobB, mobK);
         const float Y = fmaf(0.2126f, rgb.x, fmaf(0.7152f, rgb.y, 0.0722f * rgb.z));
         chroma[tileY][tileX] = make_float2((rgb.z - Y) * CB_SCALE, (rgb.x - Y) * CR_SCALE);
         // the block's own pixels give the luma outputs
@@ -289,6 +270,19 @@ __global__ void __launch_bounds__(256) p010HdrToSdr(const uint16_t* __restrict__
     const uint8_t cb8 = static_cast<uint8_t>(__float2int_rn(clamp(fmaf(sum.x, 224.0f, 128.0f), 0.0f, 255.0f)));
     const uint8_t cr8 = static_cast<uint8_t>(__float2int_rn(clamp(fmaf(sum.y, 224.0f, 128.0f), 0.0f, 255.0f)));
     reinterpret_cast<uchar2*>(uvDst + cy * uvDstPitch)[cx] = make_uchar2(cb8, cr8);
+}
+} // namespace
+
+__global__ void __launch_bounds__(256) p010HdrToSdr(const uint16_t* __restrict__ ySrc, const int yPitchBytes, const uint16_t* __restrict__ uvSrc, const int uvPitchBytes, uint8_t* __restrict__ yDst,
+    const int yDstPitch, float* __restrict__ lumaDst, uint8_t* __restrict__ uvDst, const int uvDstPitch, const int width, const int height, const float siteX, const float siteY, const float mobA,
+    const float mobB, const float mobK) {
+    p010HdrToSdrImpl<false>(ySrc, yPitchBytes, uvSrc, uvPitchBytes, yDst, yDstPitch, lumaDst, uvDst, uvDstPitch, width, height, siteX, siteY, mobA, mobB, mobK);
+}
+
+__global__ void __launch_bounds__(256) planar10HdrToSdr(const uint16_t* __restrict__ ySrc, const int yPitchBytes, const uint16_t* __restrict__ uvSrc, const int uvPitchBytes,
+    uint8_t* __restrict__ yDst, const int yDstPitch, float* __restrict__ lumaDst, uint8_t* __restrict__ uvDst, const int uvDstPitch, const int width, const int height, const float siteX,
+    const float siteY, const float mobA, const float mobB, const float mobK) {
+    p010HdrToSdrImpl<true>(ySrc, yPitchBytes, uvSrc, uvPitchBytes, yDst, yDstPitch, lumaDst, uvDst, uvDstPitch, width, height, siteX, siteY, mobA, mobB, mobK);
 }
 
 // // The CUDA watermark generation. For bit-exactness we use fma(), correctly rounded sqrt and explicit fmaf

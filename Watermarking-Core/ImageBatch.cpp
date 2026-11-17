@@ -391,14 +391,8 @@ ImageBatchSummary runImageBatch(const ImageBatchSettings& settings, const std::v
                         loadSlots.acquire();
                         struct Release {
                             decltype(loadSlots)& slots;
-                            int threads = omp_get_max_threads();
-                            ~Release() {
-                                omp_set_num_threads(threads);
-                                slots.release();
-                            }
+                            ~Release() { slots.release(); }
                         } release{loadSlots};
-                        // Parallel loads already share the CPU budget, avoid nested OpenMP teams
-                        omp_set_num_threads(1);
                         if (control.cancelled())
                             return PreloadedHandle{};
 #if defined(_USE_OPENCL_)
@@ -406,7 +400,7 @@ ImageBatchSummary runImageBatch(const ImageBatchSettings& settings, const std::v
 #elif defined(_USE_CUDA_)
                         CUDA_CHECK(cudaSetDevice(device.index));
 #endif
-                        return preloadImageFromDisk(jobs[id].inputPath, -1, false);
+                        return InternalUtils::preloadImageSerial(jobs[id].inputPath, -1);
                     };
                     const auto launch = [&] {
                         const auto id = queue.claim(device.index);

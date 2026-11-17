@@ -9,6 +9,8 @@
 #if !defined(__AVX2__)
 #error "AVX2 is required: build with AVX2 (default) or AVX-512 enabled"
 #endif
+#include <array>
+#include <cstdint>
 #include <immintrin.h>
 
 // one float vector register and the operations the CPU kernels need on it
@@ -22,6 +24,9 @@ inline Vec broadcast(const float value) { return _mm256_set1_ps(value); }
 inline Vec load(const float* source) { return _mm256_loadu_ps(source); }
 inline void store(float* destination, const Vec value) { _mm256_storeu_ps(destination, value); }
 inline Vec add(const Vec a, const Vec b) { return _mm256_add_ps(a, b); }
+inline Vec mul(const Vec a, const Vec b) { return _mm256_mul_ps(a, b); }
+inline Vec abs(const Vec v) { return _mm256_castsi256_ps(_mm256_and_si256(_mm256_castps_si256(v), _mm256_set1_epi32(0x7FFFFFFF))); }
+inline Vec max(const Vec a, const Vec b) { return _mm256_max_ps(a, b); }
 // a * b + c
 inline Vec fmadd(const Vec a, const Vec b, const Vec c) { return _mm256_fmadd_ps(a, b, c); }
 // c - a * b
@@ -30,6 +35,12 @@ inline float sum(const Vec value) {
     const __m128 quad = _mm_add_ps(_mm256_castps256_ps128(value), _mm256_extractf128_ps(value, 1));
     const __m128 pair = _mm_add_ps(quad, _mm_movehl_ps(quad, quad));
     return _mm_cvtss_f32(_mm_add_ss(pair, _mm_movehdup_ps(pair)));
+}
+inline float reduceMax(const Vec value) {
+    const __m128 quad = _mm_max_ps(_mm256_castps256_ps128(value), _mm256_extractf128_ps(value, 1));
+    const __m128 pair = _mm_max_ps(quad, _mm_movehl_ps(quad, quad));
+    const __m128 single = _mm_max_ss(pair, _mm_shuffle_ps(pair, pair, 1));
+    return _mm_cvtss_f32(single);
 }
 // each 128-bit lane of low moves down by FLOATS, the same lane of high fills its top
 template <int FLOATS>
@@ -46,11 +57,15 @@ inline Vec broadcast(const float value) { return _mm512_set1_ps(value); }
 inline Vec load(const float* source) { return _mm512_loadu_ps(source); }
 inline void store(float* destination, const Vec value) { _mm512_storeu_ps(destination, value); }
 inline Vec add(const Vec a, const Vec b) { return _mm512_add_ps(a, b); }
+inline Vec mul(const Vec a, const Vec b) { return _mm512_mul_ps(a, b); }
+inline Vec abs(const Vec v) { return _mm512_castsi512_ps(_mm512_and_si512(_mm512_castps_si512(v), _mm512_set1_epi32(0x7FFFFFFF))); }
+inline Vec max(const Vec a, const Vec b) { return _mm512_max_ps(a, b); }
 // a * b + c
 inline Vec fmadd(const Vec a, const Vec b, const Vec c) { return _mm512_fmadd_ps(a, b, c); }
 // c - a * b
 inline Vec fnmadd(const Vec a, const Vec b, const Vec c) { return _mm512_fnmadd_ps(a, b, c); }
 inline float sum(const Vec value) { return _mm512_reduce_add_ps(value); }
+inline float reduceMax(const Vec value) { return _mm512_reduce_max_ps(value); }
 inline Avx2::Vec low(const Vec value) { return _mm512_castps512_ps256(value); }
 inline Vec fmaddLow(const Avx2::Vec a, const Avx2::Vec b, const Vec accumulator) { return _mm512_insertf32x8(accumulator, Avx2::fmadd(a, b, low(accumulator)), 0); }
 // each 128-bit lane of low moves down by FLOATS, the same lane of high fills its top
@@ -77,4 +92,28 @@ inline Vec window(const Vec* quads, const int offset) {
 }
 // loads that the windows at offsets [0, count) need
 constexpr int windowQuads(const int count) { return ((count + 2) / 4) + 1; }
+
+// transposed vector index for row/col j after 4 unpack stages (4-bit bit reversal)
+inline constexpr std::array<int, 16> kTransposeRegister{0, 8, 4, 12, 2, 10, 6, 14, 1, 9, 5, 13, 3, 11, 7, 15};
+
+// in-place 16x16 byte matrix transpose in 16 XMM registers, vector j lands in m[kTransposeRegister[j]]
+inline void transposeU8_16x16(__m128i m[16]) {
+    __m128i t[16];
+    for (int i = 0; i < 8; i++) {
+        t[i] = _mm_unpacklo_epi8(m[2 * i], m[(2 * i) + 1]);
+        t[i + 8] = _mm_unpackhi_epi8(m[2 * i], m[(2 * i) + 1]);
+    }
+    for (int i = 0; i < 8; i++) {
+        m[i] = _mm_unpacklo_epi16(t[2 * i], t[(2 * i) + 1]);
+        m[i + 8] = _mm_unpackhi_epi16(t[2 * i], t[(2 * i) + 1]);
+    }
+    for (int i = 0; i < 8; i++) {
+        t[i] = _mm_unpacklo_epi32(m[2 * i], m[(2 * i) + 1]);
+        t[i + 8] = _mm_unpackhi_epi32(m[2 * i], m[(2 * i) + 1]);
+    }
+    for (int i = 0; i < 8; i++) {
+        m[i] = _mm_unpacklo_epi64(t[2 * i], t[(2 * i) + 1]);
+        m[i + 8] = _mm_unpackhi_epi64(t[2 * i], t[(2 * i) + 1]);
+    }
+}
 } // namespace Simd

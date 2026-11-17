@@ -200,4 +200,31 @@ TEST(VideoBatchSchedulerTest, SkipCancelsBothAttemptsAndBatchCancelStopsPendingC
     for (const auto& view : cancelled.snapshot())
         EXPECT_EQ(view.state, VideoBatchState::Cancelled);
 }
+
+TEST(VideoBatchSchedulerTest, FailReturnsLandedStateAcrossBackupRetryAndFailure) {
+    VideoBatchScheduler withBackup(
+        {
+            {1, "in", "out"}
+    },
+        {0, 1}, true);
+    const auto primary = withBackup.claim(0), backup = withBackup.claim(1);
+    ASSERT_TRUE(primary);
+    ASSERT_TRUE(backup);
+    // Backup attempt remains active, fail keeps active state over Retrying/Failed
+    const VideoBatchState active = withBackup.fail(*primary, "device error", true);
+    EXPECT_TRUE(active == VideoBatchState::Probing || active == VideoBatchState::Processing);
+    EXPECT_EQ(withBackup.fail(*backup, "both failed", true), VideoBatchState::Failed);
+
+    VideoBatchScheduler retrying(
+        {
+            {1, "in", "out"}
+    },
+        {0, 1}, false);
+    const auto first = retrying.claim(0);
+    ASSERT_TRUE(first);
+    EXPECT_EQ(retrying.fail(*first, "temporary error", true, false), VideoBatchState::Retrying);
+    const auto second = retrying.claim(1);
+    ASSERT_TRUE(second);
+    EXPECT_EQ(retrying.fail(*second, "fatal error", false, false), VideoBatchState::Failed);
+}
 } // namespace

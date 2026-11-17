@@ -47,6 +47,12 @@ class MultiDeviceComboBox : public QComboBox {
         return devices;
     }
 
+    // look up row by stored device ID instead of assuming list index equals ordinal
+    QString deviceName(const int device) const {
+        const int row = findData(device);
+        return row >= 0 ? itemText(row) : QString();
+    }
+
     std::function<void()> selectionChanged;
 
   protected:

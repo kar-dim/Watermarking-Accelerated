@@ -2,6 +2,7 @@
 
 #include "video_defines.hpp"
 #include "VideoProcessingContext.hpp"
+#include <memory>
 #include <string>
 
 extern "C" {
@@ -45,4 +46,20 @@ int interruptVideo(void* session);
 void reportProgress(WatermarkCore::VideoSession* s, WatermarkCore::VideoState state, bool force = true, const AVFrame* frame = nullptr);
 void previewVideoFrame(WatermarkCore::VideoSession* s, const AVFrame* frame, bool encoded);
 void videoLog(const WatermarkCore::VideoSession* s, const std::string& text);
+
+void attachLibavLog(AVCodecContext* context);
+struct LibavLogTarget;
+
+// codec workers use their context tag when they have no thread-local scope
+class LibavLogScope {
+  public:
+    explicit LibavLogScope(const WatermarkCore::VideoSession* session);
+    ~LibavLogScope();
+    LibavLogScope(const LibavLogScope&) = delete;
+    LibavLogScope& operator=(const LibavLogScope&) = delete;
+
+  private:
+    std::shared_ptr<LibavLogTarget> previous;
+    std::shared_ptr<LibavLogTarget> target;
+};
 } // namespace video_utils

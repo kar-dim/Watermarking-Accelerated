@@ -42,6 +42,7 @@ class OclVideoOutput {
     AVFrame* copyFrom(const cl::Buffer& planarYuv, const cl::Buffer& lumaOverride = {});
     AVFrame* copyFrom(const AVFrame* source, const cl::Buffer& lumaOverride = {});
     void waitUntilCopied(const AVFrame* frame) const;
+    void waitForPreview(const AVFrame* frame) const;
 };
 
 class OclVideoFrame {

@@ -25,7 +25,9 @@ void VideoBatchWorker::run() {
 void VideoBatchWorker::onUpdate(const WatermarkCore::VideoBatchUpdate& update) {
     const std::lock_guard lock(mutex_);
     // Coalesce fast worker updates instead of adding one Qt event for every change
-    pending_[update.id] = update;
+    auto& saved = pending_[update.id];
+    if (update.revision > saved.revision)
+        saved = update;
 }
 
 void VideoBatchWorker::onLog(const std::uint64_t id, const std::string& message) {

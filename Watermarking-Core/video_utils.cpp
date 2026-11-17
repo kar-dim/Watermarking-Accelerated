@@ -55,6 +55,8 @@ extern "C" {
 extern "C" {
 #include "libavutil/hwcontext_d3d11va.h"
 }
+#elif defined(_USE_EIGEN_)
+#include "eigen_utils.hpp"
 #endif
 
 extern "C" {
@@ -105,6 +107,12 @@ constexpr AVPixelFormat supportedHwFormats[] = {
 
 namespace video_utils {
 namespace {
+
+AVCodecContextPtr allocateCodecContext(const AVCodec* codec) {
+    AVCodecContextPtr context(avcodec_alloc_context3(codec));
+    attachLibavLog(context.get());
+    return context;
+}
 
 #if defined(_USE_CUDA_)
 bool isPixelFormatSupported(const std::span<const AVPixelFormat> formats, const AVPixelFormat format) {
@@ -274,7 +282,7 @@ class StreamShapeWatch {
         : declaredWidth_(params->width), declaredHeight_(params->height), declaredFormat_(static_cast<AVPixelFormat>(params->format)), parser_(av_parser_init(params->codec_id)) {
         if (!parser_)
             return;
-        parserContext_.reset(avcodec_alloc_context3(nullptr));
+        parserContext_ = allocateCodecContext(nullptr);
         if (!parserContext_ || avcodec_parameters_to_context(parserContext_.get(), params) < 0) {
             parser_.reset();
             return;
@@ -362,7 +370,7 @@ AVCodecContextPtr openSoftwareDecoder(const AVCodecParameters* inputCodecParams,
     const AVCodec* inputDecoder = avcodec_find_decoder(inputCodecParams->codec_id);
     if (!inputDecoder)
         return nullptr;
-    AVCodecContextPtr ctx(avcodec_alloc_context3(inputDecoder));
+    AVCodecContextPtr ctx = allocateCodecContext(inputDecoder);
     if (!ctx)
         return nullptr;
     if (avcodec_parameters_to_context(ctx.get(), inputCodecParams) < 0)
@@ -589,7 +597,7 @@ AVCodecContextPtr openDecoderHWAccel(VideoSession* session) {
     if (!hw_device_ctx)
         return openSoftwareDecoder(inputCodecParams, pktTimebase, session->settings.cpuThreads);
     const auto tryOpen = [&](const bool deinterlace) -> AVCodecContextPtr {
-        AVCodecContextPtr ctx(avcodec_alloc_context3(inputDecoder));
+        AVCodecContextPtr ctx = allocateCodecContext(inputDecoder);
         if (!ctx || avcodec_parameters_to_context(ctx.get(), inputCodecParams) < 0)
             return nullptr;
         ctx->hw_device_ctx = av_buffer_ref(hw_device_ctx.get());
@@ -779,7 +787,7 @@ AVCodecContextPtr openDecoderOpenCL(VideoSession* session) {
             continue;
         resetProbe();
         try {
-            AVCodecContextPtr decoder(avcodec_alloc_context3(codec));
+            AVCodecContextPtr decoder = allocateCodecContext(codec);
             checkError(!decoder, "Could not allocate the hardware decoder");
             checkAv(avcodec_parameters_to_context(decoder.get(), parameters), "Copy hardware decoder parameters");
             AVBufferRefPtr d3d(interop->createDevice());
@@ -811,7 +819,7 @@ AVCodecContextPtr openDecoderOpenCL(VideoSession* session) {
                 decoder.reset();
                 session->openclVideoFrame.reset();
                 session->openclMappedFrames.reset();
-                decoder.reset(avcodec_alloc_context3(codec));
+                decoder = allocateCodecContext(codec);
                 checkError(!decoder, "Failed to reopen the QSV decoder after preflight");
                 checkAv(avcodec_parameters_to_context(decoder.get(), parameters), "Copy QSV decoder parameters after preflight");
                 decoder->hw_device_ctx = device.release();
@@ -907,14 +915,19 @@ void copyPlane(uint8_t* dst, const int dstPitch, const uint8_t* src, const int s
 }
 
 #if defined(_USE_OPENCL_)
-// packed plane into pitched host plane, single read then spread rows in place
-// No rectangle reads: Intel's driver CRASHES reading rectangles of D3D11-shared buffers (a CPU copy from the GPU address)
-void readPlane(cl::CommandQueue& queue, const cl::Buffer& source, const size_t offset, const int width, const int height, uint8_t* dst, const int pitch, const bool blocking) {
-    queue.enqueueReadBuffer(source, blocking || pitch != width, offset, static_cast<size_t>(width) * height, dst);
+void unpackPlane(uint8_t* dst, const int width, const int height, const int pitch) {
     // backwards unpack ensures destination row is free before overwrite
     if (pitch != width)
         for (int row = height - 1; row > 0; --row)
             std::memmove(dst + static_cast<size_t>(row) * pitch, dst + static_cast<size_t>(row) * width, width);
+}
+
+// packed plane into pitched host plane, single read then spread rows in place
+// No rectangle reads: Intel's driver CRASHES reading rectangles of D3D11-shared buffers (a CPU copy from the GPU address)
+void readPlane(cl::CommandQueue& queue, const cl::Buffer& source, const size_t offset, const int width, const int height, uint8_t* dst, const int pitch, const bool blocking) {
+    queue.enqueueReadBuffer(source, blocking ? CL_TRUE : CL_FALSE, offset, static_cast<size_t>(width) * height, dst);
+    if (blocking)
+        unpackPlane(dst, width, height, pitch);
 }
 #endif
 
@@ -985,25 +998,10 @@ void loadInputFrame(VideoSession* s, const uint8_t* hostPtr, const int srcPitch)
         throw std::runtime_error("Failed to upload video frame to OpenCL buffer: " + std::to_string(uploadStatus));
     cl_utils::launchPitchedToFloat(hostGpu.clBuffer(), lumaBuffer(s).clBuffer(), width, height, width, mgr.getQueue());
 #else
-    // row-major 8-bit Y plane (row pitch srcPitch) -> column-major float luma in the session buffer, transposed
+    // row-major 8-bit Y plane (row pitch srcPitch) -> column-major float luma in session buffer, transposed
     auto& luma = s->inputFrame.getGray();
     luma.resize(height, width);
-    const int lumaRows = height;
-    const int lumaCols = width;
-    constexpr int tile = 64;
-    const int rowTiles = (lumaRows + tile - 1) / tile;
-    const int colTiles = (lumaCols + tile - 1) / tile;
-#pragma omp parallel for collapse(2) schedule(static)
-    for (int rowTile = 0; rowTile < rowTiles; rowTile++) {
-        for (int colTile = 0; colTile < colTiles; colTile++) {
-            const int row = rowTile * tile;
-            const int col = colTile * tile;
-            const int rows = std::min(tile, lumaRows - row);
-            const int cols = std::min(tile, lumaCols - col);
-            const Map<const Gray8Buffer, 0, OuterStride<>> source(hostPtr + (static_cast<size_t>(row) * srcPitch) + col, cols, rows, OuterStride<>(srcPitch));
-            luma.block(row, col, rows, cols) = source.transpose().template cast<float>();
-        }
-    }
+    eigen_utils::pitchedRowMajorU8ToColMajorFloat(hostPtr, height, width, srcPitch, luma.data());
 #endif
 }
 
@@ -1044,7 +1042,7 @@ void reportEncodedFormat(const VideoSession* s, const AVPacket* packet) {
     const auto closeParser = [](AVCodecParserContext* parser) { av_parser_close(parser); };
     std::unique_ptr<AVCodecParserContext, decltype(closeParser)> parser(av_parser_init(encoder->codec_id), closeParser);
     // the parser reads the sequence header from the extradata of a global header
-    AVCodecContextPtr context(avcodec_alloc_context3(nullptr));
+    AVCodecContextPtr context = allocateCodecContext(nullptr);
     std::unique_ptr<AVCodecParameters, detail::AVDeleter<avcodec_parameters_free>> parameters(avcodec_parameters_alloc());
     if (!parser || !context || !parameters || avcodec_parameters_from_context(parameters.get(), encoder) < 0 || avcodec_parameters_to_context(context.get(), parameters.get()) < 0)
         return;
@@ -1108,6 +1106,7 @@ void closeOutputFile(VideoSession* s) {
 // does NOT flush the encoder on exit, flushAndFinalize handles that after join()
 void encodeWorker(VideoSession* s, EncodeQueue& queue, std::exception_ptr& encErr) noexcept {
     try {
+        const LibavLogScope logScope(s);
 #if defined(_USE_OPENCL_)
         OclQueueManager::bind(s->openclDevice);
 #elif defined(_USE_CUDA_)
@@ -1143,12 +1142,7 @@ void encodeWorker(VideoSession* s, EncodeQueue& queue, std::exception_ptr& encEr
 }
 
 #if defined(_USE_CUDA_)
-// NVENC from CUDA frames, copy Y plane and chroma into hw frame and queue to encode thread
-// The chroma is in the surface layout: interleaved UV rows (NV12, NV16) in chroma[0], or the U and V planes (YUV444P)
-void encodeFrameGPU(
-    VideoSession* s, const uint8_t* ySrc, const int yPitch, const std::array<const uint8_t*, 2>& chroma, const std::array<int, 2>& chromaPitch, const FrameTiming& timing, EncodeQueue& queue) {
-    const PlanarLayout layout = outputLayout(s);
-    const auto stream = CudaStreamManager::getInstance().getComputeStream();
+AVFramePtr allocNvencFrame(VideoSession* s, const PlanarLayout& layout, const FrameTiming& timing) {
     AVFramePtr encFrame(av_frame_alloc());
     checkError(!encFrame, "Failed to allocate NVENC hw frame");
     encFrame->format = AV_PIX_FMT_CUDA;
@@ -1157,6 +1151,16 @@ void encodeFrameGPU(
     encFrame->pts = timing.pts;
     encFrame->duration = timing.duration;
     checkError(av_hwframe_get_buffer(s->outputEncoderCtx->hw_frames_ctx, encFrame.get(), 0) < 0, "Failed to get NVENC hw frame buffer");
+    return encFrame;
+}
+
+// NVENC from CUDA frames, copy Y plane and chroma into hw frame and queue to encode thread
+// Chroma is in surface layout: interleaved UV rows (NV12, NV16) in chroma[0], or U and V planes (YUV444P)
+void encodeFrameGPU(
+    VideoSession* s, const uint8_t* ySrc, const int yPitch, const std::array<const uint8_t*, 2>& chroma, const std::array<int, 2>& chromaPitch, const FrameTiming& timing, EncodeQueue& queue) {
+    const PlanarLayout layout = outputLayout(s);
+    const auto stream = CudaStreamManager::getInstance().getComputeStream();
+    AVFramePtr encFrame = allocNvencFrame(s, layout, timing);
     CUDA_CHECK(cudaMemcpy2DAsync(encFrame->data[0], encFrame->linesize[0], ySrc, yPitch, layout.width, layout.height, cudaMemcpyDefault, stream));
     if (cudaSurfaceFormat(s->outputFormat) == AV_PIX_FMT_YUV444P)
         for (int plane = 1; plane < 3; ++plane)
@@ -1168,25 +1172,28 @@ void encodeFrameGPU(
     pushToEncoder(s, queue, std::move(encFrame));
 }
 
-// CPU decode + NVENC: upload a decoded planar frame into an NVENC surface, the luma comes from the GPU watermark when watermarked
+// CPU decode + NVENC: upload decoded planar frame into NVENC surface, luma from GPU watermark when watermarked
 void uploadFrameGPU(VideoSession* s, const AVFrame* frame, const bool watermarked, const FrameTiming& timing, EncodeQueue& queue) {
     checkError(withoutFullRangeAlias(static_cast<AVPixelFormat>(frame->format)) != s->outputFormat, "Decoded video frame is not in the output format");
     const PlanarLayout layout = outputLayout(s);
     const auto stream = CudaStreamManager::getInstance().getComputeStream();
     const uint8_t* luma = watermarked ? s->watermarkedFrame.data() : frame->data[0];
     const int lumaPitch = watermarked ? layout.width : frame->linesize[0];
-    // 4:4:4 surfaces take the planes as they are
+    // 4:4:4 surfaces take planes directly
     if (cudaSurfaceFormat(s->outputFormat) == AV_PIX_FMT_YUV444P) {
         encodeFrameGPU(s, luma, lumaPitch, {frame->data[1], frame->data[2]}, {frame->linesize[1], frame->linesize[2]}, timing, queue);
         return;
     }
-    // packed U then V, interleaved into NV12/NV16 on the GPU
-    CudaArray<uint8_t> packed(2 * layout.chromaHeight, layout.chromaWidth, stream), interleaved(layout.chromaHeight, 2 * layout.chromaWidth, stream);
+    AVFramePtr encFrame = allocNvencFrame(s, layout, timing);
+    CUDA_CHECK(cudaMemcpy2DAsync(encFrame->data[0], encFrame->linesize[0], luma, lumaPitch, layout.width, layout.height, cudaMemcpyDefault, stream));
+    // pack U and V in one device buffer and interleave directly into NVENC surface
+    CudaArray<uint8_t> packed(2 * layout.chromaHeight, layout.chromaWidth, stream);
     for (int plane = 1; plane < 3; ++plane)
         CUDA_CHECK(cudaMemcpy2DAsync(packed.data() + (plane - 1) * layout.chromaBytes(), layout.chromaWidth, frame->data[plane], frame->linesize[plane], layout.chromaWidth, layout.chromaHeight,
             cudaMemcpyHostToDevice, stream));
-    cuda_utils::launchYUV420pToNV12Kernel(packed.data(), interleaved.data(), 2 * layout.chromaWidth, layout.chromaWidth, layout.chromaHeight, stream);
-    encodeFrameGPU(s, luma, lumaPitch, {interleaved.data(), nullptr}, {2 * layout.chromaWidth, 0}, timing, queue);
+    cuda_utils::launchYUV420pToNV12Kernel(packed.data(), encFrame->data[1], encFrame->linesize[1], layout.chromaWidth, layout.chromaHeight, stream);
+    CUDA_CHECK(cudaStreamSynchronize(stream));
+    pushToEncoder(s, queue, std::move(encFrame));
 }
 #endif
 
@@ -1302,14 +1309,24 @@ AVFramePtr readBackFrame(VideoSession* s, const FrameTiming& timing, const cl::B
     AVFramePtr encFrame = encoderFrame(s, timing);
     const PlanarLayout layout = outputLayout(s);
     auto& queue = OclQueueManager::getInstance().getQueue();
-    for (int plane = 0; plane < 3; ++plane) {
-        const bool fromWatermark = plane == 0 && watermarked;
-        const int width = plane == 0 ? layout.width : layout.chromaWidth;
-        const int height = plane == 0 ? layout.height : layout.chromaHeight;
-        // the in-order queue has finished every read when the last one returns
-        readPlane(
-            queue, fromWatermark ? s->watermarkedFrame.clBuffer() : packed, fromWatermark ? 0 : layout.offset(plane), width, height, encFrame->data[plane], encFrame->linesize[plane], plane == 2);
+    std::array<int, 3> widths{};
+    std::array<int, 3> heights{};
+    try {
+        for (int plane = 0; plane < 3; ++plane) {
+            const bool fromWatermark = plane == 0 && watermarked;
+            widths[plane] = plane == 0 ? layout.width : layout.chromaWidth;
+            heights[plane] = plane == 0 ? layout.height : layout.chromaHeight;
+            readPlane(queue, fromWatermark ? s->watermarkedFrame.clBuffer() : packed, fromWatermark ? 0 : layout.offset(plane), widths[plane], heights[plane], encFrame->data[plane],
+                encFrame->linesize[plane], false);
+        }
+        queue.finish();
+    } catch (...) {
+        // finish queued DMA into encFrame before unwinding releases it
+        clFinish(queue());
+        throw;
     }
+    for (int plane = 0; plane < 3; ++plane)
+        unpackPlane(encFrame->data[plane], widths[plane], heights[plane], encFrame->linesize[plane]);
     return encFrame;
 }
 
@@ -1389,15 +1406,16 @@ struct P010Planes {
     int yPitch;
     const uint16_t* uv;
     int uvPitch;
+    bool planar10 = false;
 };
 
 P010Planes p010Planes(const AVFrame* frame) { return {reinterpret_cast<const uint16_t*>(frame->data[0]), frame->linesize[0], reinterpret_cast<const uint16_t*>(frame->data[1]), frame->linesize[1]}; }
 
-// HDR P010LE to SDR in one pass, each output optional: float luma (watermark input), 8-bit luma and NV12 chroma (pitch width)
+// HDR P010LE or planar yuv420p10le to SDR in one pass, outputs optional
 void tonemapHdr(VideoSession* s, const P010Planes& source, const AVFrame* frame, float* luma, uint8_t* y, uint8_t* uv, const cudaStream_t stream) {
     const auto [height, width] = s->videoDims();
     cuda_utils::launchP010HdrToSdrKernel(
-        source.y, source.yPitch, source.uv, source.uvPitch, y, width, luma, uv, width, width, height, chromaSiting(s->inputDecoderCtx.get(), frame), hdrMobius(s), stream);
+        source.y, source.yPitch, source.uv, source.uvPitch, y, width, luma, uv, width, width, height, chromaSiting(s->inputDecoderCtx.get(), frame), hdrMobius(s), stream, source.planar10);
 }
 
 // interleaved U and V rows (NV12 half height, NV16 full height) into the planes of the encoder frame, asynchronous on the stream
@@ -1454,19 +1472,18 @@ void embedHdrFrame(VideoSession* s, int& framesCount, const P010Planes& source, 
     framesCount++;
 }
 
-// CPU-decoded PQ HDR: the yuv420p10le planes go to the GPU as P010 and are converted like NVDEC frames
+// CPU-decoded PQ HDR: yuv420p10le planes tonemapped directly without P010 staging copies
 void embedUploadedHdrFrame(VideoSession* s, int& framesCount, const AVFrame* frame, EncodeQueue& queue) {
     const auto stream = CudaStreamManager::getInstance().getComputeStream();
     const auto [height, width] = s->videoDims();
-    CudaArray<uint16_t> planar(height * 3 / 2, width, stream), y(height, width, stream), uv(height / 2, width, stream);
+    CudaArray<uint16_t> planar(height * 3 / 2, width, stream);
     for (int plane = 0; plane < 3; ++plane) {
         const int planeWidth = plane == 0 ? width : width / 2, planeHeight = plane == 0 ? height : height / 2;
         const size_t offset = plane == 0 ? 0 : static_cast<size_t>(width) * height + (plane - 1) * static_cast<size_t>(planeWidth) * planeHeight;
         CUDA_CHECK(cudaMemcpy2DAsync(
             planar.data() + offset, planeWidth * sizeof(uint16_t), frame->data[plane], frame->linesize[plane], planeWidth * sizeof(uint16_t), planeHeight, cudaMemcpyHostToDevice, stream));
     }
-    cuda_utils::launchYUV420p10ToP010Kernel(planar.data(), y.data(), uv.data(), width, height, stream);
-    embedHdrFrame(s, framesCount, {y.data(), width * 2, uv.data(), width * 2}, frame, queue);
+    embedHdrFrame(s, framesCount, {planar.data(), width * 2, planar.data() + static_cast<size_t>(width) * height, width, true}, frame, queue);
 }
 
 // embed watermark in NVDEC frame
@@ -1943,12 +1960,13 @@ void configureOpenclEncoder(VideoSession* s, const std::string& codecName, const
 } // namespace
 
 void initOutputEncoder(VideoSession* s) {
-    WatermarkCore::validateVideoOutputPath(s->settings.encodeOutputPath);
     checkError(s->settings.encodeOutputPath.empty(), "No output path specified for video encode");
+    WatermarkCore::validateVideoOutputPath(s->settings.encodeOutputPath);
     checkError(sameFileOnDisk(pathFromUtf8(s->settings.videoFile), pathFromUtf8(s->settings.encodeOutputPath)),
         "Output path points to the same physical file as the input file (" + s->settings.encodeOutputPath + "). Overwriting the input video is forbidden.");
 
-    const std::string optionsText = s->settings.useHwEncoder && s->settings.encodeOptions.empty() ? defaultHardwareEncodeOptions() : s->settings.encodeOptions;
+    const bool blankOptions = s->settings.encodeOptions.find_first_not_of(" \t\r\n\v\f") == std::string::npos;
+    const std::string optionsText = s->settings.useHwEncoder && blankOptions ? defaultHardwareEncodeOptions() : s->settings.encodeOptions;
     ParsedEncodeOptions parsed = parseEncodeOptions(optionsText);
     const std::string& codecName = parsed.codecName;
     OptionDict& opts = parsed.dictionary; // options consumed by encoder then muxer
@@ -2006,7 +2024,7 @@ void initOutputEncoder(VideoSession* s) {
         checkError(width % widthStep != 0 || height % heightStep != 0,
             std::format("{} output requires dimensions divisible by {}x{}; input is {}x{}.", pixelFormatName(s->outputFormat), widthStep, heightStep, width, height));
 
-        encCtx.reset(avcodec_alloc_context3(encoder));
+        encCtx = allocateCodecContext(encoder);
         checkError(!encCtx, "Failed to allocate encoder context");
 
         encCtx->thread_count = s->settings.cpuThreads;
@@ -2023,7 +2041,7 @@ void initOutputEncoder(VideoSession* s) {
         const AVColorRange sourceRange = s->videoStream->codecpar->color_range == AVCOL_RANGE_UNSPECIFIED && withoutFullRangeAlias(s->inputDecoderCtx->pix_fmt) != s->inputDecoderCtx->pix_fmt
                                              ? AVCOL_RANGE_JPEG
                                              : s->videoStream->codecpar->color_range;
-        encCtx->color_range = inputIsHDR && s->useHwDecoder ? AVCOL_RANGE_MPEG : sourceRange;
+        encCtx->color_range = s->isHdr ? AVCOL_RANGE_MPEG : sourceRange;
         encCtx->color_primaries = inputIsHDR ? AVCOL_PRI_BT709 : s->inputDecoderCtx->color_primaries;
         encCtx->color_trc = inputIsHDR ? AVCOL_TRC_BT709 : s->inputDecoderCtx->color_trc;
         const AVColorSpace sourceMatrix = s->inputDecoderCtx->colorspace == AVCOL_SPC_RESERVED ? AVCOL_SPC_UNSPECIFIED : s->inputDecoderCtx->colorspace;

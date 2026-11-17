@@ -55,8 +55,15 @@ class PipelineGraph {
                 throw;
             }
             const cudaError_t captured = cudaStreamEndCapture(captureStream, &graph);
+            if (captured != cudaSuccess) {
+                if (graph)
+                    cudaGraphDestroy(graph);
+                // failed capture not reused, discard stream
+                cudaStreamDestroy(captureStream);
+                (void)cudaGetLastError();
+                CUDA_CHECK(captured);
+            }
             manager.releaseCaptureStream(device, captureStream);
-            CUDA_CHECK(captured);
             cudaGraphExecUpdateResultInfo updateInfo;
             if (exec && cudaGraphExecUpdate(exec, graph, &updateInfo) != cudaSuccess) {
                 // new output layout or channels requires new graph
@@ -104,18 +111,7 @@ class WatermarkCuda final : public WatermarkBase {
         if constexpr (L::copyBorderRows)
             borderRowsCopy = CudaArray<float>(L::borderCopyRows * this->baseCols, stream);
         solverSystem = CudaArray<uint64_t>(solverSystemSize, stream);
-        const dim3 detectGrid = DetectTile<p>::grid(this->baseCols, this->baseRows);
-        const int corrNumBlocks = detectGrid.x * detectGrid.y;
-        // per frame buffers live with object, CUDA graphs require fixed pointers
-        u = CudaArray<__half>(this->baseRows, this->baseCols, stream);
         sumSq = CudaArray<uint64_t>::zeros(2, stream);
-        dotPartial = ImageBuffer(corrNumBlocks, stream);
-        uNormPartial = ImageBuffer(corrNumBlocks, stream);
-        zNormPartial = ImageBuffer(corrNumBlocks, stream);
-        corrBlockCounter = CudaArray<unsigned int>::zeros(1, stream);
-        int device = 0;
-        CUDA_CHECK(cudaGetDevice(&device));
-        correlationHost = std::unique_ptr<float, PinnedDeleter>(CudaStreamManager::getInstance().acquirePinnedFloat(), PinnedDeleter{device});
     }
 
     // RGB embedding: computes the strengthened watermark u from the luma (ME mask), then adds it to all channels of the 8-bit image
@@ -128,6 +124,7 @@ class WatermarkCuda final : public WatermarkBase {
 
     // detection: correlation between the prediction error of the image and the prediction error of (mask * watermark)
     float detectWatermark(const ImageBuffer& inputImage) override {
+        ensureDetectBuffers();
         const PipelineGraph::Key key{
             {inputImage.data(), nullptr, nullptr},
             1, 0, 0.0f
@@ -181,9 +178,35 @@ class WatermarkCuda final : public WatermarkBase {
     // the shift sums kernel for this column height (vector loads of 16-byte aligned columns when it is a multiple of 4)
     auto shiftSumsKernel() const { return this->baseRows % 4 == 0 ? me_shift_sums<p, true> : me_shift_sums<p, false>; }
 
-    // embedding: the watermark is added to the 8-bit "inputImage" (RGB), or to the luma when inputImage is null
+    // graphs require fixed pointers, allocate mode-exclusive buffers before first capture
+    void ensureEmbedBuffers() {
+        if (u.empty())
+            u = CudaArray<__half>(this->baseRows, this->baseCols, stream);
+    }
+
+    void ensureDetectBuffers() {
+        if (correlationHost)
+            return;
+        const dim3 detectGrid = DetectTile<p>::grid(this->baseCols, this->baseRows);
+        const int corrNumBlocks = detectGrid.x * detectGrid.y;
+        ImageBuffer dot(corrNumBlocks, stream);
+        ImageBuffer uNorm(corrNumBlocks, stream);
+        ImageBuffer zNorm(corrNumBlocks, stream);
+        CudaArray<unsigned int> counter = CudaArray<unsigned int>::zeros(1, stream);
+        int device = 0;
+        CUDA_CHECK(cudaGetDevice(&device));
+        std::unique_ptr<float, PinnedDeleter> pinned(CudaStreamManager::getInstance().acquirePinnedFloat(), PinnedDeleter{device});
+        dotPartial = std::move(dot);
+        uNormPartial = std::move(uNorm);
+        zNormPartial = std::move(zNorm);
+        corrBlockCounter = std::move(counter);
+        correlationHost = std::move(pinned);
+    }
+
+    // embedding: watermark added to 8-bit inputImage (RGB), or luma when inputImage is null
     void embed(const ImageBuffer& inputGrayImage, const uint8_t* inputImage, const int channels, ImageOutputBuffer& output, const Layout outputLayout) {
-        // the output buffer is reused, allocated again only when its size or channel count changes
+        ensureEmbedBuffers();
+        // output buffer reused, reallocated only when size or channel count changes
         if (output.empty() || output.getRows() != this->baseRows || output.getCols() != this->baseCols || output.getChannels() != channels)
             output = CudaArray<uint8_t>(this->baseRows, this->baseCols, channels, stream);
         const PipelineGraph::Key key{

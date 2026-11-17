@@ -364,8 +364,11 @@ VideoBatchSummary runVideoBatch(const VideoBatchSettings& settings, const std::v
                             bridge.update.detail = job.outputPath;
                             scheduler->complete(*claim, bridge.update, [&] { staged.commit(false); });
                         } catch (const std::exception& error) {
-                            log(job.id, device.index, error.what());
-                            scheduler->fail(*claim, error.what(), retryable, lostDevice(error));
+                            const VideoBatchState state = scheduler->fail(*claim, error.what(), retryable, lostDevice(error));
+                            const std::string suffix = (state == VideoBatchState::Processing || state == VideoBatchState::Probing) ? " (another GPU continues it)"
+                                                       : state == VideoBatchState::Retrying                                        ? " (will retry on another GPU)"
+                                                                                                                                   : "";
+                            log(job.id, device.index, std::string(error.what()) + suffix);
                         }
                         report();
                     }

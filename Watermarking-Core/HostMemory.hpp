@@ -35,8 +35,11 @@ class HostMemory {
         if (ptr)
             cudaFreeHost(ptr);
 #elif defined(_USE_OPENCL_)
-        if (ptr)
-            queue.enqueueUnmapMemObject(pinnedBuffer, ptr);
+        // avoid throwing C++ wrapper in destructor
+        if (ptr) {
+            clEnqueueUnmapMemObject(queue(), pinnedBuffer(), ptr, 0, nullptr, nullptr);
+            ptr = nullptr;
+        }
 #endif
     }
 

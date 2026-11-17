@@ -176,8 +176,9 @@ class VideoCompletion {
     ComPtr<ID3D11DeviceContext4> signalContext;
     ComPtr<ID3D11Fence> fence;
     HANDLE event = nullptr;
-    // fences are free threaded, encode thread waits with its own event
+    // fences are free threaded, encode and preview threads wait with their own events
     HANDLE encoderEvent = nullptr;
+    HANDLE previewEvent = nullptr;
     UINT64 signaled = 0;
     // without fences, query event per signaled value
     std::deque<std::pair<UINT64, ComPtr<ID3D11Query>>> pending;
@@ -185,7 +186,7 @@ class VideoCompletion {
 
   public:
     ~VideoCompletion() {
-        for (const HANDLE handle : {event, encoderEvent})
+        for (const HANDLE handle : {event, encoderEvent, previewEvent})
             if (handle)
                 CloseHandle(handle);
     }
@@ -196,7 +197,8 @@ class VideoCompletion {
         if (SUCCEEDED(device.As(&fenceDevice)) && SUCCEEDED(immediate.As(&signalContext)) && SUCCEEDED(fenceDevice->CreateFence(0, D3D11_FENCE_FLAG_NONE, IID_PPV_ARGS(&fence)))) {
             event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
             encoderEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-            if (!event || !encoderEvent)
+            previewEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+            if (!event || !encoderEvent || !previewEvent)
                 fence.Reset();
         }
     }
@@ -241,6 +243,7 @@ class VideoCompletion {
     void finish() { wait(signal()); }
     // wait for signaled fence value on encode thread
     void waitOnEncoder(const UINT64 value) const { waitForFence(value, encoderEvent); }
+    void waitOnPreview(const UINT64 value) const { waitForFence(value, previewEvent); }
 
   private:
     void waitForFence(const UINT64 value, const HANDLE completed) const {
@@ -815,6 +818,11 @@ void OclVideoOutput::waitUntilCopied(const AVFrame* frame) const {
         impl->completion.waitOnEncoder(reinterpret_cast<uintptr_t>(frame->opaque));
 }
 
+void OclVideoOutput::waitForPreview(const AVFrame* frame) const {
+    if (frame->opaque)
+        impl->completion.waitOnPreview(reinterpret_cast<uintptr_t>(frame->opaque));
+}
+
 void OclVideoOutput::stage(const AVFrame* source) {
     if (!source || source->format != AV_PIX_FMT_D3D11 || source->width != impl->width || source->height != impl->height || source->crop_left || source->crop_top || !source->data[0])
         throw std::invalid_argument("Unexpected direct D3D11 encoder input");
@@ -850,17 +858,23 @@ AVFrame* OclVideoOutput::copyFrom(const AVFrame* source, const cl::Buffer& lumaO
         throw std::invalid_argument("CPU encoder upload requires the negotiated 8-bit planar YUV format");
     const cl_mem memory = impl->shared();
     impl->acquireBuffer();
-    for (int plane = lumaOverride() ? 1 : 0; plane < 3; ++plane) {
-        const size_t width = plane == 0 ? impl->width : impl->chromaWidth;
-        const size_t height = plane == 0 ? impl->height : impl->chromaHeight;
-        const size_t offset = plane == 0 ? 0 : impl->pixels + (plane - 1) * static_cast<size_t>(impl->chromaWidth) * impl->chromaHeight;
-        if (!source->data[plane] || source->linesize[plane] < static_cast<int>(width))
-            throw std::invalid_argument("Unexpected CPU encoder plane layout");
-        // plane offset is a multiple of row pitch, including small even frame sizes
-        const size_t destination[3]{0, offset / width, 0}, origin[3]{0, 0, 0}, region[3]{width, height, 1};
-        checkCl(
-            clEnqueueWriteBufferRect(impl->queue(), memory, CL_TRUE, destination, origin, region, width, 0, static_cast<size_t>(source->linesize[plane]), 0, source->data[plane], 0, nullptr, nullptr),
-            "Upload encoder chroma/luma plane");
+    try {
+        for (int plane = lumaOverride() ? 1 : 0; plane < 3; ++plane) {
+            const size_t width = plane == 0 ? impl->width : impl->chromaWidth;
+            const size_t height = plane == 0 ? impl->height : impl->chromaHeight;
+            const size_t offset = plane == 0 ? 0 : impl->pixels + (plane - 1) * static_cast<size_t>(impl->chromaWidth) * impl->chromaHeight;
+            if (!source->data[plane] || source->linesize[plane] < static_cast<int>(width))
+                throw std::invalid_argument("Unexpected CPU encoder plane layout");
+            // plane offset is a multiple of row pitch, including small even frame sizes
+            const size_t destination[3]{0, offset / width, 0}, origin[3]{0, 0, 0}, region[3]{width, height, 1};
+            checkCl(clEnqueueWriteBufferRect(
+                        impl->queue(), memory, CL_FALSE, destination, origin, region, width, 0, static_cast<size_t>(source->linesize[plane]), 0, source->data[plane], 0, nullptr, nullptr),
+                "Upload encoder chroma/luma plane");
+        }
+        return impl->finish(lumaOverride);
+    } catch (...) {
+        // caller may release source frame on unwind while queued writes are still reading
+        clFinish(impl->queue());
+        throw;
     }
-    return impl->finish(lumaOverride);
 }
