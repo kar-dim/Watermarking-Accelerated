@@ -5264,6 +5264,268 @@ TEST_F(WatermarkTest, ForwardsWarningsFromFfmpegDecoderThreads) {
     EXPECT_GT(observer.workerWarnings.load(), 0);
 }
 
+TEST(VideoObserverTest, IgnoresInvalidTimeBaseInProgressReports) {
+    VideoSession session;
+    RecordingVideoObserver observer;
+    session.settings.observer = &observer;
+    session.inputFormatCtx.reset(avformat_alloc_context());
+    ASSERT_TRUE(session.inputFormatCtx);
+    session.inputFormatCtx->duration = AV_NOPTS_VALUE;
+    AVStream* stream = avformat_new_stream(session.inputFormatCtx.get(), nullptr);
+    ASSERT_NE(stream, nullptr);
+    stream->codecpar->width = 320;
+    stream->codecpar->height = 180;
+    stream->codecpar->format = AV_PIX_FMT_YUV420P;
+    stream->codecpar->codec_id = AV_CODEC_ID_H264;
+    stream->time_base = {0, 1};
+    stream->duration = 1000;
+    session.videoStream = stream;
+    session.inputDecoderCtx.reset(avcodec_alloc_context3(nullptr));
+    ASSERT_TRUE(session.inputDecoderCtx);
+    video_utils::AVFramePtr frame(av_frame_alloc());
+    ASSERT_TRUE(frame);
+    frame->pts = frame->best_effort_timestamp = 10;
+    frame->duration = 1;
+    video_utils::reportProgress(&session, VideoState::Processing, true, frame.get());
+    ASSERT_FALSE(observer.updates.empty());
+    EXPECT_LT(observer.updates.back().fraction, 0.0);
+    EXPECT_EQ(observer.updates.back().source.find("inf"), std::string::npos);
+    EXPECT_EQ(observer.updates.back().source.find("nan"), std::string::npos);
+}
+
+TEST_F(WatermarkTest, DetectsMidStreamColorChangesAndAllowsEquivalent601) {
+    using namespace video_utils;
+    const auto writeTsSegment = [](const fs::path& path, const char* encoderName, const AVPixelFormat format, const AVColorSpace space, const AVColorPrimaries primaries,
+                                    const AVColorTransferCharacteristic transfer, const AVColorRange range) {
+        AVFormatContext* rawOutput = nullptr;
+        checkAv(avformat_alloc_output_context2(&rawOutput, nullptr, "mpegts", path.string().c_str()), "Allocate TS muxer");
+        AVOutputFormatContextPtr output(rawOutput);
+        const AVCodec* codec = avcodec_find_encoder_by_name(encoderName);
+        ASSERT_NE(codec, nullptr) << encoderName;
+        AVCodecContextPtr encoder(avcodec_alloc_context3(codec));
+        ASSERT_TRUE(encoder);
+        encoder->width = 128;
+        encoder->height = 128;
+        encoder->time_base = {1, 25};
+        encoder->framerate = {25, 1};
+        encoder->pix_fmt = format;
+        encoder->colorspace = space;
+        encoder->color_primaries = primaries;
+        encoder->color_trc = transfer;
+        encoder->color_range = range;
+        AVDictionary* opts = nullptr;
+        av_dict_set(&opts, "preset", "ultrafast", 0);
+        if (std::string_view(encoderName) == "libx265")
+            av_dict_set(&opts, "x265-params", "pools=1:frame-threads=1:log-level=error", 0);
+        const int openStatus = avcodec_open2(encoder.get(), codec, &opts);
+        av_dict_free(&opts);
+        checkAv(openStatus, "Open TS segment encoder");
+        AVStream* stream = avformat_new_stream(output.get(), nullptr);
+        ASSERT_NE(stream, nullptr);
+        stream->time_base = encoder->time_base;
+        stream->avg_frame_rate = encoder->framerate;
+        checkAv(avcodec_parameters_from_context(stream->codecpar, encoder.get()), "Copy TS segment params");
+        checkAv(avio_open(&output->pb, path.string().c_str(), AVIO_FLAG_WRITE), "Open TS segment output");
+        checkAv(avformat_write_header(output.get(), nullptr), "Write TS segment header");
+        AVFramePtr frame(av_frame_alloc());
+        AVPacketPtr packet(av_packet_alloc());
+        ASSERT_TRUE(frame && packet);
+        frame->format = format;
+        frame->width = encoder->width;
+        frame->height = encoder->height;
+        frame->colorspace = space;
+        frame->color_primaries = primaries;
+        frame->color_trc = transfer;
+        frame->color_range = range;
+        checkAv(av_frame_get_buffer(frame.get(), 32), "Allocate TS segment frame");
+        const auto drain = [&] {
+            int status;
+            while ((status = avcodec_receive_packet(encoder.get(), packet.get())) >= 0) {
+                av_packet_rescale_ts(packet.get(), encoder->time_base, stream->time_base);
+                packet->stream_index = stream->index;
+                checkAv(av_interleaved_write_frame(output.get(), packet.get()), "Write TS packet");
+            }
+            if (status != AVERROR_EOF && status != AVERROR(EAGAIN))
+                checkAv(status, "Drain TS encoder");
+        };
+        for (int i = 0; i < 6; ++i) {
+            checkAv(av_frame_make_writable(frame.get()), "Make TS frame writable");
+            frame->pts = i;
+            std::fill_n(frame->data[0], static_cast<size_t>(frame->linesize[0]) * frame->height, range == AVCOL_RANGE_JPEG ? 180 : 100);
+            checkAv(avcodec_send_frame(encoder.get(), frame.get()), "Encode TS frame");
+            drain();
+        }
+        checkAv(avcodec_send_frame(encoder.get(), nullptr), "Flush TS encoder");
+        drain();
+        checkAv(av_write_trailer(output.get()), "Write TS trailer");
+        checkAv(avio_closep(&output->pb), "Close TS file");
+    };
+    const auto concatFiles = [](const fs::path& left, const fs::path& right, const fs::path& combined) {
+        const auto firstBytes = readBytes(left);
+        const auto secondBytes = readBytes(right);
+        std::ofstream out(combined, std::ios::binary | std::ios::trunc);
+        ASSERT_TRUE(out.is_open());
+        out.write(reinterpret_cast<const char*>(firstBytes.data()), static_cast<std::streamsize>(firstBytes.size()));
+        out.write(reinterpret_cast<const char*>(secondBytes.data()), static_cast<std::streamsize>(secondBytes.size()));
+    };
+
+    const fs::path seg709 = tempDir / "seg-709.ts";
+    const fs::path seg601 = tempDir / "seg-601.ts";
+    const fs::path seg470 = tempDir / "seg-470.ts";
+    const fs::path segHevcTv = tempDir / "seg-hevc-tv.ts";
+    const fs::path segRangePc = tempDir / "seg-pc.ts";
+    const fs::path segPq = tempDir / "seg-pq.ts";
+    const fs::path segSdr2020 = tempDir / "seg-sdr2020.ts";
+    writeTsSegment(seg709, "libx264", AV_PIX_FMT_YUV420P, AVCOL_SPC_BT709, AVCOL_PRI_BT709, AVCOL_TRC_BT709, AVCOL_RANGE_MPEG);
+    writeTsSegment(seg601, "libx264", AV_PIX_FMT_YUV420P, AVCOL_SPC_SMPTE170M, AVCOL_PRI_SMPTE170M, AVCOL_TRC_SMPTE170M, AVCOL_RANGE_MPEG);
+    writeTsSegment(seg470, "libx264", AV_PIX_FMT_YUV420P, AVCOL_SPC_BT470BG, AVCOL_PRI_SMPTE170M, AVCOL_TRC_SMPTE170M, AVCOL_RANGE_MPEG);
+    // 10-bit keeps the same pixel format across ranges to exercise color range detection directly
+    writeTsSegment(segHevcTv, "libx265", AV_PIX_FMT_YUV420P10LE, AVCOL_SPC_BT709, AVCOL_PRI_BT709, AVCOL_TRC_BT709, AVCOL_RANGE_MPEG);
+    writeTsSegment(segRangePc, "libx265", AV_PIX_FMT_YUV420P10LE, AVCOL_SPC_BT709, AVCOL_PRI_BT709, AVCOL_TRC_BT709, AVCOL_RANGE_JPEG);
+    writeTsSegment(segPq, "libx265", AV_PIX_FMT_YUV420P10LE, AVCOL_SPC_BT2020_NCL, AVCOL_PRI_BT2020, AVCOL_TRC_SMPTE2084, AVCOL_RANGE_MPEG);
+    writeTsSegment(segSdr2020, "libx265", AV_PIX_FMT_YUV420P10LE, AVCOL_SPC_BT2020_NCL, AVCOL_PRI_BT2020, AVCOL_TRC_BT709, AVCOL_RANGE_MPEG);
+
+    const fs::path matrixMismatch = tempDir / "color-matrix-change.ts";
+    concatFiles(seg709, seg601, matrixMismatch);
+    auto settings = makeVideoSettings(matrixMismatch.string());
+    settings.useHwDecoder = false;
+    auto video = initVideo(settings);
+    try {
+        detectVideo(video.get());
+        FAIL() << "Mid-stream color matrix switch must fail";
+    } catch (const std::runtime_error& error) { EXPECT_NE(std::string_view(error.what()).find("color matrix"), std::string_view::npos) << error.what(); }
+
+    const fs::path rangeMismatch = tempDir / "color-range-change.ts";
+    concatFiles(segHevcTv, segRangePc, rangeMismatch);
+    settings.videoFile = rangeMismatch.string();
+    settings.encodeOptions = "-c:v ffv1";
+    settings.encodeOutputPath = (tempDir / "color-range-out.mkv").string();
+    video = initVideo(settings);
+    try {
+        embedVideo(video.get());
+        FAIL() << "Mid-stream color range switch must fail";
+    } catch (const std::runtime_error& error) { EXPECT_NE(std::string_view(error.what()).find("color range"), std::string_view::npos) << error.what(); }
+    EXPECT_FALSE(fs::exists(settings.encodeOutputPath));
+
+    const fs::path transferMismatch = tempDir / "color-transfer-change.ts";
+    concatFiles(segPq, segSdr2020, transferMismatch);
+    settings.videoFile = transferMismatch.string();
+    settings.encodeOutputPath = (tempDir / "color-transfer-out.mkv").string();
+    video = initVideo(settings);
+    try {
+        embedVideo(video.get());
+        FAIL() << "Mid-stream HDR/SDR transfer switch must fail";
+    } catch (const std::runtime_error& error) { EXPECT_NE(std::string_view(error.what()).find("transfer"), std::string_view::npos) << error.what(); }
+    EXPECT_FALSE(fs::exists(settings.encodeOutputPath));
+
+    const fs::path equivalent601 = tempDir / "color-601-equivalent.ts";
+    concatFiles(seg601, seg470, equivalent601);
+    settings.videoFile = equivalent601.string();
+    settings.encodeOutputPath.clear();
+    video = initVideo(settings);
+    EXPECT_EQ(detectVideo(video.get()), 12);
+}
+
+TEST_F(WatermarkTest, AllowsHevcConformanceCropWindowThroughStreamShapeWatch) {
+    const fs::path input = tempDir / "hevc-crop.mkv";
+    const fs::path output = tempDir / "hevc-crop-out.mkv";
+    writeVideoFixture(input, false, AVCOL_TRC_BT709, true, "libx265", AV_PIX_FMT_YUV420P, AVCOL_RANGE_MPEG,
+        {
+            {"preset", "ultrafast"}
+    },
+        false, {130, 130});
+    auto settings = makeVideoSettings(input.string());
+    settings.useHwDecoder = false;
+    settings.encodeOptions = "-c:v ffv1";
+    settings.encodeOutputPath = output.string();
+    auto video = initVideo(settings);
+    EXPECT_EQ(embedVideo(video.get()), 100);
+}
+
+#if defined(_USE_GPU_)
+TEST_F(WatermarkTest, HardwareProbeSkipsLeadingInvalidNonKeyPackets) {
+    using namespace video_utils;
+    const fs::path clean = tempDir / "clean-hevc10.mkv";
+    const fs::path cut = tempDir / "cut-hevc10.mkv";
+    writeVideoFixture(clean, true, AVCOL_TRC_BT709, true, "libx265", AV_PIX_FMT_YUV420P10LE, AVCOL_RANGE_MPEG,
+        {
+            {"preset", "ultrafast"}
+    },
+        false, {320, 180});
+
+    AVFormatContext* rawIn = nullptr;
+    checkAv(avformat_open_input(&rawIn, clean.string().c_str(), nullptr, nullptr), "Open clean HEVC fixture");
+    AVFormatContextPtr in(rawIn);
+    checkAv(avformat_find_stream_info(in.get(), nullptr), "Inspect clean HEVC fixture");
+    const int inIdx = av_find_best_stream(in.get(), AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
+    ASSERT_GE(inIdx, 0);
+
+    AVFormatContext* rawOut = nullptr;
+    checkAv(avformat_alloc_output_context2(&rawOut, nullptr, "matroska", cut.string().c_str()), "Allocate cut HEVC muxer");
+    AVOutputFormatContextPtr out(rawOut);
+    AVStream* outStream = avformat_new_stream(out.get(), nullptr);
+    ASSERT_NE(outStream, nullptr);
+    checkAv(avcodec_parameters_copy(outStream->codecpar, in->streams[inIdx]->codecpar), "Copy HEVC params");
+    outStream->time_base = in->streams[inIdx]->time_base;
+    checkAv(avio_open(&out->pb, cut.string().c_str(), AVIO_FLAG_WRITE), "Open cut HEVC output");
+    checkAv(avformat_write_header(out.get(), nullptr), "Write cut HEVC header");
+
+    AVPacketPtr junk(av_packet_alloc());
+    ASSERT_TRUE(junk);
+    checkAv(av_new_packet(junk.get(), 16), "Allocate leading non-key packet");
+    std::fill_n(junk->data, junk->size, static_cast<uint8_t>(0xff));
+    junk->pts = junk->dts = 0;
+    junk->duration = 1;
+    junk->flags = 0;
+    junk->stream_index = outStream->index;
+    checkAv(av_interleaved_write_frame(out.get(), junk.get()), "Write leading non-key packet");
+
+    AVPacketPtr pkt(av_packet_alloc());
+    ASSERT_TRUE(pkt);
+    while (av_read_frame(in.get(), pkt.get()) >= 0) {
+        if (pkt->stream_index == inIdx) {
+            av_packet_rescale_ts(pkt.get(), in->streams[inIdx]->time_base, outStream->time_base);
+            pkt->stream_index = outStream->index;
+            if (pkt->pts != AV_NOPTS_VALUE)
+                pkt->pts += 1;
+            if (pkt->dts != AV_NOPTS_VALUE)
+                pkt->dts += 1;
+            checkAv(av_interleaved_write_frame(out.get(), pkt.get()), "Remux clean HEVC packet");
+        }
+        av_packet_unref(pkt.get());
+    }
+    checkAv(av_write_trailer(out.get()), "Write cut HEVC trailer");
+    checkAv(avio_closep(&out->pb), "Close cut HEVC output");
+
+    session.reset();
+    const auto devices = getAvailableDevices();
+    bool testedHw = false;
+    for (size_t deviceIndex = 0; deviceIndex < devices.size(); ++deviceIndex) {
+        ASSERT_TRUE(initializeEnvironment(static_cast<int>(deviceIndex)));
+        SCOPED_TRACE(devices[deviceIndex]);
+        auto cleanSettings = makeVideoSettings(clean.string());
+        cleanSettings.useHwDecoder = true;
+        auto cleanVideo = initVideo(cleanSettings);
+        const bool hwSupported = cleanVideo->useHwDecoder;
+        cleanVideo.reset();
+        if (!hwSupported)
+            continue;
+        testedHw = true;
+        auto cutSettings = makeVideoSettings(cut.string());
+        cutSettings.useHwDecoder = true;
+        auto cutVideo = initVideo(cutSettings);
+        EXPECT_TRUE(cutVideo->useHwDecoder);
+        cutSettings.encodeOptions = "-c:v ffv1";
+        cutSettings.encodeOutputPath = (tempDir / std::format("cut-hevc10-out-{}.mkv", deviceIndex)).string();
+        auto embedCut = initVideo(cutSettings);
+        EXPECT_TRUE(embedCut->useHwDecoder);
+        EXPECT_EQ(embedVideo(embedCut.get()), 100);
+    }
+    if (!testedHw)
+        GTEST_SKIP() << "No GPU hardware-decoded 10-bit HEVC";
+}
+#endif
+
 #include "VideoBatchSchedulerTests.hpp"
 
 #include "ImageBatchTests.hpp"

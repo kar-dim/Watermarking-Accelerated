@@ -280,13 +280,14 @@ void reportProgress(VideoSession* s, const VideoState state, const bool force, c
         progress.pipeline = "Decode: " + decoder + "  |  Process: " + (backend == "eigen" ? "Eigen (CPU)" : backend == "cuda" ? "CUDA" : "OpenCL");
         if (s->outputEncoderCtx)
             progress.pipeline += "  |  Encode: " + std::string(s->outputEncoderCtx->codec->name);
-        const double timeBase = av_q2d(stream->time_base);
-        const double duration = stream->duration > 0 ? stream->duration * timeBase : (s->inputFormatCtx->duration > 0 ? s->inputFormatCtx->duration / static_cast<double>(AV_TIME_BASE) : -1.0);
+        const double timeBase = stream->time_base.num > 0 && stream->time_base.den > 0 ? av_q2d(stream->time_base) : 0.0;
+        const double duration =
+            stream->duration > 0 && timeBase > 0.0 ? stream->duration * timeBase : (s->inputFormatCtx->duration > 0 ? s->inputFormatCtx->duration / static_cast<double>(AV_TIME_BASE) : -1.0);
         if (duration > 0.0)
             progress.source += std::format("  |  {:.1f} s", duration);
         if (stream->nb_frames > 0)
             progress.fraction = progress.frames / static_cast<double>(stream->nb_frames);
-        else if (frame && duration > 0.0) {
+        else if (frame && duration > 0.0 && timeBase > 0.0) {
             const int64_t pts = frame->best_effort_timestamp != AV_NOPTS_VALUE ? frame->best_effort_timestamp : frame->pts;
             if (pts != AV_NOPTS_VALUE) {
                 const int64_t start = stream->start_time != AV_NOPTS_VALUE ? stream->start_time : s->progressOrigin != AV_NOPTS_VALUE ? s->progressOrigin : 0;

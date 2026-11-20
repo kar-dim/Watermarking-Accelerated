@@ -190,6 +190,64 @@ std::string pixelFormatChangeMessage(const AVPixelFormat expected, const AVPixel
     return std::format("Video pixel format changed during decode (expected {}, got {}). Split or re-encode the source before watermarking.", pixelFormatName(expected), pixelFormatName(actual));
 }
 
+struct ColorMetadata {
+    AVColorRange range = AVCOL_RANGE_UNSPECIFIED;
+    AVColorTransferCharacteristic transfer = AVCOL_TRC_UNSPECIFIED;
+    AVColorSpace matrix = AVCOL_SPC_UNSPECIFIED;
+};
+
+AVColorSpace usableColorSpace(const AVColorSpace space) { return space == AVCOL_SPC_RESERVED ? AVCOL_SPC_UNSPECIFIED : space; }
+
+std::optional<std::pair<float, float>> colorMatrixWeights(const AVColorSpace space) {
+    switch (space) {
+    case AVCOL_SPC_BT470BG:
+    case AVCOL_SPC_SMPTE170M: return std::pair{0.299f, 0.114f};
+    case AVCOL_SPC_FCC: return std::pair{0.30f, 0.11f};
+    case AVCOL_SPC_SMPTE240M: return std::pair{0.212f, 0.087f};
+    case AVCOL_SPC_BT2020_NCL: return std::pair{0.2627f, 0.0593f};
+    case AVCOL_SPC_BT709: return std::pair{0.2126f, 0.0722f};
+    default: return std::nullopt;
+    }
+}
+
+bool sameColorMatrix(const AVColorSpace first, const AVColorSpace second, const int frameHeight) {
+    const auto weights = [frameHeight](const AVColorSpace space) -> std::optional<std::pair<float, float>> {
+        if (space == AVCOL_SPC_UNSPECIFIED)
+            return frameHeight <= 576 ? std::pair{0.299f, 0.114f} : std::pair{0.2126f, 0.0722f};
+        return colorMatrixWeights(space);
+    };
+    const auto firstWeights = weights(first);
+    const auto secondWeights = weights(second);
+    if (!firstWeights || !secondWeights)
+        return first == second;
+    return firstWeights == secondWeights;
+}
+
+bool sameTransferClass(const AVColorTransferCharacteristic first, const AVColorTransferCharacteristic second) {
+    return (first == AVCOL_TRC_SMPTE2084) == (second == AVCOL_TRC_SMPTE2084) && (first == AVCOL_TRC_ARIB_STD_B67) == (second == AVCOL_TRC_ARIB_STD_B67);
+}
+
+ColorMetadata frameColor(const AVFrame& frame) { return {frame.color_range, frame.color_trc, usableColorSpace(frame.colorspace)}; }
+
+ColorMetadata decoderColor(const AVCodecContext* decoder) { return {decoder->color_range, decoder->color_trc, usableColorSpace(decoder->colorspace)}; }
+
+std::string colorChangeMessage(const std::string_view property, const char* from, const char* to) {
+    return std::format("Video {} changed during decode ({} -> {}). Split or re-encode the source before watermarking.", property, from ? from : "?", to ? to : "?");
+}
+
+std::string colorChange(const ColorMetadata& from, const ColorMetadata& to, const int frameHeight, const bool probeCheck) {
+    // NVDEC may omit container tags and is only checked when the decoded frame signals values
+    const bool matrixSignalled = to.matrix != AVCOL_SPC_UNSPECIFIED;
+    if ((!probeCheck || matrixSignalled) && !sameColorMatrix(from.matrix, to.matrix, frameHeight))
+        return colorChangeMessage("color matrix", av_color_space_name(from.matrix), av_color_space_name(to.matrix));
+    if (!probeCheck && (from.range == AVCOL_RANGE_JPEG) != (to.range == AVCOL_RANGE_JPEG))
+        return colorChangeMessage("color range", av_color_range_name(from.range), av_color_range_name(to.range));
+    const bool transferSignalled = to.transfer != AVCOL_TRC_UNSPECIFIED;
+    if ((!probeCheck || transferSignalled) && !sameTransferClass(from.transfer, to.transfer))
+        return colorChangeMessage("transfer", av_color_transfer_name(from.transfer), av_color_transfer_name(to.transfer));
+    return {};
+}
+
 // full range formats have same layout, parsers never report them
 AVPixelFormat withoutFullRangeAlias(const AVPixelFormat format) {
     switch (format) {
@@ -278,8 +336,7 @@ PlanarLayout outputLayout(const VideoSession* s) {
 // bitstream parser detects mid-stream size or format changes hidden by hardware decoders
 class StreamShapeWatch {
   public:
-    explicit StreamShapeWatch(const AVCodecParameters* params)
-        : declaredWidth_(params->width), declaredHeight_(params->height), declaredFormat_(static_cast<AVPixelFormat>(params->format)), parser_(av_parser_init(params->codec_id)) {
+    explicit StreamShapeWatch(const AVCodecParameters* params) : parser_(av_parser_init(params->codec_id)) {
         if (!parser_)
             return;
         parserContext_ = allocateCodecContext(nullptr);
@@ -290,7 +347,7 @@ class StreamShapeWatch {
         parser_->flags |= PARSER_FLAG_COMPLETE_FRAMES;
     }
 
-    std::string inspect(const AVPacket* packet) { return parse(packet->data, packet->size, packet->pts, packet->dts, packet->pos); }
+    std::string inspect(const AVPacket* packet) { return packet ? parse(packet->data, packet->size, packet->pts, packet->dts, packet->pos) : std::string{}; }
     std::string flush() { return parse(nullptr, 0, AV_NOPTS_VALUE, AV_NOPTS_VALUE, -1); }
 
   private:
@@ -317,18 +374,25 @@ class StreamShapeWatch {
         return {};
     }
 
-    std::string shapeChange() const {
-        if (parser_->width > 0 && parser_->height > 0 && (parser_->width != declaredWidth_ || parser_->height != declaredHeight_))
-            return resolutionChangeMessage(declaredWidth_, declaredHeight_, parser_->width, parser_->height);
+    std::string shapeChange() {
+        // track the parser's first values because codecpar can differ on HEVC display crop or full range
+        if (parser_->width > 0 && parser_->height > 0 && firstWidth_ == 0) {
+            firstWidth_ = parser_->width;
+            firstHeight_ = parser_->height;
+        }
         const auto parsedFormat = static_cast<AVPixelFormat>(parser_->format);
-        if (parsedFormat != AV_PIX_FMT_NONE && declaredFormat_ != AV_PIX_FMT_NONE && withoutFullRangeAlias(parsedFormat) != withoutFullRangeAlias(declaredFormat_))
-            return pixelFormatChangeMessage(declaredFormat_, parsedFormat);
+        if (parsedFormat != AV_PIX_FMT_NONE && firstFormat_ == AV_PIX_FMT_NONE)
+            firstFormat_ = withoutFullRangeAlias(parsedFormat);
+        if (parser_->width > 0 && parser_->height > 0 && (parser_->width != firstWidth_ || parser_->height != firstHeight_))
+            return resolutionChangeMessage(firstWidth_, firstHeight_, parser_->width, parser_->height);
+        if (parsedFormat != AV_PIX_FMT_NONE && withoutFullRangeAlias(parsedFormat) != firstFormat_)
+            return pixelFormatChangeMessage(firstFormat_, parsedFormat);
         return {};
     }
 
-    int declaredWidth_ = 0;
-    int declaredHeight_ = 0;
-    AVPixelFormat declaredFormat_ = AV_PIX_FMT_NONE;
+    int firstWidth_ = 0;
+    int firstHeight_ = 0;
+    AVPixelFormat firstFormat_ = AV_PIX_FMT_NONE;
     std::unique_ptr<AVCodecParserContext, ParserDeleter> parser_;
     AVCodecContextPtr parserContext_;
 };
@@ -360,7 +424,9 @@ void pushToEncoder(VideoSession* s, EncodeQueue& queue, EncodeQueue::Item item) 
 void reportDetection(VideoSession* s, const AVFrame* frame, const int index, const float correlation) {
     if (s->settings.observer) {
         const int64_t pts = framePts(frame);
-        s->settings.observer->onDetection({static_cast<std::uint64_t>(index + 1), pts == AV_NOPTS_VALUE ? -1.0 : pts * av_q2d(s->videoStream->time_base), correlation});
+        const AVRational timeBase = s->videoStream->time_base;
+        const double timestamp = pts != AV_NOPTS_VALUE && timeBase.num > 0 && timeBase.den > 0 ? pts * av_q2d(timeBase) : -1.0;
+        s->settings.observer->onDetection({static_cast<std::uint64_t>(index + 1), timestamp, correlation});
     } else {
         cout << "Correlation for frame: " << (index + 1) << ": " << WatermarkCore::formatCorrelationPercent(correlation) << "\n";
     }
@@ -415,13 +481,20 @@ AVFramePtr firstHardwareFrame(AVCodecContext* decoder, const VideoSession* sessi
     rawInput->interrupt_callback = {interruptVideo, const_cast<VideoSession*>(session)};
     const int opened = avformat_open_input(&rawInput, session->settings.videoFile.c_str(), nullptr, nullptr);
     AVFormatContextPtr input(rawInput);
-    if (opened < 0 || avformat_find_stream_info(input.get(), nullptr) < 0)
+    if (opened < 0)
+        return nullptr;
+    const auto hasVideoStream = [&] {
+        return static_cast<unsigned>(session->videoStreamIndex) < input->nb_streams && input->streams[session->videoStreamIndex]->codecpar->codec_id == session->videoStream->codecpar->codec_id;
+    };
+    if (!hasVideoStream() && (avformat_find_stream_info(input.get(), nullptr) < 0 || !hasVideoStream()))
         return nullptr;
     AVPacketPtr packet(av_packet_alloc());
     AVFramePtr frame(av_frame_alloc());
     if (!packet || !frame)
         return nullptr;
     bool draining = false;
+    bool packetPending = false;
+    bool sentKeyPacket = false;
     while (true) {
         checkCancelled(session);
         const int received = avcodec_receive_frame(decoder, frame.get());
@@ -429,17 +502,36 @@ AVFramePtr firstHardwareFrame(AVCodecContext* decoder, const VideoSession* sessi
             return frame;
         if (received != AVERROR(EAGAIN) || draining)
             return nullptr;
-        int read;
-        do {
-            av_packet_unref(packet.get());
-            checkCancelled(session);
-            read = av_read_frame(input.get(), packet.get());
-        } while (read >= 0 && packet->stream_index != session->videoStreamIndex);
-        if (read < 0 && read != AVERROR_EOF)
+        if (!packetPending) {
+            int read;
+            do {
+                av_packet_unref(packet.get());
+                checkCancelled(session);
+                read = av_read_frame(input.get(), packet.get());
+            } while (read >= 0 && packet->stream_index != session->videoStreamIndex);
+            if (read < 0 && read != AVERROR_EOF)
+                return nullptr;
+            if (read == AVERROR_EOF) {
+                draining = true;
+                const int flushStatus = avcodec_send_packet(decoder, nullptr);
+                if (flushStatus < 0 && flushStatus != AVERROR(EAGAIN) && flushStatus != AVERROR_EOF)
+                    return nullptr;
+                continue;
+            }
+            packetPending = true;
+        }
+        const bool keyPacket = (packet->flags & AV_PKT_FLAG_KEY) != 0;
+        const int sendStatus = avcodec_send_packet(decoder, packet.get());
+        if (sendStatus == AVERROR(EAGAIN))
+            continue;
+        av_packet_unref(packet.get());
+        packetPending = false;
+        // mid-GOP cuts can reject non-key packets before the first keyframe
+        if (sendStatus == AVERROR_INVALIDDATA && !keyPacket && !sentKeyPacket)
+            continue;
+        if (sendStatus < 0)
             return nullptr;
-        draining = read == AVERROR_EOF;
-        if (avcodec_send_packet(decoder, draining ? nullptr : packet.get()) < 0)
-            return nullptr;
+        sentKeyPacket = sentKeyPacket || keyPacket;
     }
 }
 
@@ -537,13 +629,14 @@ AVBufferRefPtr createCudaDevice() {
     CUcontext primaryCtx = nullptr;
     if (cuDevicePrimaryCtxRetain(&primaryCtx, cuDev) != CUDA_SUCCESS)
         return nullptr;
-    cudaCtx->cuda_ctx = primaryCtx;
-    cudaCtx->stream = CudaStreamManager::getInstance().getComputeStream();
+    // install release hook before stream setup can throw
     hwCtx->user_opaque = reinterpret_cast<void*>(static_cast<intptr_t>(cuDev));
     hwCtx->free = [](AVHWDeviceContext* c) {
         const CUdevice d = static_cast<CUdevice>(reinterpret_cast<intptr_t>(c->user_opaque));
         cuDevicePrimaryCtxRelease(d);
     };
+    cudaCtx->cuda_ctx = primaryCtx;
+    cudaCtx->stream = CudaStreamManager::getInstance().getComputeStream();
     if (av_hwdevice_ctx_init(device.get()) < 0 || cuCtxSetCurrent(primaryCtx) != CUDA_SUCCESS)
         return nullptr;
     return device;
@@ -1057,14 +1150,18 @@ void reportEncodedFormat(const VideoSession* s, const AVPacket* packet) {
 }
 
 // pull all ready packets from the encoder and write them to the output container (non-blocking), the newest one is held back
-void drainEncoderPackets(VideoSession* s) {
+bool drainEncoderPackets(VideoSession* s, const bool draining = false) {
     const AVPacketPtr pkt(av_packet_alloc());
     checkError(!pkt, "Failed to allocate encoder output packet");
     const AVStream* outVideoStream = s->outputFormatCtx->streams[s->outputVideoStreamIndex];
     while (true) {
         const int receiveRet = avcodec_receive_packet(s->outputEncoderCtx.get(), pkt.get());
-        if (receiveRet == AVERROR(EAGAIN) || receiveRet == AVERROR_EOF)
-            return;
+        if (receiveRet == AVERROR(EAGAIN)) {
+            checkError(draining, "Failed to flush encoder: draining stopped before end of stream");
+            return false;
+        }
+        if (receiveRet == AVERROR_EOF)
+            return true;
         checkAv(receiveRet, "Failed to receive encoded video packet");
         if (s->encodedPackets == 0)
             reportEncodedFormat(s, pkt.get());
@@ -1571,6 +1668,8 @@ int processFrames(VideoSession* s, const bool needsFilter, const int filterInter
     int droppedRun = 0;
     constexpr int maxDroppedRun = 32;
     StreamShapeWatch shapeWatch(s->videoStream->codecpar);
+    bool hasFirstFrameColor = false;
+    ColorMetadata firstFrameColor;
     // lookahead queue lets decode engine run ahead of watermark processing
     std::deque<AVFramePtr> lookahead;
     const auto decodedFrames = [&] { return framesCount + static_cast<int>(lookahead.size()); };
@@ -1586,6 +1685,7 @@ int processFrames(VideoSession* s, const bool needsFilter, const int filterInter
             if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
                 break;
             checkAv(ret, "FFmpeg decoding error");
+            checkError((frame->hw_frames_ctx != nullptr) != s->useHwDecoder, s->useHwDecoder ? "Hardware decoder returned a software frame" : "Software decoder returned a hardware frame");
 #if defined(_USE_OPENCL_)
             mapOpenCLVideoFrame(frame, s);
 #endif
@@ -1593,6 +1693,14 @@ int processFrames(VideoSession* s, const bool needsFilter, const int filterInter
             checkError(frame->width != expectedWidth || frame->height != expectedHeight, resolutionChangeMessage(expectedWidth, expectedHeight, frame->width, frame->height));
             const AVPixelFormat frameFormat = decodedPixelFormat(frame.get());
             checkError(frameFormat != s->decodedFormat, pixelFormatChangeMessage(s->decodedFormat, frameFormat));
+            const ColorMetadata color = frameColor(*frame);
+            const std::string colorDiff =
+                hasFirstFrameColor ? colorChange(firstFrameColor, color, expectedHeight, false) : colorChange(decoderColor(s->inputDecoderCtx.get()), color, expectedHeight, true);
+            checkError(!colorDiff.empty(), colorDiff);
+            if (!hasFirstFrameColor) {
+                firstFrameColor = color;
+                hasFirstFrameColor = true;
+            }
             const int frameIndex = decodedFrames();
             if (needsFilter && frameIndex % filterInterval == 0)
                 filterFrame(frame, filteredFrame, s);
@@ -1721,7 +1829,7 @@ bool configureFilterGraph(VideoSession* s, const AVCodecContext* decoder, const 
     if (filterDesc.empty())
         return false;
 
-    const AVRational timeBase = s->videoStream->time_base;
+    const AVRational timeBase = s->videoStream->time_base.num > 0 && s->videoStream->time_base.den > 0 ? s->videoStream->time_base : AVRational{1, 30};
     auto sourceFormat = decoder->pix_fmt;
     const char* pixFmtName = av_get_pix_fmt_name(sourceFormat);
     string args = std::format("video_size={}x{}:pix_fmt={}:time_base={}/{}:pixel_aspect={}/{}", decoder->width, decoder->height, pixFmtName, timeBase.num, timeBase.den,
@@ -1951,6 +2059,9 @@ void configureOpenclEncoder(VideoSession* s, const std::string& codecName, const
         checkAv(av_hwframe_ctx_init(encCtx->hw_frames_ctx), "Initialize hardware encoder frame pool");
         encCtx->pix_fmt = pixelFormat;
         encCtx->sw_pix_fmt = frames->sw_format;
+        // hevc_qsv needs the RExt profile for non-4:2:0 surfaces
+        if (qsv && codecName == "hevc_qsv" && s->outputFormat != AV_PIX_FMT_YUV420P && !av_dict_get(opts.get(), "profile", nullptr, 0))
+            encCtx->profile = AV_PROFILE_HEVC_REXT;
         if (qsv)
             av_dict_set(opts.ptr(), "async_depth", "4", AV_DICT_DONT_OVERWRITE);
         s->openclVideoOutput = interop->createOutput(encCtx->hw_frames_ctx, manager.getQueueRaw());
@@ -2031,21 +2142,19 @@ void initOutputEncoder(VideoSession* s) {
         encCtx->width = width;
         encCtx->height = height;
         encCtx->pix_fmt = useGpuPipeline ? AV_PIX_FMT_CUDA : s->outputFormat;
-        encCtx->time_base = s->videoStream->time_base;
+        encCtx->time_base = s->videoStream->time_base.num > 0 && s->videoStream->time_base.den > 0 ? s->videoStream->time_base : AVRational{1, 30};
         encCtx->framerate = s->frameRate;
         encCtx->sample_aspect_ratio = s->videoStream->codecpar->sample_aspect_ratio;
 
         // tonemapped HDR to SDR writes SDR metadata, not source HDR flags
         const bool inputIsHDR = s->isHdr || isHDR(s->inputDecoderCtx.get());
         // deprecated full range J formats are full range even without tag
-        const AVColorRange sourceRange = s->videoStream->codecpar->color_range == AVCOL_RANGE_UNSPECIFIED && withoutFullRangeAlias(s->inputDecoderCtx->pix_fmt) != s->inputDecoderCtx->pix_fmt
-                                             ? AVCOL_RANGE_JPEG
-                                             : s->videoStream->codecpar->color_range;
+        const AVColorRange streamRange = s->videoStream->codecpar->color_range != AVCOL_RANGE_UNSPECIFIED ? s->videoStream->codecpar->color_range : s->inputDecoderCtx->color_range;
+        const AVColorRange sourceRange = streamRange == AVCOL_RANGE_UNSPECIFIED && withoutFullRangeAlias(s->inputDecoderCtx->pix_fmt) != s->inputDecoderCtx->pix_fmt ? AVCOL_RANGE_JPEG : streamRange;
         encCtx->color_range = s->isHdr ? AVCOL_RANGE_MPEG : sourceRange;
         encCtx->color_primaries = inputIsHDR ? AVCOL_PRI_BT709 : s->inputDecoderCtx->color_primaries;
         encCtx->color_trc = inputIsHDR ? AVCOL_TRC_BT709 : s->inputDecoderCtx->color_trc;
-        const AVColorSpace sourceMatrix = s->inputDecoderCtx->colorspace == AVCOL_SPC_RESERVED ? AVCOL_SPC_UNSPECIFIED : s->inputDecoderCtx->colorspace;
-        encCtx->colorspace = inputIsHDR ? AVCOL_SPC_BT709 : sourceMatrix;
+        encCtx->colorspace = inputIsHDR ? AVCOL_SPC_BT709 : usableColorSpace(s->inputDecoderCtx->colorspace);
         // unresampled chroma planes keep source sample position
         const bool sameChroma = keepsChroma(s->outputFormat, s->decodedFormat) && keepsChroma(s->decodedFormat, s->outputFormat);
         encCtx->chroma_sample_location = sameChroma ? s->inputDecoderCtx->chroma_sample_location : AVCHROMA_LOC_UNSPECIFIED;
@@ -2186,7 +2295,7 @@ void flushAndFinalize(VideoSession* s, const bool replaceExistingOutput) {
         sendRet = avcodec_send_frame(s->outputEncoderCtx.get(), nullptr);
     }
     checkError(sendRet < 0 && sendRet != AVERROR_EOF, "Failed to flush encoder: " + avErrorText(sendRet));
-    drainEncoderPackets(s);
+    checkError(!drainEncoderPackets(s, true), "Failed to flush encoder: end of stream was not reached");
     checkError(s->encodedPackets == 0, "The encoder produced no video packets. No valid output was written.");
     // reader ends track at last decode timestamp plus duration
     if (s->holdingPacket && s->stretchLastPacket && s->presentationEnd != AV_NOPTS_VALUE && s->heldPacket->dts != AV_NOPTS_VALUE) {

@@ -162,12 +162,11 @@ inline bool sameFileOnDisk(const std::filesystem::path& left, const std::filesys
 
 inline bool encoderSupportsPixFmt(const AVCodec* encoder, const AVPixelFormat want) {
     const void* configs = nullptr;
-    if (avcodec_get_supported_config(nullptr, encoder, AV_CODEC_CONFIG_PIX_FORMAT, 0, &configs, nullptr) < 0 || !configs)
+    int count = 0;
+    if (avcodec_get_supported_config(nullptr, encoder, AV_CODEC_CONFIG_PIX_FORMAT, 0, &configs, &count) < 0 || !configs)
         return true;
-    for (const auto* fmt = static_cast<const AVPixelFormat*>(configs); *fmt != AV_PIX_FMT_NONE; ++fmt)
-        if (*fmt == want)
-            return true;
-    return false;
+    const auto* formats = static_cast<const AVPixelFormat*>(configs);
+    return std::find(formats, formats + count, want) != formats + count;
 }
 
 } // namespace video_utils
