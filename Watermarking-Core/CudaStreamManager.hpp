@@ -22,6 +22,19 @@ class CudaStreamManager {
     cudaStream_t getComputeStream() { return currentResources().computeStream; }
     CudaMemPool& getPool() { return currentResources().pool; }
 
+    bool releaseIdleBuffers(const int device) {
+        DeviceResources* resources = nullptr;
+        {
+            std::lock_guard lock(mutex_);
+            const auto entry = devices_.find(device);
+            if (entry == devices_.end() || !entry->second)
+                return true;
+            resources = entry->second.get();
+        }
+        resources->pool.reset(resources->computeStream);
+        return cudaStreamSynchronize(resources->computeStream) == cudaSuccess;
+    }
+
     // pinned host float that kernels write a result to, kept for reuse when released
     float* acquirePinnedFloat() {
         auto& resources = currentResources();

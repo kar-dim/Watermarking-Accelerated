@@ -41,6 +41,14 @@ using namespace BatchUtils;
 
 bool terminal(const ImageBatchState state) { return state == ImageBatchState::Completed || state == ImageBatchState::Failed || state == ImageBatchState::Cancelled; }
 
+#if defined(_USE_GPU_)
+constexpr std::size_t saveMemoryBudget(const std::size_t memoryBytes) {
+    // Queued saves keep GPU buffers alive while the next image is processed (512 MB)
+    constexpr std::size_t maxSaveBytes = 512ull << 20;
+    return std::clamp<std::size_t>(memoryBytes / 8, 1, maxSaveBytes);
+}
+#endif
+
 class Queue {
   public:
     Queue(const std::vector<ImageBatchJob>& jobs, const std::vector<int>& devices, ImageBatchControl& control, ImageBatchObserver* observer)
@@ -332,23 +340,27 @@ ImageBatchSummary runImageBatch(const ImageBatchSettings& settings, const std::v
                         return;
                     }
                     std::size_t saveMemory = 0;
+                    std::size_t prefetchDepth = depth;
 #if defined(_USE_OPENCL_)
                     OclQueueManager::initialize(device.index, device.identity);
                     const auto owner = OclQueueManager::current();
                     if (workerCount > 1)
-                        saveMemory = std::max<std::size_t>(1, std::min<std::size_t>(512ull << 20, owner->getDevice().getInfo<CL_DEVICE_GLOBAL_MEM_SIZE>() / 8));
+                        saveMemory = saveMemoryBudget(owner->getDevice().getInfo<CL_DEVICE_GLOBAL_MEM_SIZE>());
 #elif defined(_USE_CUDA_)
                     cudaDeviceProp properties{};
                     CUDA_CHECK(cudaGetDeviceProperties(&properties, device.index));
                     if (std::memcmp(properties.uuid.bytes, device.identity.bytes, sizeof(properties.uuid.bytes)))
                         throw std::runtime_error("The selected CUDA adapter changed before image batch initialization");
                     CUDA_CHECK(cudaSetDevice(device.index));
+                    const DeviceMemoryCleanup cleanup(device.index);
                     CudaStreamManager::getInstance().getComputeStream();
-                    if (workerCount > 1) {
-                        std::size_t free = 0, total = 0;
-                        CUDA_CHECK(cudaMemGetInfo(&free, &total));
-                        saveMemory = std::max<std::size_t>(1, std::min<std::size_t>(512ull << 20, free / 8));
-                    }
+                    std::size_t freeBytes = 0, totalBytes = 0;
+                    CUDA_CHECK(cudaMemGetInfo(&freeBytes, &totalBytes));
+                    // Each prefetch can hold decoded pixels, luma and JPEG scratch at once
+                    constexpr std::size_t estimatedBytesPerPrefetch = 2ull << 30;
+                    prefetchDepth = std::clamp<std::size_t>(freeBytes / estimatedBytesPerPrefetch, 1, depth);
+                    if (!settings.detect)
+                        saveMemory = saveMemoryBudget(freeBytes);
 #else
                     initializeEnvironment(0);
 #endif
@@ -415,7 +427,7 @@ ImageBatchSummary runImageBatch(const ImageBatchSettings& settings, const std::v
                         return true;
                     };
                     for (;;) {
-                        while (pending.size() < depth && launch()) {}
+                        while (pending.size() < prefetchDepth && launch()) {}
                         if (pending.empty()) {
                             if (saver)
                                 reportSaves(saver->finish());
@@ -427,7 +439,9 @@ ImageBatchSummary runImageBatch(const ImageBatchSettings& settings, const std::v
                             break;
                         auto next = std::move(pending.front());
                         pending.pop_front();
+#if !defined(_USE_CUDA_)
                         launch();
+#endif
                         try {
                             auto image = next.loaded.get();
                             if (!image || control.cancelled()) {

@@ -62,6 +62,18 @@ std::string getDeviceName(const int deviceIndex = -1);
 std::vector<std::string> getAvailableDevices();
 int getCurrentDeviceIndex();
 
+// Declare before sessions to return their freed CUDA buffers at scope exit
+class DeviceMemoryCleanup {
+  public:
+    explicit DeviceMemoryCleanup(int deviceIndex = -1) noexcept;
+    ~DeviceMemoryCleanup();
+    DeviceMemoryCleanup(const DeviceMemoryCleanup&) = delete;
+    DeviceMemoryCleanup& operator=(const DeviceMemoryCleanup&) = delete;
+
+  private:
+    [[maybe_unused]] int deviceIndex = -1;
+};
+
 bool hasSupportedImageExtension(const std::filesystem::path& path);
 std::vector<std::filesystem::path> getValidImageFiles(const std::filesystem::path& inputDir);
 ImageHandle createImageSession(const std::string& watermarkPassword, const int p, const float psnr);

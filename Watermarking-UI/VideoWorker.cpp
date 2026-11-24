@@ -57,6 +57,7 @@ void VideoWorker::run() {
         if (stop_.stop_requested())
             throw VideoCancelled();
         initializeEnvironment(device_);
+        const DeviceMemoryCleanup cleanup;
         if (!detect_) {
             validateVideoOutputPath(settings_.encodeOutputPath);
             validateVideoEncoderOptions(settings_.encodeOptions, settings_.useHwEncoder);

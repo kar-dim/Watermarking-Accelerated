@@ -16,4 +16,6 @@ namespace nvjpeg_utils {
 std::optional<CudaArray<uint8_t>> decode(const uint8_t* jpeg, size_t length, cudaStream_t stream);
 // encodes row-major planar 8-bit planes (1 or 3 channels) with CImg's save_jpeg settings (quality 100, 4:2:0), empty on failure
 std::vector<uint8_t> encode(const CudaArray<uint8_t>& planes, cudaStream_t stream);
+// nvJPEG work must be finished and the owning device selected
+void releaseIdleCodec(int device);
 } // namespace nvjpeg_utils

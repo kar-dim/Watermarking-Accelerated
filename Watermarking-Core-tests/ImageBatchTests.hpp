@@ -177,6 +177,49 @@ TEST_F(WatermarkTest, ImageBatchObserverFailureStopsAndJoinsWorkers) {
     EXPECT_TRUE(control.cancelled());
 }
 
+#if defined(_USE_CUDA_)
+TEST_F(WatermarkTest, ImageBatchReturnsIdleCudaBuffersAfterCompletionAndCancel) {
+    ASSERT_TRUE(initializeEnvironment(0));
+    session.reset();
+    const auto stream = CudaStreamManager::getInstance().getComputeStream();
+    CudaArray<int> live(1, stream);
+    const int sentinel = 123;
+    ASSERT_EQ(cudaMemcpyAsync(live.data(), &sentinel, sizeof(sentinel), cudaMemcpyHostToDevice, stream), cudaSuccess);
+    { const DeviceMemoryCleanup cleanup; }
+    cudaMemPool_t pool = nullptr;
+    ASSERT_EQ(cudaDeviceGetMemPool(&pool, 0), cudaSuccess);
+    std::uint64_t before = 0;
+    ASSERT_EQ(cudaMemPoolGetAttribute(pool, cudaMemPoolAttrUsedMemCurrent, &before), cudaSuccess);
+
+    ImageBatchSettings settings;
+    settings.password = defaultPassword;
+    for (const bool cancel : {false, true}) {
+        ImageBatchControl control;
+        struct Observer : ImageBatchObserver {
+            ImageBatchControl* control = nullptr;
+            void onUpdate(const ImageBatchUpdate& row) override {
+                if (control && row.state == ImageBatchState::Saving)
+                    control->cancel();
+            }
+        } observer;
+        if (cancel)
+            observer.control = &control;
+        const auto output = tempDir / (cancel ? "cancel" : "complete");
+        std::vector<ImageBatchJob> jobs;
+        for (std::uint64_t id = 1; id <= 8; ++id)
+            jobs.push_back({id, exifImage.string(), (output / (std::to_string(id) + ".jpg")).string()});
+        const auto result = runImageBatch(settings, jobs, control, &observer);
+        EXPECT_EQ(result.failed, 0u);
+        EXPECT_EQ(result.cancelled > 0, cancel);
+        EXPECT_EQ(result.succeeded + result.cancelled, jobs.size());
+        std::uint64_t after = 0;
+        ASSERT_EQ(cudaMemPoolGetAttribute(pool, cudaMemPoolAttrUsedMemCurrent, &after), cudaSuccess);
+        EXPECT_EQ(after, before);
+        EXPECT_EQ(live.scalar(), sentinel);
+    }
+}
+#endif
+
 TEST_F(WatermarkTest, ImageSaveBudgetAllowsOversizedImagesOneAtATime) {
     ImageSaver saver(3, 1);
     for (std::size_t id = 0; id < 5; ++id) {

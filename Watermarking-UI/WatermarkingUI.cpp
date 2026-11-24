@@ -573,7 +573,7 @@ void WatermarkingUI::setBusy(const bool running) {
     if (deviceComboBox)
         deviceComboBox->setEnabled(!running);
     previewButton->setEnabled(!running);
-    saveButton->setEnabled(!running && singleMode->currentIndex() == 0 && singleWorker != nullptr && singleWorker->session() != nullptr);
+    saveButton->setEnabled(!running && singleMode->currentIndex() == 0 && singleWorker != nullptr && singleWorker->hasResult());
     batchStartButton->setEnabled(!running && !batchFiles.empty() && !imageBatchDevices->selectedDevices().empty());
     batchCancelButton->setEnabled(running && batchWorker != nullptr);
     benchmarkStartButton->setEnabled(!running || benchmarkWorker != nullptr);
@@ -650,7 +650,7 @@ void WatermarkingUI::startSingleOperation() {
 }
 
 void WatermarkingUI::saveSingleImage() {
-    if (busy || singleWorker == nullptr || singleWorker->session() == nullptr)
+    if (busy || singleWorker == nullptr || !singleWorker->hasResult())
         return;
     QString output = singleOutput->text().trimmed();
     if (output.isEmpty()) {
@@ -666,7 +666,7 @@ void WatermarkingUI::saveSingleImage() {
     }
     QApplication::setOverrideCursor(Qt::WaitCursor);
     try {
-        saveImageExact(singleWorker->session(), output.toStdString());
+        singleWorker->saveResult(output);
         QApplication::restoreOverrideCursor();
         setStatus(singleStatus, "Saved watermarked image to " + output, "done");
     } catch (const std::exception& error) {

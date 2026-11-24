@@ -294,6 +294,7 @@ static int testForImageSingle(const Settings& options, const int p, const float 
     checkError(fs::equivalent(imageFile, outputPath, pathError), "Input and output image must be different files.");
     const string watermarkPassword = options.Get("global", "watermark_password", "");
     checkError(watermarkPassword.empty(), "No valid watermark password specified! Supply --watermark_password.");
+    const DeviceMemoryCleanup cleanup;
     const auto started = std::chrono::steady_clock::now();
     auto s = createImageSession(watermarkPassword, p, psnr);
     loadImage(s.get(), imageFile);
@@ -529,6 +530,7 @@ static int testForVideo(const Settings& options, const string& videoFile, const 
     int framesProcessed = 0;
     double totalTime = 0;
     try {
+        const DeviceMemoryCleanup cleanup;
         VideoHandle session = initVideo(settings);
         if (isEmbed) {
             totalTime = executionTime([&]() { framesProcessed = embedVideo(session.get()); }, 1, false);

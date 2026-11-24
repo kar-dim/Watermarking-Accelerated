@@ -202,9 +202,14 @@ struct DeviceCodec {
 class Codecs {
   public:
     // null when nvJPEG is not usable on the current device
-    static DeviceCodec* current() {
-        static Codecs instance;
-        return instance.currentDevice();
+    static std::shared_ptr<DeviceCodec> current() { return instance().currentDevice(); }
+
+    static void releaseIdle(const int device) {
+        auto& codecs = instance();
+        std::lock_guard lock(codecs.mutex);
+        const auto it = codecs.devices.find(device);
+        if (it != codecs.devices.end() && it->second.use_count() == 1)
+            codecs.devices.erase(it);
     }
 
     Codecs(const Codecs&) = delete;
@@ -212,7 +217,12 @@ class Codecs {
 
   private:
     std::mutex mutex;
-    std::unordered_map<int, std::unique_ptr<DeviceCodec>> devices;
+    std::unordered_map<int, std::shared_ptr<DeviceCodec>> devices;
+
+    static Codecs& instance() {
+        static Codecs codecs;
+        return codecs;
+    }
 
     Codecs() = default;
     ~Codecs() {
@@ -232,7 +242,7 @@ class Codecs {
         return codec;
     }
 
-    DeviceCodec* currentDevice() {
+    std::shared_ptr<DeviceCodec> currentDevice() {
         int device = 0;
         if (cudaGetDevice(&device) != cudaSuccess)
             return nullptr;
@@ -240,13 +250,15 @@ class Codecs {
         auto [entry, inserted] = devices.try_emplace(device);
         if (inserted)
             entry->second = probe();
-        return entry->second.get();
+        return entry->second;
     }
 };
 } // namespace
 
+void nvjpeg_utils::releaseIdleCodec(const int device) { Codecs::releaseIdle(device); }
+
 std::optional<CudaArray<uint8_t>> nvjpeg_utils::decode(const uint8_t* jpeg, const size_t length, cudaStream_t stream) {
-    DeviceCodec* codec = Codecs::current();
+    const auto codec = Codecs::current();
     if (!codec)
         return std::nullopt;
     auto worker = codec->decoders.acquire(codec->handle.get());
@@ -278,7 +290,7 @@ std::optional<CudaArray<uint8_t>> nvjpeg_utils::decode(const uint8_t* jpeg, cons
 
 std::vector<uint8_t> nvjpeg_utils::encode(const CudaArray<uint8_t>& planes, cudaStream_t stream) {
     const int channels = planes.getChannels();
-    DeviceCodec* codec = Codecs::current();
+    const auto codec = Codecs::current();
     if (!codec || (channels != 1 && channels != 3))
         return {};
     auto worker = codec->encoders.acquire(codec->handle.get(), stream);
@@ -295,12 +307,15 @@ std::vector<uint8_t> nvjpeg_utils::encode(const CudaArray<uint8_t>& planes, cuda
                                        : succeeded(nvjpegEncoderParamsSetSamplingFactors(worker->params.get(), NVJPEG_CSS_GRAY, stream)) &&
                                              succeeded(nvjpegEncodeYUV(handle, worker->state.get(), worker->params.get(), &image, NVJPEG_CSS_GRAY, cols, rows, stream));
     size_t length = 0;
-    if (!encoded || !succeeded(nvjpegEncodeRetrieveBitstream(handle, worker->state.get(), nullptr, &length, stream)))
+    if (!encoded || !succeeded(nvjpegEncodeRetrieveBitstream(handle, worker->state.get(), nullptr, &length, stream))) {
+        CUDA_CHECK(cudaStreamSynchronize(stream));
         return {};
+    }
     std::vector<uint8_t> jpeg(length);
-    if (!succeeded(nvjpegEncodeRetrieveBitstream(handle, worker->state.get(), jpeg.data(), &length, stream)))
-        return {};
+    const bool retrieved = succeeded(nvjpegEncodeRetrieveBitstream(handle, worker->state.get(), jpeg.data(), &length, stream));
     CUDA_CHECK(cudaStreamSynchronize(stream));
+    if (!retrieved)
+        return {};
     jpeg.resize(length);
     return jpeg;
 }

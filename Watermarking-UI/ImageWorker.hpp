@@ -25,13 +25,14 @@ struct ImageOptions {
 class SingleImageWorker : public QThread {
   public:
     SingleImageWorker(ImageOptions options, QString inputPath, bool detect, QObject* parent = nullptr);
-    ~SingleImageWorker() override { wait(); }
+    ~SingleImageWorker() override;
 
     [[nodiscard]] const QImage& preview() const { return preview_; }
     [[nodiscard]] const QImage& original() const { return original_; }
     [[nodiscard]] const QString& error() const { return error_; }
     [[nodiscard]] std::optional<float> correlation() const { return correlation_; }
-    [[nodiscard]] WatermarkCore::ImageSession* session() const { return session_.get(); }
+    [[nodiscard]] bool hasResult() const { return session_ != nullptr; }
+    void saveResult(const QString& output) const;
 
   protected:
     void run() override;

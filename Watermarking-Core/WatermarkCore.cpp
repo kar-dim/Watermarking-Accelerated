@@ -34,6 +34,7 @@
 #include "CudaCheck.hpp"
 #include "CudaStreamManager.hpp"
 #include "HostMemory.hpp"
+#include "nvjpeg_utils.hpp"
 #include <cuda_runtime.h>
 #elif defined(_USE_OPENCL_)
 #include "HostMemory.hpp"
@@ -418,6 +419,32 @@ bool initializeEnvironment(const int deviceIndex) {
     std::cout << info("Using " + std::to_string(omp_get_max_threads()) + " parallel threads for Watermark calculations.\n");
 #endif
     return deviceSetSuccess;
+}
+
+DeviceMemoryCleanup::DeviceMemoryCleanup([[maybe_unused]] int index) noexcept {
+#if defined(_USE_CUDA_)
+    if (index < 0 && cudaGetDevice(&index) != cudaSuccess)
+        return;
+    deviceIndex = index;
+#endif
+}
+
+DeviceMemoryCleanup::~DeviceMemoryCleanup() {
+#if defined(_USE_CUDA_)
+    int previous = -1;
+    if (deviceIndex < 0 || cudaGetDevice(&previous) != cudaSuccess || (previous != deviceIndex && cudaSetDevice(deviceIndex) != cudaSuccess))
+        return;
+    try {
+        if (CudaStreamManager::getInstance().releaseIdleBuffers(deviceIndex)) {
+            nvjpeg_utils::releaseIdleCodec(deviceIndex);
+            cudaMemPool_t pool = nullptr;
+            if (cudaDeviceGetMemPool(&pool, deviceIndex) == cudaSuccess)
+                cudaMemPoolTrimTo(pool, 0);
+        }
+    } catch (...) {}
+    if (previous != deviceIndex)
+        cudaSetDevice(previous);
+#endif
 }
 
 string getDeviceName(const int deviceIndex) {

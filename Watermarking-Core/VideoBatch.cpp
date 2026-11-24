@@ -306,6 +306,7 @@ VideoBatchSummary runVideoBatch(const VideoBatchSettings& settings, const std::v
                     if (std::memcmp(current.uuid.bytes, device.uuid.bytes, sizeof(current.uuid.bytes)) != 0)
                         throw std::runtime_error("The selected CUDA adapter changed before initialization");
                     CUDA_CHECK(cudaSetDevice(device.index));
+                    const DeviceMemoryCleanup cleanup(device.index);
                     CudaStreamManager::getInstance().getComputeStream();
 #else
                     initializeEnvironment(0);

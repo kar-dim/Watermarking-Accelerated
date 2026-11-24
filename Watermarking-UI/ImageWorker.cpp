@@ -15,9 +15,24 @@ using namespace WatermarkCore;
 SingleImageWorker::SingleImageWorker(ImageOptions options, QString inputPath, const bool detect, QObject* parent)
     : QThread(parent), options_(std::move(options)), inputPath_(std::move(inputPath)), detect_(detect) {}
 
+SingleImageWorker::~SingleImageWorker() {
+    wait();
+    if (session_) {
+        const DeviceMemoryCleanup cleanup(options_.deviceIndex);
+        session_.reset();
+    }
+}
+
+void SingleImageWorker::saveResult(const QString& output) const {
+    const DeviceMemoryCleanup cleanup(options_.deviceIndex);
+    saveImageExact(session_.get(), output.toStdString());
+}
+
 void SingleImageWorker::run() {
     try {
-        initializeEnvironment(options_.deviceIndex);
+        if (!initializeEnvironment(options_.deviceIndex))
+            options_.deviceIndex = 0;
+        const DeviceMemoryCleanup cleanup(options_.deviceIndex);
         auto session = createImageSession(options_.password.toStdString(), options_.p, options_.psnr);
         loadImage(session.get(), inputPath_.toStdString(), true);
         if (detect_) {

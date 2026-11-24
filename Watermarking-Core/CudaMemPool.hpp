@@ -2,6 +2,7 @@
 #include <cuda_runtime.h>
 #include "CheckedSize.hpp"
 #include "CudaCheck.hpp"
+#include <algorithm>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -41,7 +42,11 @@ class CudaMemPool {
     CudaMemPool(const CudaMemPool&) = delete;
     CudaMemPool& operator=(const CudaMemPool&) = delete;
 
-    void setCapacity(const size_t vramBytes) { maxPoolBytes = static_cast<size_t>(vramBytes * 0.95); }
+    void setCapacity(const size_t totalVramBytes) {
+        // Leave at most 2GB ofVRAM for allocators outside this pool (like codecs)
+        constexpr size_t maxIdleBytes = 512ull << 20;
+        maxPoolBytes = std::clamp<size_t>(totalVramBytes / 8, 1, maxIdleBytes);
+    }
 
     void* acquire(const size_t bytes, cudaStream_t stream) {
         const size_t rounded = InternalUtils::checkedPowerOfTwo(bytes);
