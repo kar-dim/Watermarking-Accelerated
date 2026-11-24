@@ -109,7 +109,7 @@
     <ClCompile>
       <Optimization>Disabled</Optimization>
       <PreprocessorDefinitions>WIN32;WIN64;_DEBUG;_CONSOLE;_USE_CUDA_;_USE_GPU_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(WatermarkingImageIncludeDirectories);$(AF_PATH)\include;$(ProjectDir)libs\ffmpeg\include;$(ProjectDir)include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(WatermarkingImageIncludeDirectories);$(ProjectDir)libs\ffmpeg\include;$(ProjectDir)include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
       <OpenMPSupport>true</OpenMPSupport>
       <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
@@ -119,7 +119,7 @@
       <SubSystem>Console</SubSystem>
       <AdditionalDependencies>
       </AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(AF_PATH)\lib;$(ProjectDir)libs\ffmpeg\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(ProjectDir)libs\ffmpeg\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <IgnoreSpecificDefaultLibraries>LIBCMT</IgnoreSpecificDefaultLibraries>
     </Link>
     <CudaCompile>
@@ -147,7 +147,7 @@
       <OptimizeReferences>true</OptimizeReferences>
       <SubSystem>Console</SubSystem>
       <AdditionalDependencies>cudart_static.lib;cuda.lib;nvjpeg.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;avutil.lib;avformat.lib;swscale.lib;avcodec.lib;avfilter.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <AdditionalLibraryDirectories>$(AF_PATH)\lib;$(ProjectDir)libs\ffmpeg\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(ProjectDir)libs\ffmpeg\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <IgnoreSpecificDefaultLibraries>LIBCMT</IgnoreSpecificDefaultLibraries>
     </Link>
     <CudaCompile>
@@ -202,7 +202,7 @@
       <EnableVirtualArchInFatbin />
     </CudaCompile>
     <Link>
-      <AdditionalLibraryDirectories>$(AF_PATH)\lib;$(ProjectDir)libs\opencl\lib;$(ProjectDir)libs\ffmpeg\lib;</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(ProjectDir)libs\opencl\lib;$(ProjectDir)libs\ffmpeg\lib;</AdditionalLibraryDirectories>
       <AdditionalDependencies>
       </AdditionalDependencies>
       <GenerateDebugInformation>false</GenerateDebugInformation>
@@ -226,7 +226,7 @@
       </EnableVirtualArchInFatbin>
     </CudaCompile>
     <Link>
-      <AdditionalLibraryDirectories>$(AF_PATH)\lib;$(ProjectDir)libs\opencl\lib;$(ProjectDir)libs\ffmpeg\lib;</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>$(ProjectDir)libs\opencl\lib;$(ProjectDir)libs\ffmpeg\lib;</AdditionalLibraryDirectories>
       <AdditionalDependencies>
       </AdditionalDependencies>
       <GenerateDebugInformation>true</GenerateDebugInformation>

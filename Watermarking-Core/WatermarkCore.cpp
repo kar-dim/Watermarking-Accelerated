@@ -592,6 +592,7 @@ void ImageSaver::save(ImageSession* session, const string& outPath, const size_t
 void ImageSaver::saveExact(ImageSession* session, const string& outPath, const size_t id) { saveImpl(session, outPath, id, true); }
 
 void ImageSaver::saveImpl(ImageSession* session, const string& outPath, const size_t id, const bool exactPath) {
+    checkOutput(session);
     const size_t pixels = InternalUtils::checkedProduct(static_cast<size_t>(session->currentRows), static_cast<size_t>(session->currentCols));
     const size_t bytes = InternalUtils::checkedProduct(pixels, session->currentIsRGB ? 9u : 3u) + session->imgBuffer.alphaChannel.size();
     std::unique_lock lock(mutex);
@@ -812,13 +813,14 @@ static VideoHandle openVideo(const VideoSettings& settings) {
     VideoHandle session(new VideoSession());
     session->settings = settings;
     const LibavLogScope logScope(session.get());
+    // before the device lookup, which throws on a thread without an OpenCL device
+    checkCancelled(session.get());
 #if defined(_USE_OPENCL_)
     session->openclDevice = OclQueueManager::current();
 #endif
 #if defined(_USE_GPU_)
     session->deviceIndex = getCurrentDeviceIndex();
 #endif
-    checkCancelled(session.get());
     reportProgress(session.get(), VideoState::Setup);
     AVFormatContext* rawInputCtx = avformat_alloc_context();
     checkError(!rawInputCtx, "Failed to allocate video input");
@@ -894,8 +896,9 @@ int embedVideo(VideoSession* s, const bool replaceExistingOutput) {
         reportProgress(s, VideoState::Cancelled);
         throw;
     } catch (...) {
-        reportProgress(s, VideoState::Failed);
+        // a throwing observer must not leave the temporary output behind
         video_utils::discardOutput(s);
+        reportProgress(s, VideoState::Failed);
         throw;
     }
 }

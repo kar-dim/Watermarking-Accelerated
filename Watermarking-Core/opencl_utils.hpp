@@ -143,6 +143,6 @@ template <typename Func>
 auto executeKernel(const Func& kernelFunc, const std::string& context) {
     try {
         return kernelFunc();
-    } catch (const cl::Error& ex) { throw std::runtime_error("OpenCL Error in " + context + ": " + std::string(ex.what()) + " Error code: " + std::to_string(ex.err()) + "\n"); }
+    } catch (const cl::Error& ex) { throw DriverError(ex.err(), std::string(ex.what()) + " in " + context); }
 }
 } // namespace cl_utils

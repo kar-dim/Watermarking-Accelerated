@@ -1,6 +1,7 @@
 #pragma once
 #include <cuda_runtime.h>
 #include "CheckedSize.hpp"
+#include "CudaCheck.hpp"
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -54,8 +55,9 @@ class CudaMemPool {
         }
         void* ptr = nullptr;
         cudaError_t err = cudaMallocAsync(&ptr, rounded, stream);
+        // the error code lets batches retire a lost device
         if (err != cudaSuccess)
-            throw std::runtime_error("cudaMallocAsync failed: " + std::string(cudaGetErrorString(err)));
+            throw cuda_utils::CudaError(err, "cudaMallocAsync failed: " + std::string(cudaGetErrorString(err)));
         return ptr;
     }
 

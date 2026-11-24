@@ -476,7 +476,7 @@ def ui_benchmark():
     chart.node(390, 1162, 500, 106, "Final score", "round(10 × √(E × D))", terminal=True, color=CUDA, size=24, body_size=28)
     chart.note(1310, "E and D are the geometric mean embed and detect FPS across all cases.")
     chart.note(1340, "Loading and previews are outside the timers, slow cases can use one or two runs, stopping gives no score.")
-    chart.note(1370, "Images: 18×18, 512×512, 480p, 720p, 1080p, 4K. p: 3, 5, 7, 9. PSNR: 10–60 dB, step 5.")
+    chart.note(1370, "Images: 18×18, 512×512, 480p, 720p, 1080p, 4K. p: 3, 5, 7, 9. PSNR: 10–60 dB, step 10.")
     return chart
 
 

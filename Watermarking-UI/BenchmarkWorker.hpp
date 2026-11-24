@@ -14,6 +14,10 @@ class BenchmarkWorker : public QThread {
     Q_OBJECT
   public:
     explicit BenchmarkWorker(const int deviceIndex = 0, QObject* parent = nullptr);
+    ~BenchmarkWorker() override {
+        requestInterruption();
+        wait();
+    }
 
   signals:
     // Signals emitted to report benchmark progress, intermediate results, and final score

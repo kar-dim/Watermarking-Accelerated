@@ -29,6 +29,7 @@
 #include <QString>
 #include <QWidget>
 #include <filesystem>
+#include <string>
 #include <vector>
 
 class ImagePreviewView;
@@ -67,7 +68,8 @@ class WatermarkingUI : public QMainWindow {
     void invalidateSingleResult();
     void selectSingleImage(const QString& path);
     void addImageBatchPaths(const QStringList& paths);
-    void updateImageViews();
+    void updateVideoPreview();
+    void updateBenchmarkPreview();
     void startSingleOperation();
     void saveSingleImage();
     void refreshBatchQueue();
@@ -103,6 +105,7 @@ class WatermarkingUI : public QMainWindow {
     SettingsControls batchSettings;
     QComboBox* deviceComboBox = nullptr;
     QWidget* devicePickerArea = nullptr;
+    std::vector<std::string> availableDevices;
 
     // Single image tab controls
     QWidget* singlePage = nullptr;

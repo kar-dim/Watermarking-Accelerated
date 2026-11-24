@@ -22,7 +22,6 @@
 #include <iostream>
 #include <map>
 #include <mutex>
-#include <omp.h>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -189,7 +188,7 @@ Global settings:
   --watermark_password TEXT  Required password for image/video operations.
   --p N                      Prediction window size: 3, 5, 7, or 9 (default: 3).
   --psnr DB                  Positive embed PSNR in dB (default: 40).
-  --display_fps BOOL         Show FPS for video operations (default: true).
+  --display_fps BOOL         Show FPS for single video detection (default: true).
 
 Compute settings:
   --gpu_device_id N          GPU device index (CUDA and OpenCL builds, defaults to 0).
@@ -243,7 +242,7 @@ class Settings {
         const string value = Get(section, name, std::to_string(defaultValue));
         errno = 0;
         char* end = nullptr;
-        const long parsed = std::strtol(value.c_str(), &end, 0);
+        const long parsed = std::strtol(value.c_str(), &end, 10);
         if (errno != 0 || end == value.c_str() || *end != '\0')
             throw std::runtime_error("Invalid integer for '" + section + "." + name + "': " + value);
         return parsed;
@@ -482,7 +481,7 @@ int testForVideoBatch(const Settings& options, const std::string& input, const i
     settings.video.watermarkInterval = static_cast<int>(options.GetInteger("video", "watermark_interval", 1));
     settings.video.useHwDecoder = true;
     settings.video.useHwEncoder = !detect && options.GetBoolean("compute", "hw_encoder", false);
-    settings.video.encodeOptions = settings.video.useHwEncoder ? options.Get("video", "hw_encode_options", "") : options.Get("video", "encode_codec_options", "-c:v libx265 -preset medium -crf 20");
+    settings.video.encodeOptions = settings.video.useHwEncoder ? options.Get("video", "hw_encode_options", "") : options.Get("video", "encode_codec_options", defaultVideoEncoderOptions(false));
     VideoBatchControl control;
     BatchConsoleCancel cancel(control);
     CliVideoBatchObserver observer(jobs);
@@ -509,8 +508,8 @@ static int testForVideo(const Settings& options, const string& videoFile, const 
     settings.psnr = psnr;
     settings.watermarkInterval = static_cast<int>(options.GetInteger("video", "watermark_interval", 1));
     settings.useHwDecoder = true;
-    settings.useHwEncoder = options.GetBoolean("compute", "hw_encoder", false);
-    settings.encodeOptions = settings.useHwEncoder ? options.Get("video", "hw_encode_options", "") : options.Get("video", "encode_codec_options", "-c:v libx265 -preset medium -crf 20");
+    settings.useHwEncoder = isEmbed && options.GetBoolean("compute", "hw_encoder", false);
+    settings.encodeOptions = settings.useHwEncoder ? options.Get("video", "hw_encode_options", "") : options.Get("video", "encode_codec_options", defaultVideoEncoderOptions(false));
     settings.encodeOutputPath = options.Get("video", "encode_output_path", "");
     if (isEmbed)
         validateVideoOutputPath(settings.encodeOutputPath);
@@ -519,17 +518,29 @@ static int testForVideo(const Settings& options, const string& videoFile, const 
     if (isEmbed)
         optimizeThreadsForVideoEmbedding();
 
-    VideoHandle session = initVideo(settings);
+    // Ctrl+C stops through the token, embedding then deletes its temporary output
+    struct StopControl {
+        std::stop_source source;
+        void cancel() { source.request_stop(); }
+    } control;
+    settings.stopToken = control.source.get_token();
+    BatchConsoleCancel console(control);
 
     int framesProcessed = 0;
     double totalTime = 0;
-    if (isEmbed) {
-        totalTime = executionTime([&]() { framesProcessed = embedVideo(session.get()); }, 1, false);
-        cout << info("\nWatermark embedding total time: " + formatExecutionTime(false, totalTime) + "\n\n");
-    } else {
-        totalTime = executionTime([&]() { framesProcessed = detectVideo(session.get()); }, 1, false);
-        cout << info("\nWatermark detection total time: " + formatExecutionTime(false, totalTime) + "\n");
-        cout << info("Average execution time per frame: " + formatExecutionTime(showFps, totalTime / framesProcessed) + "\n");
+    try {
+        VideoHandle session = initVideo(settings);
+        if (isEmbed) {
+            totalTime = executionTime([&]() { framesProcessed = embedVideo(session.get()); }, 1, false);
+            cout << info("\nWatermark embedding total time: " + formatExecutionTime(false, totalTime) + "\n\n");
+        } else {
+            totalTime = executionTime([&]() { framesProcessed = detectVideo(session.get()); }, 1, false);
+            cout << info("\nWatermark detection total time: " + formatExecutionTime(false, totalTime) + "\n");
+            cout << info("Average execution time per frame: " + formatExecutionTime(showFps, totalTime / framesProcessed) + "\n");
+        }
+    } catch (const VideoCancelled&) {
+        cout << err("\nVideo cancelled\n");
+        return 130;
     }
     return EXIT_SUCCESS;
 }
@@ -558,7 +569,6 @@ static int runCliBenchmark(const Settings& settings, const float psnr, const boo
     checkError(watermarkPassword.empty(), "No valid watermark password specified!");
 
     const fs::path outputDir = "thesis_data";
-    fs::create_directories(outputDir);
     const fs::path outputPath = settings.Get("image", "benchmark_output_path", (outputDir / (backend + ".csv")).string());
     if (outputPath.has_parent_path())
         fs::create_directories(outputPath.parent_path());

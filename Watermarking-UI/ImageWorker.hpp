@@ -25,6 +25,7 @@ struct ImageOptions {
 class SingleImageWorker : public QThread {
   public:
     SingleImageWorker(ImageOptions options, QString inputPath, bool detect, QObject* parent = nullptr);
+    ~SingleImageWorker() override { wait(); }
 
     [[nodiscard]] const QImage& preview() const { return preview_; }
     [[nodiscard]] const QImage& original() const { return original_; }

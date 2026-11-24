@@ -85,9 +85,8 @@ void WatermarkingUI::createVideoBatchTab() {
     formatLayout->addWidget(videoBatchFormat);
     videoBatchDevices = new MultiDeviceComboBox(videoBatchInputs);
     videoBatchDevices->setObjectName("videoBatchDevices");
-    const auto available = WatermarkCore::getAvailableDevices();
-    for (int device = 0; device < static_cast<int>(available.size()); ++device)
-        videoBatchDevices->addDevice(QString::fromStdString(available[device]), device, device == (deviceComboBox ? deviceComboBox->currentIndex() : 0));
+    for (int device = 0; device < static_cast<int>(availableDevices.size()); ++device)
+        videoBatchDevices->addDevice(QString::fromStdString(availableDevices[device]), device, device == (deviceComboBox ? deviceComboBox->currentIndex() : 0));
     form->addRow("Devices", videoBatchDevices);
     videoBatchDevices->selectionChanged = [this] { updateVideoBatchSelection(); };
     videoBatchAcceleration = new QCheckBox("Accelerate final video", videoBatchInputs);
@@ -95,7 +94,7 @@ void WatermarkingUI::createVideoBatchTab() {
     videoBatchAcceleration->setChecked(true);
     videoBatchAcceleration->setToolTip(
         "When only one video remains, an idle selected GPU starts a second attempt. Only the first complete result is kept. Turn off if extra work slows CPU encoding or disk access.");
-    videoBatchAcceleration->setVisible(available.size() > 1);
+    videoBatchAcceleration->setVisible(availableDevices.size() > 1);
     formatLayout->addWidget(videoBatchAcceleration);
     formatLayout->addStretch();
     inputs->addLayout(form);

@@ -28,6 +28,15 @@ RESOLUTIONS = ("480p", "720p", "1080p", "4K")
 OPERATIONS = ("embed", "detect")
 
 
+def run_cli(backend: str, command: list[str], **options) -> subprocess.CompletedProcess:
+    try:
+        return subprocess.run(command, cwd=ROOT, check=True, **options)
+    except subprocess.CalledProcessError as error:
+        if backend == "eigen" and error.returncode == ILLEGAL_INSTRUCTION:
+            raise RuntimeError("this CPU has no AVX-512, rerun with --eigen-avx2") from error
+        raise
+
+
 def run_benchmarks(
     executables: dict[str, Path], device_ids: dict[str, int | None], loops: int | None, backends: list[str], result_name: str | None, repeats: int
 ) -> None:
@@ -47,12 +56,7 @@ def run_benchmarks(
             for run, path in enumerate(runs):
                 suffix = f" (run {run + 1}/{repeats})" if repeats > 1 else ""
                 print(f"\n=== Running {BACKEND_LABELS[backend]} benchmark{suffix} ===", flush=True)
-                try:
-                    subprocess.run(command + ["--benchmark_output_path", str(path)], cwd=ROOT, check=True)
-                except subprocess.CalledProcessError as error:
-                    if backend == "eigen" and error.returncode == ILLEGAL_INSTRUCTION:
-                        raise RuntimeError("this CPU has no AVX-512, rerun with --eigen-avx2") from error
-                    raise
+                run_cli(backend, command + ["--benchmark_output_path", str(path)])
             if repeats > 1:
                 write_median_run(runs, output)
                 print(f"Median of {repeats} runs written to {output}", flush=True)
@@ -104,7 +108,7 @@ def list_gpus(executables: dict[str, Path], backends: list[str]) -> None:
         if not executable.is_file():
             raise FileNotFoundError(f"Missing {backend} Release CLI: {executable}")
         print(f"\n{BACKEND_LABELS[backend]} devices:", flush=True)
-        result = subprocess.run([str(executable), "--list-gpu"], cwd=ROOT, check=True, capture_output=True, text=True, encoding="utf-8")
+        result = run_cli(backend, [str(executable), "--list-gpu"], capture_output=True, text=True, encoding="utf-8")
         print(result.stdout, end="", flush=True)
         if result.stderr:
             print(result.stderr, end="", file=sys.stderr, flush=True)
@@ -232,7 +236,7 @@ def generate_ui_figure() -> None:
     bar_labels = [str(r["device"]) for r in rows]
     axis.set_xticks(positions, bar_labels, rotation=38, ha="right", rotation_mode="anchor", fontsize=10.5)
     axis.yaxis.set_major_formatter(FuncFormatter(lambda value, _: f"{int(value):,}"))
-    axis.set_ylim(0, 168000)
+    axis.set_ylim(0, max(int(row["score"]) for row in rows) * 1.08)
     axis.grid(axis="y", color="#c7d0d5", linewidth=0.8)
     axis.set_axisbelow(True)
     for spine in axis.spines.values():

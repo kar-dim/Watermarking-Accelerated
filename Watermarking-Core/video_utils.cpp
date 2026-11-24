@@ -81,8 +81,8 @@ extern "C" {
 #include "libavutil/hwcontext.h"
 #include "libavutil/imgutils.h"
 #include "libavcodec/defs.h"
-#include "HdrTonemap.hpp"
 }
+#include "HdrTonemap.hpp"
 
 #if defined(_USE_EIGEN_)
 using namespace Eigen;
@@ -738,7 +738,7 @@ AVCodecContextPtr openDecoderHWAccel(VideoSession* session) {
                 videoLog(session, "NVDEC could not decode and convert the first frame, falling back to software decoder (CPU).\n");
                 return openSoftwareDecoder(inputCodecParams, pktTimebase, session->settings.cpuThreads);
             }
-        } catch (const std::exception& error) {
+        } catch (const VideoCancelled&) { throw; } catch (const std::exception& error) {
             videoLog(session, std::string("NVDEC conversion setup failed: ") + error.what() + ", falling back to software decoder (CPU).\n");
             return openSoftwareDecoder(inputCodecParams, pktTimebase, session->settings.cpuThreads);
         }
@@ -930,9 +930,9 @@ AVCodecContextPtr openDecoderOpenCL(VideoSession* session) {
             videoLog(session, std::format("Hardware decode: {} ({}), {}.\n", type == AV_HWDEVICE_TYPE_QSV ? "QSV" : "D3D11VA", pixelFormatName(session->decodedFormat),
                                   session->isHdr ? "OpenCL HDR tonemapping" : "OpenCL processing"));
             return decoder;
-        } catch (const cl::Error& error) { reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")"; } catch (const std::exception& error) {
-            reason = error.what();
-        }
+        } catch (const VideoCancelled&) { throw; } catch (const cl::Error& error) {
+            reason = std::string(error.what()) + " (" + std::to_string(error.err()) + ")";
+        } catch (const std::exception& error) { reason = error.what(); }
     }
     return fallback(reason);
 }
@@ -1088,7 +1088,7 @@ void loadInputFrame(VideoSession* s, const uint8_t* hostPtr, const int srcPitch)
         uploadStatus = clEnqueueWriteBufferRect(queue, hostGpu.data(), CL_TRUE, origin, origin, region, static_cast<size_t>(width), 0, static_cast<size_t>(srcPitch), 0, hostPtr, 0, nullptr, nullptr);
     }
     if (uploadStatus != CL_SUCCESS)
-        throw std::runtime_error("Failed to upload video frame to OpenCL buffer: " + std::to_string(uploadStatus));
+        throw cl_utils::DriverError(uploadStatus, "Video frame upload to the OpenCL buffer");
     cl_utils::launchPitchedToFloat(hostGpu.clBuffer(), lumaBuffer(s).clBuffer(), width, height, width, mgr.getQueue());
 #else
     // row-major 8-bit Y plane (row pitch srcPitch) -> column-major float luma in session buffer, transposed

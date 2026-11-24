@@ -99,6 +99,8 @@ constexpr const char* defaultPassword = "random_watermark_password";
 const fs::path colorImage = "samples/images/512.png";
 const fs::path grayImage = "samples/images/512_gray.jpg";
 const fs::path alphaImage = "samples/images/4k_argb.png";
+// one RGB value everywhere, the prediction system is singular
+const fs::path flatImage = "samples/images/1080p_flat.png";
 // 720p.png stored rotated 90 degrees counter-clockwise with EXIF orientation 6
 const fs::path exifImage = "samples/images/720p_exif6.jpg";
 
@@ -1344,6 +1346,34 @@ TEST_F(WatermarkTest, SavesReloadsAndDetectsFromTemporaryDirectory) {
     const float diskCorrelation = detectLoadedImage(diskSession.get());
     EXPECT_TRUE(std::isfinite(diskCorrelation));
     EXPECT_GT(diskCorrelation, 0.65f);
+}
+
+TEST_F(WatermarkTest, WrongPasswordFindsNoWatermark) {
+    embedImage(session.get());
+    finish();
+    const fs::path savedPath = tempDir / "watermarked.png";
+    saveImageExact(session.get(), savedPath.string());
+
+    ImageHandle wrongSession = createImageSession("a_different_password", defaultP, defaultPsnr);
+    loadImage(wrongSession.get(), savedPath.string());
+    const float correlation = detectLoadedImage(wrongSession.get());
+    EXPECT_TRUE(std::isfinite(correlation));
+    EXPECT_LT(std::abs(correlation), 0.05f);
+}
+
+TEST_F(WatermarkTest, FlatImagesStayUnchangedAndCarryNoWatermark) {
+    for (const int order : {3, 9}) {
+        SCOPED_TRACE(order);
+        ImageHandle flat = createImageSession(defaultPassword, order, defaultPsnr);
+        loadImage(flat.get(), flatImage.string());
+        const SessionPixelData output = embedAndRead(flat.get());
+        ASSERT_FALSE(output.pixels.empty());
+        EXPECT_TRUE(std::ranges::all_of(output.pixels, [&](const uint8_t value) { return value == output.pixels.front(); }));
+        prepareDetectionImage(flat.get());
+        const float correlation = detectEmbeddedBuffer(flat.get());
+        EXPECT_TRUE(std::isfinite(correlation));
+        EXPECT_LT(std::abs(correlation), 0.01f);
+    }
 }
 
 TEST_F(WatermarkTest, ReusesSessionAcrossSameSizeRgbAndGrayImages) {

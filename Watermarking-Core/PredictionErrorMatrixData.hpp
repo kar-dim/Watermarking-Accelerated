@@ -191,22 +191,11 @@ class PredictionErrorMatrixData {
     LocalVector coefficients;
     AccumVector rx;
     AccumMatrix Rx;
-    // Column-major memory offsets for neighboring pixels around the center
-    std::vector<int> neighborOffsets;
 
   public:
     // Allocates buffers for the given image dimensions
     PredictionErrorMatrixData(const int rows, const int cols)
-        : rows(rows), cols(cols), threadSums(omp_get_max_threads()), borderCols(numShifts * borderSize), corners(numShifts * borderSize * borderSize) {
-        neighborOffsets.reserve(localSize);
-        for (int dj = 0; dj < p; dj++) {
-            for (int di = 0; di < p; di++) {
-                if (di == pad && dj == pad)
-                    continue;
-                neighborOffsets.push_back((dj - pad) * rows + (di - pad));
-            }
-        }
-    }
+        : rows(rows), cols(cols), threadSums(omp_get_max_threads()), borderCols(numShifts * borderSize), corners(numShifts * borderSize * borderSize) {}
 
     // Computes Rx and rx from shift sums and solves the system with Cholesky
     bool computeCoefficients(const float* image) {

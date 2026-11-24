@@ -25,7 +25,6 @@ class OclQueueManager {
     OclMemPool pool;
     int deviceIndex = 0;
     uint64_t contextGeneration = 0;
-    size_t liveAllocations = 0;
     std::recursive_mutex stateMutex;
 
     OclQueueManager() = default;
@@ -143,15 +142,12 @@ class OclQueueManager {
         std::lock_guard lock(stateMutex);
         if (ownerQueue != queue.get())
             throw std::invalid_argument("OpenCL buffer queue does not belong to the selected context");
-        cl_mem buffer = pool.acquire(bytes, ctx.get());
-        ++liveAllocations;
-        return buffer;
+        return pool.acquire(bytes, ctx.get());
     }
 
     void releaseBuffer(const size_t bytes, cl_mem buffer) noexcept {
         std::lock_guard lock(stateMutex);
         pool.release(bytes, buffer);
-        --liveAllocations;
     }
 
     static std::vector<std::string> enumerateDevices() {

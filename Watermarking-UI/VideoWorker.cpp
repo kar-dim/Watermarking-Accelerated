@@ -126,8 +126,10 @@ void VideoWorker::previewSize(int& width, int& height) const {
 void VideoWorker::onPreview(const std::uint8_t* rgba, const int width, const int height, const int pitch) {
     // core reuses pixels on return, ping-pong two QImages to avoid per-frame allocations
     QImage& owned = previews_[previewIndex_];
-    if (owned.width() != width || owned.height() != height || owned.format() != QImage::Format_RGBA8888)
+    if (!owned.isDetached() || owned.width() != width || owned.height() != height || owned.format() != QImage::Format_RGBA8888)
         owned = QImage(width, height, QImage::Format_RGBA8888);
+    if (owned.isNull())
+        return;
     uchar* dst = owned.bits();
     const qsizetype dstPitch = owned.bytesPerLine();
     if (pitch == dstPitch) {

@@ -32,6 +32,7 @@
 #include <QRect>
 #include <QScreen>
 #include <QScrollArea>
+#include <QSet>
 #include <QSizePolicy>
 #include <QStyle>
 #include <QTableWidgetItem>
@@ -173,7 +174,6 @@ WatermarkingUI::WatermarkingUI(QWidget* parent) : QMainWindow(parent) {
     auto* pickerLayout = new QHBoxLayout(devicePickerArea);
     pickerLayout->setContentsMargins(0, 0, 0, 0);
     deviceLayout->addWidget(devicePickerArea);
-    std::vector<std::string> availableDevices;
     try {
         availableDevices = getAvailableDevices();
     } catch (const std::exception&) { availableDevices.clear(); }
@@ -508,6 +508,10 @@ void WatermarkingUI::addImageBatchPaths(const QStringList& paths) {
     if (busy)
         return;
     try {
+        // Windows paths compare without case
+        QSet<QString> known;
+        for (const auto& existing : batchFiles)
+            known.insert(QString::fromStdWString(existing.wstring()).toCaseFolded());
         for (const auto& selected : paths) {
             std::vector<fs::path> files;
             const QFileInfo info(selected);
@@ -519,9 +523,11 @@ void WatermarkingUI::addImageBatchPaths(const QStringList& paths) {
                 const QFileInfo input(QString::fromStdWString(file.wstring()));
                 const QString canonical = input.canonicalFilePath();
                 const QString path = canonical.isEmpty() ? input.absoluteFilePath() : canonical;
-                const bool duplicate = std::ranges::any_of(batchFiles, [&](const auto& existing) { return QString::fromStdWString(existing.wstring()).compare(path, Qt::CaseInsensitive) == 0; });
-                if (!duplicate)
+                const QString key = path.toCaseFolded();
+                if (!known.contains(key)) {
+                    known.insert(key);
                     batchFiles.emplace_back(path.toStdWString());
+                }
             }
         }
         if (batchOutput->text().isEmpty() && !batchFiles.empty())
@@ -615,16 +621,20 @@ void WatermarkingUI::startSingleOperation() {
     connect(singleWorker, &QThread::finished, this, [this, detect] {
         if (closing)
             return;
-        setBusy(false);
-        if (!singleWorker->error().isEmpty()) {
-            setStatus(singleStatus, singleWorker->error(), "error");
-            if (detect)
-                setStatus(singleDetectionResult, "Failed", "error");
-            QMessageBox::critical(this, detect ? "Detection failed" : "Preview failed", singleWorker->error());
+        // finished is emitted before the thread ends, deleting the worker needs the wait
+        singleWorker->wait();
+        if (const QString error = singleWorker->error(); !error.isEmpty()) {
+            // the modal box runs an event loop, the failed worker must already be gone
             delete singleWorker;
             singleWorker = nullptr;
+            setBusy(false);
+            setStatus(singleStatus, error, "error");
+            if (detect)
+                setStatus(singleDetectionResult, "Failed", "error");
+            QMessageBox::critical(this, detect ? "Detection failed" : "Preview failed", error);
             return;
         }
+        setBusy(false);
         if (detect) {
             const QString value = QString::fromStdString(formatCorrelationPercent(*singleWorker->correlation()));
             setStatus(singleDetectionResult, value, "done");
@@ -634,7 +644,7 @@ void WatermarkingUI::startSingleOperation() {
         }
         singleImageView->setImages(singleWorker->original(), singleWorker->preview());
         saveButton->setEnabled(true);
-        setStatus(singleStatus, "watermark ready. Save writes this exact result.", "done");
+        setStatus(singleStatus, "Watermark ready. Save writes this exact result.", "done");
     });
     singleWorker->start();
 }
@@ -840,7 +850,7 @@ void WatermarkingUI::startBenchmark() {
     });
     connect(benchmarkWorker, &BenchmarkWorker::resultReady, this, &WatermarkingUI::onBenchmarkResult);
     connect(benchmarkWorker, &BenchmarkWorker::benchmarkCanceled, this, &WatermarkingUI::finishBenchmarkCanceled);
-    connect(benchmarkWorker, &BenchmarkWorker::benchmarkFinished, this, [this](const double embedFps, const double detectFps, const int score) {
+    connect(benchmarkWorker, &BenchmarkWorker::benchmarkFinished, this, [this, device](const double embedFps, const double detectFps, const int score) {
         if (closing)
             return;
         if (benchmarkWorker->isInterruptionRequested()) {
@@ -859,7 +869,7 @@ void WatermarkingUI::startBenchmark() {
         setStatus(benchmarkStatus, "Benchmark complete", "done");
         QMessageBox::information(this, "Benchmark score",
             QString("Hardware: %1\nGeometric mean embed: %2 FPS\nGeometric mean detect: %3 FPS\n\nScore: %4")
-                .arg(QString::fromStdString(getDeviceName(deviceComboBox ? deviceComboBox->currentIndex() : -1)))
+                .arg(QString::fromStdString(getDeviceName(device)))
                 .arg(embedFps, 0, 'f', 1)
                 .arg(detectFps, 0, 'f', 1)
                 .arg(score));
@@ -891,7 +901,7 @@ void WatermarkingUI::onBenchmarkResult(
     if (benchmarkWorker == nullptr || benchmarkWorker->isInterruptionRequested())
         return;
     benchmarkPreviewImage = image;
-    updateImageViews();
+    updateBenchmarkPreview();
     setStatus(benchmarkStatus,
         QString("%1 | p=%2 | PSNR=%3 dB | Correlation=%4\nEmbed: %5 ms (%6 FPS)  |  Detect: %7 ms (%8 FPS)")
             .arg(file)
@@ -905,16 +915,21 @@ void WatermarkingUI::onBenchmarkResult(
         "running");
 }
 
-void WatermarkingUI::updateImageViews() {
+// smooth scaling the last 4K benchmark image on every video frame stalls the GUI
+void WatermarkingUI::updateVideoPreview() {
     if (!videoPreviewImage.isNull() && videoPreviewEnabled->isChecked())
         videoPreview->setPixmap(QPixmap::fromImage(videoPreviewImage.scaled(videoPreview->contentsRect().size(), Qt::KeepAspectRatio, Qt::SmoothTransformation)));
+}
+
+void WatermarkingUI::updateBenchmarkPreview() {
     if (!benchmarkPreviewImage.isNull())
         benchmarkImageView->setPixmap(QPixmap::fromImage(benchmarkPreviewImage.scaled(benchmarkImageView->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation)));
 }
 
 void WatermarkingUI::resizeEvent(QResizeEvent* event) {
     QMainWindow::resizeEvent(event);
-    updateImageViews();
+    updateVideoPreview();
+    updateBenchmarkPreview();
 }
 
 bool WatermarkingUI::eventFilter(QObject* watched, QEvent* event) {

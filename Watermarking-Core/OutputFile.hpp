@@ -1,6 +1,6 @@
 #pragma once
 
-#include "AvUtil.hpp"
+#include "include/Utf8Path.hpp"
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -29,7 +29,7 @@ class OutputFile {
     void prepare(const std::string& outputPath, const bool keepExtension = false) {
         if (!temporary.empty())
             throw std::logic_error("An output file is already in progress");
-        destination = std::filesystem::absolute(video_utils::pathFromUtf8(outputPath));
+        destination = std::filesystem::absolute(WatermarkCore::pathFromUtf8(outputPath));
         static std::atomic<uint64_t> sequence{0};
         const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
         for (int attempt = 0; attempt < 256; ++attempt) {

@@ -358,18 +358,19 @@ void renderPreview(VideoSession* s, const AVFrame* original, const bool encoded,
     params.outWidth = std::max(1, static_cast<int>(std::lround(params.width * ratio * scale)));
     params.outHeight = std::max(1, static_cast<int>(std::lround(params.height * scale)));
     const size_t bytes = static_cast<size_t>(params.outWidth) * params.outHeight * 4;
-    if (preview.width != params.outWidth || preview.height != params.outHeight) {
+    const bool resized = preview.width != params.outWidth || preview.height != params.outHeight;
+    if (resized)
         preview.host = std::make_unique<HostMemory<uint8_t>>(bytes);
-        preview.width = params.outWidth;
-        preview.height = params.outHeight;
+    // the first GPU frame can follow CPU frames of the same size
 #if defined(_USE_CUDA_)
-        if (gpu)
-            preview.pixels = CudaArray<uint8_t>(static_cast<int>(bytes), CudaStreamManager::getInstance().getComputeStream());
+    if (gpu && (resized || preview.pixels.empty()))
+        preview.pixels = CudaArray<uint8_t>(static_cast<int>(bytes), CudaStreamManager::getInstance().getComputeStream());
 #elif defined(_USE_OPENCL_)
-        if (gpu)
-            preview.pixels = cl::Buffer(OclQueueManager::getInstance().getContext(), CL_MEM_WRITE_ONLY, bytes);
+    if (gpu && (resized || !preview.pixels()))
+        preview.pixels = cl::Buffer(OclQueueManager::getInstance().getContext(), CL_MEM_WRITE_ONLY, bytes);
 #endif
-    }
+    preview.width = params.outWidth;
+    preview.height = params.outHeight;
     const auto* descriptor = av_pix_fmt_desc_get(format);
     if (!descriptor || descriptor->comp[0].depth != 8)
         throw std::runtime_error("Preview requires an 8-bit frame");

@@ -147,13 +147,14 @@ For the repeated benchmark, use `Watermarking-CLI.exe --bench --benchmark_loops 
 | `--image.path` | Input image, or input directory for batch mode. |
 | `--output_path` | Required destination filename for single mode. The input image cannot be overwritten. |
 | `--watermark_password` | Password used to generate the deterministic watermark. Required for image/video operations. |
-| `--display_fps` | Show video execution times as FPS (`true`, default) or seconds (`false`). |
+| `--display_fps` | Show the per-frame time of single video detection as FPS (`true`, default) or seconds (`false`). |
 | `--p` | Prediction window size: 3 (default), 5, 7, or 9. Images and frames must be at least `p x p` pixels. |
 | `--psnr` | Positive, finite embed PSNR in dB (default: 40). Higher values reduce watermark strength and can make detection harder. |
 | `--benchmark_loops` | Positive measured iteration count for `--bench` only. Defaults to 100 on Eigen and 1000 on GPU backends. |
 | `--benchmark_output_path` | CSV destination for `--bench` (default: `thesis_data/BACKEND.csv`). Use a separate file to preserve another device's results. |
 | `--list-gpu` | Print `index: GPU name` for this backend and exit before compute initialization or processing. Eigen reports that it has no GPU devices. |
-| `--gpu_device_id` | Zero-based CUDA/OpenCL GPU index (default: 0). Video batches reject an unavailable index, other operations fall back to 0. |
+| `--gpu_device_id` | Zero-based CUDA/OpenCL GPU index (default: 0). Image and video batches reject an unavailable index, other operations fall back to 0. |
+| `--image.devices` | Comma-separated image batch GPU indices, for example `0,1`. Defaults to `--gpu_device_id`. Duplicate or unavailable indices are rejected. Eigen accepts one CPU worker. |
 
 **Video-only options:**
 
@@ -183,7 +184,7 @@ In the UI, each batch tab has a **Devices** picker, video batch **Encoder option
 | `--video.mode` | `embed` (default), `detect`, `batch_embed` or `batch_detect`. Embedding re-encodes the watermarked video. |
 | `--video.path` | Input video filename, or a folder for batch modes. Folder discovery reads common video extensions without entering subfolders. Uses the common password, p, PSNR, timing, and device options above. |
 | `--watermark_interval` | Embed or detect every Nth frame (N >= 1, default: 1). Other frames pass unchanged to the encoder when embedding, or are skipped when detecting. |
-| `--hw_encoder` | Use hardware encoding on CUDA/OpenCL (`true` by default). Uses `--hw_encode_options` instead of `--encode_codec_options`. The default encoder follows the selected GPU: NVENC on NVIDIA, QSV on Intel, AMF on AMD. Eigen uses CPU decoding and encoding. |
+| `--hw_encoder` | Use hardware encoding on CUDA/OpenCL (`false` by default). Uses `--hw_encode_options` instead of `--encode_codec_options`. The default encoder follows the selected GPU: NVENC on NVIDIA, QSV on Intel, AMF on AMD. Eigen uses CPU decoding and encoding. |
 | `--encode_output_path` | Required `.mkv` or `.mp4` destination filename for video embedding. Use `--video.mode detect` to detect without writing a video. |
 | `--output_directory` | Batch output folder. Defaults to `watermark_output` under the input folder, or beside a single input file. Outputs never replace an existing file. |
 | `--output_format` | Batch Embed container, `mkv` (default) or `mp4`. Batch Detect always writes CSV reports with raw correlation coefficients. |

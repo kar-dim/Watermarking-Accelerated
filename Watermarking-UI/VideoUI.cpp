@@ -233,7 +233,7 @@ void WatermarkingUI::createVideoTab() {
             QMessageBox::critical(this, "Export failed", "Could not save the detection results.");
     });
     connect(videoInput, &QLineEdit::editingFinished, this, [this] {
-        if (videoOutput->text().isEmpty())
+        if (videoOutput->text().isEmpty() && !videoInput->text().trimmed().isEmpty())
             selectVideo(videoInput->text().trimmed());
     });
     updateVideoControls();
@@ -320,7 +320,7 @@ void WatermarkingUI::updateVideoPreviewLayout() {
         videoWorker->setPreview(preview && videoPage->isVisible() && videoPreview->isVisible(), size.width(), size.height());
     }
     if (preview)
-        updateImageViews();
+        updateVideoPreview();
 }
 
 QString WatermarkingUI::videoHardwareDefaults() const {
@@ -442,7 +442,7 @@ void WatermarkingUI::pollVideo() {
     if (!update.preview.isNull()) {
         const auto& matrix = progress.displayTransform;
         videoPreviewImage = update.preview.transformed(QTransform(matrix[0], matrix[1], matrix[2], matrix[3], 0, 0));
-        updateImageViews();
+        updateVideoPreview();
     }
     for (const QString& line : update.logs) {
         videoLog->appendPlainText(line);

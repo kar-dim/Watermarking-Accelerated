@@ -29,8 +29,6 @@ void launchP010HdrToSdrKernel(const uint16_t* ySrc, const int yPitchBytes, const
 void launchGenerateWatermarkKernel(const std::array<uint32_t, 16>& baseState, __half* watermark, const int64_t numElements, const cudaStream_t stream);
 // test-only Box-Muller transform on (x1, x2) pairs
 void launchBoxMullerKernel(const uint32_t* randomPairs, float* normals, const int pairs, const cudaStream_t stream);
-// 2D kernel grid size from image dimensions and blockSize
-inline dim3 gridSizeCalculate(const dim3 blockSize, const int cols, const int rows) { return dim3((rows + blockSize.x - 1) / blockSize.x, (cols + blockSize.y - 1) / blockSize.y); }
 // 1D grid size with 2560 block cap for grid-stride kernels
 inline int gridSize1DStridedCalculate(const int N, const int blockSize) { return std::min<int>((N + blockSize - 1) / blockSize, 2560); }
 // prediction error grid size based on GPU SM count
