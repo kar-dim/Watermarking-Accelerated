@@ -4689,7 +4689,8 @@ TEST_F(WatermarkTest, MultiDeviceVideoBatchMatchesIsolatedFilesAndPublishesOneRe
         ASSERT_EQ(result.succeeded, inputs.size());
         EXPECT_EQ(result.failed, 0);
         for (std::size_t index = 0; index < jobs.size(); ++index)
-            EXPECT_TRUE(decodeVideoPlanes(jobs[index].outputPath).frames == isolated.at(result.results[index].deviceIndex)) << "file " << index;
+            EXPECT_TRUE(decodeVideoPlanes(jobs[index].outputPath).frames == isolated.at(result.results[index].deviceIndex))
+                << "file " << index << " on device " << result.results[index].deviceIndex << (race ? " with final acceleration" : "");
         EXPECT_EQ(std::distance(fs::directory_iterator(folder), fs::directory_iterator{}), inputs.size());
         settings.detect = true;
         std::vector<std::string> encoded;

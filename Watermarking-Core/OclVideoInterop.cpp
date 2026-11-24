@@ -13,9 +13,11 @@
 #include <deque>
 #include <dxgi1_2.h>
 #include <limits>
+#include <map>
 #include <mutex>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -47,6 +49,27 @@ void checkHr(const HRESULT result, const char* operation) {
 void checkCl(const cl_int result, const char* operation) {
     if (result != CL_SUCCESS)
         throw cl_utils::DriverError(result, operation);
+}
+
+// bytecode does not depend on the device, compile it ONCE
+ComPtr<ID3DBlob> shaderBytecode(const std::string_view source, const std::vector<D3D_SHADER_MACRO>& defines, const char* operation) {
+    std::string key(operation);
+    for (const auto& define : defines)
+        if (define.Name)
+            key.append(" ").append(define.Name);
+    static std::mutex mutex;
+    static std::map<std::string, ComPtr<ID3DBlob>> cache;
+    std::lock_guard lock(mutex);
+    auto& code = cache[key];
+    if (!code) {
+        ComPtr<ID3DBlob> errors;
+        const HRESULT compiled = D3DCompile(source.data(), source.size(), nullptr, defines.data(), nullptr, "main", "cs_5_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &code, &errors);
+        if (FAILED(compiled) || !code) {
+            code.Reset();
+            throw std::runtime_error(std::string(operation) + ": " + (errors ? std::string(static_cast<const char*>(errors->GetBufferPointer()), errors->GetBufferSize()) : "unknown error"));
+        }
+    }
+    return code;
 }
 
 constexpr char copyShader[] = R"HLSL(
@@ -498,8 +521,6 @@ std::unique_ptr<OclVideoFrame> OclVideoInterop::createFrame(const AVFrame* sourc
     buffer.Usage = D3D11_USAGE_IMMUTABLE;
     buffer.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
     checkHr(device->CreateBuffer(&buffer, &initial, &frame->constants), "Create video copy constants");
-    ComPtr<ID3DBlob> code;
-    ComPtr<ID3DBlob> errors;
     std::vector<D3D_SHADER_MACRO> defines;
     if (preserveP010)
         defines.push_back({"WM_KEEP_P010", "1"});
@@ -512,9 +533,7 @@ std::unique_ptr<OclVideoFrame> OclVideoInterop::createFrame(const AVFrame* sourc
     if (sourceDescription.Format == DXGI_FORMAT_Y410)
         defines.push_back({"WM_INPUT_Y410", "1"});
     defines.push_back({nullptr, nullptr});
-    const HRESULT compiled = D3DCompile(copyShader, sizeof(copyShader) - 1, nullptr, defines.data(), nullptr, "main", "cs_5_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &code, &errors);
-    if (FAILED(compiled))
-        throw std::runtime_error("Compile video copy shader: " + (errors ? std::string(static_cast<const char*>(errors->GetBufferPointer()), errors->GetBufferSize()) : "unknown error"));
+    const auto code = shaderBytecode({copyShader, sizeof(copyShader) - 1}, defines, "Compile video copy shader");
     checkHr(device->CreateComputeShader(code->GetBufferPointer(), code->GetBufferSize(), nullptr, &frame->shader), "Create video copy shader");
     frame->completion.initialize(device, impl->immediate.Get());
     return std::unique_ptr<OclVideoFrame>(new OclVideoFrame(std::move(frame)));
@@ -784,15 +803,11 @@ std::unique_ptr<OclVideoOutput> OclVideoInterop::createOutput(AVBufferRef* encod
     buffer.Usage = D3D11_USAGE_IMMUTABLE;
     buffer.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
     checkHr(device->CreateBuffer(&buffer, &data, &output->constants), "Create encoder constants");
-    ComPtr<ID3DBlob> code, errors;
-    const D3D_SHADER_MACRO defines[]{
-        {frames->sw_format == AV_PIX_FMT_VUYX ? "WM_OUTPUT_AYUV" : "WM_OUTPUT_YUY2", "1"    },
-        {nullptr,                                                                    nullptr}
-    };
-    const auto compiled = D3DCompile(
-        outputShader, sizeof(outputShader) - 1, nullptr, frames->sw_format == AV_PIX_FMT_NV12 ? nullptr : defines, nullptr, "main", "cs_5_0", D3DCOMPILE_OPTIMIZATION_LEVEL3, 0, &code, &errors);
-    if (FAILED(compiled))
-        throw std::runtime_error("Compile encoder shader: " + (errors ? std::string(static_cast<const char*>(errors->GetBufferPointer()), errors->GetBufferSize()) : "unknown error"));
+    std::vector<D3D_SHADER_MACRO> defines;
+    if (frames->sw_format != AV_PIX_FMT_NV12)
+        defines.push_back({frames->sw_format == AV_PIX_FMT_VUYX ? "WM_OUTPUT_AYUV" : "WM_OUTPUT_YUY2", "1"});
+    defines.push_back({nullptr, nullptr});
+    const auto code = shaderBytecode({outputShader, sizeof(outputShader) - 1}, defines, "Compile encoder shader");
     checkHr(device->CreateComputeShader(code->GetBufferPointer(), code->GetBufferSize(), nullptr, &output->shader), "Create encoder shader");
     output->completion.initialize(device, impl->immediate.Get());
     // validate allocation and mapping before accepting format
