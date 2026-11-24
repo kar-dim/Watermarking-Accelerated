@@ -4611,10 +4611,12 @@ TEST(OpenCLCacheTest, DeviceOwnersKeepBuffersAndProgramsAcrossThreadsAndSelectio
     EXPECT_EQ(OclQueueManager::current(), first);
     EXPECT_EQ(cl_utils::OpenCLKernelCache<3>::getProgram()(), program());
 }
+#endif
 
+#if defined(_USE_GPU_)
 TEST_F(WatermarkTest, MultiDeviceVideoBatchMatchesIsolatedFilesAndPublishesOneReportPerInput) {
     if (getAvailableDevices().size() < 2)
-        GTEST_SKIP() << "Two OpenCL GPUs are required";
+        GTEST_SKIP() << "Two GPUs are required";
     const fs::path input = tempDir / "reference.mkv";
     writeVideoFixture(input, false, AVCOL_TRC_BT709, true);
     auto singleSettings = makeVideoSettings(input.string());
