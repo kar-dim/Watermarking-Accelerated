@@ -664,7 +664,9 @@ void ImageSaver::saveImpl(ImageSession* session, const string& outPath, const si
                         if (failure) {
                             try {
                                 std::rethrow_exception(failure);
-                            } catch (const std::exception& e) { error = *e.what() ? e.what() : "Unknown save error"; } catch (...) { error = "Unknown save error"; }
+                            } catch (const std::exception& e) { error = *e.what() ? e.what() : "Unknown save error"; } catch (...) {
+                                error = "Unknown save error";
+                            }
                         }
                         finished.push_back(SaveResult{id, error});
                     } catch (...) { saveError = std::current_exception(); }
