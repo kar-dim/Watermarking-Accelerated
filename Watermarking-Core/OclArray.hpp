@@ -73,6 +73,13 @@ class OclArray {
         }
     }
 
+    static OclArray fromHostAsync(const int rows, const int cols, const int channels, const T* hostData, cl_command_queue queue) {
+        OclArray arr(rows, cols, channels, queue);
+        if (arr.mem)
+            checkCl(clEnqueueWriteBuffer(queue, arr.mem, CL_FALSE, 0, arr.bytes(), hostData, 0, nullptr, nullptr), "clEnqueueWriteBuffer");
+        return arr;
+    }
+
     ~OclArray() { freeArray(); }
 
     OclArray(const OclArray&) = delete;
@@ -137,16 +144,19 @@ class OclArray {
             checkCl(clEnqueueReadBuffer(queue, mem, CL_FALSE, 0, bytes(), dst, 0, nullptr, nullptr), "clEnqueueReadBuffer");
     }
 
-    // if the destination needs a pitch, we can use cudaMemcpy2DAsync to copy the data row by row, with the specified pitch for the destination
     void toHostPitched(T* dst, const int rowElements, const size_t dstPitchBytes) const {
         if (rowElements <= 0 || size() % rowElements != 0 || dstPitchBytes < InternalUtils::checkedProduct(static_cast<size_t>(rowElements), sizeof(T)))
             throw std::invalid_argument("Invalid pitched buffer layout");
         InternalUtils::checkedProduct(dstPitchBytes, static_cast<size_t>(size() / rowElements));
         if (mem) {
             const size_t rowBytes = static_cast<size_t>(rowElements) * sizeof(T);
-            const size_t origin[3] = {0, 0, 0};
-            const size_t region[3] = {rowBytes, static_cast<size_t>(size() / rowElements), 1};
-            checkCl(clEnqueueReadBufferRect(queue, mem, CL_TRUE, origin, origin, region, rowBytes, 0, dstPitchBytes, 0, dst, 0, nullptr, nullptr), "clEnqueueReadBufferRect");
+            if (dstPitchBytes == rowBytes) {
+                checkCl(clEnqueueReadBuffer(queue, mem, CL_TRUE, 0, bytes(), dst, 0, nullptr, nullptr), "clEnqueueReadBuffer");
+            } else {
+                const size_t origin[3] = {0, 0, 0};
+                const size_t region[3] = {rowBytes, static_cast<size_t>(size() / rowElements), 1};
+                checkCl(clEnqueueReadBufferRect(queue, mem, CL_TRUE, origin, origin, region, rowBytes, 0, dstPitchBytes, 0, dst, 0, nullptr, nullptr), "clEnqueueReadBufferRect");
+            }
         }
     }
 

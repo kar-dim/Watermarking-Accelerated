@@ -60,8 +60,12 @@ class OutputFile {
         if (temporary.empty())
             throw std::logic_error("No output file to finalize");
         const DWORD flags = MOVEFILE_WRITE_THROUGH | (replaceExisting ? MOVEFILE_REPLACE_EXISTING : 0);
-        if (!MoveFileExW(temporary.c_str(), destination.c_str(), flags))
-            throw std::system_error(GetLastError(), std::system_category(), replaceExisting ? "Could not replace output file" : "Could not publish output file");
+        for (unsigned attempt = 0; !MoveFileExW(temporary.c_str(), destination.c_str(), flags); ++attempt) {
+            const DWORD error = GetLastError();
+            if (error != ERROR_SHARING_VIOLATION || attempt == 3)
+                throw std::system_error(error, std::system_category(), replaceExisting ? "Could not replace output file" : "Could not publish output file");
+            Sleep(10u << attempt);
+        }
         temporary.clear();
     }
 

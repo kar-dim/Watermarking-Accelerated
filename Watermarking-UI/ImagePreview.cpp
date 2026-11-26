@@ -32,16 +32,20 @@ void ImagePreviewView::paintEvent(QPaintEvent* event) {
     painter.drawImage(target, image_);
 }
 
-// Copy original pixel buffer into a QImage for side by side preview
+// Copy or hand off original pixel buffer into a QImage for side by side preview
 QImage originalPreviewFromSession(WatermarkCore::ImageSession* session) {
     WatermarkCore::OriginalPixelData pixels = WatermarkCore::takeOriginalPixelData(session);
-    if (pixels.pixels.empty())
+    if (pixels.pixels.empty() || pixels.width <= 0 || pixels.height <= 0)
         return {};
     const QImage::Format format = pixels.channels == 4 ? QImage::Format_RGBA8888 : pixels.channels == 3 ? QImage::Format_RGB888 : QImage::Format_Grayscale8;
+    const size_t rowBytes = static_cast<size_t>(pixels.width) * pixels.channels;
+    if (rowBytes % 4 == 0) {
+        auto* owned = new std::vector<uint8_t>(std::move(pixels.pixels));
+        return QImage(owned->data(), pixels.width, pixels.height, static_cast<qsizetype>(rowBytes), format, [](void* ptr) { delete static_cast<std::vector<uint8_t>*>(ptr); }, owned);
+    }
     QImage preview(pixels.width, pixels.height, format);
     if (preview.isNull())
         return preview;
-    const size_t rowBytes = static_cast<size_t>(pixels.width) * pixels.channels;
     for (int row = 0; row < pixels.height; ++row)
         std::memcpy(preview.scanLine(row), pixels.pixels.data() + static_cast<size_t>(row) * rowBytes, rowBytes);
     return preview;

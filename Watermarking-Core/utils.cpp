@@ -204,20 +204,35 @@ int exifOrientation(const TinyEXIF::EXIFInfo& exif) { return exif.Orientation >=
 
 // decode image file to 8 bits per sample
 Gray8BufferIO loadImage8(const string& imageFile) {
-    // null for types it does not detect (the loader falls back to the extension)
-    const char* detectedType = cimg_library::cimg::ftype(nullptr, imageFile.c_str());
-    const string fileType = detectedType ? detectedType : "";
+    if (imageFile == "-")
+        throw std::invalid_argument("Image input requires a file path");
+    char header[12]{};
+    std::ifstream input(imageFile, std::ios::binary);
+    if (!input)
+        throw std::runtime_error("Cannot open image: " + imageFile);
+    input.read(header, sizeof(header));
+    const auto matches = [&](const char* signature, size_t length) { return input.gcount() >= static_cast<std::streamsize>(length) && !std::memcmp(header, signature, length); };
+    const bool jpeg = matches("\xff\xd8\xff", 3);
     unsigned int bitsPerValue = 8;
     Gray8BufferIO image;
-    if (fileType == "png")
+    if (matches("\x89PNG\r\n\x1a\n", 8))
         image.load_png(imageFile.c_str(), &bitsPerValue);
-    else if (fileType == "tif")
+    else if (matches("II*\0", 4) || matches("MM\0*", 4) || matches("II+\0", 4) || matches("MM\0+", 4))
         image.load_tiff(imageFile.c_str(), 0, 0, 1, &bitsPerValue);
+    else if (header[0] == 'P' && header[1] >= '1' && header[1] <= '6')
+        image.load_pnm(imageFile.c_str());
+    else if (jpeg)
+        image.load_jpeg(imageFile.c_str());
+    else if (matches("BM", 2))
+        image.load_bmp(imageFile.c_str());
+    else if (input.gcount() == 12 && matches("RIFF", 4) && !std::memcmp(header + 8, "WEBP", 4))
+        image.load_webp(imageFile.c_str());
     else
-        image.load(imageFile.c_str());
+        throw std::runtime_error("Unsupported image format: " + imageFile);
+    checkError(image.depth() != 1, "Unsupported image depth");
     checkError(bitsPerValue > 8, "Unsupported image: " + std::to_string(bitsPerValue) + " bits per sample, only 8-bit images are supported");
     // convert CMYK JPEG to RGB, JPEG has no alpha channel
-    checkError(fileType == "jpg" && image.spectrum() == 4, "Unsupported image: CMYK JPEG, only grayscale and RGB JPEG images are supported");
+    checkError(jpeg && image.spectrum() == 4, "Unsupported image: CMYK JPEG, only grayscale and RGB JPEG images are supported");
     InternalUtils::checkImageDimensions(image.height(), image.width());
     InternalUtils::checkedElements(image.height(), image.width(), image.spectrum());
     return image;
@@ -281,10 +296,24 @@ std::pair<ImageOutputBuffer, ImageBuffer> orientOnDevice(const ImageOutputBuffer
 std::pair<ImageOutputBuffer, ImageBuffer> uploadOriented(const Gray8BufferIO& img, const int orientation, std::vector<uint8_t>* preview) {
 #if defined(_USE_CUDA_)
     const ImageOutputBuffer source(img.height(), img.width(), img.spectrum(), img.data(), CudaStreamManager::getInstance().getComputeStream());
-#elif defined(_USE_OPENCL_)
-    const ImageOutputBuffer source(img.height(), img.width(), img.spectrum(), img.data(), OclQueueManager::getInstance().getQueueRaw());
-#endif
     return orientOnDevice(source, orientation, preview);
+#elif defined(_USE_OPENCL_)
+    const cl_command_queue queue = OclQueueManager::getInstance().getQueueRaw();
+    struct UnwindSync {
+        cl_command_queue queue;
+        bool armed = true;
+        ~UnwindSync() {
+            if (armed)
+                clFinish(queue);
+        }
+    } sync{queue};
+    const ImageOutputBuffer source = ImageOutputBuffer::fromHostAsync(img.height(), img.width(), img.spectrum(), img.data(), queue);
+    auto result = orientOnDevice(source, orientation, preview);
+    if (!preview)
+        OclQueueManager::getInstance().getQueue().finish();
+    sync.armed = false;
+    return result;
+#endif
 }
 } // namespace
 #endif
@@ -317,7 +346,8 @@ void InternalUtils::saveImage(const string& imagePath, const string& suffix, con
     const bool hasAlpha = !alphaChannel.empty();
 #if defined(_USE_CUDA_)
     // async save may run on another thread, activate device first
-    CUDA_CHECK(cudaSetDevice(watermark.getDeviceIndex()));
+    const cuda_utils::ScopedDevice binding(watermark.getDeviceIndex());
+    CUDA_CHECK(binding.status);
     auto stream = CudaStreamManager::getInstance().getComputeStream();
     CudaArray<uint8_t> rowMajor(rows, cols, channels, stream);
     cuda_utils::launchColMajorToRowMajorU8Kernel(watermark.data(), rowMajor.data(), cols, rows, channels, stream);
@@ -337,8 +367,11 @@ void InternalUtils::saveImage(const string& imagePath, const string& suffix, con
 #endif
     Gray8BufferIO output(cols, rows, 1, hasAlpha ? 4 : channels);
     rowMajor.toHost(output.data());
-    if (hasAlpha)
-        std::memcpy(output.data() + (3 * cols * rows), alphaChannel.data(), cols * rows);
+    if (hasAlpha) {
+        const size_t planeSize = static_cast<size_t>(cols) * rows;
+        checkError(alphaChannel.size() != planeSize, "Invalid alpha plane size");
+        std::memcpy(output.data() + (3 * planeSize), alphaChannel.data(), planeSize);
+    }
     saveCimgByExtension(output, watermarkedFile);
 #elif defined(_USE_EIGEN_)
     const auto cimgToSave = watermark.isRGB() ? eigen_utils::eigenRgbToCimg(watermark.getRGB(), alphaChannel, parallel) : eigen_utils::eigenGrayToCimg(watermark.getGray(), parallel);
@@ -391,10 +424,13 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile, const bool cap
     rows = swapAxes ? cimgRgb.width() : cimgRgb.height();
     cols = swapAxes ? cimgRgb.height() : cimgRgb.width();
 #else
-    constexpr bool hostImage = true;
-    rotate(cimgRgb, orientation);
-    rows = cimgRgb.height();
-    cols = cimgRgb.width();
+    const bool hostImage = captureOriginal || channels == 4;
+    const int eigenOrientation = hostImage ? 1 : orientation;
+    if (hostImage)
+        rotate(cimgRgb, orientation);
+    const bool swapAxes = eigenOrientation >= 5 && eigenOrientation <= 8;
+    rows = swapAxes ? cimgRgb.width() : cimgRgb.height();
+    cols = swapAxes ? cimgRgb.height() : cimgRgb.width();
 #endif
 
     if (captureOriginal && (channels == 1 || channels == 3 || channels == 4)) {
@@ -410,8 +446,6 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile, const bool cap
 #if defined(_USE_GPU_)
 #if defined(_USE_CUDA_)
     auto stream = CudaStreamManager::getInstance().getComputeStream();
-#elif defined(_USE_OPENCL_)
-    auto stream = OclQueueManager::getInstance().getQueueRaw();
 #endif
     std::vector<uint8_t>* devicePreview = captureOriginal && !hostImage ? &buf.originalPreview : nullptr;
     switch (channels) {
@@ -440,14 +474,12 @@ ImageFileBuffer InternalUtils::loadImage(const string& imageFile, const bool cap
 #if defined(_USE_CUDA_)
     if (!devicePreview)
         CUDA_CHECK(cudaStreamSynchronize(stream));
-#elif defined(_USE_OPENCL_)
-    clFinish(stream);
 #endif
 #elif defined(_USE_EIGEN_)
     switch (channels) {
-    case 1: image = eigen_utils::cimgToEigenGray(cimgRgb, parallel); break;
+    case 1: image = eigen_utils::cimgToEigenGray(cimgRgb, parallel, eigenOrientation); break;
     case 3: {
-        auto [rgb, gray] = eigen_utils::cimgToEigenRgbAndGray(cimgRgb, parallel);
+        auto [rgb, gray] = eigen_utils::cimgToEigenRgbAndGray(cimgRgb, parallel, eigenOrientation);
         rgbImage = std::move(rgb);
         image = std::move(gray);
         break;
@@ -491,11 +523,6 @@ ImageBuffer InternalUtils::castToFloatGray(const ImageOutputBuffer& buffer, cons
     cl_utils::launchU8ToFloatGray(buffer.clBuffer(), gray.clBuffer(), planeSize, channels, mgr.getQueue());
     return gray;
 #else
-    if (isRGB) {
-        const auto& rgbU8 = buffer.getRGB();
-        return ImageBuffer((rgbU8[0].cast<float>() * kLumaR + rgbU8[1].cast<float>() * kLumaG + rgbU8[2].cast<float>() * kLumaB).eval());
-    } else {
-        return ImageBuffer(buffer.getGray().cast<float>());
-    }
+    return isRGB ? eigen_utils::u8RgbToFloatGray(buffer.getRGB()) : eigen_utils::u8GrayToFloat(buffer.getGray());
 #endif
 }

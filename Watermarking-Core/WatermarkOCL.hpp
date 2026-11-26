@@ -1,5 +1,6 @@
 #pragma once
 #include "buffer.hpp"
+#include "MeShiftLayout.hpp"
 #include "OclArray.hpp"
 #include "OclQueueManager.hpp"
 #include "opencl_init.h"
@@ -57,8 +58,7 @@ class WatermarkOCL final : public WatermarkBase {
         const cl::Buffer borderCopy = copyBorderRows ? borderRowsCopy.clBuffer() : cl::Buffer();
         copyBorderRowsKernel = cl::Kernel(program, "me_copy_border_rows");
         shiftSumsKernel = cl::Kernel(program, "me_shift_sums");
-        const size_t shiftScratch = reductionMode(program) == ReductionMode::Subgroup ? reductionScratchBytes(program, "me_shift_sums", cl::NDRange(groupSize), maxGroupShifts)
-                                                                                      : static_cast<size_t>(16 * groupSize + groupSize) * sizeof(float);
+        const size_t shiftScratch = shiftScratchBytes(program, p, groupSize);
         setArgs(shiftSumsKernel, cl::Buffer(), borderCopy, shiftSums.clBuffer(), this->baseCols, this->baseRows, shiftInteriorBlocks, borderBlocksPerLine, cl::Local(shiftScratch));
         buildSystemKernel = cl::Kernel(program, "me_build_system");
         setArgs(buildSystemKernel, cl::Buffer(), shiftSums.clBuffer(), solverSystem.clBuffer(), this->baseCols, this->baseRows);
@@ -94,33 +94,21 @@ class WatermarkOCL final : public WatermarkBase {
     }
 
   private:
-    using WatermarkBase::alignUp;
-
-    static constexpr int localSize = (p * p) - 1;
+    using LayoutInfo = MeShiftLayout<p>;
+    static constexpr int localSize = LayoutInfo::localSize;
     // shift sums layout, must match kernel defines in kernels.hpp
-    static constexpr int pad = p / 2;
-    static constexpr int maxShift = p - 1;
-    static constexpr int numShifts = ((((2 * maxShift) + 1) * ((2 * maxShift) + 1)) + 1) / 2;
-    static constexpr int borderSize = 4 * pad;
-    static constexpr int shiftSumsSize = numShifts * (1 + (2 * borderSize));
-    static constexpr int shiftGroups = p >= 9 ? 3 : (p >= 7 ? 2 : 1);
-    static constexpr int firstShift(const int dc) { return dc == 0 ? 0 : (maxShift + 1) + ((dc - 1) * (2 * maxShift + 1)); }
-    static constexpr int maxGroupShifts = [] {
-        int largest = 0;
-        for (int group = 0; group < shiftGroups; ++group) {
-            const int firstDc = group * (maxShift + 1) / shiftGroups;
-            const int lastDc = (group + 1) * (maxShift + 1) / shiftGroups;
-            const int end = lastDc > maxShift ? numShifts : firstShift(lastDc);
-            largest = std::max(largest, end - firstShift(firstDc));
-        }
-        return largest;
-    }();
-    static constexpr int interiorCols = p >= 7 ? 2 : 1;
-    static constexpr int interiorRun = 8;
-    static constexpr bool copyBorderRows = p >= 7;
-    static constexpr int borderCopyRows = 6 * pad;
+    static constexpr int pad = LayoutInfo::pad;
+    static constexpr int maxShift = LayoutInfo::maxShift;
+    static constexpr int numShifts = LayoutInfo::numShifts;
+    static constexpr int borderSize = LayoutInfo::borderSize;
+    static constexpr int shiftSumsSize = LayoutInfo::shiftSumsSize;
+    static constexpr int shiftGroups = LayoutInfo::shiftGroups;
+    static constexpr int interiorCols = LayoutInfo::interiorCols;
+    static constexpr int interiorRun = LayoutInfo::interiorRun;
+    static constexpr bool copyBorderRows = LayoutInfo::copyBorderRows;
+    static constexpr int borderCopyRows = LayoutInfo::borderCopyRows;
     // ME solver system (Rx packed lower triangular, then rx), exact fixed point
-    static constexpr int solverSystemSize = ((localSize * (localSize + 1)) / 2) + localSize;
+    static constexpr int solverSystemSize = LayoutInfo::solverSystemSize;
     // inner shift sums work-groups per compute unit
     static constexpr int residentGroupsPerUnit = 2;
 
@@ -158,8 +146,11 @@ class WatermarkOCL final : public WatermarkBase {
         setArgs(errorK, cl::Buffer(), this->randomMatrix.clBuffer(), localU.clBuffer(), coefficients.clBuffer(), sumSq.clBuffer(), this->baseCols, this->baseRows, stopFlag.clBuffer(),
             cl::Local(reductionScratchBytes(program, "me_error_sequence_u_sumsq_fused", errorLocal, 1)));
         cl::Kernel rgbK(program, "apply_watermark_rgb");
+        setArgs(rgbK, cl::Buffer(), localU.clBuffer(), sumSq.clBuffer(), cl::Buffer(), this->strengthNumerator, this->totalPixels);
         cl::Kernel grayK(program, "apply_watermark_gray");
+        setArgs(grayK, cl::Buffer(), localU.clBuffer(), sumSq.clBuffer(), cl::Buffer(), this->strengthNumerator, this->totalPixels);
         cl::Kernel rowMajorK(program, "apply_watermark_row_major");
+        setArgs(rowMajorK, cl::Buffer(), localU.clBuffer(), sumSq.clBuffer(), cl::Buffer(), this->strengthNumerator, this->baseCols, this->baseRows);
         u = std::move(localU);
         meErrorKernel = std::move(errorK);
         applyRgbKernel = std::move(rgbK);
@@ -210,12 +201,13 @@ class WatermarkOCL final : public WatermarkBase {
                 // scale u by strength and add to channels or luma
                 cl::Kernel& apply = inputImage ? applyRgbKernel : (outputLayout == Layout::ColMajor ? applyGrayKernel : applyRowMajorKernel);
                 const cl::Buffer source = inputImage ? inputImage->clBuffer() : gray;
+                apply.setArg(0, source);
+                apply.setArg(3, output.clBuffer());
+                apply.setArg(4, this->strengthNumerator);
                 if (&apply == &applyRowMajorKernel) {
-                    setArgs(apply, source, u.clBuffer(), sumSq.clBuffer(), output.clBuffer(), this->strengthNumerator, this->baseCols, this->baseRows);
                     const int tileRows = groupSize / 32;
                     enqueue(apply, cl::NDRange(roundUp(this->baseRows, 32), ((this->baseCols + 31) / 32) * tileRows), cl::NDRange(32, tileRows));
                 } else {
-                    setArgs(apply, source, u.clBuffer(), sumSq.clBuffer(), output.clBuffer(), this->strengthNumerator, this->totalPixels);
                     enqueue(apply, applyGlobal, cl::NDRange(groupSize));
                 }
             },

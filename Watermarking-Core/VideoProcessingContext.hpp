@@ -79,6 +79,15 @@ struct VideoSession {
     // frame processing buffers reused per frame
     ImageBuffer inputFrame;
     ImageOutputBuffer watermarkedFrame;
+#if defined(_USE_CUDA_)
+    CudaArray<uint8_t> hostYScratch;
+    CudaArray<uint8_t> chromaScratch;
+    CudaArray<uint8_t> hdrUvScratch;
+    CudaArray<uint8_t> hdrYScratch;
+    CudaArray<uint16_t> hdrPlanarScratch;
+#elif defined(_USE_OPENCL_)
+    OclArray<uint8_t> hostYScratch;
+#endif
     // output encoding in embed mode
     OutputFile outputFile; // destroyed after FFmpeg contexts close handles
     video_utils::AVOutputFormatContextPtr outputFormatCtx;
@@ -90,12 +99,14 @@ struct VideoSession {
     bool reportedDtsRepair = false;
     // newest encoded packet is held back to stretch last packet in decode order to presentation end
     video_utils::AVPacketPtr heldPacket;
+    video_utils::AVPacketPtr encodePacket;
     bool holdingPacket = false;
     bool stretchLastPacket = false;
     int64_t presentationEnd = AV_NOPTS_VALUE;
     int64_t firstReorderDelay = 0;
     uint64_t encodedPackets = 0;
-    inline std::pair<int, int> videoDims() const { return {videoStream->codecpar->height, videoStream->codecpar->width}; }
+    std::pair<int, int> dimensions{};
+    inline std::pair<int, int> videoDims() const { return dimensions; }
 };
 
 } // namespace WatermarkCore

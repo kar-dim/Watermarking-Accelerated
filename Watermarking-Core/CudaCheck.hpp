@@ -5,10 +5,34 @@
 #include <string>
 
 /*!
- *  \brief  CUDA runtime error checking helper
+ *  \brief  CUDA runtime error checking helper and Scoped Device management
  *  \author Dimitris Karatzas
  */
 namespace cuda_utils {
+class ScopedDevice {
+  public:
+    explicit ScopedDevice(int device) noexcept {
+        if (device < 0)
+            return;
+        status = cudaGetDevice(&previous);
+        if (status == cudaSuccess && previous != device) {
+            status = cudaSetDevice(device);
+            changed = status == cudaSuccess;
+        }
+    }
+    ~ScopedDevice() {
+        if (changed)
+            cudaSetDevice(previous);
+    }
+    ScopedDevice(const ScopedDevice&) = delete;
+    ScopedDevice& operator=(const ScopedDevice&) = delete;
+    cudaError_t status = cudaSuccess;
+
+  private:
+    int previous = -1;
+    bool changed = false;
+};
+
 class CudaError : public std::runtime_error {
   public:
     CudaError(const cudaError_t code, const std::string& message) : std::runtime_error(message), code(code) {}

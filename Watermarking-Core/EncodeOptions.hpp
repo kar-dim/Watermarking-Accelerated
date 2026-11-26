@@ -27,6 +27,7 @@ struct ParsedEncodeOptions {
 };
 
 ParsedEncodeOptions parseEncodeOptions(const std::string& text);
+void applyX265ThreadDefaults(ParsedEncodeOptions& parsed, int cpuThreads);
 std::string hardwareEncoderDefaults(std::uint32_t vendor);
 const AVCodec* findVideoEncoder(const std::string& name, bool hardware);
 unsigned codecTagFromString(const std::string& tag);

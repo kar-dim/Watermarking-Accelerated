@@ -1,3 +1,7 @@
+/*!
+ *  \brief  Transfer tables for GPU HDR conversion
+ *  \author Dimitris Karatzas
+ */
 #pragma once
 
 #include <cstddef>

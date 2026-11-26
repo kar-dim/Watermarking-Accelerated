@@ -244,6 +244,7 @@ QMessageBox {
 }
 
 QLabel#videoStatus { color: #c1c6d7; padding: 4px; }
+QLabel#videoStatus[state="running"] { color: @WARNING@; }
 QLabel#videoStatus[state="done"] { color: @ACCENT_LIGHT@; }
 QLabel#videoStatus[state="error"] { color: @ERROR@; }
 QPlainTextEdit {

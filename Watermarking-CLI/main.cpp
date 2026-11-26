@@ -8,12 +8,11 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
-#include <cerrno>
 #include <charconv>
 #include <chrono>
 #include <cmath>
-#include <cstdlib>
 #include <cstdint>
+#include <cstdlib>
 #include <exception>
 #include <filesystem>
 #include <format>
@@ -230,6 +229,14 @@ Example: Watermarking-CLI --image.path input.png --output_path output.png
 }
 
 class Settings {
+    static const char* numberStart(const string& value) {
+        const auto first = value.find_first_not_of(" \t\r\n\v\f");
+        if (first == string::npos)
+            return value.data() + value.size();
+        const bool positive = value[first] == '+' && first + 1 < value.size() && value[first + 1] != '-';
+        return value.data() + first + positive;
+    }
+
   public:
     explicit Settings(const std::map<string, string>& values) : values_(values) {}
 
@@ -240,20 +247,18 @@ class Settings {
 
     long GetInteger(const string& section, const string& name, const long defaultValue) const {
         const string value = Get(section, name, std::to_string(defaultValue));
-        errno = 0;
-        char* end = nullptr;
-        const long parsed = std::strtol(value.c_str(), &end, 10);
-        if (errno != 0 || end == value.c_str() || *end != '\0')
+        long parsed = 0;
+        const auto [ptr, ec] = std::from_chars(numberStart(value), value.data() + value.size(), parsed);
+        if (ec != std::errc{} || ptr != value.data() + value.size())
             throw std::runtime_error("Invalid integer for '" + section + "." + name + "': " + value);
         return parsed;
     }
 
     float GetFloat(const string& section, const string& name, const float defaultValue) const {
         const string value = Get(section, name, std::to_string(defaultValue));
-        errno = 0;
-        char* end = nullptr;
-        const float parsed = std::strtof(value.c_str(), &end);
-        if (errno != 0 || end == value.c_str() || *end != '\0' || !std::isfinite(parsed))
+        float parsed = 0.0f;
+        const auto [ptr, ec] = std::from_chars(numberStart(value), value.data() + value.size(), parsed);
+        if (ec != std::errc{} || ptr != value.data() + value.size() || !std::isfinite(parsed))
             throw std::runtime_error("Invalid number for '" + section + "." + name + "': " + value);
         return parsed;
     }
@@ -574,6 +579,13 @@ static int runCliBenchmark(const Settings& settings, const float psnr, const boo
     const fs::path outputPath = settings.Get("image", "benchmark_output_path", (outputDir / (backend + ".csv")).string());
     if (outputPath.has_parent_path())
         fs::create_directories(outputPath.parent_path());
+    const bool outputExists = fs::exists(outputPath);
+    for (const auto& image : images) {
+        if (!fs::is_regular_file(image.path))
+            throw std::runtime_error("Benchmark image not found: " + string(image.path));
+        if (outputExists && fs::equivalent(outputPath, image.path))
+            throw std::invalid_argument("Benchmark CSV and input image must be different files");
+    }
     std::ofstream output(outputPath, std::ios::trunc);
     if (!output)
         throw std::runtime_error("Could not write benchmark CSV: " + outputPath.string());
@@ -591,8 +603,6 @@ static int runCliBenchmark(const Settings& settings, const float psnr, const boo
     for (const int p : predictionOrders) {
         auto session = createImageSession(watermarkPassword, p, psnr);
         for (const auto& image : images) {
-            if (!fs::is_regular_file(image.path))
-                throw std::runtime_error("Benchmark image not found: " + string(image.path));
             loadImage(session.get(), image.path);
 
             const auto embedOnce = [&]() {
@@ -665,14 +675,13 @@ int main(const int argc, char* argv[]) {
             throw std::invalid_argument("--image.devices applies to image batch modes");
         if (!videoBatch && !options.Get("video", "devices", "").empty())
             throw std::invalid_argument("--video.devices applies to video batch modes");
-        if (videoFile.empty()) {
-            if (commandLine.settings.contains("video.path"))
-                throw std::invalid_argument("--video.path cannot be empty");
-            for (const auto& [key, value] : commandLine.settings) {
-                (void)value;
-                if (key.starts_with("video."))
-                    throw std::invalid_argument("Video option '--" + key + "' requires '--video.path'");
-            }
+        if (videoFile.empty() && commandLine.settings.contains("video.path"))
+            throw std::invalid_argument("--video.path cannot be empty");
+        for (const auto& [key, value] : commandLine.settings) {
+            if (videoFile.empty() && key.starts_with("video."))
+                throw std::invalid_argument("Video option '--" + key + "' requires '--video.path'");
+            if (!videoFile.empty() && key.starts_with("image."))
+                throw std::invalid_argument("Image option '--" + key + "' cannot be used with '--video.path'");
         }
         // Batch workers choose their own devices, avoid an unused main-thread GPU context
         if (!videoBatch && !imageBatch)
@@ -680,12 +689,12 @@ int main(const int argc, char* argv[]) {
         const float psnr = options.GetFloat("global", "psnr", 40.0f);
         if (!std::isfinite(psnr) || psnr <= 0)
             throw std::runtime_error("PSNR must be a finite number greater than 0");
-        if (commandLine.benchmark)
-            return runCliBenchmark(options, psnr, commandLine.benchmarkSave);
 
         const int p = options.GetInteger("global", "p", 3);
         if (p != 3 && p != 5 && p != 7 && p != 9)
             throw std::runtime_error("p must be 3, 5, 7 or 9");
+        if (commandLine.benchmark)
+            return runCliBenchmark(options, psnr, commandLine.benchmarkSave);
         if (!videoFile.empty())
             exitCode = testForVideo(options, videoFile, p, psnr);
         else if (imageMode == "batch_embed")

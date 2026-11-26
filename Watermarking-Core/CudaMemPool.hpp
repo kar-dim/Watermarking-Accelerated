@@ -1,18 +1,16 @@
 #pragma once
-#include <cuda_runtime.h>
 #include "CheckedSize.hpp"
 #include "CudaCheck.hpp"
 #include <algorithm>
+#include <bit>
+#include <cuda_runtime.h>
 #include <mutex>
-#include <stdexcept>
 #include <string>
 #include <unordered_map>
 
 /*!
- *  \brief  Free-list memory pool for CUDA device pointers, allocations are rounded up to the next
- *          power of 2 so that images with similar dimensions are put in the same "bucket",
- *          a maximum capacity cap, set based on available VRAM prevents overflow to RAM.
- *          Owned by CudaStreamManager.
+ *  \brief  Free-list CUDA device pool owned by CudaStreamManager
+ *          Allocations round to powers of 2 for bucket reuse, capped by free VRAM
  *  \author Dimitris Karatzas
  */
 class CudaMemPool {
@@ -22,17 +20,11 @@ class CudaMemPool {
     size_t maxPoolBytes = 0;
     std::mutex mtx;
 
-    static size_t roundUpPow2(size_t v) {
-        if (v <= 1)
-            return 1;
-        v--;
-        v |= v >> 1;
-        v |= v >> 2;
-        v |= v >> 4;
-        v |= v >> 8;
-        v |= v >> 16;
-        v |= v >> 32;
-        return v + 1;
+    void clearIdle(cudaStream_t stream) {
+        for (auto& [sz, ptr] : memList)
+            cudaFreeAsync(ptr, stream);
+        memList.clear();
+        pooledBytes = 0;
     }
 
   public:
@@ -43,7 +35,7 @@ class CudaMemPool {
     CudaMemPool& operator=(const CudaMemPool&) = delete;
 
     void setCapacity(const size_t totalVramBytes) {
-        // Leave at most 2GB ofVRAM for allocators outside this pool (like codecs)
+        // Idle buffers can crowd out allocations of other sizes
         constexpr size_t maxIdleBytes = 512ull << 20;
         maxPoolBytes = std::clamp<size_t>(totalVramBytes / 8, 1, maxIdleBytes);
     }
@@ -60,6 +52,11 @@ class CudaMemPool {
         }
         void* ptr = nullptr;
         cudaError_t err = cudaMallocAsync(&ptr, rounded, stream);
+        if (err == cudaErrorMemoryAllocation && !memList.empty()) {
+            cudaGetLastError();
+            clearIdle(stream);
+            err = cudaMallocAsync(&ptr, rounded, stream);
+        }
         // the error code lets batches retire a lost device
         if (err != cudaSuccess)
             throw cuda_utils::CudaError(err, "cudaMallocAsync failed: " + std::string(cudaGetErrorString(err)));
@@ -69,7 +66,7 @@ class CudaMemPool {
     void release(const size_t bytes, void* ptr, cudaStream_t stream) noexcept {
         if (!ptr)
             return;
-        const size_t rounded = roundUpPow2(bytes);
+        const size_t rounded = std::bit_ceil(bytes);
         std::lock_guard lock(mtx);
         if (maxPoolBytes > 0 && (rounded > maxPoolBytes || pooledBytes > maxPoolBytes - rounded)) {
             cudaFreeAsync(ptr, stream);
@@ -83,9 +80,6 @@ class CudaMemPool {
 
     void reset(cudaStream_t stream) {
         std::lock_guard lock(mtx);
-        for (auto& [sz, ptr] : memList)
-            cudaFreeAsync(ptr, stream);
-        memList.clear();
-        pooledBytes = 0;
+        clearIdle(stream);
     }
 };

@@ -38,12 +38,11 @@ double calculateCV(const std::vector<double>& times) {
  *  \author Dimitris Karatzas
  */
 
-// Initialize benchmark worker with selected compute device index
 BenchmarkWorker::BenchmarkWorker(const int deviceIndex, QObject* parent) : QThread(parent), deviceIndex(deviceIndex) {}
 
 void BenchmarkWorker::run() {
     try {
-        // read the image files (which are embedded in the executable) and write them to temporary folder
+        // Extract bundled resource samples so Core APIs load them from disk
         if (tempDir.isValid()) {
             const QDir resourceDir(":/samples");
             for (const QString& fileName : resourceDir.entryList(QDir::Files)) {
@@ -54,22 +53,22 @@ void BenchmarkWorker::run() {
                         outFile.write(resFile.readAll());
                 }
             }
-            // we can load the images from this temp folder
             inputFolder = tempDir.path();
         } else {
             emit benchmarkFinished(0.0, 0.0, 0);
             return;
         }
 
-        // Select the GPU for this worker thread before creating any buffers
+        // Select GPU before creating any buffers
         initializeEnvironment(deviceIndex);
-        buildOpenCLKernels(); // NO-OP for non-OpenCL backends, but we call it here to ensure any necessary pre-compilation is done before the benchmark loop starts
+        const DeviceMemoryCleanup cleanup(deviceIndex);
+        // Pre-compile OpenCL kernels before the timed loop (no-op on other backends)
+        buildOpenCLKernels();
         if (isInterruptionRequested()) {
             emit benchmarkCanceled();
             return;
         }
 
-        // check if the input directory which conntains the benchmark images is valid
         fs::path inputDir(inputFolder.toStdString());
         if (!fs::exists(inputDir) || !fs::is_directory(inputDir)) {
             emit benchmarkFinished(0.0, 0.0, 0);
@@ -202,20 +201,22 @@ void BenchmarkWorker::run() {
                             sumLogDetectFps += std::log(detectFps);
                             cellCount++;
                         }
-                        // GUI: convert the current watermarked image to a QImage format (interleaved RGB, transposed row-wise) for display in the GUI
-                        // and emit current FPS and time for this specific frame and step completion to the GUI for display
+                        // Convert and scale outside timed sections before queueing across threads
                         QImage& preview = previews[currentStep % previews.size()];
                         updatePreviewFromSession(session.get(), preview);
-                        emit resultReady(preview, p, psnr, avgEmbedMs, avgDetectMs, embedFps, detectFps, currentFileName, currentCorrelation);
+                        const int maxWidth = previewMaxWidth.load(std::memory_order_relaxed);
+                        const int maxHeight = previewMaxHeight.load(std::memory_order_relaxed);
+                        const QImage displayImg =
+                            (preview.width() > maxWidth || preview.height() > maxHeight) ? preview.scaled(maxWidth, maxHeight, Qt::KeepAspectRatio, Qt::SmoothTransformation) : preview;
+                        emit resultReady(displayImg, p, psnr, avgEmbedMs, avgDetectMs, embedFps, detectFps, currentFileName, currentCorrelation);
                         emit progressUpdated(++currentStep, totalSteps);
                     }
                 }
-            } catch (...) {
-                // if at least one file is not benchmarked, we consider it failure
+            } catch (const std::exception& error) {
                 if (isInterruptionRequested())
                     emit benchmarkCanceled();
                 else
-                    emit benchmarkFinished(0.0, 0.0, 0);
+                    emit benchmarkFinished(0.0, 0.0, 0, QString::fromUtf8(error.what()));
                 return;
             }
         }
@@ -229,10 +230,10 @@ void BenchmarkWorker::run() {
         const double finalDetectFps = (cellCount > 0) ? std::exp(sumLogDetectFps / cellCount) : 0.0;
         const int finalScore = static_cast<int>(std::round(std::sqrt(finalEmbedFps * finalDetectFps) * 10.0));
         emit benchmarkFinished(finalEmbedFps, finalDetectFps, finalScore);
-    } catch (...) {
+    } catch (const std::exception& error) {
         if (isInterruptionRequested())
             emit benchmarkCanceled();
         else
-            emit benchmarkFinished(0.0, 0.0, 0);
-    }
+            emit benchmarkFinished(0.0, 0.0, 0, QString::fromUtf8(error.what()));
+    } catch (...) { emit benchmarkFinished(0.0, 0.0, 0); }
 }

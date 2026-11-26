@@ -36,8 +36,6 @@ WatermarkBuffer WatermarkBase::generateWatermark(const std::string& watermarkPas
     cl_utils::launchGenerateWatermarkKernel(baseState, watermark.clBuffer(), numElements, queueManager.getQueue());
     return watermark;
 #elif defined(_USE_EIGEN_)
-    Eigen::ArrayXXf watermark(rows, cols);
-    WatermarkCrypto::generateFloatRoundedHalfWatermark(baseState, watermark.data(), numElements);
-    return WatermarkBuffer(std::move(watermark));
+    return WatermarkCrypto::generateHalfWatermark(baseState, numElements);
 #endif
 }

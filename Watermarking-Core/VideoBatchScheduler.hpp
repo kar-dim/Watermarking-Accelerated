@@ -215,9 +215,11 @@ class VideoBatchScheduler {
         const std::lock_guard lock(mutex_);
         for (const auto candidate : order_) {
             auto& record = records_.at(candidate);
-            if ((!id || candidate == id) && !terminal(record.view.state) && !record.active.empty()) {
+            if ((!id || candidate == id) && !terminal(record.view.state) && (!record.active.empty() || (id && record.view.state == VideoBatchState::Retrying))) {
                 record.skip = true;
                 stop(record);
+                settle(record);
+                refresh(record);
                 changed_.notify_all();
                 return true;
             }

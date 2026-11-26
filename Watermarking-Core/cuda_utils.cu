@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>
+#include <stdexcept>
 
 /*!
  *  \brief  CUDA kernel launch wrappers for image conversions, watermark generation, and reductions
@@ -102,6 +103,8 @@ void launchOrientRowMajorToColMajorKernel(
 
 void launchP010HdrToSdrKernel(const uint16_t* ySrc, const int yPitchBytes, const uint16_t* uvSrc, const int uvPitchBytes, uint8_t* yDst, const int yDstPitch, float* lumaDst, uint8_t* uvDst,
     const int uvDstPitch, const int width, const int height, const video_utils::ChromaSiting& siting, const video_utils::MobiusParams& mobius, const cudaStream_t stream, const bool planar10) {
+    if (width <= 0 || height <= 0 || (width & 1) != 0 || (height & 1) != 0)
+        throw std::invalid_argument("HDR conversion requires positive even dimensions");
     // one 32x8 block per 32x8 chroma pairs
     constexpr dim3 blockSize(32, 8);
     const dim3 gridSize((width / 2 + 31) / 32, (height / 2 + 7) / 8);

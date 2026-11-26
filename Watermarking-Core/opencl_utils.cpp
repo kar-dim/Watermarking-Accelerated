@@ -3,6 +3,7 @@
 #include "kernels/half_kernels.hpp"
 #include "kernels/kernels.hpp"
 #include "kernels/utility_kernels.hpp"
+#include "MeShiftLayout.hpp"
 #include "OclQueueManager.hpp"
 #include "opencl_utils.hpp"
 #include <algorithm>
@@ -117,7 +118,9 @@ bool tryBuildProgram(cl::Program& program, const cl::Device& device, const strin
     try {
         program.build(device, options.c_str());
         return true;
-    } catch (const cl::Error&) {
+    } catch (const cl::Error& error) {
+        if (error.err() != CL_BUILD_PROGRAM_FAILURE && error.err() != CL_INVALID_BUILD_OPTIONS)
+            throw;
         try {
             if (program.get() != nullptr)
                 buildLog = program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(device);
@@ -139,7 +142,7 @@ bool forcePortableReductionsRequested() {
 
 ReductionMode reductionMode(const cl::Program& program) {
     try {
-        const cl::Device device = OclQueueManager::getInstance().getDevice();
+        const cl::Device device = program.getInfo<CL_PROGRAM_DEVICES>().at(0);
         const string options = program.getBuildInfo<CL_PROGRAM_BUILD_OPTIONS>(device);
         if (options.find("WM_WORK_GROUP_REDUCTIONS") != string::npos)
             return ReductionMode::WorkGroupCollective;
@@ -149,15 +152,36 @@ ReductionMode reductionMode(const cl::Program& program) {
     return ReductionMode::Portable;
 }
 
+size_t shiftScratchBytes(const cl::Program& program, const int p, const int groupSize) {
+    if (reductionMode(program) != ReductionMode::Subgroup)
+        return static_cast<size_t>(17 * groupSize) * sizeof(float);
+    const int groups = meShiftGroups(p);
+    int largest = 0;
+    for (int group = 0; group < groups; ++group)
+        largest = std::max(largest, meFirstShift(p, (group + 1) * p / groups) - meFirstShift(p, group * p / groups));
+    return reductionScratchBytes(program, "me_shift_sums", cl::NDRange(groupSize), largest);
+}
+
 // every kernel of program can run workgroups of groupSize on device
-bool kernelsFit(cl::Program program, const cl::Device& device, const int groupSize) {
+bool kernelsFit(cl::Program program, const cl::Device& device, const int groupSize, const int p) {
     std::vector<cl::Kernel> programKernels;
     program.createKernels(&programKernels);
     const cl_ulong localMemory = device.getInfo<CL_DEVICE_LOCAL_MEM_SIZE>();
     // the local memory check catches drivers that reserve more than the kernel's tiles, the kernel would fail at its first launch
-    for (const auto& kernel : programKernels)
+    for (auto& kernel : programKernels) {
+        const auto name = kernel.getInfo<CL_KERNEL_FUNCTION_NAME>();
+        size_t scratch = 0;
+        if (name == "me_shift_sums")
+            scratch = shiftScratchBytes(program, p, groupSize);
+        else if (name == "me_error_sequence_u_sumsq_fused")
+            scratch = reductionScratchBytes(program, name.c_str(), cl::NDRange(groupSize), 1);
+        else if (name == "finalize_correlation")
+            scratch = 3 * groupSize * sizeof(float);
+        if (scratch)
+            kernel.setArg(kernel.getInfo<CL_KERNEL_NUM_ARGS>() - 1, cl::Local(scratch));
         if (kernel.getWorkGroupInfo<CL_KERNEL_WORK_GROUP_SIZE>(device) < static_cast<size_t>(groupSize) || kernel.getWorkGroupInfo<CL_KERNEL_LOCAL_MEM_SIZE>(device) > localMemory)
             return false;
+    }
     return true;
 }
 
@@ -165,57 +189,55 @@ cl::Program buildKernels(const int p) {
     auto& mgr = OclQueueManager::getInstance();
     cl::Context context = mgr.getContext();
     cl::Device device = mgr.getDevice();
-    try {
-        const bool forcePortable = forcePortableReductionsRequested();
-        const SubgroupDialect availableDialect = forcePortable ? SubgroupDialect::None : subgroupDialect(device);
-        // prefer Intel subgroup for shift sums acceleration
-        // on AMD and other devices prefer work-group path, Khronos subgroup reductions had bugs on some drivers
-        const bool useWorkGroupCollectives = !forcePortable && availableDialect != SubgroupDialect::Intel && supportsWorkGroupCollectives(device);
-        const SubgroupDialect dialect = useWorkGroupCollectives ? SubgroupDialect::None : availableDialect;
-        // native half storage passed rounding checks on Intel
-        // other drivers retain integer conversion, including AMD tie-rounding workaround
-        const bool nativeHalfStorage = dialect == SubgroupDialect::Intel && device.getInfo<CL_DEVICE_VENDOR_ID>() == 0x8086 && hasExtension(device.getInfo<CL_DEVICE_EXTENSIONS>(), "cl_khr_fp16");
-        // use newer language only when selected core feature requires it
-        const string standard = useWorkGroupCollectives || dialect == SubgroupDialect::Core ? latestOpenClStdOption(device) : openClStdOption(device);
-        const string reductionOptions = (forcePortable                ? " -DWM_DISABLE_SUBGROUPS=1"
-                                            : useWorkGroupCollectives ? " -DWM_WORK_GROUP_REDUCTIONS=1"
-                                                                      : subgroupBuildDefine(dialect)) +
-                                        string(nativeHalfStorage ? " -DWM_NATIVE_HALF_STORAGE=1" : "");
-        const char* description = forcePortable ? "forced portable local-memory reductions" : useWorkGroupCollectives ? "work-group collective reductions" : subgroupDescription(dialect);
-        for (int groupSize = static_cast<int>(std::min(256u, maxPow2WorkGroupSize(device))); groupSize >= 64; groupSize /= 2) {
-            const string baseOptions = standard + " -DWINDOW_SIZE=" + std::to_string(p) + " -DWG_SIZE=" + std::to_string(groupSize) + " -DDT_OWN=" + std::to_string(detectionTilePatches);
-            string buildLog;
-            cl::Program program(context, cl::Program::Sources{halfKernels, kernels});
-            if (tryBuildProgram(program, device, baseOptions + reductionOptions, buildLog)) {
-                if (kernelsFit(program, device, groupSize)) {
-                    cout << "OpenCL kernel p=" << p << ": " << description << ", work-group size " << groupSize << " (" << standard << ")\n";
-                    return program;
-                }
-                continue;
+    const bool forcePortable = forcePortableReductionsRequested();
+    const SubgroupDialect availableDialect = forcePortable ? SubgroupDialect::None : subgroupDialect(device);
+    // prefer Intel subgroup for shift sums acceleration
+    // on AMD and other devices prefer work-group path, Khronos subgroup reductions had bugs on some drivers
+    const bool useWorkGroupCollectives = !forcePortable && availableDialect != SubgroupDialect::Intel && supportsWorkGroupCollectives(device);
+    const SubgroupDialect dialect = useWorkGroupCollectives ? SubgroupDialect::None : availableDialect;
+    // native half storage passed rounding checks on Intel
+    // other drivers retain integer conversion, including AMD tie-rounding workaround
+    const bool nativeHalfStorage = dialect == SubgroupDialect::Intel && device.getInfo<CL_DEVICE_VENDOR_ID>() == 0x8086 && hasExtension(device.getInfo<CL_DEVICE_EXTENSIONS>(), "cl_khr_fp16");
+    // use newer language only when selected core feature requires it
+    const string standard = useWorkGroupCollectives || dialect == SubgroupDialect::Core ? latestOpenClStdOption(device) : openClStdOption(device);
+    const string reductionOptions = (forcePortable                ? " -DWM_DISABLE_SUBGROUPS=1"
+                                        : useWorkGroupCollectives ? " -DWM_WORK_GROUP_REDUCTIONS=1"
+                                                                  : subgroupBuildDefine(dialect)) +
+                                    string(nativeHalfStorage ? " -DWM_NATIVE_HALF_STORAGE=1" : "");
+    const char* description = forcePortable ? "forced portable local-memory reductions" : useWorkGroupCollectives ? "work-group collective reductions" : subgroupDescription(dialect);
+    for (int groupSize = static_cast<int>(std::min(256u, maxPow2WorkGroupSize(device))); groupSize >= 64; groupSize /= 2) {
+        const string baseOptions = standard + " -DWINDOW_SIZE=" + std::to_string(p) + " -DWG_SIZE=" + std::to_string(groupSize) + " -DDT_OWN=" + std::to_string(detectionTilePatches);
+        string buildLog;
+        cl::Program program(context, cl::Program::Sources{halfKernels, kernels});
+        if (tryBuildProgram(program, device, baseOptions + reductionOptions, buildLog)) {
+            if (kernelsFit(program, device, groupSize, p)) {
+                cout << "OpenCL kernel p=" << p << ": " << description << ", work-group size " << groupSize << " (" << standard << ")\n";
+                return program;
             }
-            if (useWorkGroupCollectives || dialect != SubgroupDialect::None) {
-                cout << "NOTE: OpenCL optimized reduction kernel build failed for p=" << p << ", using portable local-memory reductions.\n";
-                if (!buildLog.empty())
-                    cout << buildLog << "\n";
-                program = cl::Program(context, cl::Program::Sources{halfKernels, kernels});
-                buildLog.clear();
-                if (tryBuildProgram(program, device, baseOptions + " -DWM_DISABLE_SUBGROUPS=1", buildLog) && kernelsFit(program, device, groupSize))
-                    return program;
-            }
+            continue;
+        }
+        if (useWorkGroupCollectives || dialect != SubgroupDialect::None) {
+            cout << "NOTE: OpenCL optimized reduction kernel build failed for p=" << p << ", using portable local-memory reductions.\n";
             if (!buildLog.empty())
                 cout << buildLog << "\n";
+            program = cl::Program(context, cl::Program::Sources{halfKernels, kernels});
+            buildLog.clear();
+            if (tryBuildProgram(program, device, baseOptions + " -DWM_DISABLE_SUBGROUPS=1", buildLog) && kernelsFit(program, device, groupSize, p))
+                return program;
         }
-    } catch (const std::exception& ex) { cout << ex.what() << "\n"; }
+        if (!buildLog.empty())
+            cout << buildLog << "\n";
+    }
     throw std::runtime_error("Failed to build OpenCL kernels. Check the error messages above for details.");
 }
 
 int workGroupSize(const cl::Program& program) {
     const cl::Kernel kernel(program, "me_shift_sums");
-    return static_cast<int>(kernel.getWorkGroupInfo<CL_KERNEL_COMPILE_WORK_GROUP_SIZE>(OclQueueManager::getInstance().getDevice())[0]);
+    return static_cast<int>(kernel.getWorkGroupInfo<CL_KERNEL_COMPILE_WORK_GROUP_SIZE>(program.getInfo<CL_PROGRAM_DEVICES>().at(0))[0]);
 }
 
 bool usesNativeHalfStorage(const cl::Program& program) {
-    const auto& device = OclQueueManager::getInstance().getDevice();
+    const auto device = program.getInfo<CL_PROGRAM_DEVICES>().at(0);
     return program.getBuildInfo<CL_PROGRAM_BUILD_OPTIONS>(device).find("-DWM_NATIVE_HALF_STORAGE=1") != string::npos;
 }
 
@@ -232,8 +254,9 @@ cl::Program buildUtilityKernels() {
         return program;
     } catch (const cl::Error& e) {
         cout << "Could not build utility kernels, Reason: " << e.what() << "\n\n";
-        if (program.get() != NULL && program.getBuildInfo<CL_PROGRAM_BUILD_STATUS>(device) != CL_BUILD_SUCCESS)
-            cout << program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(device) << "\n";
+        if (e.err() != CL_BUILD_PROGRAM_FAILURE)
+            throw;
+        cout << program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(device) << "\n";
     } catch (const std::exception& ex) { cout << ex.what() << "\n"; }
     throw std::runtime_error("Failed to build OpenCL utility kernels. Check the error messages above for details.");
 }
@@ -287,7 +310,7 @@ std::size_t reductionScratchBytes(const cl::Program& program, const char* kernel
 
     std::size_t scratchSlots = workItems;
     try {
-        const cl::Device device = OclQueueManager::getInstance().getDevice();
+        const cl::Device device = program.getInfo<CL_PROGRAM_DEVICES>().at(0);
         const ReductionMode mode = reductionMode(program);
         if (mode == ReductionMode::WorkGroupCollective) {
             scratchSlots = 1;

@@ -68,6 +68,7 @@ class AuxiliaryMux {
     MediaLog log_;
     AuxiliaryPacketSink sink_;
     std::vector<int> inputToOutput_;
+    std::vector<int64_t> lastAudioDts_;
     std::vector<SubtitleTranscode> subtitleTranscodes_;
 };
 

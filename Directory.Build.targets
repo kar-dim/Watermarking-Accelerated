@@ -45,6 +45,7 @@
     <WatermarkingRuntimeFile Include="$(VCInstallDir)Redist\MSVC\$(VCToolsRedistVersion)\$(WatermarkingCrtSubDir)\*.dll" Condition="Exists('$(VCInstallDir)Redist\MSVC\$(VCToolsRedistVersion)\$(WatermarkingCrtSubDir)')" />
     <WatermarkingRuntimeFile Include="$(UniversalCRTSdkDir)bin\$(TargetPlatformVersion)\x64\ucrt\ucrtbased.dll" Condition="$(Configuration.Contains('Debug')) and Exists('$(UniversalCRTSdkDir)bin\$(TargetPlatformVersion)\x64\ucrt\ucrtbased.dll')" />
     <WatermarkingRuntimeFile Include="$(VCInstallDir)Redist\MSVC\$(VCToolsRedistVersion)\x64\Microsoft.VC$(PlatformToolsetVersion).OpenMP\vcomp140.dll" Condition="!$(Configuration.Contains('Debug')) and !$(Configuration.StartsWith('EIGEN_')) and Exists('$(VCInstallDir)Redist\MSVC\$(VCToolsRedistVersion)\x64\Microsoft.VC$(PlatformToolsetVersion).OpenMP\vcomp140.dll')" />
+    <WatermarkingRuntimeFile Include="$(VCInstallDir)Redist\MSVC\$(VCToolsRedistVersion)\debug_nonredist\x64\Microsoft.VC$(PlatformToolsetVersion).DebugOpenMP\vcomp140d.dll" Condition="$(Configuration.Contains('Debug')) and !$(Configuration.StartsWith('EIGEN_')) and Exists('$(VCInstallDir)Redist\MSVC\$(VCToolsRedistVersion)\debug_nonredist\x64\Microsoft.VC$(PlatformToolsetVersion).DebugOpenMP\vcomp140d.dll')" />
     <WatermarkingSampleFile Include="$(WatermarkingRoot)samples\**\*" Exclude="$(WatermarkingRoot)samples\videos\**\*" Condition="'$(MSBuildProjectName)' == 'Watermarking-CLI' or '$(MSBuildProjectName)' == 'Watermarking-Core-tests'" />
   </ItemGroup>
 

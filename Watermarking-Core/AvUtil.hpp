@@ -36,6 +36,16 @@ extern "C" {
 
 namespace video_utils {
 
+// deterministic input or option failure that will fail identically on every GPU
+struct NonRetryableMediaError : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+
+inline void checkMediaError(const bool condition, const std::string& message) {
+    if (condition)
+        throw NonRetryableMediaError(message);
+}
+
 using MediaLog = std::function<void(const std::string&)>;
 
 inline std::string avErrorText(const int avRet) {

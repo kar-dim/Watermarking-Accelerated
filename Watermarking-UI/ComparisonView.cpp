@@ -4,11 +4,14 @@
 #include <cmath>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPainterPath>
 #include <QPaintEvent>
 #include <QPen>
 #include <QPointF>
 #include <QRectF>
 #include <QSizeF>
+#include <QStyle>
+#include <QStyleOption>
 #include <QWheelEvent>
 
 /*!
@@ -16,7 +19,6 @@
  *  \author Dimitris Karatzas
  */
 
-// Configure comparison canvas defaults and enable mouse tracking
 ComparisonView::ComparisonView(QWidget* parent) : QWidget(parent) {
     setObjectName("comparisonCanvas");
     setMinimumSize(400, 330);
@@ -24,14 +26,12 @@ ComparisonView::ComparisonView(QWidget* parent) : QWidget(parent) {
     setCursor(Qt::OpenHandCursor);
 }
 
-// Assign images and reset view to initial center position
 void ComparisonView::setImages(const QImage& original, const QImage& watermarked) {
     original_ = original;
     watermarked_ = watermarked;
     resetView();
 }
 
-// Reset zoom and pan coordinates back to default centered position
 void ComparisonView::resetView() {
     zoom_ = 1.0;
     divider_ = 0.5;
@@ -39,16 +39,22 @@ void ComparisonView::resetView() {
     update();
 }
 
-// Render split view of both images with divider line and labels
 void ComparisonView::paintEvent(QPaintEvent*) {
     QPainter painter(this);
+    QStyleOption option;
+    option.initFrom(this);
+    style()->drawPrimitive(QStyle::PE_Widget, &option, &painter, this);
+    painter.setRenderHint(QPainter::Antialiasing);
     painter.setRenderHint(QPainter::SmoothPixmapTransform);
-    painter.fillRect(rect(), themePalette().canvas);
     if (!hasImages()) {
         painter.setPen(themePalette().muted);
         painter.drawText(rect(), Qt::AlignCenter, "Preview will appear here");
         return;
     }
+
+    QPainterPath clipPath;
+    clipPath.addRoundedRect(QRectF(rect()).adjusted(1, 1, -1, -1), 8, 8);
+    painter.setClipPath(clipPath);
 
     const double fit = std::min(double(width()) / watermarked_.width(), double(height()) / watermarked_.height());
     const QSizeF size = QSizeF(watermarked_.size()) * fit * zoom_;
@@ -57,11 +63,11 @@ void ComparisonView::paintEvent(QPaintEvent*) {
     const int splitX = static_cast<int>(std::round(divider_ * width()));
 
     painter.save();
-    painter.setClipRect(QRect(0, 0, splitX, height()));
+    painter.setClipRect(QRect(0, 0, splitX, height()), Qt::IntersectClip);
     painter.drawImage(target, original_);
     painter.restore();
     painter.save();
-    painter.setClipRect(QRect(splitX, 0, width() - splitX, height()));
+    painter.setClipRect(QRect(splitX, 0, width() - splitX, height()), Qt::IntersectClip);
     painter.drawImage(target, watermarked_);
     painter.restore();
 
@@ -79,7 +85,6 @@ void ComparisonView::paintEvent(QPaintEvent*) {
     painter.drawText(QRect(width() - 113, 12, 101, 24), Qt::AlignCenter, "Watermarked");
 }
 
-// Handle mouse wheel zoom centered around cursor position
 void ComparisonView::wheelEvent(QWheelEvent* event) {
     if (!hasImages()) {
         event->ignore();
@@ -93,7 +98,6 @@ void ComparisonView::wheelEvent(QWheelEvent* event) {
     event->accept();
 }
 
-// Handle mouse press to start panning or dragging divider
 void ComparisonView::mousePressEvent(QMouseEvent* event) {
     if (!hasImages() || event->button() != Qt::LeftButton)
         return;
@@ -104,7 +108,6 @@ void ComparisonView::mousePressEvent(QMouseEvent* event) {
     event->accept();
 }
 
-// Update divider split position or pan image offset on mouse move
 void ComparisonView::mouseMoveEvent(QMouseEvent* event) {
     if (!hasImages())
         return;
@@ -120,14 +123,14 @@ void ComparisonView::mouseMoveEvent(QMouseEvent* event) {
     }
 }
 
-// Reset dragging and panning flags on mouse release
-void ComparisonView::mouseReleaseEvent(QMouseEvent*) {
+void ComparisonView::mouseReleaseEvent(QMouseEvent* event) {
+    if (event->button() != Qt::LeftButton)
+        return;
     draggingDivider_ = false;
     panning_ = false;
     setCursor(Qt::OpenHandCursor);
 }
 
-// Double click resets zoom and pan back to initial state
 void ComparisonView::mouseDoubleClickEvent(QMouseEvent* event) {
     if (event->button() == Qt::LeftButton && hasImages()) {
         resetView();

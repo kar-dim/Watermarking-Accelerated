@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "buffer.hpp"
 #include "Eigen/Core"
@@ -49,14 +49,15 @@ class WatermarkEigen final : public WatermarkBase {
             output = ImageOutputBuffer(EigenArrayU8RGB{Gray8(baseRows, baseCols), Gray8(baseRows, baseCols), Gray8(baseRows, baseCols)});
         const auto& rgbIn = inputImage.getRGB();
         auto& rgbOut = output.getRGB();
+        const bool useParallel = static_cast<size_t>(baseRows) * baseCols >= 32768;
         if (!scale) {
-#pragma omp parallel for schedule(static)
+#pragma omp parallel for if (useParallel) schedule(static)
             for (int col = 0; col < baseCols; col++)
                 for (int channel = 0; channel < 3; channel++)
                     std::memcpy(rgbOut[channel].col(col).data(), rgbIn[channel].col(col).data(), static_cast<size_t>(baseRows));
             return;
         }
-#pragma omp parallel for schedule(static)
+#pragma omp parallel for if (useParallel) schedule(static)
         for (int col = 0; col < baseCols; col++)
             for (int channel = 0; channel < 3; channel++)
                 watermarkColumn(rgbIn[channel].col(col).data(), u.col(col).data(), *scale, rgbOut[channel].col(col).data());
@@ -73,8 +74,9 @@ class WatermarkEigen final : public WatermarkBase {
         if (!output.matches(outRows, outCols, false))
             output = ImageOutputBuffer(Gray8(outRows, outCols));
         auto& out = output.getGray();
+        const bool useParallel = static_cast<size_t>(baseRows) * baseCols >= 32768;
         if (!rowMajor) {
-#pragma omp parallel for schedule(static)
+#pragma omp parallel for if (useParallel) schedule(static)
             for (int col = 0; col < baseCols; col++) {
                 if (scale)
                     watermarkColumn(gray.col(col).data(), u.col(col).data(), strength, out.col(col).data());
@@ -83,7 +85,7 @@ class WatermarkEigen final : public WatermarkBase {
             }
             return;
         }
-#pragma omp parallel for schedule(static)
+#pragma omp parallel for if (useParallel) schedule(static)
         for (int row = 0; row < baseRows; row += 16) {
             if (row + 16 <= baseRows) {
                 int col = 0;
@@ -118,12 +120,12 @@ class WatermarkEigen final : public WatermarkBase {
         if (!predictionData.computeCoefficients(image.data()))
             return 0.0f;
         prepareWorkspaces();
-        const auto& w = randomMatrix.getGray();
+        const auto* w = randomMatrix.get();
         const auto imageColumn = [&](const int col) { return image.data() + (static_cast<size_t>(std::clamp(col, 0, baseCols - 1)) * baseRows); };
         double dot = 0.0;
         double sqError = 0.0;
         double sqMaskedError = 0.0;
-#pragma omp parallel reduction(+ : dot, sqError, sqMaskedError)
+#pragma omp parallel if (static_cast<size_t>(baseRows) * baseCols >= 32768) reduction(+ : dot, sqError, sqMaskedError)
         {
             // each thread keeps only the last p columns of e and of |e| * w (the correlation is scale-invariant, no max|e| division)
             ArrayXXf& columns = workspaces[omp_get_thread_num()];
@@ -137,13 +139,13 @@ class WatermarkEigen final : public WatermarkBase {
                 for (; next <= std::min(col + pad, baseCols - 1); next++) {
                     float* const errPtr = columns.col(next % p).data();
                     float* const maskOutPtr = columns.col(p + (next % p)).data();
-                    const float* const wPtr = w.col(next).data();
+                    const auto* wPtr = w + static_cast<size_t>(next) * baseRows;
                     errorColumn(imageColumn, next, errPtr);
                     int r = 0;
                     for (; r + Simd::lanes <= baseRows; r += Simd::lanes)
-                        Simd::store(maskOutPtr + r, Simd::mul(Simd::abs(Simd::load(errPtr + r)), Simd::load(wPtr + r)));
+                        Simd::store(maskOutPtr + r, Simd::mul(Simd::abs(Simd::load(errPtr + r)), Simd::loadHalf(wPtr + r)));
                     for (; r < baseRows; ++r)
-                        maskOutPtr[r] = std::abs(errPtr[r]) * wPtr[r];
+                        maskOutPtr[r] = std::abs(errPtr[r]) * _cvtsh_ss(wPtr[r]);
                 }
                 errorColumn(maskedColumn, col, maskedErrorPtr);
                 const float* const errPtr = columns.col(col % p).data();
@@ -325,18 +327,18 @@ class WatermarkEigen final : public WatermarkBase {
         if (u.size() == 0)
             u.resize(baseRows, baseCols);
         prepareWorkspaces();
-        const auto& w = randomMatrix.getGray();
+        const auto* w = randomMatrix.get();
         const auto imageColumn = [&](const int col) { return inputImage.data() + (static_cast<size_t>(std::clamp(col, 0, baseCols - 1)) * baseRows); };
         float maxAbs = 0.0f;
         double sumSq = 0.0;
-#pragma omp parallel reduction(max : maxAbs) reduction(+ : sumSq)
+#pragma omp parallel if (static_cast<size_t>(baseRows) * baseCols >= 32768) reduction(max : maxAbs) reduction(+ : sumSq)
         {
             // error column stays in cache between passes, full size error never stored
             float* const errPtr = workspaces[omp_get_thread_num()].col(0).data();
 #pragma omp for schedule(static)
             for (int col = 0; col < baseCols; col++) {
                 errorColumn(imageColumn, col, errPtr);
-                const float* const wPtr = w.col(col).data();
+                const auto* wPtr = w + static_cast<size_t>(col) * baseRows;
                 float* const uPtr = u.col(col).data();
                 Simd::Vec maxVec = Simd::zero();
                 Simd::Vec sqVec = Simd::zero();
@@ -344,7 +346,7 @@ class WatermarkEigen final : public WatermarkBase {
                 for (; r + Simd::lanes <= baseRows; r += Simd::lanes) {
                     const Simd::Vec eAbs = Simd::abs(Simd::load(errPtr + r));
                     maxVec = Simd::max(maxVec, eAbs);
-                    const Simd::Vec uv = Simd::mul(eAbs, Simd::load(wPtr + r));
+                    const Simd::Vec uv = Simd::mul(eAbs, Simd::loadHalf(wPtr + r));
                     Simd::store(uPtr + r, uv);
                     sqVec = Simd::fmadd(uv, uv, sqVec);
                 }
@@ -353,7 +355,7 @@ class WatermarkEigen final : public WatermarkBase {
                 for (; r < baseRows; ++r) {
                     const float eAbs = std::abs(errPtr[r]);
                     colMax = std::max(colMax, eAbs);
-                    const float uv = eAbs * wPtr[r];
+                    const float uv = eAbs * _cvtsh_ss(wPtr[r]);
                     uPtr[r] = uv;
                     colSq += static_cast<double>(uv) * uv;
                 }
@@ -362,8 +364,9 @@ class WatermarkEigen final : public WatermarkBase {
             }
         }
         // flat image: sum(u^2) with u normalized by max|e|
-        if (!(maxAbs > 0.0f) || sumSq <= 1e-3 * maxAbs * maxAbs)
+        if (!std::isfinite(maxAbs) || !std::isfinite(sumSq) || !(maxAbs > 0.0f) || sumSq <= 1e-3 * maxAbs * maxAbs)
             return std::nullopt;
-        return static_cast<float>(strengthFactor / std::sqrt(sumSq / totalPixels));
+        const float scale = static_cast<float>(strengthFactor / std::sqrt(sumSq / totalPixels));
+        return std::isfinite(scale) ? std::optional<float>(scale) : std::nullopt;
     }
 };

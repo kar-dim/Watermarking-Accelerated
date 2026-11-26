@@ -287,9 +287,10 @@ VideoBatchSummary runVideoBatch(const VideoBatchSettings& settings, const std::v
         }
     }
     report();
+    const int cpuStages = std::max(1, (settings.video.useHwDecoder ? 0 : 1) + (!settings.detect && !settings.video.useHwEncoder ? 1 : 0));
     // Decode, filters and encode share CPU time across all selected GPU workers
     const int cpuThreads = settings.video.cpuThreads > 0 ? settings.video.cpuThreads
-                           : devices.size() > 1          ? std::max(1, static_cast<int>(std::thread::hardware_concurrency()) / static_cast<int>(devices.size() * 3))
+                           : devices.size() > 1          ? std::max(1, static_cast<int>(std::thread::hardware_concurrency()) / static_cast<int>(devices.size() * cpuStages))
                                                          : 0;
     std::vector<std::jthread> workers;
     try {
@@ -300,6 +301,7 @@ VideoBatchSummary runVideoBatch(const VideoBatchSettings& settings, const std::v
                         return;
 #if defined(_USE_OPENCL_)
                     OclQueueManager::initialize(device.index, device.handle);
+                    const DeviceMemoryCleanup cleanup(device.index);
 #elif defined(_USE_CUDA_)
                     cudaDeviceProp current;
                     CUDA_CHECK(cudaGetDeviceProperties(&current, device.index));
@@ -365,11 +367,14 @@ VideoBatchSummary runVideoBatch(const VideoBatchSettings& settings, const std::v
                             bridge.update.detail = job.outputPath;
                             scheduler->complete(*claim, bridge.update, [&] { staged.commit(false); });
                         } catch (const std::exception& error) {
+                            if (dynamic_cast<const video_utils::NonRetryableMediaError*>(&error))
+                                retryable = false;
                             const VideoBatchState state = scheduler->fail(*claim, error.what(), retryable, lostDevice(error));
                             const std::string suffix = (state == VideoBatchState::Processing || state == VideoBatchState::Probing) ? " (another GPU continues it)"
                                                        : state == VideoBatchState::Retrying                                        ? " (will retry on another GPU)"
                                                                                                                                    : "";
-                            log(job.id, device.index, std::string(error.what()) + suffix);
+                            if (!(claim->stop.stop_requested() && state == VideoBatchState::Completed))
+                                log(job.id, device.index, std::string(error.what()) + suffix);
                         }
                         report();
                     }

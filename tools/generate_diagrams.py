@@ -77,20 +77,28 @@ class Flowchart:
         self.text(44, 94, title, size=34, weight=700)
         self.text(44, 126, subtitle, size=19, color=MUTED)
 
-    def rect(self, x, y, width, height, *, fill="none", stroke="none", radius=0, extra=""):
-        self.parts.append(
+    @staticmethod
+    def _rect(x, y, width, height, *, fill="none", stroke="none", radius=0, extra=""):
+        return (
             f'<rect x="{x}" y="{y}" width="{width}" height="{height}" '
             f'rx="{radius}" fill="{fill}" stroke="{stroke}"{extra}/>'
         )
 
-    def text(self, x, y, value, *, size=18, color=TEXT, weight=400,
-             anchor="start", mono=False, tracking=0):
+    @staticmethod
+    def _text(x, y, value, *, size=18, color=TEXT, weight=400, anchor="start", mono=False, tracking=0):
         family = MONO if mono else SANS
-        self.parts.append(
+        return (
             f'<text x="{x}" y="{y}" font-family="{escape(family, quote=True)}" '
             f'font-size="{size}" font-weight="{weight}" text-anchor="{anchor}" '
             f'letter-spacing="{tracking}" fill="{color}">{escape(value)}</text>'
         )
+
+    def rect(self, x, y, width, height, *, fill="none", stroke="none", radius=0, extra=""):
+        self.parts.append(self._rect(x, y, width, height, fill=fill, stroke=stroke, radius=radius, extra=extra))
+
+    def text(self, x, y, value, *, size=18, color=TEXT, weight=400,
+             anchor="start", mono=False, tracking=0):
+        self.parts.append(self._text(x, y, value, size=size, color=color, weight=weight, anchor=anchor, mono=mono, tracking=tracking))
 
     def lines(self, x, y, values, *, gap=26, **style):
         for index, value in enumerate(values):
@@ -143,7 +151,7 @@ class Flowchart:
         self.parts.append('</g>')
 
     def link(self, points, *, color=LINE, arrow=True, dashed=False):
-        # Round bends without changing the requested route or its endpoints.
+        # Round bends without changing the requested route or its endpoints
         commands = [f'M {points[0][0]} {points[0][1]}']
         for index, (x, y) in enumerate(points[1:-1], 1):
             px, py = points[index - 1]
@@ -178,15 +186,16 @@ class Flowchart:
         self.text(44, y, value, color=color, size=size)
 
     def svg(self):
-        # Group names sit above crossing wires and use the group's own background.
+        # Group names sit above crossing wires and use the group's own background
+        headers = []
         for x, y, width, label, color, note in self.group_headers:
-            self.rect(x + 13, y + 14, len(label) * 10 + 36, 29, fill=tint(color, 0.035), radius=4)
-            self.rect(x + 20, y + 22, 5, 14, fill=color, radius=2)
-            self.text(x + 38, y + 34, label.upper(), size=15, color=color,
-                      weight=600, mono=True, tracking=1)
+            headers.append(self._rect(x + 13, y + 14, len(label) * 10 + 36, 29, fill=tint(color, 0.035), radius=4))
+            headers.append(self._rect(x + 20, y + 22, 5, 14, fill=color, radius=2))
+            headers.append(self._text(x + 38, y + 34, label.upper(), size=15, color=color,
+                                      weight=600, mono=True, tracking=1))
             if note:
-                self.text(x + width - 20, y + 34, note, size=16, color=MUTED, anchor="end")
-        return "\n".join(self.parts + ['</svg>', ''])
+                headers.append(self._text(x + width - 20, y + 34, note, size=16, color=MUTED, anchor="end"))
+        return "\n".join(self.parts + headers + ['</svg>', ''])
 
 
 def image_pipeline():
@@ -338,7 +347,7 @@ def video_architecture():
     chart.link([(340, 596), (340, 654)])
     chart.link([(340, 740), (340, 798)])
     chart.link([(562, 841), (614, 841), (614, 724), (664, 724)], color=VIOLET)
-    # Auxiliary packets bypass the watermark work and share the same queue.
+    # Auxiliary packets bypass the watermark work and share the same queue
     chart.link([(562, 405), (760, 405), (760, 660)], color=VIOLET)
     chart.link([(856, 724), (900, 724), (900, 414), (970, 414)], color=VIOLET)
     chart.link([(1060, 462), (1060, 534)])
@@ -358,7 +367,7 @@ def video_architecture():
     chart.node(118, 798, 444, 86, "Hand off an owned frame", "GPU surface or CPU buffer")
     chart.text(78, 940, "Decode continues while the encoder works.", size=18, color=MUTED)
 
-    # Stacked outlines distinguish this shared queue from a processing step.
+    # Stacked outlines distinguish this shared queue from a processing step
     chart.rect(656, 652, 192, 128, fill=tint(VIOLET), stroke=VIOLET, radius=11,
                extra=' stroke-opacity="0.25"')
     chart.rect(660, 656, 192, 128, fill=tint(VIOLET), stroke=VIOLET, radius=11,

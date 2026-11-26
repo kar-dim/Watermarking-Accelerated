@@ -93,6 +93,12 @@ class OclQueueManager {
     }
 
     static std::shared_ptr<OclQueueManager> current() { return selected; }
+    static void releaseIdleBuffers(int index) {
+        const std::lock_guard lock(registryMutex);
+        for (const auto& [handle, owner] : devices)
+            if (owner->deviceIndex == index)
+                owner->pool.reset();
+    }
     static void bind(std::shared_ptr<OclQueueManager> owner) { selected = std::move(owner); }
     class Binding {
       public:

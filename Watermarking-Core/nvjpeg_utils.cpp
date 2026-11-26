@@ -66,8 +66,34 @@ nvjpegImage_t planarImage(uint8_t* planes, const int rows, const int cols, const
     return image;
 }
 
-// the decode objects of one caller: nvJPEG states, streams and buffers can't be shared by concurrent decodes
+class CodecStream {
+  public:
+    CodecStream() {
+        cudaStream_t stream = nullptr;
+        CUDA_CHECK(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
+        stream_.reset(stream);
+        cudaEvent_t event = nullptr;
+        CUDA_CHECK(cudaEventCreateWithFlags(&event, cudaEventDisableTiming));
+        ready_.reset(event);
+    }
+
+    cudaStream_t get() const { return stream_.get(); }
+
+    // The compute stream allocates or fills the image before nvJPEG can use it
+    cudaStream_t waitFor(cudaStream_t producer) const {
+        CUDA_CHECK(cudaEventRecord(ready_.get(), producer));
+        CUDA_CHECK(cudaStreamWaitEvent(get(), ready_.get()));
+        return get();
+    }
+
+  private:
+    Owned<CUstream_st, cudaStreamDestroy> stream_;
+    Owned<CUevent_st, cudaEventDestroy> ready_;
+};
+
+// Concurrent decodes need their own nvJPEG state and scratch buffers
 struct DecodeWorker {
+    CodecStream codecStream;
     JpegStream jpegStream;
     DecodeParams decodeParams;
     // GPU assisted Huffman decoding (decoupled API)
@@ -100,6 +126,7 @@ struct DecodeWorker {
         if (!batchedState && !::create(batchedState, [&](auto* state) { return nvjpegJpegStateCreate(handle, state); }))
             return false;
         if (batchedFormat != format) {
+            batchedFormat.reset();
             if (!succeeded(nvjpegDecodeBatchedInitialize(handle, batchedState.get(), 1, 1, format)))
                 return false;
             batchedFormat = format;
@@ -121,19 +148,30 @@ struct DecodeWorker {
 
 // the encode objects of one caller
 struct EncodeWorker {
+    CodecStream codecStream;
     EncoderState state;
+    EncoderState gpuState;
     EncoderParams params;
+    bool hardwareEncoder = false;
 
-    static std::unique_ptr<EncodeWorker> create(nvjpegHandle_t handle, cudaStream_t stream) {
+    static std::unique_ptr<EncodeWorker> create(nvjpegHandle_t handle) {
         auto worker = std::make_unique<EncodeWorker>();
-        const auto createState = [&](const nvjpegEncBackend_t backend) {
-            return ::create(worker->state, [&](auto* state) { return nvjpegEncoderStateCreateWithBackend(handle, state, backend, stream); });
+        const auto stream = worker->codecStream.get();
+        const auto createState = [&](EncoderState& target, const nvjpegEncBackend_t backend) {
+            return ::create(target, [&](auto* s) { return nvjpegEncoderStateCreateWithBackend(handle, s, backend, stream); });
         };
         // the hardware encoder when the device has one, CImg's save_jpeg settings: quality 100, no optimized Huffman tables
-        const bool created = (createState(NVJPEG_ENC_BACKEND_HARDWARE) || createState(NVJPEG_ENC_BACKEND_GPU)) &&
+        worker->hardwareEncoder = createState(worker->state, NVJPEG_ENC_BACKEND_HARDWARE);
+        const bool created = (worker->hardwareEncoder || createState(worker->state, NVJPEG_ENC_BACKEND_GPU)) &&
                              ::create(worker->params, [&](auto* params) { return nvjpegEncoderParamsCreate(handle, params, stream); }) &&
                              succeeded(nvjpegEncoderParamsSetQuality(worker->params.get(), 100, stream)) && succeeded(nvjpegEncoderParamsSetOptimizedHuffman(worker->params.get(), 0, stream));
         return created ? std::move(worker) : nullptr;
+    }
+
+    nvjpegEncoderState_t ensureGpuState(nvjpegHandle_t handle) {
+        if (!gpuState && !::create(gpuState, [&](auto* s) { return nvjpegEncoderStateCreateWithBackend(handle, s, NVJPEG_ENC_BACKEND_GPU, codecStream.get()); }))
+            return nullptr;
+        return gpuState.get();
     }
 };
 
@@ -141,7 +179,7 @@ struct EncodeWorker {
 template <typename Worker>
 class WorkerPool {
   public:
-    explicit WorkerPool(const int maxWorkers) : maxWorkers(maxWorkers) {}
+    explicit WorkerPool(const int maxWorkers) : maxWorkers(maxWorkers) { idle.reserve(maxWorkers); }
 
     // gives the worker back on destruction, empty when the worker could not be created
     class Lease {
@@ -169,7 +207,12 @@ class WorkerPool {
         }
         created++;
         lock.unlock();
-        return Lease(*this, Worker::create(std::forward<Args>(args)...));
+        try {
+            return Lease(*this, Worker::create(std::forward<Args>(args)...));
+        } catch (...) {
+            release(nullptr);
+            throw;
+        }
     }
 
   private:
@@ -257,7 +300,7 @@ class Codecs {
 
 void nvjpeg_utils::releaseIdleCodec(const int device) { Codecs::releaseIdle(device); }
 
-std::optional<CudaArray<uint8_t>> nvjpeg_utils::decode(const uint8_t* jpeg, const size_t length, cudaStream_t stream) {
+std::optional<CudaArray<uint8_t>> nvjpeg_utils::decode(const uint8_t* jpeg, const size_t length, cudaStream_t computeStream) {
     const auto codec = Codecs::current();
     if (!codec)
         return std::nullopt;
@@ -278,8 +321,9 @@ std::optional<CudaArray<uint8_t>> nvjpeg_utils::decode(const uint8_t* jpeg, cons
     const int cols = static_cast<int>(width);
     const int channels = static_cast<int>(components);
     const nvjpegOutputFormat_t format = channels == 3 ? NVJPEG_OUTPUT_RGB : NVJPEG_OUTPUT_Y;
-    CudaArray<uint8_t> planes(rows, cols, channels, stream);
+    CudaArray<uint8_t> planes(rows, cols, channels, computeStream);
     nvjpegImage_t image = planarImage(planes.data(), rows, cols, channels);
+    const auto stream = worker->codecStream.waitFor(computeStream);
     const bool decoded = (codec->hardwareDecoder && worker->decodeHardware(handle, jpeg, length, format, image, stream)) || worker->decodeGpu(handle, format, image, stream);
     // the next decode with this worker rewrites its pinned buffer from the host: the transfer must be done before the worker is released
     CUDA_CHECK(cudaStreamSynchronize(stream));
@@ -288,34 +332,51 @@ std::optional<CudaArray<uint8_t>> nvjpeg_utils::decode(const uint8_t* jpeg, cons
     return planes;
 }
 
-std::vector<uint8_t> nvjpeg_utils::encode(const CudaArray<uint8_t>& planes, cudaStream_t stream) {
+std::vector<uint8_t> nvjpeg_utils::encode(const CudaArray<uint8_t>& planes, cudaStream_t computeStream) {
     const int channels = planes.getChannels();
     const auto codec = Codecs::current();
     if (!codec || (channels != 1 && channels != 3))
         return {};
-    auto worker = codec->encoders.acquire(codec->handle.get(), stream);
+    auto worker = codec->encoders.acquire(codec->handle.get());
     if (!worker)
         return {};
     nvjpegHandle_t handle = codec->handle.get();
+    const auto stream = worker->codecStream.waitFor(computeStream);
     const int rows = planes.getRows();
     const int cols = planes.getCols();
     // nvJPEG does not write to the source planes
     const nvjpegImage_t image = planarImage(const_cast<uint8_t*>(planes.data()), rows, cols, channels);
-    // libjpeg's defaults (CImg): 4:2:0 color, grayscale with a single component
-    const bool encoded = channels == 3 ? succeeded(nvjpegEncoderParamsSetSamplingFactors(worker->params.get(), NVJPEG_CSS_420, stream)) &&
-                                             succeeded(nvjpegEncodeImage(handle, worker->state.get(), worker->params.get(), &image, NVJPEG_INPUT_RGB, cols, rows, stream))
-                                       : succeeded(nvjpegEncoderParamsSetSamplingFactors(worker->params.get(), NVJPEG_CSS_GRAY, stream)) &&
-                                             succeeded(nvjpegEncodeYUV(handle, worker->state.get(), worker->params.get(), &image, NVJPEG_CSS_GRAY, cols, rows, stream));
-    size_t length = 0;
-    if (!encoded || !succeeded(nvjpegEncodeRetrieveBitstream(handle, worker->state.get(), nullptr, &length, stream))) {
+    const auto encodeWith = [&](nvjpegEncoderState_t state) -> std::optional<std::vector<uint8_t>> {
+        // libjpeg's defaults (CImg): 4:2:0 color, grayscale with a single component
+        const bool encoded = channels == 3 ? succeeded(nvjpegEncoderParamsSetSamplingFactors(worker->params.get(), NVJPEG_CSS_420, stream)) &&
+                                                 succeeded(nvjpegEncodeImage(handle, state, worker->params.get(), &image, NVJPEG_INPUT_RGB, cols, rows, stream))
+                                           : succeeded(nvjpegEncoderParamsSetSamplingFactors(worker->params.get(), NVJPEG_CSS_GRAY, stream)) &&
+                                                 succeeded(nvjpegEncodeYUV(handle, state, worker->params.get(), &image, NVJPEG_CSS_GRAY, cols, rows, stream));
+        size_t length = 0;
+        if (!encoded || !succeeded(nvjpegEncodeRetrieveBitstream(handle, state, nullptr, &length, stream)))
+            return std::nullopt;
+        std::vector<uint8_t> jpeg;
+        try {
+            jpeg.resize(length);
+        } catch (...) {
+            cudaStreamSynchronize(stream);
+            throw;
+        }
+        const bool retrieved = succeeded(nvjpegEncodeRetrieveBitstream(handle, state, jpeg.data(), &length, stream));
+        // The transfer can still reference the vector when retrieval returns
         CUDA_CHECK(cudaStreamSynchronize(stream));
-        return {};
+        if (!retrieved)
+            return std::nullopt;
+        jpeg.resize(length);
+        return jpeg;
+    };
+    auto jpeg = encodeWith(worker->state.get());
+    if (!jpeg && worker->hardwareEncoder) {
+        // Hardware JPEG encoders reject single-component input, retry on GPU compute backend
+        if (nvjpegEncoderState_t gpuState = worker->ensureGpuState(handle))
+            jpeg = encodeWith(gpuState);
     }
-    std::vector<uint8_t> jpeg(length);
-    const bool retrieved = succeeded(nvjpegEncodeRetrieveBitstream(handle, worker->state.get(), jpeg.data(), &length, stream));
-    CUDA_CHECK(cudaStreamSynchronize(stream));
-    if (!retrieved)
-        return {};
-    jpeg.resize(length);
-    return jpeg;
+    if (!jpeg)
+        CUDA_CHECK(cudaStreamSynchronize(stream));
+    return jpeg ? std::move(*jpeg) : std::vector<uint8_t>{};
 }

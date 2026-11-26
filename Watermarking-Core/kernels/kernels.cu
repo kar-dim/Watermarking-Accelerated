@@ -180,9 +180,10 @@ __device__ __forceinline__ float2 hdrChromaAt(
     const int y0 = clamp(static_cast<int>(v0), 0, chromaHeight - 1), y1 = clamp(static_cast<int>(v0) + 1, 0, chromaHeight - 1);
     float2 c00, c10, c01, c11;
     if constexpr (Planar10) {
-        const size_t chromaPlane = static_cast<size_t>(chromaWidth) * chromaHeight;
-        const uint16_t* const u0Row = uvSrc + y0 * chromaWidth;
-        const uint16_t* const u1Row = uvSrc + y1 * chromaWidth;
+        const int uvPitchU16 = uvPitchBytes / 2;
+        const size_t chromaPlane = static_cast<size_t>(uvPitchU16) * chromaHeight;
+        const uint16_t* const u0Row = uvSrc + static_cast<size_t>(y0) * uvPitchU16;
+        const uint16_t* const u1Row = uvSrc + static_cast<size_t>(y1) * uvPitchU16;
         const uint16_t* const v0Row = u0Row + chromaPlane;
         const uint16_t* const v1Row = u1Row + chromaPlane;
         c00 = make_float2(static_cast<float>(__ldg(u0Row + x0) & 0x3FFu), static_cast<float>(__ldg(v0Row + x0) & 0x3FFu));

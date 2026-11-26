@@ -48,6 +48,25 @@ class SingleImageWorker : public QThread {
     std::optional<float> correlation_;
 };
 
+class SingleSaveWorker : public QThread {
+  public:
+    SingleSaveWorker(const SingleImageWorker* source, QString outputPath, QObject* parent = nullptr) : QThread(parent), source_(source), outputPath_(std::move(outputPath)) {}
+    [[nodiscard]] const QString& outputPath() const { return outputPath_; }
+    [[nodiscard]] const QString& error() const { return error_; }
+
+  protected:
+    void run() override {
+        try {
+            source_->saveResult(outputPath_);
+        } catch (const std::exception& e) { error_ = QString::fromUtf8(e.what()); }
+    }
+
+  private:
+    const SingleImageWorker* source_;
+    QString outputPath_;
+    QString error_;
+};
+
 class BatchImageWorker : public QThread, private WatermarkCore::ImageBatchObserver {
     Q_OBJECT
   public:

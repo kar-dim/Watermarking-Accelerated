@@ -1,21 +1,23 @@
-# Exercise argument parsing and batch exit codes against a built CLI executable.
+# Exercise argument parsing and batch exit codes against a built CLI executable
 param([string]$Executable = 'x64/EIGEN_Release/Watermarking-CLI.exe')
 $ErrorActionPreference = 'Stop'
 $taskRoot = Split-Path $PSScriptRoot -Parent
 $executablePath = if ([IO.Path]::IsPathRooted($Executable)) { $Executable } else { Join-Path $taskRoot $Executable }
 $cliPath = (Resolve-Path -LiteralPath $executablePath).Path
-# Keep generated outputs and logs together for inspection.
+# Keep generated outputs and logs together for inspection
 $fixtureDirectory = Join-Path $taskRoot ('x64/review/cli-regression-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $fixtureDirectory | Out-Null
 $imagePath = Join-Path $taskRoot 'samples/images/512.png'
 $baseArguments = @('--watermark_password', 'regression-password', '--image.path', $imagePath, '--output_path', (Join-Path $fixtureDirectory 'output.png'))
 $passed = 0
-# Close stdin and enforce a timeout so an interactive pause fails the case.
+# Close stdin and fail if the command pauses for user input
 function Invoke-Case([string]$Name, [string[]]$Arguments, [int]$ExpectedExit, [string]$ExpectedText) {
     $start = [Diagnostics.ProcessStartInfo]::new()
     $start.FileName = $cliPath
     $start.WorkingDirectory = $fixtureDirectory
     $start.UseShellExecute = $false
+    $start.StandardOutputEncoding = [Text.Encoding]::UTF8
+    $start.StandardErrorEncoding = [Text.Encoding]::UTF8
     $start.RedirectStandardInput = $true
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
@@ -35,15 +37,16 @@ function Invoke-Case([string]$Name, [string[]]$Arguments, [int]$ExpectedExit, [s
     $process.Dispose()
 }
 
-# An isolated working directory verifies that commands need no external configuration.
+# An isolated working directory verifies that commands need no external configuration
 Invoke-Case 'no-arguments-help' @() 0 'Usage: Watermarking-CLI'
 Invoke-Case 'help' @('--help') 0 'Usage: Watermarking-CLI'
 Invoke-Case 'valid-defaults' $baseArguments 0 'Embedded watermark.*p = 3, PSNR = 40'
 Invoke-Case 'explicit-options' ($baseArguments + @('--p', '5', '--psnr', '42', '--no-pause')) 0 'Embedded watermark.*p = 5, PSNR = 42'
+Invoke-Case 'signed-positive-options' ($baseArguments + @('--p= +5', '--psnr=+42')) 0 'Embedded watermark.*p = 5, PSNR = 42'
 Invoke-Case 'qualified-and-equals' @('--global.watermark_password=regression-password', '--image.mode=single', "--image.path=$imagePath", "--image.output_path=$fixtureDirectory/output.png", '--global.p=5', '--global.psnr=42') 0 'Embedded watermark.*p = 5, PSNR = 42'
 Invoke-Case 'repeated-option' ($baseArguments + @('--p', 'invalid', '--p', '3')) 0 'Embedded watermark'
 Invoke-Case 'explicit-gpu-device' ($baseArguments + @('--gpu_device_id', '0')) 0 'Embedded watermark'
-# Required inputs should produce actionable errors instead of implicit sample operations.
+# Required inputs should produce actionable errors instead of implicit sample operations
 Invoke-Case 'missing-password' @('--image.path', $imagePath, '--output_path', "$fixtureDirectory/output.png") 1 'No valid watermark password'
 Invoke-Case 'missing-output' @('--watermark_password', 'regression-password', '--image.path', $imagePath) 1 'requires --output_path'
 Invoke-Case 'missing-input' @('--watermark_password', 'regression-password', '--output_path', "$fixtureDirectory/output.png") 1 'No valid image file'
@@ -51,7 +54,7 @@ Invoke-Case 'unknown-option' @('--not-an-option', 'value') 1 'Unknown command-li
 Invoke-Case 'missing-value' @('--psnr') 1 'Missing value'
 Invoke-Case 'ambiguous-option' @('--mode', 'single') 1 'Ambiguous setting'
 Invoke-Case 'positional-argument' @('unexpected') 1 'Unexpected positional argument'
-# Numeric options must reject trailing text and out-of-range values.
+# Numeric options must reject trailing text and out-of-range values
 foreach ($value in @('3garbage', '999999999999999999999999')) {
     $name = if ($value -eq '3garbage') { 'trailing' } else { 'overflow' }
     Invoke-Case "cli-integer-$name" ($baseArguments + @('--p', $value)) 1 'Invalid integer'
@@ -60,13 +63,19 @@ foreach ($value in @('40garbage', 'nan', 'inf', '1e50')) {
     $name = if ($value -eq '40garbage') { 'trailing' } else { $value }
     Invoke-Case "cli-number-$name" ($baseArguments + @('--psnr', $value)) 1 'Invalid number'
 }
-# Invalid booleans should fail parsing before a missing video is opened.
+# Invalid booleans should fail parsing before a missing video is opened
 Invoke-Case 'cli-boolean' @('--watermark_password', 'regression-password', '--video.path', 'missing-video.mkv', '--hw_encoder', 'maybe') 1 'Invalid boolean'
 Invoke-Case 'removed-cuda-encoder-option' @('--cuda_hw_encoder', 'true') 1 'Unknown command-line option'
-# Benchmark defaults must reach sample loading without requiring a password option.
+# Benchmark defaults must reach sample loading without requiring a password option
 Invoke-Case 'benchmark-defaults' @('--bench', '--benchmark_loops', '1') 1 'Benchmark image not found'
 Invoke-Case 'benchmark-invalid-loops' @('--bench', '--benchmark_loops', '0') 1 'benchmark_loops must be positive'
-# A corrupt image must make a partially successful batch return a failure code.
+$sampleDirectory = Join-Path $fixtureDirectory 'samples/images'
+New-Item -ItemType Directory -Path $sampleDirectory | Out-Null
+$sample = Join-Path $sampleDirectory '480p.png'
+Copy-Item -LiteralPath $imagePath -Destination $sample
+Invoke-Case 'benchmark-output-is-input' @('--bench', '--benchmark_output_path', $sample) 1 'must be different files'
+if ((Get-FileHash -LiteralPath $sample).Hash -ne (Get-FileHash -LiteralPath $imagePath).Hash) { throw 'Benchmark changed its input image' }
+# A corrupt image must make a partially successful batch return a failure code
 $batchDirectory = Join-Path $fixtureDirectory 'batch'
 New-Item -ItemType Directory -Path $batchDirectory | Out-Null
 Copy-Item -LiteralPath $imagePath -Destination (Join-Path $batchDirectory 'valid.png')
@@ -74,7 +83,7 @@ Set-Content -LiteralPath (Join-Path $batchDirectory 'invalid.png') -Value 'corru
 foreach ($mode in @('batch_detect', 'batch_embed')) {
     Invoke-Case $mode ($baseArguments + @('--image.mode', $mode, '--image.path', $batchDirectory)) 1 'Successfully processed 1/2'
 }
-# The same batch should succeed once every input is valid.
+# The same batch should succeed once every input is valid
 Remove-Item -LiteralPath (Join-Path $batchDirectory 'invalid.png')
 Invoke-Case 'complete-batch' ($baseArguments + @('--image.mode', 'batch_detect', '--image.path', $batchDirectory)) 0 'Successfully processed 1/1'
 Invoke-Case 'image-batch-device' ($baseArguments + @('--image.mode', 'batch_detect', '--image.path', $batchDirectory, '--image.devices', '0')) 0 'Successfully processed 1/1'
@@ -85,6 +94,8 @@ Invoke-Case 'image-devices-single-mode' ($baseArguments + @('--image.devices', '
 Invoke-Case 'video-devices-single-mode' ($baseArguments + @('--video.devices', '0')) 1 'applies to video batch modes'
 Invoke-Case 'orphaned-video-mode' ($baseArguments + @('--video.mode', 'detect')) 1 'requires.*--video\.path'
 Invoke-Case 'empty-video-path' @('--watermark_password', 'regression-password', '--video.path', '') 1 '--video\.path cannot be empty'
+Invoke-Case 'image-and-video' @('--video.path', 'missing.mkv', '--image.path', $imagePath) 1 'cannot be used with'
+Invoke-Case 'benchmark-bad-order' @('--bench', '--p', '4') 1 'p must be'
 Invoke-Case 'ambiguous-devices-option' @('--devices', '0') 1 'Ambiguous setting'
 Invoke-Case 'no-interactive-pause' ($baseArguments + @('--image.mode', 'invalid')) 1 'Invalid mode'
 Write-Output "$passed CLI regression cases passed. Logs: $fixtureDirectory"

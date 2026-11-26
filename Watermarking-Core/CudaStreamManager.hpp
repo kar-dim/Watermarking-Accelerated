@@ -31,6 +31,9 @@ class CudaStreamManager {
                 return true;
             resources = entry->second.get();
         }
+        const cuda_utils::ScopedDevice binding(device);
+        if (binding.status != cudaSuccess)
+            return false;
         resources->pool.reset(resources->computeStream);
         return cudaStreamSynchronize(resources->computeStream) == cudaSuccess;
     }

@@ -47,6 +47,7 @@ cl::Program buildKernels(const int p);
 
 // probed workgroup size
 int workGroupSize(const cl::Program& program);
+size_t shiftScratchBytes(const cl::Program& program, int p, int groupSize);
 
 // tile patches per work-item of the detection kernel (DT_OWN). 3 need more than 32 KB of local memory at p >= 7 with 256 work-items,
 // which halves the work-groups on GPUs with 64 KB per CU

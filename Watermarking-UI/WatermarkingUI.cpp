@@ -2,6 +2,7 @@
 #include "ImagePreview.hpp"
 #include "MultiDeviceComboBox.hpp"
 #include "ThemePalette.hpp"
+#include "UiHelpers.hpp"
 #include "WatermarkingUI.h"
 #include <algorithm>
 #include <CorrelationFormat.hpp>
@@ -55,27 +56,15 @@ namespace fs = std::filesystem;
 namespace {
 constexpr auto imageFilter = "Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff *.webp)";
 
-// Create an input row combining a text path field with a browse button
-QWidget* makeFileRow(QLineEdit*& field, const QString& buttonText, QWidget* parent, const std::function<void()>& browse) {
-    auto* row = new QWidget(parent);
-    row->setProperty("workflowContainer", true);
-    auto* layout = new QHBoxLayout(row);
-    layout->setContentsMargins(0, 0, 0, 0);
-    field = new QLineEdit(row);
-    auto* button = new AnimatedButton(buttonText, row);
-    button->setObjectName("secondaryButton");
-    layout->addWidget(field, 1);
-    layout->addWidget(button);
-    QObject::connect(button, &QPushButton::clicked, row, browse);
-    return row;
-}
-
-// Set text message and update dynamic CSS styling state on status label
-void setStatus(QLabel* label, const QString& message, const QString& state) {
-    label->setText(message);
-    label->setProperty("state", state);
-    label->style()->unpolish(label);
-    label->style()->polish(label);
+void displayPreview(QLabel* label, const QImage& image) {
+    const qreal ratio = label->devicePixelRatioF();
+    const QSize target = label->contentsRect().size() * ratio;
+    if (target.isEmpty())
+        return;
+    const QImage scaled = image.size().scaled(target, Qt::KeepAspectRatio) == image.size() ? image : image.scaled(target, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    auto pixmap = QPixmap::fromImage(scaled);
+    pixmap.setDevicePixelRatio(ratio);
+    label->setPixmap(pixmap);
 }
 
 // Extract and validate first acceptable file or folder path from drop mime data
@@ -139,8 +128,12 @@ WatermarkingUI::WatermarkingUI(QWidget* parent) : QMainWindow(parent) {
     QScreen* startupScreen = QGuiApplication::screenAt(QCursor::pos());
     if (startupScreen == nullptr)
         startupScreen = QGuiApplication::primaryScreen();
-    const QRect workArea = startupScreen->availableGeometry();
-    resize(std::min(1120, workArea.width()), static_cast<int>(workArea.height() * 0.9));
+    if (startupScreen != nullptr) {
+        const QRect workArea = startupScreen->availableGeometry();
+        resize(std::min(1120, workArea.width()), static_cast<int>(workArea.height() * 0.9));
+    } else {
+        resize(1120, 800);
+    }
 
     auto* scroll = new QScrollArea(this);
     scroll->setObjectName("mainScroll");
@@ -493,6 +486,8 @@ WatermarkingUI::WatermarkingUI(QWidget* parent) : QMainWindow(parent) {
     connect(tabs, &QTabWidget::currentChanged, this, [this] {
         dropOverlay->hide();
         devicePickerArea->setVisible(tabs->currentWidget() != videoBatchPage && tabs->currentWidget() != batchPage);
+        updateVideoPreview();
+        updateBenchmarkPreview();
     });
     refreshBatchQueue();
     qApp->installEventFilter(this);
@@ -660,20 +655,30 @@ void WatermarkingUI::saveSingleImage() {
         singleOutput->setText(output);
     }
     std::error_code pathError;
-    if (fs::equivalent(singleInput->text().toStdString(), output.toStdString(), pathError)) {
+    if (fs::equivalent(singleInput->text().trimmed().toStdWString(), output.toStdWString(), pathError)) {
         QMessageBox::warning(this, "Invalid output", "Input and output must be different files.");
         return;
     }
-    QApplication::setOverrideCursor(Qt::WaitCursor);
-    try {
-        singleWorker->saveResult(output);
-        QApplication::restoreOverrideCursor();
-        setStatus(singleStatus, "Saved watermarked image to " + output, "done");
-    } catch (const std::exception& error) {
-        QApplication::restoreOverrideCursor();
-        setStatus(singleStatus, QString::fromUtf8(error.what()), "error");
-        QMessageBox::critical(this, "Save failed", QString::fromUtf8(error.what()));
-    }
+    saveWorker = new SingleSaveWorker(singleWorker, output, this);
+    setStatus(singleStatus, "Saving watermarked image...", "running");
+    setBusy(true);
+    connect(saveWorker, &QThread::finished, this, [this] {
+        if (closing)
+            return;
+        saveWorker->wait();
+        const QString error = saveWorker->error();
+        const QString savedPath = saveWorker->outputPath();
+        saveWorker->deleteLater();
+        saveWorker = nullptr;
+        setBusy(false);
+        if (!error.isEmpty()) {
+            setStatus(singleStatus, error, "error");
+            QMessageBox::critical(this, "Save failed", error);
+            return;
+        }
+        setStatus(singleStatus, "Saved watermarked image to " + savedPath, "done");
+    });
+    saveWorker->start();
 }
 
 void WatermarkingUI::refreshBatchQueue() {
@@ -850,7 +855,7 @@ void WatermarkingUI::startBenchmark() {
     });
     connect(benchmarkWorker, &BenchmarkWorker::resultReady, this, &WatermarkingUI::onBenchmarkResult);
     connect(benchmarkWorker, &BenchmarkWorker::benchmarkCanceled, this, &WatermarkingUI::finishBenchmarkCanceled);
-    connect(benchmarkWorker, &BenchmarkWorker::benchmarkFinished, this, [this, device](const double embedFps, const double detectFps, const int score) {
+    connect(benchmarkWorker, &BenchmarkWorker::benchmarkFinished, this, [this, device](const double embedFps, const double detectFps, const int score, const QString& error) {
         if (closing)
             return;
         if (benchmarkWorker->isInterruptionRequested()) {
@@ -863,7 +868,7 @@ void WatermarkingUI::startBenchmark() {
         setBusy(false);
         if (score <= 0) {
             setStatus(benchmarkStatus, "Benchmark failed", "error");
-            QMessageBox::critical(this, "Benchmark failed", "The benchmark could not finish. Check the selected device, sample files, and available memory.");
+            QMessageBox::critical(this, "Benchmark failed", error.isEmpty() ? tr("Check the selected device, sample files, and available memory.") : error);
             return;
         }
         setStatus(benchmarkStatus, "Benchmark complete", "done");
@@ -874,6 +879,8 @@ void WatermarkingUI::startBenchmark() {
                 .arg(detectFps, 0, 'f', 1)
                 .arg(score));
     });
+    const QSize target = benchmarkImageView->contentsRect().size() * benchmarkImageView->devicePixelRatioF();
+    benchmarkWorker->setPreviewTargetSize(std::max(960, target.width()), std::max(540, target.height()));
     benchmarkWorker->start();
 }
 
@@ -915,19 +922,22 @@ void WatermarkingUI::onBenchmarkResult(
         "running");
 }
 
-// smooth scaling the last 4K benchmark image on every video frame stalls the GUI
 void WatermarkingUI::updateVideoPreview() {
-    if (!videoPreviewImage.isNull() && videoPreviewEnabled->isChecked())
-        videoPreview->setPixmap(QPixmap::fromImage(videoPreviewImage.scaled(videoPreview->contentsRect().size(), Qt::KeepAspectRatio, Qt::SmoothTransformation)));
+    if (videoPreview->isVisible() && !videoPreviewImage.isNull() && videoPreviewEnabled->isChecked())
+        displayPreview(videoPreview, videoPreviewImage);
 }
 
 void WatermarkingUI::updateBenchmarkPreview() {
-    if (!benchmarkPreviewImage.isNull())
-        benchmarkImageView->setPixmap(QPixmap::fromImage(benchmarkPreviewImage.scaled(benchmarkImageView->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation)));
+    if (benchmarkImageView->isVisible() && !benchmarkPreviewImage.isNull())
+        displayPreview(benchmarkImageView, benchmarkPreviewImage);
 }
 
 void WatermarkingUI::resizeEvent(QResizeEvent* event) {
     QMainWindow::resizeEvent(event);
+    if (benchmarkWorker != nullptr) {
+        const QSize target = benchmarkImageView->contentsRect().size() * benchmarkImageView->devicePixelRatioF();
+        benchmarkWorker->setPreviewTargetSize(std::max(960, target.width()), std::max(540, target.height()));
+    }
     updateVideoPreview();
     updateBenchmarkPreview();
 }
@@ -942,12 +952,13 @@ bool WatermarkingUI::eventFilter(QObject* watched, QEvent* event) {
         return QMainWindow::eventFilter(watched, event);
 
     if (type == QEvent::DragLeave) {
-        if (!rect().contains(mapFromGlobal(QCursor::pos())))
-            dropOverlay->hide();
+        dropOverlay->hide();
         return QMainWindow::eventFilter(watched, event);
     }
 
     auto* drop = static_cast<QDropEvent*>(event);
+    if (!drop->mimeData()->hasUrls())
+        return QMainWindow::eventFilter(watched, event);
     QWidget* const current = tabs->currentWidget();
     const bool batch = current == batchPage;
     const bool video = current == videoPage;
@@ -1023,6 +1034,8 @@ void WatermarkingUI::closeEvent(QCloseEvent* event) {
         videoWorker->cancel();
         videoWorker->wait();
     }
+    if (saveWorker != nullptr && saveWorker->isRunning())
+        saveWorker->wait();
     if (singleWorker != nullptr && singleWorker->isRunning()) {
         singleWorker->requestInterruption();
         singleWorker->wait();

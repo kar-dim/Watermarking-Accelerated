@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <iterator>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -11,6 +12,7 @@
 
 extern "C" {
 #include "libavutil/dict.h"
+#include "libavutil/mem.h"
 }
 
 /*!
@@ -44,9 +46,14 @@ const AVCodec* findVideoEncoder(const std::string& name, const bool hardware) {
 namespace {
 
 // ffmpeg options split to tokens, respecting single and double quotes
-std::vector<std::string> tokenizeOptions(const std::string& text) {
-    std::vector<std::string> tokens;
-    std::string current;
+struct OptionToken {
+    std::string text;
+    bool quoted = false;
+};
+
+std::vector<OptionToken> tokenizeOptions(const std::string& text) {
+    std::vector<OptionToken> tokens;
+    OptionToken current;
     bool started = false;
     char quote = 0;
     for (const char character : text) {
@@ -54,22 +61,26 @@ std::vector<std::string> tokenizeOptions(const std::string& text) {
             if (character == quote)
                 quote = 0;
             else
-                current += character;
+                current.text += character;
             continue;
         }
         if (character == '"' || character == '\'') {
+            if (!started)
+                current.quoted = true;
             quote = character;
             started = true;
         } else if (std::isspace(static_cast<unsigned char>(character))) {
             if (started)
                 tokens.push_back(current);
-            current.clear();
+            current = {};
             started = false;
         } else {
-            current += character;
+            current.text += character;
             started = true;
         }
     }
+    if (quote)
+        throw std::invalid_argument("Unclosed quote in encoder options");
     if (started)
         tokens.push_back(current);
     return tokens;
@@ -87,7 +98,7 @@ bool isOptionValue(const std::string& token) {
 
 // stream selection and other streams' codecs, audio and subtitles follow container rules
 bool selectsStreams(const std::string& key) {
-    static constexpr std::string_view kStreamKeys[] = {"map", "acodec", "scodec", "dcodec", "an", "sn", "dn", "vn", "pix_fmt", "pixel_format", "max_interleave_delta"};
+    static constexpr std::string_view kStreamKeys[] = {"map", "acodec", "scodec", "dcodec", "an", "sn", "dn", "vn", "pix_fmt", "pixel_format", "max_interleave_delta", "s", "video_size", "time_base"};
     return std::ranges::find(kStreamKeys, key) != std::end(kStreamKeys);
 }
 
@@ -111,39 +122,74 @@ ParsedEncodeOptions parseEncodeOptions(const std::string& text) {
         otherStream = stream != "v" && stream != "v:0";
         return key.substr(0, colon);
     };
-    const std::vector<std::string> tokens = tokenizeOptions(text);
+    const auto tokens = tokenizeOptions(text);
     for (size_t index = 0; index < tokens.size();) {
-        if (isOptionValue(tokens[index])) {
+        if (isOptionValue(tokens[index].text)) {
             ++index;
             continue;
         }
         bool otherStream = false;
-        const std::string key = splitSpecifier(tokens[index].substr(1), otherStream);
-        const bool hasValue = index + 1 < tokens.size() && isOptionValue(tokens[index + 1]);
+        const std::string key = splitSpecifier(tokens[index].text.substr(1), otherStream);
+        const bool hasValue = index + 1 < tokens.size() && (tokens[index + 1].quoted || isOptionValue(tokens[index + 1].text));
         const size_t step = hasValue ? 2 : 1;
         if (otherStream || selectsStreams(key)) {
-            result.ignored.push_back(tokens[index]);
+            result.ignored.push_back(tokens[index].text);
             index += step;
             continue;
         }
         if (!hasValue) {
-            result.valueless.push_back(tokens[index]);
+            result.valueless.push_back(tokens[index].text);
             index += step;
             continue;
         }
-        const std::string& value = tokens[index + 1];
+        const std::string& value = tokens[index + 1].text;
         if (key == "c" || key == "codec" || key == "vcodec") {
             result.codecName = value;
         } else if (key == "tag" || key == "vtag") {
             result.codecTag = value;
         } else {
             if (clashesWithPipeline(key))
-                result.overrides.push_back(tokens[index]);
+                result.overrides.push_back(tokens[index].text);
             av_dict_set(result.dictionary.ptr(), key.c_str(), value.c_str(), 0);
         }
         index += step;
     }
     return result;
+}
+
+void applyX265ThreadDefaults(ParsedEncodeOptions& parsed, const int cpuThreads) {
+    if (cpuThreads <= 0 || parsed.codecName != "libx265")
+        return;
+
+    // FFmpeg's thread_count configures x265 frame threads but leaves its worker pool on auto
+    OptionDict& options = parsed.dictionary;
+    const auto* entry = av_dict_get(options.get(), "x265-params", nullptr, 0);
+    OptionDict params;
+    checkAv(av_dict_parse_string(params.ptr(), entry ? entry->value : nullptr, "=", ":", 0), "Invalid x265-params");
+
+    bool hasPool = false;
+    bool hasFrameThreads = av_dict_get(options.get(), "threads", nullptr, 0) != nullptr;
+    const AVDictionaryEntry* param = nullptr;
+    while ((param = av_dict_iterate(params.get(), param)) != nullptr) {
+        std::string_view key = param->key;
+        if (key.starts_with("--"))
+            key.remove_prefix(2);
+        hasPool |= key == "pools" || key == "numa-pools" || key == "numa_pools";
+        hasFrameThreads |= key == "frame-threads" || key == "frame_threads";
+    }
+
+    const bool setFrameThreads = !hasFrameThreads && cpuThreads <= 2;
+    if (hasPool && !setFrameThreads)
+        return;
+    if (!hasPool)
+        checkAv(av_dict_set_int(params.ptr(), "pools", cpuThreads, 0), "Failed to set x265 worker pool size");
+    if (setFrameThreads)
+        checkAv(av_dict_set(params.ptr(), "frame-threads", "1", 0), "Failed to set x265 frame threads");
+
+    char* rawParams = nullptr;
+    checkAv(av_dict_get_string(params.get(), &rawParams, '=', ':'), "Failed to serialize x265-params");
+    const std::unique_ptr<char, decltype(&av_free)> serialized(rawParams, av_free);
+    checkAv(av_dict_set(options.ptr(), "x265-params", serialized.get(), 0), "Failed to set x265-params");
 }
 
 unsigned codecTagFromString(const std::string& tag) {

@@ -1,3 +1,7 @@
+/*!
+ *  \brief  GPU frame transfers between D3D11 and OpenCL
+ *  \author Dimitris Karatzas
+ */
 #pragma once
 
 #include "opencl_init.h"

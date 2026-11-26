@@ -54,8 +54,10 @@ int main(int argc, char* argv[]) {
     QScreen* startupScreen = QGuiApplication::screenAt(QCursor::pos());
     if (startupScreen == nullptr)
         startupScreen = QGuiApplication::primaryScreen();
-    QRect frame = window.frameGeometry();
-    frame.moveCenter(startupScreen->availableGeometry().center());
-    window.move(frame.topLeft());
+    if (startupScreen != nullptr) {
+        QRect frame = window.frameGeometry();
+        frame.moveCenter(startupScreen->availableGeometry().center());
+        window.move(frame.topLeft());
+    }
     return app.exec();
 }

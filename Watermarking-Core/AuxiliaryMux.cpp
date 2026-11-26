@@ -141,6 +141,7 @@ bool AuxiliaryMux::configure(const AuxiliaryMuxSetup& setup, std::string& error)
     output_ = setup.output;
     log_ = setup.log;
     sink_ = setup.sink;
+    lastAudioDts_.assign(input_->nb_streams, AV_NOPTS_VALUE);
     inputToOutput_.assign(input_->nb_streams, -1);
 
     for (unsigned index = 0; index < input_->nb_streams; ++index) {
@@ -274,6 +275,8 @@ bool AuxiliaryMux::routePacket(AVPacket* packet, std::string& error) {
         return transcodeSubtitle(*transcode, packet, error);
     }
     av_packet_rescale_ts(packet, inputTimeBase, output_->streams[outputIndex]->time_base);
+    if (output_->streams[outputIndex]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO && !(output_->oformat->flags & AVFMT_TS_NONSTRICT))
+        enforceMonotonicDts(packet, lastAudioDts_[inputIndex]);
     packet->stream_index = outputIndex;
     packet->pos = -1;
     return emit(packet, error);
@@ -304,7 +307,8 @@ bool AuxiliaryMux::transcodeSubtitle(SubtitleTranscode& transcode, AVPacket* pac
         return true;
     }
     subtitle.pts += av_rescale_q(subtitle.start_display_time, AVRational{1, 1000}, AV_TIME_BASE_Q);
-    subtitle.end_display_time = subtitle.end_display_time > subtitle.start_display_time ? subtitle.end_display_time - subtitle.start_display_time : 0;
+    const bool unknownEnd = subtitle.end_display_time == UINT32_MAX;
+    subtitle.end_display_time = !unknownEnd && subtitle.end_display_time > subtitle.start_display_time ? subtitle.end_display_time - subtitle.start_display_time : 0;
     subtitle.start_display_time = 0;
     constexpr size_t scratchSize = 1 << 20;
     if (transcode.encodeScratch.empty()) {
@@ -331,7 +335,8 @@ bool AuxiliaryMux::transcodeSubtitle(SubtitleTranscode& transcode, AVPacket* pac
     outputPacket->dts = outputPacket->pts;
     // decoder leaves subtitle.pts unset when packet has none, fall back to packet ts
     const int64_t displayed = av_rescale_q(subtitle.end_display_time, AVRational{1, 1000}, outputTimeBase);
-    outputPacket->duration = packet->duration > 0 ? std::min(displayed, av_rescale_q(packet->duration, inputTimeBase, outputTimeBase)) : displayed;
+    const int64_t packetDuration = packet->duration > 0 ? av_rescale_q(packet->duration, inputTimeBase, outputTimeBase) : 0;
+    outputPacket->duration = unknownEnd ? packetDuration : packetDuration > 0 ? std::min(displayed, packetDuration) : displayed;
     outputPacket->pos = -1;
     return emit(outputPacket.get(), error);
 }

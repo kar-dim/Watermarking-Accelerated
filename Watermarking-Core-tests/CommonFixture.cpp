@@ -71,6 +71,7 @@ extern "C" {
 #include <png.h>
 
 #if defined(_USE_EIGEN_)
+#include "../Watermarking-Core/utils.hpp"
 #include "../Watermarking-Core/WatermarkEigen.hpp"
 #endif
 
@@ -957,18 +958,20 @@ TEST(WatermarkCryptoTest, HostWatermarkMatchesTheScalarReference) {
     }
 }
 
-TEST(WatermarkCryptoTest, FloatRoundedWatermarkMatchesGenerateHalfWatermarkBitForBit) {
-    const std::array<uint32_t, 16> baseState = WatermarkCrypto::computeBaseState(defaultPassword);
-    for (const int64_t numElements : {1, 7, 8, 9, 15, 16, 63, 64, 65, 127, 128, 129, 136, 324, 1000, 12293, 1920 * 1080 + 3}) {
-        const auto halfBits = WatermarkCrypto::generateHalfWatermark(baseState, numElements);
-        std::vector<float> expected(static_cast<size_t>(numElements));
-        for (int64_t i = 0; i < numElements; ++i)
-            expected[static_cast<size_t>(i)] = HalfFloat::toFloat(halfBits[i]);
-        std::vector<float> actual(static_cast<size_t>(numElements));
-        WatermarkCrypto::generateFloatRoundedHalfWatermark(baseState, actual.data(), numElements);
-        EXPECT_EQ(bitDifferences(actual, expected), "") << numElements << " values";
+#if defined(_USE_EIGEN_)
+TEST(WatermarkCryptoTest, EigenExpandsFiniteHalfValuesExactly) {
+    uint16_t bits[Simd::lanes];
+    float actual[Simd::lanes];
+    for (unsigned first = 0; first < 65536; first += Simd::lanes) {
+        for (int i = 0; i < Simd::lanes; ++i)
+            bits[i] = static_cast<uint16_t>(first + i);
+        Simd::store(actual, Simd::loadHalf(bits));
+        for (int i = 0; i < Simd::lanes; ++i)
+            if ((bits[i] & 0x7c00) != 0x7c00)
+                EXPECT_EQ(std::bit_cast<uint32_t>(actual[i]), std::bit_cast<uint32_t>(HalfFloat::toFloat(bits[i])));
     }
 }
+#endif
 
 #if defined(_USE_CUDA_) || defined(_USE_OPENCL_)
 // the Box-Muller transform of the device generation kernel is the CPU reference, bit for bit, for every input
@@ -1585,15 +1588,16 @@ TEST(CudaBufferTest, FailedUploadReturnsItsAllocationToThePool) {
 }
 #endif
 
-#if defined(_USE_OPENCL_)
+#if defined(_USE_GPU_)
 // Live handles keep their owning device when another device is selected
-TEST_F(WatermarkTest, OpenCLSwitchKeepsLiveSessionAndExportOwners) {
+TEST_F(WatermarkTest, DeviceSwitchKeepsLiveSessionAndExportOwners) {
     if (getAvailableDevices().size() < 2)
-        GTEST_SKIP() << "Requires two OpenCL devices";
+        GTEST_SKIP() << "Requires two GPUs";
     auto preload = preloadImageFromDisk(colorImage.string());
     ASSERT_TRUE(initializeEnvironment(1));
     EXPECT_EQ(getCurrentDeviceIndex(), 1);
     preload.reset();
+    EXPECT_EQ(getCurrentDeviceIndex(), 1);
     EXPECT_GT(detectLoadedImage(session.get()) + 1.0f, 0.0f);
     session.reset();
     ASSERT_TRUE(initializeEnvironment(1));
@@ -1601,9 +1605,11 @@ TEST_F(WatermarkTest, OpenCLSwitchKeepsLiveSessionAndExportOwners) {
     loadImage(session.get(), colorImage.string());
     embedImage(session.get());
     auto exported = createReusableExportBuffer();
-    exportForSave(session.get(), exported.get());
-    session.reset();
     ASSERT_TRUE(initializeEnvironment(0));
+    exportForSave(session.get(), exported.get());
+    EXPECT_EQ(getCurrentDeviceIndex(), 0);
+    session.reset();
+    EXPECT_EQ(getCurrentDeviceIndex(), 0);
     flushToDiskAsync(exported.get(), (tempDir / "old-device.png").string());
     exported.reset();
     ASSERT_TRUE(initializeEnvironment(0));
@@ -1800,7 +1806,10 @@ TEST(EigenPredictionTest, VectorRemaindersMatchClampedReferenceCalculations) {
             const Eigen::ArrayXXd masked = error.abs() * watermark.cast<double>();
             const Eigen::ArrayXXd maskedError = errorOf(masked);
             const double expectedCorrelation = (error * maskedError).sum() / std::sqrt(error.square().sum() * maskedError.square().sum());
-            WatermarkEigen<p> object(height, width, WatermarkBuffer(Eigen::ArrayXXf(watermark)), defaultPsnr);
+            auto halfWatermark = std::make_unique_for_overwrite<uint16_t[]>(watermark.size());
+            for (Eigen::Index i = 0; i < watermark.size(); ++i)
+                halfWatermark[i] = HalfFloat::fromFloat(watermark(i));
+            WatermarkEigen<p> object(height, width, std::move(halfWatermark), defaultPsnr);
             ImageBuffer input{Eigen::ArrayXXf(image)};
             EXPECT_NEAR(object.detectWatermark(input), expectedCorrelation, 2e-5);
             ImageOutputBuffer output;
@@ -2393,6 +2402,48 @@ TEST(GpuHdrTest, MatchesTheHdrContractForColoredPixelsPeaksAndChromaSitings) {
             }
     }
 }
+
+#if defined(_USE_CUDA_)
+TEST(GpuHdrTest, RejectsOddDimensionsAndUsesPlanar10UvPitch) {
+    ASSERT_TRUE(initializeEnvironment(0));
+    const auto stream = CudaStreamManager::getInstance().getComputeStream();
+    constexpr int width = 34, height = 18, chromaWidth = width / 2, chromaHeight = height / 2;
+    constexpr int paddedChromaWidth = chromaWidth + 16;
+    const auto mobius = video_utils::MobiusParams::fromHdrPeak(10.0f);
+    const video_utils::ChromaSiting siting{0.0f, 0.5f};
+
+    std::vector<uint16_t> yHost(width * height), uvTight(chromaWidth * chromaHeight * 2), uvPadded(paddedChromaWidth * chromaHeight * 2, 0xFFFFu);
+    for (int i = 0; i < width * height; ++i)
+        yHost[i] = static_cast<uint16_t>((i * 41) & 0x3FFu);
+    for (int p = 0; p < 2; ++p)
+        for (int cy = 0; cy < chromaHeight; ++cy)
+            for (int cx = 0; cx < chromaWidth; ++cx) {
+                const uint16_t val = static_cast<uint16_t>((p * 300 + cy * 37 + cx * 19) & 0x3FFu);
+                uvTight[(p * chromaHeight + cy) * chromaWidth + cx] = val;
+                uvPadded[(p * chromaHeight + cy) * paddedChromaWidth + cx] = val;
+            }
+    CudaArray<uint16_t> yDev(height, width, yHost.data(), stream);
+    CudaArray<uint16_t> uvTightDev(chromaHeight * 2, chromaWidth, uvTight.data(), stream);
+    CudaArray<uint16_t> uvPaddedDev(chromaHeight * 2, paddedChromaWidth, uvPadded.data(), stream);
+    CudaArray<uint8_t> yOutTight(height, width, stream), yOutPadded(height, width, stream);
+    CudaArray<uint8_t> uvOutTight(chromaHeight, width, stream), uvOutPadded(chromaHeight, width, stream);
+
+    EXPECT_THROW(
+        cuda_utils::launchP010HdrToSdrKernel(yDev.data(), width * 2, uvTightDev.data(), width, yOutTight.data(), width, nullptr, uvOutTight.data(), width, 33, height, siting, mobius, stream, true),
+        std::invalid_argument);
+    cuda_utils::launchP010HdrToSdrKernel(yDev.data(), width * 2, uvTightDev.data(), width, yOutTight.data(), width, nullptr, uvOutTight.data(), width, width, height, siting, mobius, stream, true);
+    cuda_utils::launchP010HdrToSdrKernel(
+        yDev.data(), width * 2, uvPaddedDev.data(), paddedChromaWidth * 2, yOutPadded.data(), width, nullptr, uvOutPadded.data(), width, width, height, siting, mobius, stream, true);
+
+    std::vector<uint8_t> tightY(width * height), paddedY(width * height), tightUv(chromaHeight * width), paddedUv(chromaHeight * width);
+    yOutTight.toHost(tightY.data());
+    yOutPadded.toHost(paddedY.data());
+    uvOutTight.toHost(tightUv.data());
+    uvOutPadded.toHost(paddedUv.data());
+    EXPECT_EQ(tightY, paddedY);
+    EXPECT_EQ(tightUv, paddedUv);
+}
+#endif
 #endif
 
 #if defined(_USE_OPENCL_)
@@ -3604,6 +3655,7 @@ TEST(CudaVideoTest, Converts422SurfacesToNv12OrNv16OnTheGpu) {
             SCOPED_TRACE(av_get_pix_fmt_name(surface));
             VideoSession probe;
             probe.videoStream = stream;
+            probe.dimensions = {height, width};
             probe.useHwDecoder = true;
             probe.decodedFormat = format;
             probe.outputFormat = output;
@@ -3901,7 +3953,7 @@ TEST_F(WatermarkTest, EmbedsIntoVideoAndDetectsFromTheEncodedFile) {
 
     VideoHandle embedSession = initVideo(embedSettings);
     const int embeddedFrames = embedVideo(embedSession.get());
-    embedSession.reset(); // close the muxer so the file is complete before we read it back
+    embedSession.reset(); // close muxer to flush output before reading it back
     ASSERT_EQ(embeddedFrames, 100);
     ASSERT_TRUE(fs::exists(output));
     ASSERT_GT(fs::file_size(output), 0U);
@@ -5077,12 +5129,44 @@ TEST(EncodeOptionsTest, DropsTrailingFlagsThatHaveNoValue) {
 TEST(EncodeOptionsTest, RespectsQuotedValues) {
     const video_utils::ParsedEncodeOptions parsed = video_utils::parseEncodeOptions("-c:v libx265 -x265-params \"keyint=50:min-keyint=50\"");
     EXPECT_EQ(dictValue(parsed, "x265-params"), "keyint=50:min-keyint=50");
+    EXPECT_EQ(dictValue(video_utils::parseEncodeOptions("-flags '-loop'"), "flags"), "-loop");
+    EXPECT_THROW(video_utils::parseEncodeOptions("-preset 'fast"), std::invalid_argument);
 }
 
 TEST(EncodeOptionsTest, ParsesBothNumericAndFourCcCodecTags) {
     EXPECT_EQ(video_utils::parseEncodeOptions("-c:v libx265 -tag:v hvc1").codecTag, "hvc1");
     EXPECT_EQ(video_utils::codecTagFromString("hvc1"), 0x31637668U); // little endian 'h','v','c','1'
     EXPECT_EQ(video_utils::codecTagFromString("0x31637668"), 0x31637668U);
+}
+
+TEST(EncodeOptionsTest, AppliesX265ThreadDefaultsWhenBudgeted) {
+    auto parsed = video_utils::parseEncodeOptions("-c:v libx265");
+    video_utils::applyX265ThreadDefaults(parsed, 0);
+    EXPECT_EQ(dictValue(parsed, "x265-params"), "");
+    video_utils::applyX265ThreadDefaults(parsed, 2);
+    EXPECT_EQ(dictValue(parsed, "x265-params"), "pools=2:frame-threads=1");
+}
+
+TEST(EncodeOptionsTest, PreservesExplicitX265ThreadOptions) {
+    auto parsed = video_utils::parseEncodeOptions("-c:v libx265 -x265-params \"crf=20: numa-pools=none\"");
+    video_utils::applyX265ThreadDefaults(parsed, 2);
+    EXPECT_EQ(dictValue(parsed, "x265-params"), "crf=20:numa-pools=none:frame-threads=1");
+
+    parsed = video_utils::parseEncodeOptions("-c:v libx265 -threads 4");
+    video_utils::applyX265ThreadDefaults(parsed, 2);
+    EXPECT_EQ(dictValue(parsed, "threads"), "4");
+    EXPECT_EQ(dictValue(parsed, "x265-params"), "pools=2");
+
+    parsed = video_utils::parseEncodeOptions("-c:v libx265 -x265-params \"--numa_pools=none:frame_threads=3\"");
+    video_utils::applyX265ThreadDefaults(parsed, 2);
+    EXPECT_EQ(dictValue(parsed, "x265-params"), "--numa_pools=none:frame_threads=3");
+}
+
+TEST(EncodeOptionsTest, LeavesAv1OptionsToTheirEncoder) {
+    auto parsed = video_utils::parseEncodeOptions("-c:v libsvtav1 -svtav1-params lp=2");
+    video_utils::applyX265ThreadDefaults(parsed, 2);
+    EXPECT_EQ(dictValue(parsed, "svtav1-params"), "lp=2");
+    EXPECT_EQ(av_dict_count(parsed.dictionary.get()), 1);
 }
 
 // the UI benchmark and batch workers: images are preloaded on another thread (on the GPU backends they are uploaded on the compute stream)
@@ -5562,3 +5646,87 @@ TEST_F(WatermarkTest, HardwareProbeSkipsLeadingInvalidNonKeyPackets) {
 #include "VideoBatchSchedulerTests.hpp"
 
 #include "ImageBatchTests.hpp"
+
+#if defined(_USE_GPU_)
+TEST_F(WatermarkTest, VideoBatchRetriesDeviceSpecificEncoderOptions) {
+    if (getAvailableDevices().size() < 2 || !avcodec_find_encoder_by_name("h264_mf"))
+        GTEST_SKIP() << "Two GPUs and the Media Foundation encoder are required";
+    VideoBatchSettings settings;
+    settings.accelerateFinal = false;
+    settings.video = makeVideoSettings(shortVideoFixture().string());
+    settings.video.useHwEncoder = true;
+    settings.video.encodeOptions.clear();
+    settings.deviceIndices = {0, 1};
+    for (const int device : settings.deviceIndices)
+        settings.hardwareOptions[device] = "-c:v h264_mf -hw_encoding 0";
+    const auto jobs = prepareVideoBatch({settings.video.videoFile}, (tempDir / "retry-encoder").string(), false);
+    VideoBatchControl control;
+    const auto result = runVideoBatch(settings, jobs, control);
+    ASSERT_EQ(result.results.size(), 1u);
+    EXPECT_EQ(result.results[0].attempt, 2u);
+    EXPECT_NE(result.results[0].detail.find("MF encoding requires"), std::string::npos);
+}
+
+TEST_F(WatermarkTest, VideoBatchDoesNotRetryDeterministicMediaErrorsAcrossGpus) {
+    if (getAvailableDevices().size() < 2)
+        GTEST_SKIP() << "Two GPUs are required";
+    struct Observer : VideoBatchObserver {
+        int retryingStates = 0;
+        std::vector<std::string> logs;
+        void onUpdate(const VideoBatchUpdate& update) override {
+            if (update.state == VideoBatchState::Retrying)
+                ++retryingStates;
+        }
+        void onLog(std::uint64_t, const std::string& line) override { logs.push_back(line); }
+    } observer;
+    VideoBatchSettings settings;
+    settings.detect = true;
+    settings.accelerateFinal = false;
+    settings.video = makeVideoSettings(shortVideoFixture().string());
+    settings.deviceIndices = {0, 1};
+    const auto jobs = prepareVideoBatch({shortVideoFixture().string()}, (tempDir / "no-retry").string(), true);
+    VideoBatchControl control;
+    const auto result = runVideoBatch(settings, jobs, control, &observer);
+    EXPECT_EQ(result.succeeded, 0u);
+    EXPECT_EQ(result.failed, 1u);
+    ASSERT_EQ(result.results.size(), 1u);
+    EXPECT_EQ(result.results[0].attempt, 1u);
+    EXPECT_EQ(observer.retryingStates, 0);
+    ASSERT_EQ(observer.logs.size(), 1u);
+    EXPECT_EQ(observer.logs[0].find("will retry"), std::string::npos);
+}
+#endif
+
+#if defined(_USE_EIGEN_)
+TEST_F(WatermarkTest, EigenFusedExifMatchesHostRotateAllOrientations) {
+    for (const auto& [w, h] : std::vector<std::pair<int, int>>{
+             {43,  71 },
+             {197, 213}
+    }) {
+        for (const int channels : {1, 3}) {
+            const std::vector<uint8_t> displayed = jpegTestPattern(w, h, channels);
+            for (int orient = 1; orient <= 8; ++orient) {
+                const fs::path jpg = tempDir / std::format("exif_{}x{}_{}ch_o{}.jpg", w, h, channels, orient);
+                writeOrientedJpeg(jpg, displayed, w, h, channels, orient);
+                const ImageFileBuffer host = InternalUtils::loadImage(jpg.string(), true, true);
+                const ImageFileBuffer fused = InternalUtils::loadImage(jpg.string(), false, true);
+                ASSERT_EQ(fused.rows, host.rows) << orient;
+                ASSERT_EQ(fused.cols, host.cols) << orient;
+                ASSERT_EQ(fused.isRGB, host.isRGB) << orient;
+                const auto& fg = fused.image.getGray();
+                const auto& hg = host.image.getGray();
+                ASSERT_EQ(fg.rows(), hg.rows());
+                ASSERT_EQ(fg.cols(), hg.cols());
+                EXPECT_EQ(std::memcmp(fg.data(), hg.data(), static_cast<size_t>(fg.size()) * sizeof(float)), 0) << w << "x" << h << " ch=" << channels << " orient=" << orient;
+                if (channels == 3) {
+                    for (int c = 0; c < 3; ++c) {
+                        const auto& fr = fused.rgbImage.getRGB()[c];
+                        const auto& hr = host.rgbImage.getRGB()[c];
+                        EXPECT_EQ(std::memcmp(fr.data(), hr.data(), static_cast<size_t>(fr.size())), 0) << w << "x" << h << " ch=" << c << " orient=" << orient;
+                    }
+                }
+            }
+        }
+    }
+}
+#endif

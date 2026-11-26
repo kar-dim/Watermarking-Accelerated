@@ -343,8 +343,9 @@ ImageBatchSummary runImageBatch(const ImageBatchSettings& settings, const std::v
                     std::size_t prefetchDepth = depth;
 #if defined(_USE_OPENCL_)
                     OclQueueManager::initialize(device.index, device.identity);
+                    const DeviceMemoryCleanup cleanup(device.index);
                     const auto owner = OclQueueManager::current();
-                    if (workerCount > 1)
+                    if (!settings.detect)
                         saveMemory = saveMemoryBudget(owner->getDevice().getInfo<CL_DEVICE_GLOBAL_MEM_SIZE>());
 #elif defined(_USE_CUDA_)
                     cudaDeviceProp properties{};

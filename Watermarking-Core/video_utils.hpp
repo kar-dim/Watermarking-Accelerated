@@ -19,14 +19,15 @@ extern "C" {
  */
 namespace video_utils {
 // rejects formats whose components exceed 8 bits
-inline bool is10bit(const AVCodecContext* codecCtx, const AVStream* st) {
+inline bool is10bit(const AVCodecContext* codecCtx, const AVStream* st, AVPixelFormat decoded = AV_PIX_FMT_NONE) {
     const auto exceeds8Bits = [](const AVPixelFormat format) {
         if (format == AV_PIX_FMT_NONE)
             return false;
         const AVPixFmtDescriptor* descriptor = av_pix_fmt_desc_get(format);
         return descriptor && descriptor->nb_components > 0 && descriptor->comp[0].depth > 8;
     };
-    return exceeds8Bits(codecCtx->pix_fmt) || exceeds8Bits(codecCtx->sw_pix_fmt) || exceeds8Bits(static_cast<AVPixelFormat>(st->codecpar->format)) || st->codecpar->bits_per_raw_sample > 8;
+    return exceeds8Bits(decoded) || exceeds8Bits(codecCtx->pix_fmt) || exceeds8Bits(codecCtx->sw_pix_fmt) || exceeds8Bits(static_cast<AVPixelFormat>(st->codecpar->format)) ||
+           st->codecpar->bits_per_raw_sample > 8;
 }
 // PQ HDR10 or HLG HDR
 inline bool isHDR(const AVCodecContext* codecCtx) { return codecCtx->color_trc == AVCOL_TRC_SMPTE2084 || codecCtx->color_trc == AVCOL_TRC_ARIB_STD_B67; }

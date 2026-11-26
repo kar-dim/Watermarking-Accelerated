@@ -5,6 +5,7 @@
 #include "common_utils.hpp"
 #include "ImageFileBuffer.hpp"
 #include "ImagePixels.hpp"
+#include "ImagePixelsInternal.hpp"
 #include "include/WatermarkCore.hpp"
 #include "utils.hpp"
 #include "video_utils.hpp"
@@ -33,11 +34,9 @@
 #include "CudaArray.hpp"
 #include "CudaCheck.hpp"
 #include "CudaStreamManager.hpp"
-#include "HostMemory.hpp"
 #include "nvjpeg_utils.hpp"
 #include <cuda_runtime.h>
 #elif defined(_USE_OPENCL_)
-#include "HostMemory.hpp"
 #include "OclQueueManager.hpp"
 #include "opencl_utils.hpp"
 #elif defined(_USE_EIGEN_)
@@ -237,7 +236,7 @@ void interleavePlanes(
     // small row tiles keep cache lines hot while reading planar columns
     constexpr int tileRows = 32;
     const __m128i zero = _mm_setzero_si128();
-    const __m128i rgbMask = _mm_setr_epi8(0, 1, 2, 4, 5, 6, 8, 9, 10, 12, 13, 14, -1, -1, -1, -1);
+    const __m128i rgbMask = ImagePixelsInternal::rgbPackMask();
 #pragma omp parallel for schedule(static)
     for (int rowBlock = 0; rowBlock < rows; rowBlock += tileRows) {
         const int rowEnd = std::min(rowBlock + tileRows, rows);
@@ -334,7 +333,8 @@ void copySessionPreview(const ImageSession* session, uint8_t* destination, const
             throw std::logic_error("Invalid alpha plane for preview");
         std::vector<uint8_t> planar(planeSize * 3);
 #if defined(_USE_CUDA_)
-        CUDA_CHECK(cudaSetDevice(buffer.getDeviceIndex()));
+        const cuda_utils::ScopedDevice binding(buffer.getDeviceIndex());
+        CUDA_CHECK(binding.status);
         const cudaStream_t stream = CudaStreamManager::getInstance().getComputeStream();
         CudaArray<uint8_t> rowMajor(height, width, 3, stream);
         cuda_utils::launchColMajorToRowMajorU8Kernel(buffer.data(), rowMajor.data(), width, height, 3, stream);
@@ -357,7 +357,8 @@ void copySessionPreview(const ImageSession* session, uint8_t* destination, const
         return;
     }
 #if defined(_USE_CUDA_)
-    CUDA_CHECK(cudaSetDevice(buffer.getDeviceIndex()));
+    const cuda_utils::ScopedDevice binding(buffer.getDeviceIndex());
+    CUDA_CHECK(binding.status);
     const cudaStream_t stream = CudaStreamManager::getInstance().getComputeStream();
     CudaArray<uint8_t> interleaved(height, width, channels, stream);
     cuda_utils::launchColMajorToInterleavedU8Kernel(buffer.data(), interleaved.data(), width, height, channels, stream);
@@ -426,6 +427,10 @@ DeviceMemoryCleanup::DeviceMemoryCleanup([[maybe_unused]] int index) noexcept {
     if (index < 0 && cudaGetDevice(&index) != cudaSuccess)
         return;
     deviceIndex = index;
+#elif defined(_USE_OPENCL_)
+    deviceIndex = index;
+    if (const auto owner = OclQueueManager::current(); index < 0 && owner)
+        deviceIndex = owner->getDeviceIndex();
 #endif
 }
 
@@ -444,6 +449,8 @@ DeviceMemoryCleanup::~DeviceMemoryCleanup() {
     } catch (...) {}
     if (previous != deviceIndex)
         cudaSetDevice(previous);
+#elif defined(_USE_OPENCL_)
+    OclQueueManager::releaseIdleBuffers(deviceIndex);
 #endif
 }
 
@@ -457,17 +464,13 @@ string getDeviceName(const int deviceIndex) {
     int CPUInfo[4] = {-1};
     char CPUBrandString[0x40] = {0};
     __cpuid(CPUInfo, 0x80000000);
-    unsigned int nExIds = CPUInfo[0];
-    for (unsigned int i = 0x80000000; i <= nExIds; ++i) {
-        __cpuid(CPUInfo, i);
-        if (i == 0x80000002)
-            memcpy(CPUBrandString, CPUInfo, sizeof(CPUInfo));
-        else if (i == 0x80000003)
-            memcpy(CPUBrandString + 16, CPUInfo, sizeof(CPUInfo));
-        else if (i == 0x80000004)
-            memcpy(CPUBrandString + 32, CPUInfo, sizeof(CPUInfo));
-    }
+    if (static_cast<unsigned>(CPUInfo[0]) >= 0x80000004u)
+        for (int leaf = 0; leaf < 3; ++leaf) {
+            __cpuid(CPUInfo, static_cast<int>(0x80000002u + leaf));
+            memcpy(CPUBrandString + leaf * sizeof(CPUInfo), CPUInfo, sizeof(CPUInfo));
+        }
     string cpuName(CPUBrandString);
+    cpuName.erase(0, cpuName.find_first_not_of(" \t"));
     cpuName.erase(cpuName.find_last_not_of(" \n\r\t\0") + 1);
     return cpuName.empty() ? "Unknown CPU" : cpuName;
 #else
@@ -537,6 +540,9 @@ void updateSessionParams(ImageSession* s, const int p, const float psnr) {
     checkError(!s, "No active image session");
 #if defined(_USE_OPENCL_)
     const OclQueueManager::Binding binding(s->imgBuffer.image.getOwner());
+#elif defined(_USE_CUDA_)
+    const cuda_utils::ScopedDevice binding(s->imgBuffer.image.getDeviceIndex());
+    CUDA_CHECK(binding.status);
 #endif
     checkPredictionOrder(p);
     checkPsnr(psnr);
@@ -639,7 +645,7 @@ void ImageSaver::saveImpl(ImageSession* session, const string& outPath, const si
         {
             std::lock_guard assignLock(mutex);
             slot.task = std::async(std::launch::async, [this, index, id, outPath, exactPath, bytes] {
-                string error;
+                std::exception_ptr failure;
                 try {
                     if (exactPath) {
                         const auto& output = *saveSlots[index].buffer;
@@ -647,15 +653,21 @@ void ImageSaver::saveImpl(ImageSession* session, const string& outPath, const si
                     } else {
                         flushToDiskAsync(saveSlots[index].buffer.get(), outPath);
                     }
-                } catch (const std::exception& e) { error = *e.what() ? e.what() : "Unknown save error"; } catch (...) {
-                    error = "Unknown save error";
-                }
+                } catch (...) { failure = std::current_exception(); }
                 // Idle slots must not retain GPU buffers outside the active save budget
                 if (maxInFlightBytes)
                     *saveSlots[index].buffer = {};
                 {
                     std::lock_guard finishedLock(mutex);
-                    finished.push_back(SaveResult{id, std::move(error)});
+                    try {
+                        const char* error = "";
+                        if (failure) {
+                            try {
+                                std::rethrow_exception(failure);
+                            } catch (const std::exception& e) { error = *e.what() ? e.what() : "Unknown save error"; } catch (...) { error = "Unknown save error"; }
+                        }
+                        finished.push_back(SaveResult{id, error});
+                    } catch (...) { saveError = std::current_exception(); }
                     freeSlots.push_back(index);
                     inFlightBytes -= bytes;
                 }
@@ -677,12 +689,16 @@ void ImageSaver::saveImpl(ImageSession* session, const string& outPath, const si
 
 std::vector<SaveResult> ImageSaver::takeFinished() {
     std::lock_guard lock(mutex);
+    if (saveError)
+        std::rethrow_exception(std::exchange(saveError, {}));
     return std::exchange(finished, {});
 }
 
 std::vector<SaveResult> ImageSaver::finish() {
     std::unique_lock lock(mutex);
     slotFreed.wait(lock, [&] { return freeSlots.size() == saveSlots.size(); });
+    if (saveError)
+        std::rethrow_exception(std::exchange(saveError, {}));
     return std::exchange(finished, {});
 }
 
@@ -704,6 +720,11 @@ void bindPreloadedImage(ImageSession* s, PreloadedHandle preloadedData) {
 #if defined(_USE_OPENCL_)
     const OclQueueManager::Binding binding(preloadedData->buffer.image.getOwner());
     const bool deviceChanged = !s->imgBuffer.image.empty() && s->imgBuffer.image.getOwner() != preloadedData->buffer.image.getOwner();
+#elif defined(_USE_CUDA_)
+    const auto device = preloadedData->buffer.image.getDeviceIndex();
+    const cuda_utils::ScopedDevice binding(device);
+    CUDA_CHECK(binding.status);
+    const bool deviceChanged = !s->imgBuffer.image.empty() && s->imgBuffer.image.getDeviceIndex() != device;
 #else
     const bool deviceChanged = false;
 #endif
@@ -727,7 +748,7 @@ void bindPreloadedImage(ImageSession* s, PreloadedHandle preloadedData) {
 #if defined(_USE_EIGEN_)
     if (replaceOutput)
         s->watermarkBuffer = std::move(output);
-#elif defined(_USE_OPENCL_)
+#elif defined(_USE_GPU_)
     if (deviceChanged)
         s->watermarkBuffer = {};
 #endif
@@ -766,6 +787,9 @@ void prepareDetectionImage(ImageSession* s) {
     checkOutput(s);
 #if defined(_USE_OPENCL_)
     const OclQueueManager::Binding binding(s->watermarkBuffer.getOwner());
+#elif defined(_USE_CUDA_)
+    const cuda_utils::ScopedDevice binding(s->watermarkBuffer.getDeviceIndex());
+    CUDA_CHECK(binding.status);
 #endif
     s->detectionReady = false;
     s->detectGrayBuffer = InternalUtils::castToFloatGray(s->watermarkBuffer, s->imgBuffer.isRGB);
@@ -869,8 +893,8 @@ static VideoHandle openVideo(const VideoSettings& settings) {
     session->frameRate = av_guess_frame_rate(session->inputFormatCtx.get(), session->inputFormatCtx->streams[session->videoStreamIndex], nullptr);
     session->nominalFrameDuration = nominalFrameDuration(session->frameRate, session->videoStream->time_base);
     // dimensions must fit chroma subsampling, checked with encoder, detection reads only luma
-    const int height = session->videoStream->codecpar->height;
-    const int width = session->videoStream->codecpar->width;
+    session->dimensions = {session->inputDecoderCtx->height, session->inputDecoderCtx->width};
+    const auto [height, width] = session->videoDims();
     checkCancelled(session.get());
     session->watermarkObj = createWatermarkObject(height, width, settings.watermarkPassword, settings.p, settings.psnr);
     reportProgress(session.get(), VideoState::Setup);
@@ -913,7 +937,7 @@ int embedVideo(VideoSession* s, const bool replaceExistingOutput) {
         reportProgress(s, VideoState::Processing);
         const bool needsFilter = initFilterGraph(s);
         const int framesProcessed = videoDispatcher(s, VideoMode::EMBED, needsFilter);
-        checkError(framesProcessed <= 0, "No video frames were decoded");
+        video_utils::checkMediaError(framesProcessed <= 0, "No video frames were decoded");
         reportProgress(s, VideoState::Finalizing);
         video_utils::flushAndFinalize(s, replaceExistingOutput);
         reportProgress(s, VideoState::Completed);
@@ -939,11 +963,11 @@ int detectVideo(VideoSession* s) {
         CUDA_CHECK(cudaSetDevice(s->deviceIndex));
 #endif
         checkCancelled(s);
-        checkError(is10bit(s->inputDecoderCtx.get(), s->videoStream) || isHDR(s->inputDecoderCtx.get()),
+        video_utils::checkMediaError(is10bit(s->inputDecoderCtx.get(), s->videoStream, s->decodedFormat) || s->isHdr || isHDR(s->inputDecoderCtx.get()),
             "Video watermark detection supports only 8-bit SDR input. High-bit-depth and HDR detection are not supported.");
         reportProgress(s, VideoState::Processing);
         const int frames = videoDispatcher(s, VideoMode::DETECT, initFilterGraph(s));
-        checkError(frames <= 0, "No video frames were decoded");
+        video_utils::checkMediaError(frames <= 0, "No video frames were decoded");
         checkCancelled(s);
         reportProgress(s, VideoState::Completed);
         return frames;

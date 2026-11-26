@@ -597,6 +597,8 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='OPENCL_Debug|x64'">true</ExcludedFromBuild>
     </ClInclude>
     <ClInclude Include="TinyEXIF.h" />
+    <ClInclude Include="ImagePixelsInternal.hpp" />
+    <ClInclude Include="MeShiftLayout.hpp" />
     <ClInclude Include="utils.hpp" />
     <ClInclude Include="VideoProcessingContext.hpp" />
     <ClInclude Include="video_defines.hpp" />

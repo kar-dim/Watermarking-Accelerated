@@ -54,6 +54,7 @@ class WatermarkingUI : public QMainWindow {
     bool eventFilter(QObject* watched, QEvent* event) override;
 
   private:
+    static constexpr auto videoFilter = "Videos (*.mkv *.mp4 *.mov *.avi *.webm *.m4v *.ts *.mts *.m2ts *.mpg *.mpeg *.wmv *.vob *.mxf *.flv *.ogv *.nut *.y4m *.h264 *.hevc *.av1);;All files (*)";
     // Input controls for watermarking parameters
     struct SettingsControls {
         QLineEdit* password = nullptr;
@@ -121,6 +122,7 @@ class WatermarkingUI : public QMainWindow {
     QLabel* singleDetectionFile = nullptr;
     QLabel* singleDetectionResult = nullptr;
     SingleImageWorker* singleWorker = nullptr;
+    SingleSaveWorker* saveWorker = nullptr;
 
     // Batch processing tab controls
     QWidget* batchPage = nullptr;

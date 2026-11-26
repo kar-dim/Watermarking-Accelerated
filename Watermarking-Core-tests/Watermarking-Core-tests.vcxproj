@@ -74,6 +74,7 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <PrecompiledHeaderFile>
       </PrecompiledHeaderFile>
+      <OpenMPSupport>true</OpenMPSupport>
       <PreprocessorDefinitions>X64;NDEBUG;_CONSOLE;_USE_CUDA_;_USE_GPU_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <DebugInformationFormat>None</DebugInformationFormat>
@@ -148,6 +149,7 @@
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <PrecompiledHeaderFile>
       </PrecompiledHeaderFile>
+      <OpenMPSupport>true</OpenMPSupport>
       <PreprocessorDefinitions>X64;NDEBUG;_CONSOLE;_USE_OPENCL_;_USE_GPU_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
       <DebugInformationFormat>None</DebugInformationFormat>

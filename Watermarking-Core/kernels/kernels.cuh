@@ -1,5 +1,6 @@
 #pragma once
 #include "common_utils.hpp"
+#include "../MeShiftLayout.hpp"
 #include <cstdint>
 #include <cub/block/block_reduce.cuh>
 #include <cuda_fp16.h>
@@ -514,46 +515,6 @@ struct FloatFloat {
         return quickTwoSum(h, __fmul_rn(0.5f * h, r)); // fmul_rn on purpose
     }
     __device__ __forceinline__ friend FloatFloat shfl(const FloatFloat v, const int srcLane) { return {__shfl_sync(0xffffffffu, v.hi, srcLane), __shfl_sync(0xffffffffu, v.lo, srcLane)}; }
-};
-
-// Autocorrelation shift layout for fast prediction system assembly
-// Sums unique spatial shifts over the inner area, then adds border lines and corners
-template <int p>
-struct MeShiftLayout {
-    static constexpr int pad = p / 2;
-    static constexpr int windowSize = p * p;
-    static constexpr int windowCenter = windowSize / 2;
-    static constexpr int maxShift = p - 1;
-    static constexpr int shiftSpan = (2 * maxShift) + 1;
-    // Keep only unique shift directions (dc > 0 or dc == 0 with dr >= 0)
-    static constexpr int numShifts = ((shiftSpan * shiftSpan) + 1) / 2;
-    // Border rows and columns outside the inner image area
-    static constexpr int borderSize = 4 * pad;
-    // Layout of fixed point sums for inner area, border rows, and border columns
-    static constexpr int borderRowsOffset = numShifts;
-    static constexpr int borderColsOffset = numShifts + (numShifts * borderSize);
-    static constexpr int shiftSumsSize = numShifts * (1 + (2 * borderSize));
-    // Scale products by 1 / 255^2 so fixed point sums do not overflow
-    static constexpr float productScale = 1.0f / (255.0f * 255.0f);
-
-    __host__ __device__ static constexpr int shiftIndex(const int dr, const int dc) { return dc == 0 ? dr : (maxShift + 1) + ((dc - 1) * shiftSpan) + (dr + maxShift); }
-    // First shift index for column offset dc
-    __host__ __device__ static constexpr int firstShift(const int dc) { return dc == 0 ? 0 : shiftIndex(-maxShift, dc); }
-    // Number of column shift groups to keep register usage in check
-    static constexpr int shiftGroups = p >= 9 ? 3 : (p >= 7 ? 2 : 1);
-    // Number of neighboring inner columns processed per task
-    static constexpr int interiorCols = p >= 7 ? 2 : 1;
-    // Number of rows processed per task
-    static constexpr int interiorRun = 8;
-    __host__ __device__ static constexpr int groupFirstDc(const int group) { return (group * (maxShift + 1)) / shiftGroups; }
-    // One past the last shift index before column offset dc
-    __host__ __device__ static constexpr int shiftEnd(const int dc) { return dc > maxShift ? numShifts : firstShift(dc); }
-    // Maps a border index to the unclamped row or column coordinate
-    __device__ static int borderToCoord(const int border, const int size) { return border < 2 * pad ? border - pad : size - (3 * pad) + border; }
-    // Copy border rows to row-major format for p >= 7 to speed up memory access
-    static constexpr bool copyBorderRows = p >= 7;
-    static constexpr int borderCopyRows = 6 * pad;
-    __device__ static int borderCopyRow(const int row, const int height) { return row < borderCopyRows / 2 ? row : row - height + borderCopyRows; }
 };
 
 // Reads an image pixel with edge clamping

@@ -124,6 +124,8 @@ class WatermarkCuda final : public WatermarkBase {
 
     // detection: correlation between the prediction error of the image and the prediction error of (mask * watermark)
     float detectWatermark(const ImageBuffer& inputImage) override {
+        const cuda_utils::ScopedDevice binding(coefficients.getDeviceIndex());
+        CUDA_CHECK(binding.status);
         ensureDetectBuffers();
         const PipelineGraph::Key key{
             {inputImage.data(), nullptr, nullptr},
@@ -152,8 +154,8 @@ class WatermarkCuda final : public WatermarkBase {
     CudaArray<uint64_t> shiftSums;
     // row-major copy of the image rows used by the border row sums
     CudaArray<float> borderRowsCopy;
-    // the ME solver system (Rx packed lower triangular, then rx), exact uint64 fixed point
-    static constexpr int solverSystemSize = ((localSize * (localSize + 1)) / 2) + localSize;
+    // ME solver system (Rx packed lower triangular, then rx), exact uint64 fixed point
+    static constexpr int solverSystemSize = MeShiftLayout<p>::solverSystemSize;
     CudaArray<uint64_t> solverSystem;
 
     // per frame buffers: u, [0] = sum(u^2) (fixed point) and [1] = max|e| float bits, the per block correlation sums, the last block ticket
@@ -205,6 +207,8 @@ class WatermarkCuda final : public WatermarkBase {
 
     // embedding: watermark added to 8-bit inputImage (RGB), or luma when inputImage is null
     void embed(const ImageBuffer& inputGrayImage, const uint8_t* inputImage, const int channels, ImageOutputBuffer& output, const Layout outputLayout) {
+        const cuda_utils::ScopedDevice binding(coefficients.getDeviceIndex());
+        CUDA_CHECK(binding.status);
         ensureEmbedBuffers();
         // output buffer reused, reallocated only when size or channel count changes
         if (output.empty() || output.getRows() != this->baseRows || output.getCols() != this->baseCols || output.getChannels() != channels)

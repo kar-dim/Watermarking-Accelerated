@@ -12,11 +12,6 @@
  */
 class WatermarkBase {
   protected:
-    template <int ALIGNMENT>
-    static constexpr int alignUp(const int x) {
-        static_assert(ALIGNMENT > 0 && (ALIGNMENT & (ALIGNMENT - 1)) == 0, "ALIGNMENT must be a power of 2");
-        return (x + (ALIGNMENT - 1)) & ~(ALIGNMENT - 1);
-    }
     int baseRows, baseCols, totalPixels;
     WatermarkBuffer randomMatrix;
     float strengthFactor;

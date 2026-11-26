@@ -199,21 +199,24 @@ class PredictionErrorMatrixData {
 
     // Computes Rx and rx from shift sums and solves the system with Cholesky
     bool computeCoefficients(const float* image) {
-        // Resize thread buffers if thread count changed, then reset sums to zero
-        threadSums.resize(std::max<size_t>(threadSums.size(), omp_get_max_threads()));
-        for (auto& sums : threadSums) {
+        const bool useParallel = static_cast<size_t>(rows) * cols >= 32768;
+        threadSums.resize(std::max<size_t>(threadSums.size(), useParallel ? omp_get_max_threads() : 1));
+        int activeThreads = 1;
+#pragma omp parallel if (useParallel)
+        {
+            const int tid = omp_get_thread_num();
+            if (tid == 0)
+                activeThreads = omp_get_num_threads();
+            auto& sums = threadSums[tid];
             sums.inner.fill(0.0);
             sums.borderRows.fill(0.0);
-        }
-#pragma omp parallel
-        {
-            auto& sums = threadSums[omp_get_thread_num()];
 #pragma omp for schedule(static)
             for (int c = -pad; c < cols + pad; c++)
                 sumColumn(image, c, sums);
         }
         ShiftSums total{};
-        for (const auto& sums : threadSums) {
+        for (int t = 0; t < activeThreads; t++) {
+            const auto& sums = threadSums[t];
             for (int i = 0; i < numShifts; i++)
                 total.inner[i] += sums.inner[i];
             for (int i = 0; i < numShifts * borderSize; i++)
@@ -245,9 +248,9 @@ class PredictionErrorMatrixData {
             return false;
         // Solve Rx * coefficients = rx using upper Cholesky decomposition
         Eigen::LLT<AccumMatrix, Eigen::Upper> llt(Rx);
-        if (llt.info() != Eigen::Success)
+        if (llt.info() != Eigen::Success || !(llt.matrixLLT().diagonal().array().square() > 1e-3).all())
             return false;
         coefficients = llt.solve(rx).template cast<float>();
-        return true;
+        return coefficients.allFinite();
     }
 };

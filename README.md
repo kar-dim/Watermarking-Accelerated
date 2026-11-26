@@ -177,7 +177,7 @@ Video batches accept a file or folder. Without `--output_directory`, output goes
 
 Ctrl+C cancels the batch. Image batches finish images already processing or saving, video batches discard incomplete output. Exit codes are 0 on success, 1 if any file failed, or 130 after cancellation.
 
-In the UI, each batch tab has a **Devices** picker, video batch **Encoder options for** selects whose hardware settings you edit. CLI hardware options apply to every selected GPU. Video workers keep hardware decoding and encoding on their selected GPU, with CPU decoder fallback. Processing errors can try each remaining GPU once and unavailable devices leave the batch. Automatic CPU codec threads and image load/save concurrency are bounded across workers to not overcommit, and shared CPU/disk/PCIe bandwidth can limit scaling.
+In the UI, each batch tab has a **Devices** picker, video batch **Encoder options for** selects whose hardware settings you edit. CLI hardware options apply to every selected GPU. Video workers keep hardware decoding and encoding on their selected GPU, with CPU decoder fallback. Processing errors can try each remaining GPU once and unavailable devices leave the batch. Batches limit image load/save concurrency and set a CPU thread budget for codecs that honor it. Shared CPU, disk and PCIe bandwidth can limit scaling.
 
 | Option | Description |
 |---|---|

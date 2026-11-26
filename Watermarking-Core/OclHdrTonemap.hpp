@@ -1,3 +1,7 @@
+/*!
+ *  \brief  OpenCL HDR to SDR conversion
+ *  \author Dimitris Karatzas
+ */
 #pragma once
 #include "HdrTonemap.hpp"
 #include "opencl_init.h"

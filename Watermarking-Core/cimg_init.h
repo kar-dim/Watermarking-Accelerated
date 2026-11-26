@@ -1,5 +1,7 @@
 #pragma once
 #define cimg_display 0 // disable display features to save build time and binary size
+#define cimg_verbosity 0
+#define cimg_no_system_calls
 #define cimg_use_png
 #define cimg_use_jpeg
 #define cimg_use_openmp

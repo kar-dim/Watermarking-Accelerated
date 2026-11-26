@@ -65,6 +65,9 @@
     <ClInclude Include="ThemePalette.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="UiHelpers.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <QtMoc Include="ImageWorker.hpp">
       <Filter>Header Files</Filter>
     </QtMoc>

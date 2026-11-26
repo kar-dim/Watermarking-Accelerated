@@ -22,6 +22,7 @@ inline constexpr int lanes = 8;
 inline Vec zero() { return _mm256_setzero_ps(); }
 inline Vec broadcast(const float value) { return _mm256_set1_ps(value); }
 inline Vec load(const float* source) { return _mm256_loadu_ps(source); }
+inline Vec loadHalf(const uint16_t* source) { return _mm256_cvtph_ps(_mm_loadu_si128(reinterpret_cast<const __m128i*>(source))); }
 inline void store(float* destination, const Vec value) { _mm256_storeu_ps(destination, value); }
 inline Vec add(const Vec a, const Vec b) { return _mm256_add_ps(a, b); }
 inline Vec mul(const Vec a, const Vec b) { return _mm256_mul_ps(a, b); }
@@ -55,6 +56,7 @@ inline constexpr int lanes = 16;
 inline Vec zero() { return _mm512_setzero_ps(); }
 inline Vec broadcast(const float value) { return _mm512_set1_ps(value); }
 inline Vec load(const float* source) { return _mm512_loadu_ps(source); }
+inline Vec loadHalf(const uint16_t* source) { return _mm512_cvtph_ps(_mm256_loadu_si256(reinterpret_cast<const __m256i*>(source))); }
 inline void store(float* destination, const Vec value) { _mm512_storeu_ps(destination, value); }
 inline Vec add(const Vec a, const Vec b) { return _mm512_add_ps(a, b); }
 inline Vec mul(const Vec a, const Vec b) { return _mm512_mul_ps(a, b); }

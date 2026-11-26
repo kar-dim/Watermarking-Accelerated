@@ -238,7 +238,7 @@
     <ClCompile>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <OpenMPSupport>true</OpenMPSupport>
-      <AdditionalIncludeDirectories>$(WatermarkingPublicIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(WatermarkingPublicIncludeDirectories);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;WIN64;_DEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus </AdditionalOptions>
       <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
@@ -259,7 +259,7 @@
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <DebugInformationFormat>None</DebugInformationFormat>
       <OpenMPSupport>true</OpenMPSupport>
-      <AdditionalIncludeDirectories>$(WatermarkingPublicIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(WatermarkingPublicIncludeDirectories);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;WIN64;NDEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus</AdditionalOptions>
       <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
@@ -280,7 +280,7 @@
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
       <AdditionalOptions>-openmp /Zc:__cplusplus -Wno-unused-command-line-argument</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(WatermarkingPublicIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(WatermarkingPublicIncludeDirectories);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;WIN64;_DEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
@@ -296,7 +296,7 @@
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <EnableEnhancedInstructionSet>AdvancedVectorExtensions512</EnableEnhancedInstructionSet>
       <AdditionalOptions>-openmp /Zc:__cplusplus -Wno-unused-command-line-argument</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(WatermarkingPublicIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(WatermarkingPublicIncludeDirectories);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;WIN64;_DEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
@@ -315,7 +315,7 @@
       <DebugInformationFormat>None</DebugInformationFormat>
       <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
       <AdditionalOptions>-openmp /clang:-O3 /Zc:__cplusplus -Wno-unused-command-line-argument -flto=thin %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(WatermarkingPublicIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(WatermarkingPublicIncludeDirectories);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;WIN64;NDEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
@@ -336,7 +336,7 @@
       <DebugInformationFormat>None</DebugInformationFormat>
       <EnableEnhancedInstructionSet>AdvancedVectorExtensions512</EnableEnhancedInstructionSet>
       <AdditionalOptions>-openmp /clang:-O3 /Zc:__cplusplus -Wno-unused-command-line-argument -flto=thin %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(WatermarkingPublicIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(WatermarkingPublicIncludeDirectories);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;WIN64;NDEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
@@ -356,7 +356,7 @@
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <DebugInformationFormat>None</DebugInformationFormat>
       <OpenMPSupport>true</OpenMPSupport>
-      <AdditionalIncludeDirectories>$(WatermarkingPublicIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(WatermarkingPublicIncludeDirectories);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;WIN64;NDEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus </AdditionalOptions>
       <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
@@ -376,7 +376,7 @@
     <ClCompile>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <OpenMPSupport>true</OpenMPSupport>
-      <AdditionalIncludeDirectories>$(WatermarkingPublicIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(WatermarkingPublicIncludeDirectories);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32;WIN64;_DEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalOptions>/wd4275 /wd4996 /Zc:__cplusplus </AdditionalOptions>
       <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
@@ -416,6 +416,7 @@
     <ClInclude Include="AnimatedButton.hpp" />
     <ClInclude Include="MultiDeviceComboBox.hpp" />
     <ClInclude Include="ThemePalette.hpp" />
+    <ClInclude Include="UiHelpers.hpp" />
     <QtMoc Include="ImageWorker.hpp" />
     <ClInclude Include="ImagePreview.hpp" />
     <ClInclude Include="VideoWorker.hpp" />

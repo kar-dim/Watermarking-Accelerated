@@ -30,8 +30,9 @@ using FlagBuffer = OclArray<int32_t>;
 #include "ImageEigenBuffer.hpp"
 #include "ImageEigenOutputBuffer.hpp"
 #include <Eigen/Core>
+#include <memory>
 using ImageBuffer = ImageEigenBuffer;
-using WatermarkBuffer = ImageEigenBuffer;
+using WatermarkBuffer = std::unique_ptr<uint16_t[]>;
 using ImageOutputBuffer = ImageEigenOutputBuffer;
 using Gray8Buffer = Eigen::Array<uint8_t, Eigen::Dynamic, Eigen::Dynamic>;
 using Gray16Buffer = Eigen::Array<uint16_t, Eigen::Dynamic, Eigen::Dynamic>;

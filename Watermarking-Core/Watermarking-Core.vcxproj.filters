@@ -31,6 +31,9 @@
     <ClInclude Include="ImagePixels.hpp">
       <Filter>Header Files\util</Filter>
     </ClInclude>
+    <ClInclude Include="ImagePixelsInternal.hpp">
+      <Filter>Header Files\util</Filter>
+    </ClInclude>
     <ClCompile Include="video_utils.cpp">
       <Filter>Source Files\util</Filter>
     </ClCompile>
@@ -146,6 +149,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="WatermarkBase.hpp">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="MeShiftLayout.hpp">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="WatermarkFactory.hpp">

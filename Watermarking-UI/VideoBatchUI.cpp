@@ -1,6 +1,7 @@
 #include "AnimatedButton.hpp"
 #include "MultiDeviceComboBox.hpp"
 #include "ThemePalette.hpp"
+#include "UiHelpers.hpp"
 #include "WatermarkingUI.h"
 #include <algorithm>
 #include <CorrelationFormat.hpp>
@@ -34,12 +35,6 @@
  */
 
 namespace {
-QString hardwareDefaults(const int device) {
-    try {
-        return QString::fromStdString(WatermarkCore::defaultVideoEncoderOptions(true, device));
-    } catch (const std::exception&) { return {}; }
-}
-
 bool terminal(const WatermarkCore::VideoBatchState state) {
     using State = WatermarkCore::VideoBatchState;
     return state == State::Completed || state == State::Failed || state == State::Skipped || state == State::Cancelled;
@@ -63,15 +58,12 @@ void WatermarkingUI::createVideoBatchTab() {
     videoBatchMode->setObjectName("videoBatchMode");
     videoBatchMode->addItems({"Embed watermark", "Detect watermark"});
     form->addRow("Operation", videoBatchMode);
-    auto* outputRow = new QWidget(videoBatchInputs);
-    outputRow->setProperty("workflowContainer", true);
-    auto* outputLayout = new QHBoxLayout(outputRow);
-    outputLayout->setContentsMargins(0, 0, 0, 0);
-    videoBatchOutput = new QLineEdit(outputRow);
+    QWidget* outputRow = makeFileRow(videoBatchOutput, "Browse", videoBatchInputs, [this] {
+        const QString path = QFileDialog::getExistingDirectory(this, "Choose batch output folder", videoBatchOutput->text());
+        if (!path.isEmpty())
+            videoBatchOutput->setText(path);
+    });
     videoBatchOutput->setObjectName("videoBatchOutput");
-    auto* browse = new AnimatedButton("Browse", outputRow);
-    outputLayout->addWidget(videoBatchOutput, 1);
-    outputLayout->addWidget(browse);
     form->addRow("Output folder", outputRow);
     videoBatchFormatRow = new QWidget(videoBatchInputs);
     videoBatchFormatRow->setProperty("workflowContainer", true);
@@ -216,14 +208,7 @@ void WatermarkingUI::createVideoBatchTab() {
     videoBatchTimer = new QTimer(this);
     videoBatchTimer->setInterval(100);
     connect(videoBatchTimer, &QTimer::timeout, this, &WatermarkingUI::pollVideoBatch);
-    connect(browse, &QPushButton::clicked, this, [this] {
-        const QString path = QFileDialog::getExistingDirectory(this, "Choose batch output folder", videoBatchOutput->text());
-        if (!path.isEmpty())
-            videoBatchOutput->setText(path);
-    });
-    connect(videoBatchAddFiles, &QPushButton::clicked, this, [this] {
-        addVideoBatchPaths(QFileDialog::getOpenFileNames(this, "Add videos", QString(), "Videos (*.mkv *.mp4 *.mov *.avi *.webm *.m4v *.ts *.mts *.m2ts *.mpg *.mpeg *.wmv);;All files (*)"));
-    });
+    connect(videoBatchAddFiles, &QPushButton::clicked, this, [this] { addVideoBatchPaths(QFileDialog::getOpenFileNames(this, "Add videos", QString(), videoFilter)); });
     connect(videoBatchAddFolder, &QPushButton::clicked, this, [this] {
         const QString path = QFileDialog::getExistingDirectory(this, "Add videos from a folder");
         if (!path.isEmpty())
@@ -249,7 +234,7 @@ void WatermarkingUI::createVideoBatchTab() {
     connect(videoBatchHardware, &QCheckBox::toggled, this, [this](const bool hardware) {
         if (hardware) {
             videoBatchSoftwareOptions = videoBatchEncoderOptions->text();
-            videoBatchEncoderOptions->setText(videoBatchHardwareOptions.value(videoBatchOptionsDevice, hardwareDefaults(videoBatchOptionsDevice)));
+            videoBatchEncoderOptions->setText(videoBatchHardwareOptions.value(videoBatchOptionsDevice, hardwareEncoderDefaultsText(videoBatchOptionsDevice)));
         } else {
             videoBatchHardwareOptions.insert(videoBatchOptionsDevice, videoBatchEncoderOptions->text());
             videoBatchEncoderOptions->setText(videoBatchSoftwareOptions);
@@ -262,7 +247,7 @@ void WatermarkingUI::createVideoBatchTab() {
             videoBatchWorker->cancel();
             videoBatchCancel->setEnabled(false);
             videoBatchSkip->setEnabled(false);
-            videoBatchStatus->setText("Cancelling batch...");
+            setStatus(videoBatchStatus, "Cancelling batch...", "running");
         }
     });
     connect(videoBatchSkip, &QPushButton::clicked, this, [this] {
@@ -338,7 +323,7 @@ void WatermarkingUI::refreshVideoBatchTable() {
         videoBatchTable->setItem(row, 3, new QTableWidgetItem);
         videoBatchTable->setItem(row, 4, new QTableWidgetItem);
     }
-    videoBatchStatus->setText(QString("%1 videos queued").arg(videoBatchFiles.size()));
+    setStatus(videoBatchStatus, QString("%1 videos queued").arg(videoBatchFiles.size()), "idle");
     videoBatchProgress->setValue(0);
     videoBatchElapsed->setText("Elapsed: 0.0 s");
     videoBatchSkip->setText(videoBatchDevices->selectedDevices().size() > 1 ? "Skip selected" : "Skip current");
@@ -362,7 +347,7 @@ void WatermarkingUI::updateVideoBatchDevice(const int device) {
         videoBatchHardwareOptions.insert(videoBatchOptionsDevice, videoBatchEncoderOptions->text());
     videoBatchOptionsDevice = device;
     if (videoBatchHardware->isChecked())
-        videoBatchEncoderOptions->setText(videoBatchHardwareOptions.value(device, hardwareDefaults(device)));
+        videoBatchEncoderOptions->setText(videoBatchHardwareOptions.value(device, hardwareEncoderDefaultsText(device)));
 }
 
 void WatermarkingUI::updateVideoBatchSelection() {
@@ -411,7 +396,7 @@ void WatermarkingUI::startVideoBatch() {
     if (settings.video.useHwEncoder) {
         videoBatchHardwareOptions.insert(videoBatchOptionsDevice, videoBatchEncoderOptions->text());
         for (const int device : settings.deviceIndices)
-            settings.hardwareOptions.emplace(device, videoBatchHardwareOptions.value(device, hardwareDefaults(device)).toStdString());
+            settings.hardwareOptions.emplace(device, videoBatchHardwareOptions.value(device, hardwareEncoderDefaultsText(device)).toStdString());
         settings.video.encodeOptions.clear();
     }
     try {
@@ -442,7 +427,7 @@ void WatermarkingUI::startVideoBatch() {
     videoBatchSkipRequested.clear();
     videoBatchFinished = 0;
     videoBatchLog->clear();
-    videoBatchStatus->setText("Starting batch...");
+    setStatus(videoBatchStatus, "Starting batch...", "running");
     setBusy(true);
     connect(worker, &QThread::finished, this, [this, worker, run] {
         if (closing || videoBatchWorker != worker || run != videoBatchRun)
@@ -463,15 +448,19 @@ void WatermarkingUI::startVideoBatch() {
                     static_cast<QProgressBar*>(videoBatchTable->cellWidget(row, 2))->setRange(0, 1000);
                 }
             }
-            videoBatchStatus->setText(worker->error());
+            setStatus(videoBatchStatus, worker->error(), "error");
         } else {
             const auto& result = worker->summary();
-            videoBatchStatus->setText(QString("%1 done, %2 failed, %3 skipped, %4 cancelled  |  %5 s")
+            setStatus(videoBatchStatus,
+                QString("%1 done, %2 failed, %3 skipped, %4 cancelled  |  %5 s")
                     .arg(result.succeeded)
                     .arg(result.failed)
                     .arg(result.skipped)
                     .arg(result.cancelled)
-                    .arg(result.elapsedSeconds, 0, 'f', 1));
+                    .arg(result.elapsedSeconds, 0, 'f', 1),
+                result.failed      ? "error"
+                : result.cancelled ? "idle"
+                                   : "done");
             if (!result.cancelled)
                 videoBatchProgress->setValue(1000);
         }
@@ -571,9 +560,10 @@ void WatermarkingUI::pollVideoBatch() {
     for (const auto& log : update.logs)
         videoBatchLog->appendPlainText(log);
     if (videoBatchWorker->isRunning())
-        videoBatchStatus->setText(videoBatchWorker->cancellationRequested()
-                                      ? "Cancelling batch..."
-                                      : QString("%1 of %2 videos finished  |  %3 active  |  %4 FPS").arg(videoBatchFinished).arg(videoBatchJobs.size()).arg(active).arg(fps, 0, 'f', 1));
+        setStatus(videoBatchStatus,
+            videoBatchWorker->cancellationRequested() ? "Cancelling batch..."
+                                                      : QString("%1 of %2 videos finished  |  %3 active  |  %4 FPS").arg(videoBatchFinished).arg(videoBatchJobs.size()).arg(active).arg(fps, 0, 'f', 1),
+            "running");
     if (!videoBatchJobs.empty()) {
         const int progress = static_cast<int>(1000.0 * (videoBatchFinished + activeFraction) / videoBatchJobs.size());
         // retries may lower file progress, keep the batch bar from moving backwards

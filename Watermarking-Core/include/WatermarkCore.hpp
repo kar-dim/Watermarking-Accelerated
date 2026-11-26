@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <deque>
 #include <filesystem>
+#include <exception>
 #include <future>
 #include <memory>
 #include <mutex>
@@ -62,7 +63,7 @@ std::string getDeviceName(const int deviceIndex = -1);
 std::vector<std::string> getAvailableDevices();
 int getCurrentDeviceIndex();
 
-// Declare before sessions to return their freed CUDA buffers at scope exit
+// Declare before sessions to return their idle GPU buffers at scope exit
 class DeviceMemoryCleanup {
   public:
     explicit DeviceMemoryCleanup(int deviceIndex = -1) noexcept;
@@ -138,6 +139,7 @@ class ImageSaver {
     std::vector<Slot> saveSlots;
     std::vector<size_t> freeSlots;
     std::vector<SaveResult> finished;
+    std::exception_ptr saveError;
     std::mutex mutex;
     std::condition_variable slotFreed;
     size_t inFlightBytes = 0;
@@ -178,11 +180,11 @@ void validateVideoOutputPath(const std::string& path);
 struct VideoSettings {
     std::string videoFile;
     std::string watermarkPassword;
-    int p;
-    float psnr;
-    int watermarkInterval;
-    bool useHwDecoder;
-    bool useHwEncoder;
+    int p = 3;
+    float psnr = 40.0f;
+    int watermarkInterval = 1;
+    bool useHwDecoder = true;
+    bool useHwEncoder = false;
     // empty string selects GPU default hardware encoder when useHwEncoder is true
     std::string encodeOptions;
     std::string encodeOutputPath;

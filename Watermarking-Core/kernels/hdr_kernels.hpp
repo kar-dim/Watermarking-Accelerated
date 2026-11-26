@@ -1,3 +1,7 @@
+/*!
+ *  \brief  OpenCL kernels for HDR luma and chroma conversion
+ *  \author Dimitris Karatzas
+ */
 #pragma once
 #include <string>
 

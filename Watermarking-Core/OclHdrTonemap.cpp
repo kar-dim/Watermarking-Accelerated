@@ -1,3 +1,7 @@
+/*!
+ *  \brief  OpenCL uploads and kernel dispatch for HDR video
+ *  \author Dimitris Karatzas
+ */
 #include "CheckedSize.hpp"
 #include "HdrTonemapCurves.hpp"
 #include "kernels/hdr_kernels.hpp"
@@ -58,17 +62,22 @@ const cl::Buffer& OclHdrTonemap::convertPlanar10(
     const size_t pixels = static_cast<size_t>(width) * height;
     if (!uploaded())
         uploaded = cl::Buffer(OclQueueManager::getInstance().getContext(), CL_MEM_READ_ONLY, pixels * 3);
-    for (int plane = 0; plane < 3; ++plane) {
-        const size_t rowBytes = static_cast<size_t>(plane == 0 ? width : width / 2) * sizeof(uint16_t), rows = plane == 0 ? height : height / 2;
-        const size_t offset = plane == 0 ? 0 : (pixels + (plane - 1) * pixels / 4) * sizeof(uint16_t);
-        if (pitches[plane] < static_cast<int>(rowBytes))
-            throw std::invalid_argument("OpenCL HDR upload plane pitch is too small");
-        queue.enqueueWriteBufferRect(uploaded, CL_FALSE, {offset, 0, 0}, {0, 0, 0}, {rowBytes, rows, 1}, rowBytes, 0, static_cast<size_t>(pitches[plane]), 0, planes[plane]);
+    try {
+        for (int plane = 0; plane < 3; ++plane) {
+            const size_t rowBytes = static_cast<size_t>(plane == 0 ? width : width / 2) * sizeof(uint16_t), rows = plane == 0 ? height : height / 2;
+            const size_t offset = plane == 0 ? 0 : (pixels + (plane - 1) * pixels / 4) * sizeof(uint16_t);
+            if (pitches[plane] < static_cast<int>(rowBytes))
+                throw std::invalid_argument("OpenCL HDR upload plane pitch is too small");
+            queue.enqueueWriteBufferRect(uploaded, CL_FALSE, {0, offset / rowBytes, 0}, {0, 0, 0}, {rowBytes, rows, 1}, rowBytes, 0, static_cast<size_t>(pitches[plane]), 0, planes[plane]);
+        }
+        const auto& converted = run(uploaded, 0, mobius, siting, floatLuma);
+        // host planes belong to decoder, writes must finish before reuse
+        queue.finish();
+        return converted;
+    } catch (...) {
+        clFinish(queue());
+        throw;
     }
-    const auto& converted = run(uploaded, 0, mobius, siting, floatLuma);
-    // host planes belong to decoder, writes must finish before reuse
-    queue.finish();
-    return converted;
 }
 
 const cl::Buffer& OclHdrTonemap::run(const cl::Buffer& source, const int sampleShift, const video_utils::MobiusParams& mobius, const video_utils::ChromaSiting& siting, const cl::Buffer& floatLuma) {

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <functional>
 #include <QAbstractItemView>
 #include <QComboBox>
@@ -28,6 +29,7 @@ class MultiDeviceComboBox : public QComboBox {
             if (selectionChanged)
                 selectionChanged();
         });
+        updateSummary();
     }
 
     void addDevice(const QString& name, const int device, const bool checked) {
@@ -60,7 +62,8 @@ class MultiDeviceComboBox : public QComboBox {
         QStylePainter painter(this);
         QStyleOptionComboBox option;
         initStyleOption(&option);
-        option.currentText = summary_;
+        const QRect editRect = style()->subControlRect(QStyle::CC_ComboBox, &option, QStyle::SC_ComboBoxEditField, this);
+        option.currentText = fontMetrics().elidedText(summary_, Qt::ElideRight, std::max(0, editRect.width()));
         painter.drawComplexControl(QStyle::CC_ComboBox, option);
         painter.drawControl(QStyle::CE_ComboBoxLabel, option);
     }
@@ -102,8 +105,8 @@ class MultiDeviceComboBox : public QComboBox {
         for (int row = 0; row < count(); ++row)
             if (itemData(row, Qt::CheckStateRole).toInt() == Qt::Checked)
                 names.push_back(itemText(row));
-        summary_ = names.isEmpty() ? "Select devices" : names.join(", ");
-        setToolTip(names.isEmpty() ? "Select one or more devices." : names.join('\n'));
+        summary_ = count() == 0 ? "No devices found" : names.isEmpty() ? "Select devices" : names.join(", ");
+        setToolTip(count() == 0 ? "No compatible compute devices were found." : names.isEmpty() ? "Select one or more devices." : names.join('\n'));
         setAccessibleDescription(summary_);
         update();
     }

@@ -19,14 +19,6 @@ class CudaArray {
     cudaStream_t stream = nullptr;
     int deviceIndex = -1;
 
-    cudaError_t selectOwnDevice() const {
-        int current = 0;
-        const cudaError_t result = cudaGetDevice(&current);
-        if (result != cudaSuccess || current == deviceIndex)
-            return result;
-        return cudaSetDevice(deviceIndex);
-    }
-
     void alloc() {
         if (size() > 0) {
             CUDA_CHECK(cudaGetDevice(&deviceIndex));
@@ -37,7 +29,8 @@ class CudaArray {
     void freeArray() {
         if (ptr_) {
             // this check is needed because a session can be released by a different host thread
-            if (selectOwnDevice() != cudaSuccess)
+            const cuda_utils::ScopedDevice binding(deviceIndex);
+            if (binding.status != cudaSuccess)
                 return;
             CudaStreamManager::getInstance().getPool().release(bytes(), ptr_, stream);
             ptr_ = nullptr;
@@ -116,14 +109,18 @@ class CudaArray {
     cudaStream_t getStream() const { return stream; }
 
     void fillZero() {
-        if (ptr_)
+        if (ptr_) {
+            const cuda_utils::ScopedDevice binding(deviceIndex);
+            CUDA_CHECK(binding.status);
             CUDA_CHECK(cudaMemsetAsync(ptr_, 0, bytes(), stream));
+        }
     }
 
     T scalar() const {
         T val{};
         if (ptr_) {
-            CUDA_CHECK(selectOwnDevice());
+            const cuda_utils::ScopedDevice binding(deviceIndex);
+            CUDA_CHECK(binding.status);
             CUDA_CHECK(cudaMemcpyAsync(&val, ptr_, sizeof(T), cudaMemcpyDeviceToHost, stream));
             CUDA_CHECK(cudaStreamSynchronize(stream));
         }
@@ -132,7 +129,8 @@ class CudaArray {
 
     void toHost(T* dst) const {
         if (ptr_) {
-            CUDA_CHECK(selectOwnDevice());
+            const cuda_utils::ScopedDevice binding(deviceIndex);
+            CUDA_CHECK(binding.status);
             CUDA_CHECK(cudaMemcpyAsync(dst, ptr_, bytes(), cudaMemcpyDeviceToHost, stream));
             CUDA_CHECK(cudaStreamSynchronize(stream));
         }
@@ -140,20 +138,24 @@ class CudaArray {
 
     void toHostAsync(T* dst) const {
         if (ptr_) {
-            CUDA_CHECK(selectOwnDevice());
+            const cuda_utils::ScopedDevice binding(deviceIndex);
+            CUDA_CHECK(binding.status);
             CUDA_CHECK(cudaMemcpyAsync(dst, ptr_, bytes(), cudaMemcpyDeviceToHost, stream));
         }
     }
 
-    // if the destination needs a pitch, we can use cudaMemcpy2DAsync to copy the data row by row, with the specified pitch for the destination
     void toHostPitched(T* dst, const int rowElements, const size_t dstPitchBytes) const {
         if (rowElements <= 0 || size() % rowElements != 0 || dstPitchBytes < InternalUtils::checkedProduct(static_cast<size_t>(rowElements), sizeof(T)))
             throw std::invalid_argument("Invalid pitched buffer layout");
         InternalUtils::checkedProduct(dstPitchBytes, static_cast<size_t>(size() / rowElements));
         if (ptr_) {
             const size_t rowBytes = static_cast<size_t>(rowElements) * sizeof(T);
-            CUDA_CHECK(selectOwnDevice());
-            CUDA_CHECK(cudaMemcpy2DAsync(dst, dstPitchBytes, ptr_, rowBytes, rowBytes, size() / rowElements, cudaMemcpyDeviceToHost, stream));
+            const cuda_utils::ScopedDevice binding(deviceIndex);
+            CUDA_CHECK(binding.status);
+            if (dstPitchBytes == rowBytes)
+                CUDA_CHECK(cudaMemcpyAsync(dst, ptr_, bytes(), cudaMemcpyDeviceToHost, stream));
+            else
+                CUDA_CHECK(cudaMemcpy2DAsync(dst, dstPitchBytes, ptr_, rowBytes, rowBytes, size() / rowElements, cudaMemcpyDeviceToHost, stream));
             CUDA_CHECK(cudaStreamSynchronize(stream));
         }
     }
@@ -171,6 +173,8 @@ class CudaArray {
     }
 
     CudaArray clone() const {
+        const cuda_utils::ScopedDevice binding(deviceIndex);
+        CUDA_CHECK(binding.status);
         CudaArray copy(rows, cols, channels, stream);
         if (ptr_)
             CUDA_CHECK(cudaMemcpyAsync(copy.ptr_, ptr_, bytes(), cudaMemcpyDeviceToDevice, stream));

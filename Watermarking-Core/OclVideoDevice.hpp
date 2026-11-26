@@ -1,3 +1,7 @@
+/*!
+ *  \brief  D3D11 device shared with an OpenCL video session
+ *  \author Dimitris Karatzas
+ */
 #pragma once
 
 #include "AvUtil.hpp"

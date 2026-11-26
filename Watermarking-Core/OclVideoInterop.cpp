@@ -1,3 +1,7 @@
+/*!
+ *  \brief  D3D11 frame packing and synchronization for OpenCL
+ *  \author Dimitris Karatzas
+ */
 #include "OclVideoInterop.hpp"
 #include "CheckedSize.hpp"
 #include "AvUtil.hpp"
@@ -147,12 +151,13 @@ void main(uint3 id : SV_DispatchThreadID) {
 #else
     const uint samplesPerWord = 4, bitsPerSample = 8;
 #endif
-    uint first = id.x * samplesPerWord;
+    uint word = id.x + id.y * (65535u * 256u);
+    uint first = word * samplesPerWord;
     if (first >= totalSamples) return;
     uint packed = 0;
     [unroll] for (uint sample = 0; sample < samplesPerWord; ++sample)
         if (first + sample < totalSamples) packed |= sampleByte(first + sample) << (sample * bitsPerSample);
-    output.Store(id.x * 4, packed);
+    output.Store(word * 4, packed);
 }
 )HLSL";
 
@@ -413,6 +418,9 @@ struct OclVideoFrame::Impl {
     size_t bytes = 0;
 
     ~Impl() {
+        if (!device)
+            return;
+        std::lock_guard lock(device->mutex);
         for (auto& slot : slots)
             if (slot.acquired) {
                 const cl_mem memory = slot.shared();
@@ -487,7 +495,7 @@ std::unique_ptr<OclVideoFrame> OclVideoInterop::createFrame(const AVFrame* sourc
     const size_t samples = pixels + 2 * static_cast<size_t>(chromaWidth) * chromaHeight;
     frame->lumaBytes = pixels * (preserveP010 ? 2 : 1);
     frame->bytes = samples * (preserveP010 ? 2 : 1);
-    if (frame->bytes > std::numeric_limits<UINT>::max() - 3 || (frame->bytes + 3) / 4 > 65535 * 256)
+    if (frame->bytes > std::numeric_limits<UINT>::max() - 3)
         throw std::invalid_argument("D3D11 video frame is too large");
     frame->queue = cl::CommandQueue(queue, true);
     const auto device = impl->device.Get();
@@ -575,7 +583,8 @@ void OclVideoFrame::stage(const AVFrame* frame, const bool lumaOnly) {
     immediate->CSSetConstantBuffers(0, 1, &constants);
     // luma packed first, each thread group packs 1024 bytes
     const size_t packedBytes = lumaOnly ? impl->lumaBytes : impl->bytes;
-    immediate->Dispatch(static_cast<UINT>((packedBytes + 1023) / 1024), 1, 1);
+    const auto groups = static_cast<UINT>((packedBytes + 1023) / 1024);
+    immediate->Dispatch(std::min(groups, 65535u), (groups + 65534u) / 65535u, 1);
     planes.fill(nullptr);
     output = nullptr;
     constants = nullptr;
@@ -635,6 +644,9 @@ struct OclVideoOutput::Impl {
     UINT64 sharedRead = 0;
 
     ~Impl() {
+        if (!device)
+            return;
+        std::lock_guard lock(device->mutex);
         if (acquired) {
             const cl_mem memory = shared();
             device->release(queue(), 1, &memory, 0, nullptr, nullptr);

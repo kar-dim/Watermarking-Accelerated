@@ -1,4 +1,5 @@
 #include "AnimatedButton.hpp"
+#include "UiHelpers.hpp"
 #include "WatermarkingUI.h"
 #include <algorithm>
 #include <climits>
@@ -28,22 +29,7 @@
  * \author Dimitris Karatzas
  */
 namespace {
-constexpr auto videoFilter = "Videos (*.mkv *.mp4 *.mov *.avi *.webm *.m4v *.ts *.mts *.m2ts *.mpg *.mpeg *.wmv);;All files (*)";
 constexpr auto outputVideoFilter = "Matroska (*.mkv);;MP4 (*.mp4)";
-
-QWidget* fileRow(QLineEdit*& input, QWidget* parent, const std::function<void()>& browse) {
-    auto* row = new QWidget(parent);
-    row->setProperty("workflowContainer", true);
-    auto* layout = new QHBoxLayout(row);
-    layout->setContentsMargins(0, 0, 0, 0);
-    input = new QLineEdit(row);
-    auto* button = new AnimatedButton("Browse", row);
-    button->setObjectName("secondaryButton");
-    layout->addWidget(input, 1);
-    layout->addWidget(button);
-    QObject::connect(button, &QPushButton::clicked, row, browse);
-    return row;
-}
 
 QString durationText(const double seconds) {
     if (seconds < 0.0)
@@ -72,13 +58,13 @@ void WatermarkingUI::createVideoTab() {
     videoMode->setObjectName("videoMode");
     videoMode->addItems({"Embed watermark", "Detect watermark"});
     files->addRow("Operation", videoMode);
-    files->addRow("Input video", fileRow(videoInput, videoInputs, [this] {
+    files->addRow("Input video", makeFileRow(videoInput, "Browse", videoInputs, [this] {
         const QString path = QFileDialog::getOpenFileName(this, "Choose a video", videoInput->text(), videoFilter);
         if (!path.isEmpty())
             selectVideo(path);
     }));
     videoInput->setObjectName("videoInput");
-    videoOutputRow = fileRow(videoOutput, videoInputs, [this] {
+    videoOutputRow = makeFileRow(videoOutput, "Browse", videoInputs, [this] {
         const QString path = QFileDialog::getSaveFileName(this, "Choose output video", videoOutput->text(), outputVideoFilter);
         if (!path.isEmpty())
             videoOutput->setText(path);
@@ -128,10 +114,8 @@ void WatermarkingUI::createVideoTab() {
     videoStart = new AnimatedButton("Embed video", videoPage);
     videoStart->setObjectName("primaryButton");
     videoCancel = new AnimatedButton("Cancel", videoPage);
-    videoCancel->setObjectName("secondaryButton");
     videoCancel->setEnabled(false);
     videoExport = new AnimatedButton("Export results", videoPage);
-    videoExport->setObjectName("secondaryButton");
     videoExport->hide();
     videoExport->setEnabled(false);
     actions->addWidget(videoStart);
@@ -197,6 +181,9 @@ void WatermarkingUI::createVideoTab() {
     connect(videoInput, &QLineEdit::textChanged, this, [this] {
         if (busy)
             return;
+        videoResults->setRowCount(0);
+        videoDetectionSummary->clear();
+        videoExport->setEnabled(false);
         if (videoProbeWorker)
             videoProbeWorker->cancel();
         videoProbePending = true;
@@ -316,18 +303,14 @@ void WatermarkingUI::updateVideoPreviewLayout() {
     layout->setStretchFactor(videoResults, detect && !preview ? 1 : 0);
     layout->setStretch(layout->count() - 1, !detect && !preview ? 1 : 0);
     if (videoWorker) {
-        const QSize size = videoPreview->contentsRect().size();
+        const QSize size = videoPreview->contentsRect().size() * videoPreview->devicePixelRatioF();
         videoWorker->setPreview(preview && videoPage->isVisible() && videoPreview->isVisible(), size.width(), size.height());
     }
     if (preview)
         updateVideoPreview();
 }
 
-QString WatermarkingUI::videoHardwareDefaults() const {
-    try {
-        return QString::fromStdString(WatermarkCore::defaultVideoEncoderOptions(true, videoOptionsDevice));
-    } catch (const std::exception&) { return {}; }
-}
+QString WatermarkingUI::videoHardwareDefaults() const { return hardwareEncoderDefaultsText(videoOptionsDevice); }
 
 void WatermarkingUI::updateVideoDevice(const int device) {
     if (videoHardware->isChecked())
@@ -418,7 +401,7 @@ void WatermarkingUI::startVideo() {
 void WatermarkingUI::pollVideo() {
     if (!videoWorker)
         return;
-    const QSize previewSize = videoPreview->contentsRect().size();
+    const QSize previewSize = videoPreview->contentsRect().size() * videoPreview->devicePixelRatioF();
     videoWorker->setPreview(videoPreviewEnabled->isChecked() && videoPage->isVisible() && videoPreview->isVisible(), previewSize.width(), previewSize.height());
     auto update = videoWorker->takeUpdate();
     const auto& progress = update.progress;

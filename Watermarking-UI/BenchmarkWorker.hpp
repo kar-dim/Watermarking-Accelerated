@@ -1,5 +1,7 @@
 #pragma once
+#include <algorithm>
 #include <array>
+#include <atomic>
 #include <QImage>
 #include <QString>
 #include <QTemporaryDir>
@@ -18,13 +20,17 @@ class BenchmarkWorker : public QThread {
         requestInterruption();
         wait();
     }
+    void setPreviewTargetSize(const int width, const int height) {
+        previewMaxWidth.store(std::max(1, width), std::memory_order_relaxed);
+        previewMaxHeight.store(std::max(1, height), std::memory_order_relaxed);
+    }
 
   signals:
     // Signals emitted to report benchmark progress, intermediate results, and final score
     void resultReady(const QImage& img, const int p, const float psnr, const double embedTime, const double detectTime, const double embedFps, const double detectFps, const QString& fileName,
         const float correlation);
     void progressUpdated(const int currentStep, const int totalSteps);
-    void benchmarkFinished(const double finalEmbedFps, const double finalDetectFps, const int finalScore);
+    void benchmarkFinished(const double finalEmbedFps, const double finalDetectFps, const int finalScore, const QString& error = {});
     void benchmarkCanceled();
 
   protected:
@@ -40,4 +46,6 @@ class BenchmarkWorker : public QThread {
     QTemporaryDir tempDir;
     QString inputFolder;
     int deviceIndex;
+    std::atomic<int> previewMaxWidth{960};
+    std::atomic<int> previewMaxHeight{540};
 };
